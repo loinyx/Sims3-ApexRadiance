@@ -81,7 +81,7 @@ public sealed partial class MainWindow : Window
         {
             if (!_busy) { _tray?.Dispose(); return; }
             a.Cancel = true;
-            _ = Message(T("Setup is applying changes"), T("Wait until it finishes before closing."));
+            _ = Message(T("The launcher is applying changes"), T("Wait until it finishes before closing."));
         };
         ((FrameworkElement)Content).Loaded += async (_, _) => await StartAsync();
     }
@@ -138,8 +138,8 @@ public sealed partial class MainWindow : Window
         {
             if (await SelfUpdate.DownloadIfNewerAsync(apex, self) is not { } file) return;
             var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(file).FileVersion is { } fv && Version.TryParse(fv, out var pv) ? pv.ToString(3) : "";
-            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new Setup is available"),
-                T("Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again.", v), T("Update Setup"), () =>
+            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new Apex Launcher is available"),
+                T("Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again.", v), T("Update the launcher"), () =>
                 {
                     if (_busy) return; // (an install in progress finishes first)
                     try
@@ -154,7 +154,7 @@ public sealed partial class MainWindow : Window
                         // (the new exe quarantined or blocked by an antivirus: said as such)
                         var shown = e is FileNotFoundException || e is System.ComponentModel.Win32Exception { NativeErrorCode: 2 or 225 or 226 } || Engine.IsVirusBlock(e)
                             ? Engine.Antivirus(SelfUpdate.AssetName, Path.GetDirectoryName(file) ?? "") : e;
-                        _ = ShowDialog(new ContentDialog { Title = T("Setup could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
+                        _ = ShowDialog(new ContentDialog { Title = T("The launcher could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
                     }
                 });
         }
@@ -395,7 +395,7 @@ public sealed partial class MainWindow : Window
             GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."),
             ComponentsStep when _loading => T("Checking the latest versions\u2026"),
             ComponentsStep when _offline && wa.Count > 0 && _releaseError is { } le => T(le.Key, le.Args),
-            ComponentsStep when _offline && wa.Count > 0 => T("Setup needs the internet to download the files."),
+            ComponentsStep when _offline && wa.Count > 0 => T("The launcher needs the internet to download the files."),
             ComponentsStep when work.Count == 0 && !fixes => T("Everything is installed and up to date."),
             ComponentsStep when _state?.ApexVersion is null => T("Nothing changes until you click Install."),
             // what Apply will change in the drivers and Apex's settings (the components show theirs on their rows)
@@ -418,7 +418,7 @@ public sealed partial class MainWindow : Window
     {
         var latest = Latest(Components.Apex);
         FirstTitle.Text = "Apex Radiance" + (latest is null ? "" : " " + latest);
-        FirstGame.Text = _game is { } g ? T("The Sims 3 \u00b7 {0} found", g.Label) : T("Setup found no install. Browse for the game folder.");
+        FirstGame.Text = _game is { } g ? T("The Sims 3 \u00b7 {0} found", g.Label) : T("The launcher found no install. Browse for the game folder.");
         FirstGameIcon.Visibility = FirstNotThis.Visibility = _game is null ? Visibility.Collapsed : Visibility.Visible;
         FirstGamePath.Text = _game?.Root ?? "";
         FirstGamePath.Visibility = FirstGameIcon.Visibility;
@@ -497,7 +497,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         CardHeader(UpdateList, "\uE896", "ApexAccentBrush", ups.Count == 1 ? T("1 update for The Sims 3 \u00b7 {0}", g.Label) : T("{0} updates for The Sims 3 \u00b7 {1}", ups.Count, g.Label),
-            T("Setup makes a restore point before it changes any file, so you can undo this."));
+            T("The launcher makes a restore point before it changes any file, so you can undo this."));
         foreach (var c in ups)
         {
             var box = new CheckBox { Content = Name(c), IsChecked = !_skipUpdate.Contains(c), MinWidth = 0, IsEnabled = !_busy };
@@ -580,7 +580,7 @@ public sealed partial class MainWindow : Window
         var inst = _game is null ? null : _state?.ApexVersion;
         if (_offline)
         {
-            if (_releaseError is { } limit) SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("Setup can't reach GitHub"), T(limit.Key, limit.Args), T("Try again"), async () => await LoadReleasesAsync());
+            if (_releaseError is { } limit) SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("The launcher can't reach GitHub"), T(limit.Key, limit.Args), T("Try again"), async () => await LoadReleasesAsync());
             else SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("No internet connection"), T("Check your internet connection, then try again."), T("Try again"), async () => await LoadReleasesAsync());
         }
         else if (_loading && _game is not null)
@@ -638,7 +638,7 @@ public sealed partial class MainWindow : Window
         {
             var bar = new InfoBar
             {
-                IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("Setup fixes this") : "",
+                IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("The launcher fixes this") : "",
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
             };
             if (x.Link is { } link) bar.ActionButton = new HyperlinkButton { Content = T("Read more"), NavigateUri = new Uri(link) };
@@ -783,7 +783,7 @@ public sealed partial class MainWindow : Window
             {
                 IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args),
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
-                Title = x.CanFix ? T("Setup fixes this") : "",
+                Title = x.CanFix ? T("The launcher fixes this") : "",
             };
             if (x.Link is { } link) bar.ActionButton = new HyperlinkButton { Content = T("Read more"), NavigateUri = new Uri(link) };
             ProblemList.Children.Add(bar);
@@ -1236,14 +1236,14 @@ public sealed partial class MainWindow : Window
         if (OldCard)
             BridgeDetail.Text = T("DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0}).", CardFound);
         else if (OldDriver)
-            BridgeDetail.Text = T("Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again.", MissingList);
+            BridgeDetail.Text = T("Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open the launcher again.", MissingList);
 
         // the game resets its graphics options when the card it sees changes: DXVK's TS3W profile and the bridge report a
         // GeForce GTX 580; the game's own D3D9 the real card (DXVK on TS3.exe: unverified, so treated as a change)
         string Card(string r) => r switch { RBridge => "580", RDxvk when g.Exe == "TS3W.exe" => "580", RNative => "real", _ => "?" };
         if (changed && (Card(_renderer) != Card(cur) || Card(cur) == "?"))
             SetInfo(GraphicsInfo, InfoBarSeverity.Warning, "",
-                T("Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."));
+                T("Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back."));
         else GraphicsInfo.IsOpen = false;
         RendererResetNote.Visibility = GraphicsInfo.IsOpen ? Visibility.Visible : Visibility.Collapsed;
 
@@ -1546,13 +1546,13 @@ public sealed partial class MainWindow : Window
             App.Log(ex);
             AfterFrameGenOff(); // (the drivers read again, a removal's turn-off error taken once, not left for the next Apply)
             var net = Engine.IsNetwork(ex);
-            var title = net ? T("Setup can't reach GitHub") : T("Setup could not finish");
+            var title = net ? T("The launcher can't reach GitHub") : T("The launcher could not finish");
             var text = ErrorText(ex);
             // the files it changed before the error are put back: half an install is the worse state. Keeping them is the
             // second choice (Repair or remove sets them right later)
             if (!engineDone && point?.Committed is { } p)
             {
-                var keep = await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + "\n\n" + T("Setup puts back the files it changed.")),
+                var keep = await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + "\n\n" + T("The launcher puts back the files it changed.")),
                     PrimaryButtonText = T("Undo these changes"), SecondaryButtonText = T("Keep what was installed"),
                     DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Secondary;
                 if (!keep)
@@ -1561,7 +1561,7 @@ public sealed partial class MainWindow : Window
                     // (Restore needs the game, its launcher and the restart host closed: said, not skipped in silence)
                     if (_running || Games.IsRunning())
                     {
-                        await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(T("Setup could not put the files back while The Sims 3, its launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove.")),
+                        await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(T("The launcher could not put the files back while The Sims 3, the game's own launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove.")),
                             CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
                         _busy = false;
                         return;
@@ -1571,7 +1571,7 @@ public sealed partial class MainWindow : Window
                     await RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir);
                     // the driver's frame generation is not in a restore point: the removal turned it off, and it stays off
                     if (smoothOff || afmfOff)
-                        await Message(T("Setup could not finish"), T("Frame generation was turned off with the removal and stays off; turn it on again in Components if you want it."));
+                        await Message(T("The launcher could not finish"), T("Frame generation was turned off with the removal and stays off; turn it on again in Components if you want it."));
                     return;
                 }
             }
@@ -1653,7 +1653,7 @@ public sealed partial class MainWindow : Window
         if (s.S3ss) ManageRow("Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
         if (s.RestartHost) ManageRow(T("Restart host"), T("Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."), T("Remove"), () => RemoveAsync(Components.RestartHost));
         if (s.Modernization) ManageRow("Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
-        ManageRow(T("Uninstall everything"), T("Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."), T("Uninstall"), UninstallAll, danger: true);
+        ManageRow(T("Uninstall everything"), T("Removes what the launcher installed, and Apex Radiance, and puts back every file the launcher replaced."), T("Uninstall"), UninstallAll, danger: true);
 
         foreach (var p in RestorePoints.List(g.Bin))
         {
@@ -1662,7 +1662,7 @@ public sealed partial class MainWindow : Window
                 T("Restore"), () => RestoreAsync(p), list: RestoreList);
         }
         if (RestoreList.Children.Count == 0)
-            RestoreList.Children.Add(new TextBlock { Text = T("No restore points yet. Setup makes one before every change."), Margin = new Thickness(18, 14, 18, 14),
+            RestoreList.Children.Add(new TextBlock { Text = T("No restore points yet. The launcher makes one before every change."), Margin = new Thickness(18, 14, 18, 14),
                 FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
     }
 
@@ -1700,18 +1700,18 @@ public sealed partial class MainWindow : Window
     {
         if (_game is not { } g || _busy) return;
         if (_running) { SetInfo(bar ?? ManageInfo, InfoBarSeverity.Warning, T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."), ""); return; }
-        if (ask && !await Confirm(T("Restore this point?"), T("Setup puts back the files as they were before this change, and undoes every change made after it. Close the game first."), T("Restore"))) return;
+        if (ask && !await Confirm(T("Restore this point?"), T("The launcher puts back the files as they were before this change, and undoes every change made after it. Close the game first."), T("Restore"))) return;
         await Guarded(() =>
         {
             if (RestorePoints.Restore(g.Bin, p) is { Count: > 0 } failed)
-                throw new IOException(T("Setup could not put back {0}.", string.Join(", ", failed)));
+                throw new IOException(T("The launcher could not put back {0}.", string.Join(", ", failed)));
         }, T("Changes undone."), bar);
     }
 
     async Task RemoveAsync(string c)
     {
         if (_game is not { } g || _busy || _running) return;
-        if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. Setup removes the files and puts back the ones it replaced."), T("Remove"), danger: true)) return;
+        if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. The launcher removes the files and puts back the ones it replaced."), T("Remove"), danger: true)) return;
         await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)), label: "Remove {0}", args: Components.Name(c));
         AfterFrameGenOff();
         RefreshComponents();
@@ -1720,8 +1720,8 @@ public sealed partial class MainWindow : Window
     async Task UninstallAll()
     {
         if (_game is not { } g || _busy || _running) return;
-        if (!await Confirm(T("Uninstall everything?"), T("Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"), danger: true)) return;
-        await Guarded(() => Engine.RemoveAll(g), T("Everything Setup installed was removed."), label: "Uninstall everything");
+        if (!await Confirm(T("Uninstall everything?"), T("The launcher removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"), danger: true)) return;
+        await Guarded(() => Engine.RemoveAll(g), T("Everything the launcher installed was removed."), label: "Uninstall everything");
         AfterFrameGenOff();
         RefreshComponents();
     }
@@ -1770,10 +1770,10 @@ public sealed partial class MainWindow : Window
         // after the refresh, which rewrites the screens' bars; Components' bar open again holds the graphics-reset warning for
         // the choices kept, so it stays (the suggestion's card going shows the result)
         if (ok) { if (!(bar == GraphicsInfo && GraphicsInfo.IsOpen)) SetInfo(bar, InfoBarSeverity.Success, done, ""); }
-        else if (point?.Committed is { } p) SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!, T("Undo these changes"),
+        else if (point?.Committed is { } p) SetInfo(bar, InfoBarSeverity.Error, T("The launcher could not finish"), error!, T("Undo these changes"),
             // a change made since then would be undone too: asked first
             () => _ = RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir, bar));
-        else SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!);
+        else SetInfo(bar, InfoBarSeverity.Error, T("The launcher could not finish"), error!);
         if (!ok) bar.Content = ErrorLinks(inBar: true); // (Copy details, Open log folder, as the dialogs have)
         return ok;
     }
@@ -1841,7 +1841,7 @@ public sealed partial class MainWindow : Window
         _showingUnexpected = true;
         DispatcherQueue.TryEnqueue(async () =>
         {
-            try { await ShowDialog(new ContentDialog { Title = T("Setup could not finish"), Content = ErrorContent(ErrorText(e)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot }); }
+            try { await ShowDialog(new ContentDialog { Title = T("The launcher could not finish"), Content = ErrorContent(ErrorText(e)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot }); }
             catch (Exception x) { App.Log(x); }
             finally { _showingUnexpected = false; }
         });
@@ -1859,8 +1859,8 @@ public sealed partial class MainWindow : Window
         catch (Exception e) { App.Log(e); return true; } // (a check that cannot run is no reason to stop)
         if (found.Count == 0) return true;
         var text = string.Join("\n\n", found.Select(f => "• " + T(f.Key, f.Args)));
-        if (found.Any(f => f.Blocks)) { await Message(T("Before Setup can continue"), text); return false; }
-        return await Confirm(T("Before Setup continues"), text, T("Continue"));
+        if (found.Any(f => f.Blocks)) { await Message(T("Before the launcher can continue"), text); return false; }
+        return await Confirm(T("Before the launcher continues"), text, T("Continue"));
     }
 
     // an error in the player's words, then the raw text for a report
@@ -1870,12 +1870,12 @@ public sealed partial class MainWindow : Window
         {
             SetupException se => T(se.Key, se.Args),
             _ when Engine.IsNetwork(ex) => T("Check your internet connection, then try again."),
-            UnauthorizedAccessException => T("Windows did not let Setup change a file. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; a read-only or locked file can also cause this."),
-            IOException when Engine.IsVirusBlock(ex) => T("Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again.", GitHubSource.TempRoot + ", " + (_game?.Bin ?? "Game\\Bin")),
-            IOException => T("A file Setup needed is in use or could not be written. Close the game and other programs using it, then try again."),
+            UnauthorizedAccessException => T("Windows did not let the launcher change a file. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; a read-only or locked file can also cause this."),
+            IOException when Engine.IsVirusBlock(ex) => T("Your antivirus blocked a file the launcher needs; add an exception for {0} and open the launcher again.", GitHubSource.TempRoot + ", " + (_game?.Bin ?? "Game\\Bin")),
+            IOException => T("A file the launcher needed is in use or could not be written. Close the game and other programs using it, then try again."),
             // an English text Setup throws and translates (Close The Sims 3 first, the restart host's wait): that text alone
             _ when Has(ex.Message) => T(ex.Message),
-            _ => T("Setup ran into a problem it did not expect."),
+            _ => T("The launcher ran into a problem it did not expect."),
         };
         return ex is SetupException || Has(ex.Message) || plain == ex.Message ? plain : plain + "\n\n" + ex.Message;
     }

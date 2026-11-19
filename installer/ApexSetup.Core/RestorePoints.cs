@@ -141,7 +141,7 @@ public static class RestorePoints
     public static List<string> Restore(string bin, RestorePoint point)
     {
         Engine.CheckWritable();
-        if (_open is not null) throw new InvalidOperationException("Setup is applying changes");
+        if (_open is not null) throw new InvalidOperationException("The launcher is applying changes");
         var points = List(bin);
         if (!points.Any(p => p.Dir == point.Dir)) throw new InvalidOperationException("This restore point is gone.");
         var failed = new List<string>();

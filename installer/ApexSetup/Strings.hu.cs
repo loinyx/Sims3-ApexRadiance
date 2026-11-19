@@ -21,19 +21,19 @@ public static partial class Strings
         ["Get started"] = "Kezdjük",
         ["Finish"] = "Befejezés",
         ["Close The Sims 3 to continue."] = "A folytatáshoz zárd be a The Sims 3-at.",
-        ["Setup needs the internet to download the files."] =
-            "A telepítőnek internetre van szüksége a fájlok letöltéséhez.",
+        ["The launcher needs the internet to download the files."] =
+            "A launchernek internetre van szüksége a fájlok letöltéséhez.",
         ["Nothing changes until you click Install."] = "Semmi sem változik, amíg nem kattintasz a Telepítés gombra.",
         ["Lighting, picture and performance for The Sims 3."] = "Világítás, kép és teljesítmény a The Sims 3-hoz.",
-        ["What Setup does"] = "Mit csinál a telepítő",
-        ["Setup can't reach GitHub"] = "A telepítő nem éri el a GitHubot",
+        ["What the launcher does"] = "Mit csinál a launcher",
+        ["The launcher can't reach GitHub"] = "A launcher nem éri el a GitHubot",
         ["Check your internet connection, then try again."] = "Ellenőrizd az internetkapcsolatot, majd próbáld újra.",
         ["Try again"] = "Újrapróbálás",
         ["Choose your game"] = "Válaszd ki a játékot",
-        ["Setup found these installs. Pick the one you play."] =
-            "A telepítő ezeket a telepítéseket találta. Válaszd azt, amelyikkel játszol.",
-        ["Setup found no install. Browse for the game folder."] =
-            "A telepítő nem talált telepítést. Tallózd ki a játék mappáját.",
+        ["The launcher found these installs. Pick the one you play."] =
+            "A launcher ezeket a telepítéseket találta. Válaszd azt, amelyikkel játszol.",
+        ["The launcher found no install. Browse for the game folder."] =
+            "A launcher nem talált telepítést. Tallózd ki a játék mappáját.",
         ["Browse for another folder"] = "Másik mappa tallózása",
         ["No game in this folder"] = "Ebben a mappában nincs játék",
         ["Pick the The Sims 3 folder, or its Game\\Bin folder (the one with TS3W.exe or TS3.exe)."] =
@@ -56,7 +56,7 @@ public static partial class Strings
         ["Wrong build"] = "Rossz verzió",
         ["Update {0}"] = "Frissítés: {0}",
         ["Up to date"] = "Naprakész",
-        ["Setup could not finish"] = "A telepítő nem tudott végezni",
+        ["The launcher could not finish"] = "A launcher nem tudott végezni",
         ["Close The Sims 3 first."] = "Előbb zárd be a The Sims 3-at.",
         ["You're all set"] = "Minden kész",
         ["Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."] =
@@ -74,18 +74,18 @@ public static partial class Strings
             "Újra letölt és bemásol mindent, ami itt telepítve van. A beállításaid megmaradnak.",
         ["Repair"] = "Javítás",
         ["Uninstall everything"] = "Minden eltávolítása",
-        ["Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."] =
-            "Eltávolítja, amit a telepítő telepített, és az Apex Radiance-t, és visszaállít minden fájlt, amelyet a telepítő lecserélt.",
+        ["Removes what the launcher installed, and Apex Radiance, and puts back every file the launcher replaced."] =
+            "Eltávolítja, amit a launcher telepített, és az Apex Radiance-t, és visszaállít minden fájlt, amelyet a launcher lecserélt.",
         ["Uninstall"] = "Eltávolítás",
         ["Remove {0}?"] = "Eltávolítod: {0}?",
-        ["Close the game first. Setup removes the files and puts back the ones it replaced."] =
-            "Előbb zárd be a játékot. A telepítő eltávolítja a fájlokat, és visszaállítja azokat, amelyeket lecserélt.",
+        ["Close the game first. The launcher removes the files and puts back the ones it replaced."] =
+            "Előbb zárd be a játékot. A launcher eltávolítja a fájlokat, és visszaállítja azokat, amelyeket lecserélt.",
         ["{0} removed."] = "{0} eltávolítva.",
         ["Uninstall everything?"] = "Mindent eltávolítasz?",
-        ["Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."] =
-            "A telepítő eltávolítja az Apex Radiance-t és mindent, amit ebbe a játékba telepített, és visszaállít minden fájlt, amelyet lecserélt. A Documents mappában lévő beállításaid megmaradnak.",
-        ["Everything Setup installed was removed."] = "A telepítő minden telepített elemet eltávolított.",
-        ["Setup fixes this"] = "A telepítő kijavítja",
+        ["The launcher removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."] =
+            "A launcher eltávolítja az Apex Radiance-t és mindent, amit ebbe a játékba telepített, és visszaállít minden fájlt, amelyet lecserélt. A Documents mappában lévő beállításaid megmaradnak.",
+        ["Everything the launcher installed was removed."] = "Minden, amit a launcher telepített, el lett távolítva.",
+        ["The launcher fixes this"] = "A launcher kijavítja",
         ["Read more"] = "Bővebben",
         ["Fixed."] = "Javítva.",
         ["No incompatible settings found."] = "Nincs összeférhetetlen beállítás.",
@@ -97,8 +97,8 @@ public static partial class Strings
             "A Sims 3 Modernization ts3native fájlja a másik kiadás verziója, és nem csinál semmit. Kapcsold be az Összetevők között, hogy a megfelelő települjön.",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
             "A Sims 3 Modernization nem rendelkezik verzióval ehhez a játékverzióhoz ({0}), így a ts3native fájlja nem csinál semmit. Kapcsold ki az Összetevők között.",
-        ["{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder."] =
-            "A Game\\Bin mappában lévő {0} a(z) {1} második példánya; mindkettő betöltődik. A telepítő áthelyezi a biztonsági mentések mappájába.",
+        ["{0} in Game\\Bin is a second copy of {1}; both load. The launcher moves it to the backup folder."] =
+            "A Game\\Bin mappában lévő {0} a(z) {1} második példánya; mindkettő betöltődik. A launcher áthelyezi a biztonsági mentések mappájába.",
         ["Mods has {0} .package files but no Resource.cfg, so the game loads none of them."] =
             "A Mods mappában {0} .package fájl van, de nincs Resource.cfg, így a játék egyiket sem tölti be.",
         ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =
@@ -107,18 +107,18 @@ public static partial class Strings
             "Az NRaas ErrorTrapnek nincs olyan verziója, amelyről biztosan tudni, hogy működik az EA app 1.69.47 verzióval.",
         ["{0} overrides game code Sims 3 Modernization also patches (not tested together)."] =
             "A(z) {0} olyan játékkódot ír felül, amelyet a Sims 3 Modernization is módosít (együtt nem tesztelték).",
-        ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
-            "A(z) {0} egy régi verzió, benne az Apexszel; amíg a Game\\Bin mappában van, az Apex Radiance kikapcsolva marad. A telepítő áthelyezi a biztonsági mentések mappájába (ha használtad, telepítsd helyette a hivatalos Sims3SettingsSetter-t).",
-        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
-            "A Sims3Performance ShortWaitSpin és ThreadStackDiet beállítása ütközik a Sims 3 Modernizationnel. A telepítő mindkettőt 0-ra állítja (egy másolat megmarad Sims3Performance.ini.apex-backup néven).",
-        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
-            "A Sims3SettingsSetter tömörítetlen textúrái akadozást okoznak az RTX Remix bridge mellett. A telepítő kikapcsolja őket (egy másolat megmarad S3SS.toml.apex-backup néven).",
+        ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
+            "A(z) {0} egy régi verzió, benne az Apexszel; amíg a Game\\Bin mappában van, az Apex Radiance kikapcsolva marad. A launcher áthelyezi a biztonsági mentések mappájába (ha használtad, telepítsd helyette a hivatalos Sims3SettingsSetter-t).",
+        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. The launcher sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
+            "A Sims3Performance ShortWaitSpin és ThreadStackDiet beállítása ütközik a Sims 3 Modernizationnel. A launcher mindkettőt 0-ra állítja (egy másolat megmarad Sims3Performance.ini.apex-backup néven).",
+        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
+            "A Sims3SettingsSetter tömörítetlen textúrái akadozást okoznak az RTX Remix bridge mellett. A launcher kikapcsolja őket (egy másolat megmarad S3SS.toml.apex-backup néven).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
             "A(z) {0} a client.targetProcess = {1} értéket állítja be, de ez a játék a(z) {2}: a bridge nem indul el.",
         ["dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
             "A dxvk.conf fájlból hiányzik a(z) {0}, vagy más az értéke: enélkül a játék a bridge mellett visszaállítja a grafikai beállításait, vagy lefagy felbontásváltáskor.",
-        ["Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
-            "A Mods\\Resource.cfg nem olvassa be ezt: {0}, így a játék nem tölti be. A telepítő hozzáadja a Packages mappa sorait (egy másolat megmarad Resource.cfg.apex-backup néven).",
+        ["Mods\\Resource.cfg does not read {0}, so the game does not load it. The launcher adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
+            "A Mods\\Resource.cfg nem olvassa be ezt: {0}, így a játék nem tölti be. A launcher hozzáadja a Packages mappa sorait (egy másolat megmarad Resource.cfg.apex-backup néven).",
         ["Fix settings"] = "Beállítások javítása",
         ["Everything is installed and up to date."] = "Minden telepítve van és naprakész.",
         ["Will be removed"] = "Eltávolításra kerül",
@@ -126,7 +126,7 @@ public static partial class Strings
         ["Nothing to apply"] = "Nincs mit alkalmazni",
         ["Preview"] = "Előnézet",
         ["This is a preview: nothing was installed."] = "Ez csak előnézet: a telepítő semmit sem telepített.",
-        ["Setup is applying changes"] = "A telepítő alkalmazza a változásokat",
+        ["The launcher is applying changes"] = "A launcher alkalmazza a változásokat",
         ["Wait until it finishes before closing."] = "Bezárás előtt várd meg, amíg befejezi.",
         ["Checking the latest versions…"] = "A legújabb verziók ellenőrzése…",
         ["Checking for updates…"] = "Frissítések keresése…",
@@ -178,19 +178,19 @@ public static partial class Strings
         ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Az RTX Remix bridge-en keresztül Vulkanon futtatja a játékot: kevesebb akadás és kb. 600 MB-tal több szabad memória a nagy világokhoz. Ha a játék rosszul működik vele, vagy a videokártyád nem tudja futtatni, használd a DXVK-t.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Az Apex Radiance önállóan is működik, de jól párosul a sims3fiend Sims3SettingsSetter moddal: képkockasebesség-korlát, kevesebb akadás és sok extra játékbeállítás.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "A DXVK-t saját 64 bites folyamatba helyezi: a játéknak kb. 600 MB-tal több szabad memóriája marad hosszú játékokhoz és nagy világokhoz.",
-        ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "A(z) {0} fájlban {1} = {2}, amit a telepítő nem tud beolvasni. A telepítő a fájlt változatlanul hagyja.",
+        ["{0} has {1} = {2}, which the launcher cannot read. The launcher leaves the file as it is."] = "A(z) {0} fájlban {1} = {2}, amit a launcher nem tud beolvasni. A launcher a fájlt változatlanul hagyja.",
         // restore points (Repair or remove)
         ["Install {0}"] = "Telepítés: {0}",
         ["Restore points"] = "Visszaállítási pontok",
-        ["Setup keeps a copy of every file it changes. Restoring a point undoes that change and every later one."] = "A telepítő megőrzi minden általa módosított fájl másolatát. Egy pont visszaállítása visszavonja azt a módosítást és minden későbbit.",
+        ["The launcher keeps a copy of every file it changes. Restoring a point undoes that change and every later one."] = "A launcher megőrzi minden általa módosított fájl másolatát. Egy pont visszaállítása visszavonja azt a módosítást és minden későbbit.",
         ["Before: {0}"] = "Előtte: {0}",
         ["{0} · 1 file"] = "{0} · 1 fájl",
         ["{0} · {1} files"] = "{0} · {1} fájl",
         ["Restore"] = "Visszaállítás",
-        ["No restore points yet. Setup makes one before every change."] = "Még nincs visszaállítási pont. A telepítő minden módosítás előtt létrehoz egyet.",
+        ["No restore points yet. The launcher makes one before every change."] = "Még nincs visszaállítási pont. A launcher minden módosítás előtt létrehoz egyet.",
         ["Restore this point?"] = "Visszaállítod ezt a pontot?",
-        ["Setup puts back the files as they were before this change, and undoes every change made after it. Close the game first."] = "A telepítő visszaállítja a fájlokat a módosítás előtti állapotukra, és visszavon minden későbbi módosítást. Előbb zárd be a játékot.",
-        ["Setup could not put back {0}."] = "A telepítő nem tudta visszaállítani: {0}.",
+        ["The launcher puts back the files as they were before this change, and undoes every change made after it. Close the game first."] = "A launcher visszaállítja a fájlokat a módosítás előtti állapotukra, és visszavon minden későbbi módosítást. Előbb zárd be a játékot.",
+        ["The launcher could not put back {0}."] = "A launcher nem tudta visszaállítani: {0}.",
         ["Changes undone."] = "Módosítások visszavonva.",
         ["Undo these changes"] = "Módosítások visszavonása",
         ["This restore point is gone."] = "Ez a visszaállítási pont már nem létezik.",
@@ -198,8 +198,8 @@ public static partial class Strings
         ["Update now"] = "Frissítés most",
         ["{0} {1} → {2}"] = "{0} {1} → {2}",
         ["Removes MonoPatcher.asi and its package."] = "Eltávolítja a MonoPatcher.asi fájlt és a csomagját.",
-        ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. Setup moves it to the backup folder (S3SS does the same job)."] =
-            "A Smooth Patch TS3Patch.asi fájlja ugyanazt a játékkódot módosítja, mint a Sims3SettingsSetter Smooth Patch funkciója. A telepítő áthelyezi a biztonsági mentések mappájába (az S3SS ugyanezt a feladatot látja el).",
+        ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. The launcher moves it to the backup folder (S3SS does the same job)."] =
+            "A Smooth Patch TS3Patch.asi fájlja ugyanazt a játékkódot módosítja, mint a Sims3SettingsSetter Smooth Patch funkciója. A launcher áthelyezi a biztonsági mentések mappájába (az S3SS ugyanezt a feladatot látja el).",
         ["simler90's Gameplay Core Mod and NRaas StoryProgression replace the same game code. Keep one of them."] =
             "A simler90-féle Gameplay Core Mod és az NRaas StoryProgression ugyanazt a játékkódot cseréli le. Csak az egyiket tartsd meg.",
         ["MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed."] =
@@ -225,12 +225,12 @@ public static partial class Strings
         ["Vulkan, DXVK"] = "Vulkan, DXVK",
         ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan több memóriával (RTX Remix bridge, ajánlott)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "A DXVK-hoz és az RTX Remix bridge-hez Vulkan 1.3-at támogató videokártya kell (talált: {0}).",
-        ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "A videokártya-illesztőprogram túl régi a DXVK-hoz és az RTX Remix bridge-hez (hiányzik: {0}). Frissítse az illesztőprogramot, majd nyissa meg újra a Setupot.",
+        ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open the launcher again."] = "A videokártya-illesztőprogram túl régi a DXVK-hoz és az RTX Remix bridge-hez (hiányzik: {0}). Frissítse az illesztőprogramot, majd nyissa meg újra a launchert.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "A(z) {0} nem indul el ezzel a videokártya-illesztőprogrammal (hiányzik: {1}), ezért a játék induláskor bezáródik. Frissítse az illesztőprogramot, vagy válassza a(z) Windows alapértelmezett (Direct3D 9) lehetőséget itt: Összetevők módosítása.",
         ["{0} cannot start on this graphics card ({1}), so the game closes at start. Choose Windows default (Direct3D 9) in Change components."] = "A(z) {0} nem indul el ezen a videokártyán ({1}), ezért a játék induláskor bezáródik. Válassza a(z) Windows alapértelmezett (Direct3D 9) lehetőséget itt: Összetevők módosítása.",
         ["1 update for The Sims 3 · {0}"] = "1 frissítés a The Sims 3-hoz · {0}",
         ["Change"] = "Módosítás",
-        ["Close the game before you start. Everything comes from each author's official GitHub, and Setup keeps a copy of every file it changes."] = "Kezdés előtt zárd be a játékot. Minden a szerzők hivatalos GitHubjáról jön, és a telepítő másolatot tart minden fájlról, amit módosít.",
+        ["Close the game before you start. Everything comes from each author's official GitHub, and the launcher keeps a copy of every file it changes."] = "Kezdés előtt zárd be a játékot. Minden a szerzők hivatalos GitHubjáról jön, és a launcher másolatot tart minden fájlról, amit módosít.",
         ["Everything is updated"] = "Minden frissítve",
         ["Game, components and installation"] = "Játék, összetevők és telepítés",
         ["How the game draws"] = "Hogyan rajzol a játék",
@@ -238,7 +238,7 @@ public static partial class Strings
         ["Optional mods"] = "Választható modok",
         ["Replaces {0}"] = "Lecseréli: {0}",
         ["See what's new"] = "Újdonságok megtekintése",
-        ["Setup makes a restore point before it changes any file, so you can undo this."] = "A telepítő visszaállítási pontot készít, mielőtt bármely fájlt módosítana, így ez visszavonható.",
+        ["The launcher makes a restore point before it changes any file, so you can undo this."] = "A launcher visszaállítási pontot készít, mielőtt bármely fájlt módosítana, így ez visszavonható.",
         ["Something looks wrong in the game? This puts back everything as it was before this update."] = "Valami furcsa a játékban? Ez mindent visszaállít a frissítés előtti állapotra.",
         ["Step {0} of {1}: {2}"] = "{0}/{1}. lépés: {2}",
         ["The Sims 3 · {0} found"] = "The Sims 3 · {0} megtalálva",
@@ -258,8 +258,8 @@ public static partial class Strings
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Kb. 600 MB-tal több memóriát hagy szabadon a nagy világokhoz. Vulkant támogató videokártya kell hozzá. Ha a játék hibásan működik vele, válaszd a DXVK-t.",
         ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Működik, de az RTX Remix bridge-dzsel vagy a DXVK-val jobban fut az Apex Radiance.",
-        ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
-            "A játékon belüli grafikai beállításaid egyszer visszaállhatnak. A telepítő másolatot tart róluk, és visszaállítja őket, ha visszaváltasz.",
+        ["Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back."] =
+            "A játékon belüli grafikai beállításaid egyszer visszaállhatnak. A launcher másolatot tart róluk, és visszaállítja őket, ha visszaváltasz.",
         ["Fixes for game and graphics settings."] = "Javítások a játék és a grafika beállításaihoz.",
         ["Fixes stutters, Sims getting stuck and crashes."] =
             "Javítja az akadozást, a beragadó Simeket és az összeomlásokat.",
@@ -274,16 +274,16 @@ public static partial class Strings
         ["Automatic"] = "Automatikus",
         ["This file has no Sims3Performance.asi."] = "Ebben a fájlban nincs Sims3Performance.asi.",
         ["Dry run: Setup changes nothing."] = "Próbafuttatás: a telepítő semmit sem módosít.",
-        ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases."] =
-            "Az Apex Radiance-t loinyx készítette. Az RTX Remix bridge az NVIDIA-é, a The Sims 3-ra dalexlol és alexvixell35-stack ültette át. A Sims3SettingsSetter sims3fiend, a Sims 3 Modernization rodneypantonial, az Ultimate ASI Loader ThirteenAG munkája: a telepítő a saját GitHub-kiadásaikból tölti le őket.",
+        ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: the launcher downloads them from their own GitHub releases."] =
+            "Az Apex Radiance-t loinyx készítette. Az RTX Remix bridge az NVIDIA-é, a The Sims 3-ra dalexlol és alexvixell35-stack ültette át. A Sims3SettingsSetter sims3fiend, a Sims 3 Modernization rodneypantonial, az Ultimate ASI Loader ThirteenAG munkája: a launcher a saját GitHub-kiadásaikból tölti le őket.",
         ["RTX Remix bridge: third-party notices"] = "RTX Remix bridge: harmadik felek közleményei",
         ["Read"] = "Megnyitás",
         ["Licence text"] = "Licencszöveg",
         ["OK"] = "OK",
         ["Cancel"] = "Mégse",
-        ["A new Setup is available"] = "Új Setup érhető el",
-        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Az Apex Radiance Setup {0} letöltve és ellenőrizve. Frissítsd a Setupot, utána újra megnyílik.",
-        ["Update Setup"] = "Setup frissítése",
+        ["A new Apex Launcher is available"] = "Új Apex Launcher érhető el",
+        ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Az Apex Launcher {0} letöltve és ellenőrizve. Frissítsd a launchert, utána újra megnyílik.",
+        ["Update the launcher"] = "A launcher frissítése",
         // restart host (experimental)
         ["Restart host"] = "Játék újraindítása",
         ["Experimental"] = "Kísérleti",
@@ -294,7 +294,7 @@ public static partial class Strings
         ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "Bekapcsolva a The Sims 3-hoz az NVIDIA-illesztőben. Az Apex képkockakorlátjával 60 és 90 fps között működik a legjobban.",
         ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "Bekapcsolva a The Sims 3-hoz az NVIDIA illesztőprogramban. Az Apex képkockakorlátja most 60 fps, ezzel működik a legjobban.",
         ["Off for The Sims 3."] = "Kikapcsolva a The Sims 3-hoz.",
-        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "Már a saját NVIDIA-profilodban van (\"{0}\"): a Setup nem nyúl hozzá.",
+        ["Already in your NVIDIA profile \"{0}\": the launcher leaves it as it is."] = "Már a saját NVIDIA-profilodban van (\"{0}\"): a launcher nem nyúl hozzá.",
         ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "NVIDIA GeForce RTX 40 vagy 50 sorozatú kártya kell (talált: {0}).",
         ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "571.86-os vagy újabb NVIDIA-illesztő kell (talált: {0}).",
         ["Needs the RTX Remix bridge as the graphics choice."] = "Grafikai választásként az RTX Remix bridge kell.",
@@ -318,7 +318,7 @@ public static partial class Strings
         ["no limit"] = "nincs korlát",
         ["Custom"] = "Egyéni",
         ["Could not change Apex's frame limit: {0}"] = "Az Apex képkockakorlátja nem módosítható: {0}",
-        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "A Setupon kívül, az NVIDIA-illesztő beállításaiban kapcsolták be: a Setup nem nyúl hozzá.",
+        ["Turned on outside the launcher, in the NVIDIA driver settings: the launcher leaves it as it is."] = "A launcheren kívül, az NVIDIA-illesztő beállításaiban kapcsolták be: a launcher nem nyúl hozzá.",
         ["{0} fps → about {1} fps on screen with {2}"] = "{0} FPS → nagyjából {1} FPS a képernyőn ezzel: {2}",
         ["No limit: about double your frame rate on screen with {0}"] = "Nincs korlát: nagyjából dupla képkockaszám a képernyőn ezzel: {0}",
         ["Turns on when you apply the changes."] = "A módosítások alkalmazásakor bekapcsol.",
@@ -326,41 +326,41 @@ public static partial class Strings
         ["Changes to {0} when you apply the changes."] = "A módosítások alkalmazásakor {0} lesz.",
         ["Apex frame limit: {0}"] = "Apex képkockakorlát: {0}",
         ["To apply: {0}"] = "Alkalmazandó: {0}",
-        ["Windows did not let Setup change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again."] = "A Windows nem engedte, hogy a Setup módosítsa az illesztő beállításait. Zárd be az NVIDIA Appot és az NVIDIA Profile Inspectort, majd próbáld újra.",
+        ["Windows did not let the launcher change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again."] = "A Windows nem engedte, hogy a launcher módosítsa az illesztő beállításait. Zárd be az NVIDIA Appot és az NVIDIA Profile Inspectort, majd próbáld újra.",
         ["The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."] = "Az AMD-illesztő nem fogadta el a módosítást. Kézzel bekapcsolhatod az AMD Software-ben: Játék > Grafika > AMD Fluid Motion Frames.",
         ["The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector."] = "Az NVIDIA-illesztő nem fogadta el a módosítást. Kézzel bekapcsolhatod az NVIDIA Profile Inspectorral.",
         ["How to do it by hand"] = "Így csináld kézzel",
         ["GitHub's download limit was reached; try again in {0} minutes."] = "Elérted a GitHub letöltési korlátját; próbáld újra {0} perc múlva.",
-        ["Your antivirus removed or blocked {0}; add an exception for {1} and run Setup again."] = "A víruskeresőd eltávolította vagy blokkolta ezt: {0}; adj hozzá kivételt ehhez: {1}, és indítsd újra a Setupot.",
+        ["Your antivirus removed or blocked {0}; add an exception for {1} and open the launcher again."] = "A víruskeresőd eltávolította vagy blokkolta ezt: {0}; adj hozzá kivételt ehhez: {1}, és nyisd meg újra a launchert.",
         ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again."] = "Zárd be a The Sims 3-at, az indítóját, a játékújraindítót (ts3wrap.exe) és az RTX Remix bridge-et (NvRemixBridge.exe), majd próbáld újra.",
-        ["Setup cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; or move the game out of a protected folder."] = "A Setup nem tud írni ide: {0}. Ha a Windows biztonság Szabályozott mappahozzáférése be van kapcsolva, engedélyezd ott az ApexRadianceSetup.exe-t; vagy vidd ki a játékot a védett mappából.",
-        ["Setup needs {0} MB free on drive {1}. Free some space, then try again."] = "A Setupnak {0} MB szabad hely kell a(z) {1} meghajtón. Szabadíts fel helyet, majd próbáld újra.",
-        ["Setup did not find The Sims 3's folder in Documents. Start the game once, then run Setup again for the settings it writes there."] = "A Setup nem találta a The Sims 3 mappáját a Dokumentumokban. Indítsd el egyszer a játékot, majd újra a Setupot, az oda írt beállításokért.",
+        ["The launcher cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; or move the game out of a protected folder."] = "A launcher nem tud írni ide: {0}. Ha a Windows biztonság Szabályozott mappahozzáférése be van kapcsolva, engedélyezd ott az ApexLauncher.exe-t; vagy vidd ki a játékot a védett mappából.",
+        ["The launcher needs {0} MB free on drive {1}. Free some space, then try again."] = "A launchernek {0} MB szabad hely kell a(z) {1} meghajtón. Szabadíts fel helyet, majd próbáld újra.",
+        ["The launcher did not find The Sims 3's folder in Documents. Start the game once, then open the launcher again for the settings it writes there."] = "A launcher nem találta a The Sims 3 mappáját a Dokumentumokban. Indítsd el egyszer a játékot, majd nyisd meg újra a launchert, az oda írt beállításokért.",
         ["{0} (d3d9.dll) is set aside in Game\\Bin\\Apex Radiance backup; removing the renderer in Repair or remove puts it back."] = "{0} (d3d9.dll) a Game\\Bin\\Apex Radiance backup mappába kerül; a megjelenítő eltávolítása a Javítás vagy eltávolításban visszateszi.",
-        ["Two ASI loaders ({0}): Setup keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup."] = "Két ASI loader ({0}): a Setup megtartja ezt: {1}, a többit a Game\\Bin\\Apex Radiance backup mappába teszi.",
-        ["Before Setup can continue"] = "Mielőtt a Setup folytathatná",
-        ["Before Setup continues"] = "Mielőtt a Setup folytatja",
+        ["Two ASI loaders ({0}): the launcher keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup."] = "Két ASI loader ({0}): a launcher megtartja ezt: {1}, a többit a Game\\Bin\\Apex Radiance backup mappába teszi.",
+        ["Before the launcher can continue"] = "Mielőtt a launcher folytathatná",
+        ["Before the launcher continues"] = "Mielőtt a launcher folytatja",
         ["Continue"] = "Folytatás",
-        ["Windows did not let Setup change a file. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; a read-only or locked file can also cause this."] = "A Windows nem engedte, hogy a Setup módosítson egy fájlt. Ha a Szabályozott mappahozzáférés be van kapcsolva, engedélyezd ott az ApexRadianceSetup.exe-t; írásvédett vagy zárolt fájl is okozhatja.",
-        ["A file Setup needed is in use or could not be written. Close the game and other programs using it, then try again."] = "Egy fájl, amire a Setupnak szüksége van, használatban van, vagy nem sikerült írni. Zárd be a játékot és az azt használó programokat, és próbáld újra.",
-        ["Setup ran into a problem it did not expect."] = "A Setup váratlan hibába ütközött.",
+        ["Windows did not let the launcher change a file. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; a read-only or locked file can also cause this."] = "A Windows nem engedte, hogy a launcher módosítson egy fájlt. Ha a Szabályozott mappahozzáférés be van kapcsolva, engedélyezd ott az ApexLauncher.exe-t; írásvédett vagy zárolt fájl is okozhatja.",
+        ["A file the launcher needed is in use or could not be written. Close the game and other programs using it, then try again."] = "Egy fájl, amire a launchernek szüksége van, használatban van, vagy nem sikerült írni. Zárd be a játékot és az azt használó programokat, és próbáld újra.",
+        ["The launcher ran into a problem it did not expect."] = "A launcher váratlan hibába ütközött.",
         ["Copy details"] = "Részletek másolása",
         ["Open log folder"] = "Naplómappa megnyitása",
-        ["Setup puts back the files it changed."] = "A Setup visszaállítja a módosított fájlokat.",
+        ["The launcher puts back the files it changed."] = "A launcher visszaállítja a módosított fájlokat.",
         ["Keep what was installed"] = "A telepítettek megtartása",
         ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."] = "A folytatáshoz zárd be a The Sims 3-at, az indítóját, a játékújraindítót (ts3wrap.exe) és az RTX Remix bridge-et (NvRemixBridge.exe).",
         ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update."] = "A frissítéshez zárd be a The Sims 3-at, az indítóját, a játékújraindítót (ts3wrap.exe) és az RTX Remix bridge-et (NvRemixBridge.exe).",
-        ["Setup could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again."] = "A Setup nem találta ezt: {0}. Töltsd le újra a Sims 3 Performance Patch-et, vagy válaszd ki újra a letöltött fájlt.",
-        ["Setup could not put the files back while The Sims 3, its launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove."] = "A Setup nem tudta visszatenni a fájlokat, amíg a The Sims 3, az indítója, a játékújraindító vagy az RTX Remix bridge fut. Zárd be őket, majd a Javítás vagy eltávolításban kattints a legújabb pont Visszaállítás gombjára.",
+        ["The launcher could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again."] = "A launcher nem találta ezt: {0}. Töltsd le újra a Sims 3 Performance Patch-et, vagy válaszd ki újra a letöltött fájlt.",
+        ["The launcher could not put the files back while The Sims 3, the game's own launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove."] = "A launcher nem tudta visszatenni a fájlokat, amíg a The Sims 3, a játék saját indítója, a játékújraindító vagy az RTX Remix bridge fut. Zárd be őket, majd a Javítás vagy eltávolításban kattints a legújabb pont Visszaállítás gombjára.",
         ["Frame generation was turned off with the removal and stays off; turn it on again in Components if you want it."] = "A képkocka-generálás az eltávolítással kikapcsolt és kikapcsolva marad; ha kell, kapcsold vissza az Összetevőkben.",
-        ["Setup could not update itself"] = "A Setup nem tudta frissíteni magát",
+        ["The launcher could not update itself"] = "A launcher nem tudta frissíteni magát",
         ["Some changes did not apply"] = "Néhány módosítás nem lépett életbe",
         ["Not changed: {0}"] = "Nem változott: {0}",
         ["The AMD driver did not accept the change. You can turn it off by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."] = "Az AMD-illesztő nem fogadta el a módosítást. Kézzel kikapcsolhatod az AMD Software-ben: Játék > Grafika > AMD Fluid Motion Frames.",
         ["The NVIDIA driver did not accept the change. You can turn it off by hand with NVIDIA Profile Inspector."] = "Az NVIDIA-illesztő nem fogadta el a módosítást. Kézzel kikapcsolhatod az NVIDIA Profile Inspectorral.",
-        ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "A Windows nem engedte, hogy a Setup módosítsa az illesztő beállításait. Zárd be az AMD Software-t, majd próbáld újra.",
+        ["Windows did not let the launcher change the driver settings. Close AMD Software, then try again."] = "A Windows nem engedte, hogy a launcher módosítsa az illesztő beállításait. Zárd be az AMD Software-t, majd próbáld újra.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "A(z) {0} letöltése sérült. Próbáld újra; ha ismétlődik, egy víruskereső webes védelme vagy egy proxy módosíthatja a letöltéseket.",
-        ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "A víruskeresőd blokkolt egy fájlt, amire a Setupnak szüksége van; adj hozzá kivételt ehhez: {0}, és indítsd újra a Setupot.",
+        ["Your antivirus blocked a file the launcher needs; add an exception for {0} and open the launcher again."] = "A víruskeresőd blokkolt egy fájlt, amire a launchernek szüksége van; adj hozzá kivételt ehhez: {0}, és nyisd meg újra a launchert.",
 
         // Apex Launcher: install choice, Mods library, merge, hunt and Health checks
         ["Same as {0}"] = "Ugyanaz, mint: {0}",

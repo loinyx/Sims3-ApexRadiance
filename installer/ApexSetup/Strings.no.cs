@@ -21,18 +21,18 @@ public static partial class Strings
         ["Get started"] = "Kom i gang",
         ["Finish"] = "Fullfør",
         ["Close The Sims 3 to continue."] = "Lukk The Sims 3 for å fortsette.",
-        ["Setup needs the internet to download the files."] =
-            "Installasjonsprogrammet trenger internett for å laste ned filene.",
+        ["The launcher needs the internet to download the files."] =
+            "Launcheren trenger internett for å laste ned filene.",
         ["Nothing changes until you click Install."] = "Ingenting endres før du klikker Installer.",
         ["Lighting, picture and performance for The Sims 3."] = "Belysning, bilde og ytelse for The Sims 3.",
-        ["What Setup does"] = "Hva installasjonsprogrammet gjør",
-        ["Setup can't reach GitHub"] = "Installasjonsprogrammet når ikke GitHub",
+        ["What the launcher does"] = "Hva launcheren gjør",
+        ["The launcher can't reach GitHub"] = "Launcheren når ikke GitHub",
         ["Check your internet connection, then try again."] = "Sjekk internettforbindelsen, og prøv igjen.",
         ["Try again"] = "Prøv igjen",
         ["Choose your game"] = "Velg spillet ditt",
-        ["Setup found these installs. Pick the one you play."] =
-            "Installasjonsprogrammet fant disse installasjonene. Velg den du spiller.",
-        ["Setup found no install. Browse for the game folder."] = "Fant ingen installasjon. Bla etter spillmappen.",
+        ["The launcher found these installs. Pick the one you play."] =
+            "Launcheren fant disse installasjonene. Velg den du spiller.",
+        ["The launcher found no install. Browse for the game folder."] = "Launcheren fant ingen installasjon. Bla etter spillmappen.",
         ["Browse for another folder"] = "Bla etter en annen mappe",
         ["No game in this folder"] = "Ikke noe spill i denne mappen",
         ["Pick the The Sims 3 folder, or its Game\\Bin folder (the one with TS3W.exe or TS3.exe)."] =
@@ -54,7 +54,7 @@ public static partial class Strings
         ["Wrong build"] = "Feil versjon",
         ["Update {0}"] = "Oppdater {0}",
         ["Up to date"] = "Oppdatert",
-        ["Setup could not finish"] = "Installasjonsprogrammet ble ikke ferdig",
+        ["The launcher could not finish"] = "Launcheren ble ikke ferdig",
         ["Close The Sims 3 first."] = "Lukk The Sims 3 først.",
         ["You're all set"] = "Alt er klart",
         ["Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."] =
@@ -72,18 +72,18 @@ public static partial class Strings
             "Laster ned og kopierer alt som er installert her, på nytt. Innstillingene dine blir.",
         ["Repair"] = "Reparer",
         ["Uninstall everything"] = "Avinstaller alt",
-        ["Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."] =
-            "Fjerner det installasjonsprogrammet installerte, og Apex Radiance, og legger tilbake hver fil det erstattet.",
+        ["Removes what the launcher installed, and Apex Radiance, and puts back every file the launcher replaced."] =
+            "Fjerner det launcheren installerte, og Apex Radiance, og legger tilbake hver fil launcheren erstattet.",
         ["Uninstall"] = "Avinstaller",
         ["Remove {0}?"] = "Fjerne {0}?",
-        ["Close the game first. Setup removes the files and puts back the ones it replaced."] =
-            "Lukk spillet først. Installasjonsprogrammet fjerner filene og legger tilbake dem det erstattet.",
+        ["Close the game first. The launcher removes the files and puts back the ones it replaced."] =
+            "Lukk spillet først. Launcheren fjerner filene og legger tilbake dem den erstattet.",
         ["{0} removed."] = "{0} er fjernet.",
         ["Uninstall everything?"] = "Avinstallere alt?",
-        ["Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."] =
-            "Installasjonsprogrammet fjerner Apex Radiance og alt det installerte i dette spillet, og legger tilbake hver fil det erstattet. Innstillingene dine i Dokumenter blir.",
-        ["Everything Setup installed was removed."] = "Alt installasjonsprogrammet installerte, er fjernet.",
-        ["Setup fixes this"] = "Installasjonsprogrammet retter dette",
+        ["The launcher removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."] =
+            "Launcheren fjerner Apex Radiance og alt den installerte i dette spillet, og legger tilbake hver fil den erstattet. Innstillingene dine i Dokumenter blir.",
+        ["Everything the launcher installed was removed."] = "Alt launcheren installerte, er fjernet.",
+        ["The launcher fixes this"] = "Launcheren retter dette",
         ["Read more"] = "Les mer",
         ["Fixed."] = "Rettet.",
         ["No incompatible settings found."] = "Fant ingen inkompatible innstillinger.",
@@ -95,8 +95,8 @@ public static partial class Strings
             "ts3native fra Sims 3 Modernization er versjonen for den andre utgaven og gjør ingenting. Slå den på under Komponenter for å installere den riktige.",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
             "Sims 3 Modernization har ingen versjon for denne spillversjonen ({0}), så ts3native gjør ingenting. Slå den av under Komponenter.",
-        ["{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder."] =
-            "{0} i Game\\Bin er en ekstra kopi av {1}; begge lastes. Installasjonsprogrammet flytter den til sikkerhetskopimappen.",
+        ["{0} in Game\\Bin is a second copy of {1}; both load. The launcher moves it to the backup folder."] =
+            "{0} i Game\\Bin er en ekstra kopi av {1}; begge lastes. Launcheren flytter den til sikkerhetskopimappen.",
         ["Mods has {0} .package files but no Resource.cfg, so the game loads none of them."] =
             "Mods har {0} .package-filer, men ingen Resource.cfg, så spillet laster ingen av dem.",
         ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =
@@ -105,18 +105,18 @@ public static partial class Strings
             "NRaas ErrorTrap har ingen versjon som er kjent for å virke med EA app 1.69.47.",
         ["{0} overrides game code Sims 3 Modernization also patches (not tested together)."] =
             "{0} overstyrer spillkode som Sims 3 Modernization også endrer (ikke testet sammen).",
-        ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
-            "{0} er en gammel versjon med Apex inni; så lenge den ligger i Game\\Bin, er Apex Radiance av. Installasjonsprogrammet flytter den til sikkerhetskopimappen (installer den offisielle Sims3SettingsSetter i stedet hvis du brukte den).",
-        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
-            "ShortWaitSpin og ThreadStackDiet i Sims3Performance kolliderer med Sims 3 Modernization. Installasjonsprogrammet setter begge til 0 (en kopi lagres som Sims3Performance.ini.apex-backup).",
-        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
-            "De ukomprimerte teksturene i Sims3SettingsSetter får spillet til å hakke med RTX Remix bridge. Installasjonsprogrammet slår dem av (en kopi lagres som S3SS.toml.apex-backup).",
+        ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
+            "{0} er en gammel versjon med Apex inni; så lenge den ligger i Game\\Bin, er Apex Radiance av. Launcheren flytter den til sikkerhetskopimappen (installer den offisielle Sims3SettingsSetter i stedet hvis du brukte den).",
+        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. The launcher sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
+            "ShortWaitSpin og ThreadStackDiet i Sims3Performance kolliderer med Sims 3 Modernization. Launcheren setter begge til 0 (en kopi lagres som Sims3Performance.ini.apex-backup).",
+        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
+            "De ukomprimerte teksturene i Sims3SettingsSetter får spillet til å hakke med RTX Remix bridge. Launcheren slår dem av (en kopi lagres som S3SS.toml.apex-backup).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
             "{0} setter client.targetProcess = {1}, men dette spillet er {2}: broen starter ikke.",
         ["dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
             "dxvk.conf mangler {0} eller har andre verdier: uten dem tilbakestiller spillet grafikkvalgene eller fryser ved bytte av oppløsning med broen.",
-        ["Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
-            "Mods\\Resource.cfg leser ikke {0}, så spillet laster den ikke. Installasjonsprogrammet legger til linjene for Packages-mappen (en kopi lagres som Resource.cfg.apex-backup).",
+        ["Mods\\Resource.cfg does not read {0}, so the game does not load it. The launcher adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
+            "Mods\\Resource.cfg leser ikke {0}, så spillet laster den ikke. Launcheren legger til linjene for Packages-mappen (en kopi lagres som Resource.cfg.apex-backup).",
         ["Fix settings"] = "Rett innstillinger",
         ["Everything is installed and up to date."] = "Alt er installert og oppdatert.",
         ["Will be removed"] = "Blir fjernet",
@@ -124,7 +124,7 @@ public static partial class Strings
         ["Nothing to apply"] = "Ingenting å utføre",
         ["Preview"] = "Forhåndsvisning",
         ["This is a preview: nothing was installed."] = "Dette er en forhåndsvisning: ingenting ble installert.",
-        ["Setup is applying changes"] = "Installasjonsprogrammet utfører endringer",
+        ["The launcher is applying changes"] = "Launcheren utfører endringer",
         ["Wait until it finishes before closing."] = "Vent til det er ferdig før du lukker.",
         ["Checking the latest versions…"] = "Ser etter nyeste versjoner…",
         ["Checking for updates…"] = "Ser etter oppdateringer…",
@@ -174,19 +174,19 @@ public static partial class Strings
         ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Kjører spillet på Vulkan gjennom RTX Remix bridge: mindre hakking og rundt 600 MB mer ledig minne til store verdener. Hvis spillet oppfører seg feil med den eller grafikkortet ditt ikke kan kjøre den, bruk DXVK.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance fungerer alene, men passer godt sammen med Sims3SettingsSetter av sims3fiend: en bildefrekvensbegrenser, mindre hakking og mange ekstra spillinnstillinger.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Flytter DXVK til sin egen 64-biters prosess: spillet beholder rundt 600 MB mer ledig minne til lange økter og store verdener.",
-        ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} har {1} = {2}, som installasjonsprogrammet ikke kan lese. Installasjonsprogrammet lar filen være som den er.",
+        ["{0} has {1} = {2}, which the launcher cannot read. The launcher leaves the file as it is."] = "{0} har {1} = {2}, som launcheren ikke kan lese. Launcheren lar filen være som den er.",
         // restore points (Repair or remove)
         ["Install {0}"] = "Installer {0}",
         ["Restore points"] = "Gjenopprettingspunkter",
-        ["Setup keeps a copy of every file it changes. Restoring a point undoes that change and every later one."] = "Installasjonsprogrammet tar vare på en kopi av hver fil det endrer. Å gjenopprette et punkt angrer den endringen og alle senere.",
+        ["The launcher keeps a copy of every file it changes. Restoring a point undoes that change and every later one."] = "Launcheren tar vare på en kopi av hver fil den endrer. Å gjenopprette et punkt angrer den endringen og alle senere.",
         ["Before: {0}"] = "Før: {0}",
         ["{0} · 1 file"] = "{0} · 1 fil",
         ["{0} · {1} files"] = "{0} · {1} filer",
         ["Restore"] = "Gjenopprett",
-        ["No restore points yet. Setup makes one before every change."] = "Ingen gjenopprettingspunkter ennå. Installasjonsprogrammet lager ett før hver endring.",
+        ["No restore points yet. The launcher makes one before every change."] = "Ingen gjenopprettingspunkter ennå. Launcheren lager ett før hver endring.",
         ["Restore this point?"] = "Gjenopprette dette punktet?",
-        ["Setup puts back the files as they were before this change, and undoes every change made after it. Close the game first."] = "Installasjonsprogrammet legger tilbake filene slik de var før denne endringen, og angrer alle endringer gjort etter den. Lukk spillet først.",
-        ["Setup could not put back {0}."] = "Installasjonsprogrammet kunne ikke legge tilbake {0}.",
+        ["The launcher puts back the files as they were before this change, and undoes every change made after it. Close the game first."] = "Launcheren legger tilbake filene slik de var før denne endringen, og angrer alle endringer gjort etter den. Lukk spillet først.",
+        ["The launcher could not put back {0}."] = "Launcheren kunne ikke legge tilbake {0}.",
         ["Changes undone."] = "Endringene er angret.",
         ["Undo these changes"] = "Angre disse endringene",
         ["This restore point is gone."] = "Dette gjenopprettingspunktet finnes ikke lenger.",
@@ -194,8 +194,8 @@ public static partial class Strings
         ["Update now"] = "Oppdater nå",
         ["{0} {1} → {2}"] = "{0} {1} → {2}",
         ["Removes MonoPatcher.asi and its package."] = "Fjerner MonoPatcher.asi og pakken som hører til.",
-        ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. Setup moves it to the backup folder (S3SS does the same job)."] =
-            "TS3Patch.asi fra Smooth Patch endrer den samme spillkoden som Smooth Patch i Sims3SettingsSetter. Installasjonsprogrammet flytter den til sikkerhetskopimappen (S3SS gjør den samme jobben).",
+        ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. The launcher moves it to the backup folder (S3SS does the same job)."] =
+            "TS3Patch.asi fra Smooth Patch endrer den samme spillkoden som Smooth Patch i Sims3SettingsSetter. Launcheren flytter den til sikkerhetskopimappen (S3SS gjør den samme jobben).",
         ["simler90's Gameplay Core Mod and NRaas StoryProgression replace the same game code. Keep one of them."] =
             "Gameplay Core Mod fra simler90 og NRaas StoryProgression erstatter den samme spillkoden. Behold bare én av dem.",
         ["MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed."] =
@@ -219,12 +219,12 @@ public static partial class Strings
         ["Vulkan, DXVK"] = "Vulkan, DXVK",
         ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan med mer minne (RTX Remix bridge, anbefalt)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK og RTX Remix bridge krever et skjermkort med Vulkan 1.3 (funnet: {0}).",
-        ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Skjermkortdriveren er for gammel for DXVK og RTX Remix bridge (mangler: {0}). Oppdater skjermkortdriveren, og åpne Setup på nytt.",
+        ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open the launcher again."] = "Skjermkortdriveren er for gammel for DXVK og RTX Remix bridge (mangler: {0}). Oppdater skjermkortdriveren, og åpne launcheren på nytt.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} kan ikke starte med denne skjermkortdriveren (mangler: {1}), så spillet lukkes ved oppstart. Oppdater skjermkortdriveren, eller velg Windows-standard (Direct3D 9) under Endre komponenter.",
         ["{0} cannot start on this graphics card ({1}), so the game closes at start. Choose Windows default (Direct3D 9) in Change components."] = "{0} kan ikke starte på dette skjermkortet ({1}), så spillet lukkes ved oppstart. Velg Windows-standard (Direct3D 9) under Endre komponenter.",
         ["1 update for The Sims 3 · {0}"] = "1 oppdatering for The Sims 3 · {0}",
         ["Change"] = "Endre",
-        ["Close the game before you start. Everything comes from each author's official GitHub, and Setup keeps a copy of every file it changes."] = "Lukk spillet før du begynner. Alt kommer fra hver forfatters offisielle GitHub, og Setup tar vare på en kopi av hver fil den endrer.",
+        ["Close the game before you start. Everything comes from each author's official GitHub, and the launcher keeps a copy of every file it changes."] = "Lukk spillet før du begynner. Alt kommer fra hver forfatters offisielle GitHub, og launcheren tar vare på en kopi av hver fil den endrer.",
         ["Everything is updated"] = "Alt er oppdatert",
         ["Game, components and installation"] = "Spill, komponenter og installasjon",
         ["How the game draws"] = "Hvordan spillet tegner",
@@ -232,7 +232,7 @@ public static partial class Strings
         ["Optional mods"] = "Valgfrie modder",
         ["Replaces {0}"] = "Erstatter {0}",
         ["See what's new"] = "Se nyhetene",
-        ["Setup makes a restore point before it changes any file, so you can undo this."] = "Setup lager et gjenopprettingspunkt før den endrer en fil, så du kan angre.",
+        ["The launcher makes a restore point before it changes any file, so you can undo this."] = "Launcheren lager et gjenopprettingspunkt før den endrer en fil, så du kan angre.",
         ["Something looks wrong in the game? This puts back everything as it was before this update."] = "Ser noe feil ut i spillet? Dette setter alt tilbake slik det var før denne oppdateringen.",
         ["Step {0} of {1}: {2}"] = "Trinn {0} av {1}: {2}",
         ["The Sims 3 · {0} found"] = "The Sims 3 · {0} funnet",
@@ -252,8 +252,8 @@ public static partial class Strings
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Holder rundt 600 MB mer minne ledig for store verdener. Krever et skjermkort med Vulkan. Hvis spillet oppfører seg rart med det, velger du DXVK.",
         ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Fungerer, men Apex Radiance kjører bedre med RTX Remix bridge eller DXVK.",
-        ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
-            "Grafikkinnstillingene i spillet kan bli tilbakestilt én gang. Installasjonsprogrammet tar vare på en kopi og legger den tilbake hvis du bytter tilbake.",
+        ["Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back."] =
+            "Grafikkinnstillingene i spillet kan bli tilbakestilt én gang. Launcheren tar vare på en kopi og legger den tilbake hvis du bytter tilbake.",
         ["Fixes for game and graphics settings."] = "Rettinger for spill- og grafikkinnstillinger.",
         ["Fixes stutters, Sims getting stuck and crashes."] = "Retter hakking, Simmer som setter seg fast, og krasj.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] =
@@ -267,16 +267,16 @@ public static partial class Strings
         ["Automatic"] = "Automatisk",
         ["This file has no Sims3Performance.asi."] = "Denne filen har ingen Sims3Performance.asi.",
         ["Dry run: Setup changes nothing."] = "Prøvekjøring: installasjonsprogrammet endrer ingenting.",
-        ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases."] =
-            "Apex Radiance av loinyx. RTX Remix bridge er fra NVIDIA, overført til The Sims 3 av dalexlol og alexvixell35-stack. Sims3SettingsSetter er laget av sims3fiend, Sims 3 Modernization av rodneypantonial og Ultimate ASI Loader av ThirteenAG: installasjonsprogrammet laster dem ned fra deres egne GitHub-utgivelser.",
+        ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: the launcher downloads them from their own GitHub releases."] =
+            "Apex Radiance av loinyx. RTX Remix bridge er fra NVIDIA, overført til The Sims 3 av dalexlol og alexvixell35-stack. Sims3SettingsSetter er laget av sims3fiend, Sims 3 Modernization av rodneypantonial og Ultimate ASI Loader av ThirteenAG: launcheren laster dem ned fra deres egne GitHub-utgivelser.",
         ["RTX Remix bridge: third-party notices"] = "RTX Remix bridge: tredjepartsmerknader",
         ["Read"] = "Les",
         ["Licence text"] = "Lisenstekst",
         ["OK"] = "OK",
         ["Cancel"] = "Avbryt",
-        ["A new Setup is available"] = "Et nytt Setup er tilgjengelig",
-        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} er lastet ned og kontrollert. Oppdater Setup, så åpnes det igjen.",
-        ["Update Setup"] = "Oppdater Setup",
+        ["A new Apex Launcher is available"] = "En ny Apex Launcher er tilgjengelig",
+        ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Apex Launcher {0} er lastet ned og kontrollert. Oppdater launcheren, så åpnes den igjen.",
+        ["Update the launcher"] = "Oppdater launcheren",
         // restart host (experimental)
         ["Restart host"] = "Omstart av spillet",
         ["Experimental"] = "Eksperimentell",
@@ -287,7 +287,7 @@ public static partial class Strings
         ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "På for The Sims 3 i NVIDIA-driveren. Fungerer best med Apex sin bildegrense på 60 til 90 fps.",
         ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "På for The Sims 3 i NVIDIA-driveren. Apex sin bildegrense er nå 60 fps, tempoet det fungerer best med.",
         ["Off for The Sims 3."] = "Av for The Sims 3.",
-        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "Allerede i NVIDIA-profilen din \"{0}\": Setup lar den være.",
+        ["Already in your NVIDIA profile \"{0}\": the launcher leaves it as it is."] = "Allerede i NVIDIA-profilen din \"{0}\": launcheren lar den være.",
         ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "Krever et NVIDIA GeForce RTX 40- eller 50-seriekort (funnet: {0}).",
         ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "Krever NVIDIA-driver 571.86 eller nyere (funnet: {0}).",
         ["Needs the RTX Remix bridge as the graphics choice."] = "Krever RTX Remix bridge som grafikkvalg.",
@@ -311,7 +311,7 @@ public static partial class Strings
         ["no limit"] = "ingen grense",
         ["Custom"] = "Egendefinert",
         ["Could not change Apex's frame limit: {0}"] = "Kunne ikke endre Apex' bildegrense: {0}",
-        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Slått på utenfor Setup, i innstillingene til NVIDIA-driveren: Setup lar det være.",
+        ["Turned on outside the launcher, in the NVIDIA driver settings: the launcher leaves it as it is."] = "Slått på utenfor launcheren, i innstillingene til NVIDIA-driveren: launcheren lar det være.",
         ["{0} fps → about {1} fps on screen with {2}"] = "{0} fps → omtrent {1} fps på skjermen med {2}",
         ["No limit: about double your frame rate on screen with {0}"] = "Ingen grense: omtrent dobbel bildefrekvens på skjermen med {0}",
         ["Turns on when you apply the changes."] = "Slås på når du tar i bruk endringene.",
@@ -319,41 +319,41 @@ public static partial class Strings
         ["Changes to {0} when you apply the changes."] = "Blir {0} når du tar i bruk endringene.",
         ["Apex frame limit: {0}"] = "Apex' bildegrense: {0}",
         ["To apply: {0}"] = "Skal brukes: {0}",
-        ["Windows did not let Setup change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again."] = "Windows lot ikke Setup endre driverinnstillingene. Lukk NVIDIA App og NVIDIA Profile Inspector, og prøv igjen.",
+        ["Windows did not let the launcher change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again."] = "Windows lot ikke launcheren endre driverinnstillingene. Lukk NVIDIA App og NVIDIA Profile Inspector, og prøv igjen.",
         ["The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."] = "AMD-driveren godtok ikke endringen. Du kan slå det på for hånd i AMD Software: Gaming > Graphics > AMD Fluid Motion Frames.",
         ["The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector."] = "NVIDIA-driveren godtok ikke endringen. Du kan slå det på for hånd med NVIDIA Profile Inspector.",
         ["How to do it by hand"] = "Slik gjør du det for hånd",
         ["GitHub's download limit was reached; try again in {0} minutes."] = "GitHubs nedlastingsgrense er nådd; prøv igjen om {0} minutter.",
-        ["Your antivirus removed or blocked {0}; add an exception for {1} and run Setup again."] = "Antiviruset ditt fjernet eller blokkerte {0}; legg til et unntak for {1} og kjør Setup igjen.",
+        ["Your antivirus removed or blocked {0}; add an exception for {1} and open the launcher again."] = "Antiviruset ditt fjernet eller blokkerte {0}; legg til et unntak for {1} og åpne launcheren igjen.",
         ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again."] = "Lukk The Sims 3, startprogrammet, spillomstarten (ts3wrap.exe) og RTX Remix bridge (NvRemixBridge.exe), og prøv igjen.",
-        ["Setup cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; or move the game out of a protected folder."] = "Setup kan ikke skrive til {0}. Hvis kontrollert mappetilgang i Windows-sikkerhet er på, tillat ApexRadianceSetup.exe der; eller flytt spillet ut av en beskyttet mappe.",
-        ["Setup needs {0} MB free on drive {1}. Free some space, then try again."] = "Setup trenger {0} MB ledig på stasjon {1}. Frigjør plass og prøv igjen.",
-        ["Setup did not find The Sims 3's folder in Documents. Start the game once, then run Setup again for the settings it writes there."] = "Setup fant ikke mappen til The Sims 3 i Dokumenter. Start spillet én gang og så Setup igjen, for innstillingene det skriver der.",
+        ["The launcher cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; or move the game out of a protected folder."] = "Launcheren kan ikke skrive til {0}. Hvis kontrollert mappetilgang i Windows-sikkerhet er på, tillat ApexLauncher.exe der; eller flytt spillet ut av en beskyttet mappe.",
+        ["The launcher needs {0} MB free on drive {1}. Free some space, then try again."] = "Launcheren trenger {0} MB ledig på stasjon {1}. Frigjør plass og prøv igjen.",
+        ["The launcher did not find The Sims 3's folder in Documents. Start the game once, then open the launcher again for the settings it writes there."] = "Launcheren fant ikke mappen til The Sims 3 i Dokumenter. Start spillet én gang, og åpne så launcheren igjen, for innstillingene den skriver der.",
         ["{0} (d3d9.dll) is set aside in Game\\Bin\\Apex Radiance backup; removing the renderer in Repair or remove puts it back."] = "{0} (d3d9.dll) legges til side i Game\\Bin\\Apex Radiance backup; å fjerne rendereren i Reparer eller fjern legger det tilbake.",
-        ["Two ASI loaders ({0}): Setup keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup."] = "To ASI-lastere ({0}): Setup beholder {1} og legger de andre til side i Game\\Bin\\Apex Radiance backup.",
-        ["Before Setup can continue"] = "Før Setup kan fortsette",
-        ["Before Setup continues"] = "Før Setup fortsetter",
+        ["Two ASI loaders ({0}): the launcher keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup."] = "To ASI-lastere ({0}): launcheren beholder {1} og legger de andre til side i Game\\Bin\\Apex Radiance backup.",
+        ["Before the launcher can continue"] = "Før launcheren kan fortsette",
+        ["Before the launcher continues"] = "Før launcheren fortsetter",
         ["Continue"] = "Fortsett",
-        ["Windows did not let Setup change a file. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; a read-only or locked file can also cause this."] = "Windows lot ikke Setup endre en fil. Hvis kontrollert mappetilgang er på, tillat ApexRadianceSetup.exe der; en skrivebeskyttet eller låst fil kan også være årsaken.",
-        ["A file Setup needed is in use or could not be written. Close the game and other programs using it, then try again."] = "En fil Setup trenger, er i bruk eller kunne ikke skrives. Lukk spillet og andre programmer som bruker den, og prøv igjen.",
-        ["Setup ran into a problem it did not expect."] = "Setup støtte på et uventet problem.",
+        ["Windows did not let the launcher change a file. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; a read-only or locked file can also cause this."] = "Windows lot ikke launcheren endre en fil. Hvis kontrollert mappetilgang er på, tillat ApexLauncher.exe der; en skrivebeskyttet eller låst fil kan også være årsaken.",
+        ["A file the launcher needed is in use or could not be written. Close the game and other programs using it, then try again."] = "En fil launcheren trenger, er i bruk eller kunne ikke skrives. Lukk spillet og andre programmer som bruker den, og prøv igjen.",
+        ["The launcher ran into a problem it did not expect."] = "Launcheren støtte på et uventet problem.",
         ["Copy details"] = "Kopier detaljer",
         ["Open log folder"] = "Åpne loggmappen",
-        ["Setup puts back the files it changed."] = "Setup legger tilbake filene det endret.",
+        ["The launcher puts back the files it changed."] = "Launcheren legger tilbake filene den endret.",
         ["Keep what was installed"] = "Behold det som ble installert",
         ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."] = "Lukk The Sims 3, startprogrammet, spillomstarten (ts3wrap.exe) og RTX Remix bridge (NvRemixBridge.exe) for å fortsette.",
         ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update."] = "Lukk The Sims 3, startprogrammet, spillomstarten (ts3wrap.exe) og RTX Remix bridge (NvRemixBridge.exe) for å oppdatere.",
-        ["Setup could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again."] = "Setup fant ikke {0}. Last ned Sims 3 Performance Patch igjen, eller velg den nedlastede filen igjen.",
-        ["Setup could not put the files back while The Sims 3, its launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove."] = "Setup kunne ikke legge filene tilbake mens The Sims 3, startprogrammet, spillomstarten eller RTX Remix bridge kjører. Lukk dem, og klikk så Gjenopprett på det nyeste punktet i Reparer eller fjern.",
+        ["The launcher could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again."] = "Launcheren fant ikke {0}. Last ned Sims 3 Performance Patch igjen, eller velg den nedlastede filen igjen.",
+        ["The launcher could not put the files back while The Sims 3, the game's own launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove."] = "Launcheren kunne ikke legge filene tilbake mens The Sims 3, spillets egen launcher, spillomstarten eller RTX Remix bridge kjører. Lukk dem, og klikk så Gjenopprett på det nyeste punktet i Reparer eller fjern.",
         ["Frame generation was turned off with the removal and stays off; turn it on again in Components if you want it."] = "Bildegenerering ble slått av med fjerningen og forblir av; slå den på igjen under Komponenter hvis du vil ha den.",
-        ["Setup could not update itself"] = "Setup kunne ikke oppdatere seg selv",
+        ["The launcher could not update itself"] = "Launcheren kunne ikke oppdatere seg selv",
         ["Some changes did not apply"] = "Noen endringer ble ikke tatt i bruk",
         ["Not changed: {0}"] = "Ikke endret: {0}",
         ["The AMD driver did not accept the change. You can turn it off by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."] = "AMD-driveren godtok ikke endringen. Du kan slå det av for hånd i AMD Software: Gaming > Graphics > AMD Fluid Motion Frames.",
         ["The NVIDIA driver did not accept the change. You can turn it off by hand with NVIDIA Profile Inspector."] = "NVIDIA-driveren godtok ikke endringen. Du kan slå det av for hånd med NVIDIA Profile Inspector.",
-        ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows lot ikke Setup endre driverinnstillingene. Lukk AMD Software og prøv igjen.",
+        ["Windows did not let the launcher change the driver settings. Close AMD Software, then try again."] = "Windows lot ikke launcheren endre driverinnstillingene. Lukk AMD Software og prøv igjen.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "Nedlastingen av {0} var skadet. Prøv igjen; hvis det gjentar seg, kan et nettskjold i antiviruset eller en proxy endre nedlastingene.",
-        ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "Antiviruset ditt blokkerte en fil Setup trenger; legg til et unntak for {0} og kjør Setup igjen.",
+        ["Your antivirus blocked a file the launcher needs; add an exception for {0} and open the launcher again."] = "Antiviruset ditt blokkerte en fil launcheren trenger; legg til et unntak for {0} og åpne launcheren igjen.",
 
         // Apex Launcher: install choice, Mods library, merge, hunt and Health checks
         ["Same as {0}"] = "Samme som {0}",

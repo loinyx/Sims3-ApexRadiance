@@ -642,7 +642,7 @@ try
             Check(gone, "antivirus: a downloaded file gone before its copy is named in the player's words");
             var s3pp = false;
             try { await Engine.InstallAsync(g, new[] { Components.S3pp }, new VanishingSource(root), null, docs); }
-            catch (SetupException e) { s3pp = e.Key.StartsWith("Setup could not find"); }
+            catch (SetupException e) { s3pp = e.Key.StartsWith("The launcher could not find"); }
             Check(s3pp, "antivirus: a Performance Patch archive the player moved is not called an antivirus");
         }
 
@@ -883,7 +883,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
           && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", 56600), true, false)?.Arg == "566.00", "smooth motion: an older card or driver says why");
     Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070"), false, false)?.Key.Contains("RTX Remix bridge") == true
           && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", on: true), false, true) is null, "smooth motion: needs the bridge to turn on, never to turn off");
-    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", on: true), true, false)?.Key.StartsWith("Turned on outside Setup") == true,
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", on: true), true, false)?.Key.StartsWith("Turned on outside the launcher") == true,
           "smooth motion: on in NVIDIA's profile but not by Setup (Profile Inspector) is left alone");
     Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", owner: "My TS3"), true, false) is { Arg: "My TS3" }, "smooth motion: an exe in the player's own profile is left alone");
     Check(SmoothMotion.Blocked(new SmoothMotion.Status(null, 0, false, null, "no nvapi64.dll"), true, false) is { Arg: "no nvapi64.dll" }, "smooth motion: an NVAPI error reads as a reason");

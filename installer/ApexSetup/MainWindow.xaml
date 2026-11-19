@@ -205,7 +205,7 @@
                             </Border>
                             <Border x:Name="WelcomeIntro" Style="{StaticResource ApexCard}">
                                 <StackPanel Spacing="12">
-                                    <TextBlock Text="What Setup does" Style="{StaticResource ApexStrong}" FontSize="13" />
+                                    <TextBlock Text="What the launcher does" Style="{StaticResource ApexStrong}" FontSize="13" />
                                     <StackPanel Orientation="Horizontal" Spacing="12">
                                         <FontIcon Glyph="&#xE721;" FontSize="16" Foreground="{StaticResource ApexAccentBrush}" />
                                         <TextBlock Text="Finds your The Sims 3 (Steam or EA app)." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" />
@@ -227,7 +227,7 @@
                         <StackPanel x:Name="ScreenGame" Spacing="12" Visibility="Collapsed">
                             <StackPanel x:Name="StepsGame" Tag="dyn" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8" />
                             <TextBlock Text="Choose your game" Style="{StaticResource ApexTitle}" />
-                            <TextBlock Text="Setup found these installs. Pick the one you play." Style="{StaticResource ApexMuted}" FontSize="13" />
+                            <TextBlock Text="The launcher found these installs. Pick the one you play." Style="{StaticResource ApexMuted}" FontSize="13" />
                             <ListView x:Name="GameList" SelectionMode="Single" SelectionChanged="OnGamePicked" ContainerContentChanging="OnGameCard">
                                 <!-- the card is the item: no list chrome (selection box, left bar); the chosen game shows by the card's
                                      accent outline, as the renderer cards, and keyboard focus by the system focus rectangle -->
@@ -270,7 +270,7 @@
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
-                            <TextBlock x:Name="NoGames" Text="Setup found no install. Browse for the game folder." Style="{StaticResource ApexBody}" Visibility="Collapsed" />
+                            <TextBlock x:Name="NoGames" Text="The launcher found no install. Browse for the game folder." Style="{StaticResource ApexBody}" Visibility="Collapsed" />
                             <Button Click="OnBrowse">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon Glyph="&#xE838;" FontSize="14" />
@@ -594,7 +594,7 @@
                             </Border>
                             <StackPanel Spacing="2" Margin="0,8,0,0">
                                 <TextBlock Text="Restore points" Style="{StaticResource ApexStrong}" FontSize="13" />
-                                <TextBlock Text="Setup keeps a copy of every file it changes. Restoring a point undoes that change and every later one." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                <TextBlock Text="The launcher keeps a copy of every file it changes. Restoring a point undoes that change and every later one." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
                             </StackPanel>
                             <Border Style="{StaticResource ApexCard}" Padding="0">
                                 <StackPanel x:Name="RestoreList" Tag="dyn" />
@@ -608,7 +608,7 @@
                             <TextBlock x:Name="GpuLine" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" />
                             <StackPanel x:Name="RendererCards" Tag="dyn" Spacing="8" />
                             <TextBlock x:Name="BridgeDetail" Tag="dyn" Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="RendererResetNote" Text="Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" Foreground="{StaticResource ApexWarningBrush}" />
+                            <TextBlock x:Name="RendererResetNote" Text="Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" Foreground="{StaticResource ApexWarningBrush}" />
                         </StackPanel>
 
                         <!-- 8..14 the launcher's own screens, filled in code (MainWindow.Launcher.cs) -->
@@ -635,7 +635,7 @@
                         <!-- 6 About -->
                         <StackPanel x:Name="ScreenAbout" Spacing="14" Visibility="Collapsed">
                             <TextBlock Text="About and licences" Style="{StaticResource ApexTitle}" />
-                            <TextBlock Text="Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases." Style="{StaticResource ApexMuted}" FontSize="13" />
+                            <TextBlock Text="Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: the launcher downloads them from their own GitHub releases." Style="{StaticResource ApexMuted}" FontSize="13" />
                             <Border Style="{StaticResource ApexCard}" Padding="0">
                                 <StackPanel x:Name="LicenceList" Tag="dyn" />
                             </Border>
@@ -948,7 +948,7 @@
                         <TextBlock Text="Game, components and installation" Style="{StaticResource ApexMuted}" />
                     </StackPanel>
                 </StackPanel>
-                <TextBlock Grid.Row="1" Text="Close the game before you start. Everything comes from each author's official GitHub, and Setup keeps a copy of every file it changes."
+                <TextBlock Grid.Row="1" Text="Close the game before you start. Everything comes from each author's official GitHub, and the launcher keeps a copy of every file it changes."
                            Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
             </Grid>
         </Grid>

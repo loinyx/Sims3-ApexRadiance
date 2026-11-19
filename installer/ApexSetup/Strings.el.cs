@@ -21,19 +21,19 @@ public static partial class Strings
         ["Get started"] = "Έναρξη",
         ["Finish"] = "Τέλος",
         ["Close The Sims 3 to continue."] = "Κλείσε το The Sims 3 για να συνεχίσεις.",
-        ["Setup needs the internet to download the files."] =
-            "Η εγκατάσταση χρειάζεται Internet για τη λήψη των αρχείων.",
+        ["The launcher needs the internet to download the files."] =
+            "Ο launcher χρειάζεται Internet για τη λήψη των αρχείων.",
         ["Nothing changes until you click Install."] = "Τίποτα δεν αλλάζει μέχρι να πατήσεις Εγκατάσταση.",
         ["Lighting, picture and performance for The Sims 3."] = "Φωτισμός, εικόνα και επιδόσεις για το The Sims 3.",
-        ["What Setup does"] = "Τι κάνει το πρόγραμμα εγκατάστασης",
-        ["Setup can't reach GitHub"] = "Το πρόγραμμα εγκατάστασης δεν μπορεί να συνδεθεί στο GitHub",
+        ["What the launcher does"] = "Τι κάνει ο launcher",
+        ["The launcher can't reach GitHub"] = "Ο launcher δεν μπορεί να συνδεθεί στο GitHub",
         ["Check your internet connection, then try again."] = "Έλεγξε τη σύνδεσή σου στο Internet και δοκίμασε ξανά.",
         ["Try again"] = "Επανάληψη",
         ["Choose your game"] = "Διάλεξε το παιχνίδι σου",
-        ["Setup found these installs. Pick the one you play."] =
-            "Βρέθηκαν αυτές οι εγκαταστάσεις. Διάλεξε αυτή που παίζεις.",
-        ["Setup found no install. Browse for the game folder."] =
-            "Δεν βρέθηκε εγκατάσταση. Αναζήτησε τον φάκελο του παιχνιδιού.",
+        ["The launcher found these installs. Pick the one you play."] =
+            "Ο launcher βρήκε αυτές τις εγκαταστάσεις. Διάλεξε αυτή που παίζεις.",
+        ["The launcher found no install. Browse for the game folder."] =
+            "Ο launcher δεν βρήκε εγκατάσταση. Αναζήτησε τον φάκελο του παιχνιδιού.",
         ["Browse for another folder"] = "Αναζήτηση άλλου φακέλου",
         ["No game in this folder"] = "Δεν υπάρχει παιχνίδι σε αυτόν τον φάκελο",
         ["Pick the The Sims 3 folder, or its Game\\Bin folder (the one with TS3W.exe or TS3.exe)."] =
@@ -55,7 +55,7 @@ public static partial class Strings
         ["Wrong build"] = "Λάθος έκδοση",
         ["Update {0}"] = "Ενημέρωση {0}",
         ["Up to date"] = "Ενημερωμένο",
-        ["Setup could not finish"] = "Η εγκατάσταση δεν ολοκληρώθηκε",
+        ["The launcher could not finish"] = "Ο launcher δεν μπόρεσε να ολοκληρώσει",
         ["Close The Sims 3 first."] = "Κλείσε πρώτα το The Sims 3.",
         ["You're all set"] = "Όλα έτοιμα",
         ["Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."] =
@@ -73,18 +73,18 @@ public static partial class Strings
             "Κατεβάζει και αντιγράφει ξανά ό,τι είναι εγκατεστημένο εδώ. Οι ρυθμίσεις σου μένουν.",
         ["Repair"] = "Επιδιόρθωση",
         ["Uninstall everything"] = "Απεγκατάσταση όλων",
-        ["Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."] =
-            "Αφαιρεί ό,τι εγκατέστησε το πρόγραμμα εγκατάστασης και το Apex Radiance, και επαναφέρει κάθε αρχείο που αντικατέστησε.",
+        ["Removes what the launcher installed, and Apex Radiance, and puts back every file the launcher replaced."] =
+            "Αφαιρεί ό,τι εγκατέστησε ο launcher και το Apex Radiance, και επαναφέρει κάθε αρχείο που αντικατέστησε.",
         ["Uninstall"] = "Απεγκατάσταση",
         ["Remove {0}?"] = "Να αφαιρεθεί το {0};",
-        ["Close the game first. Setup removes the files and puts back the ones it replaced."] =
-            "Κλείσε πρώτα το παιχνίδι. Το πρόγραμμα εγκατάστασης αφαιρεί τα αρχεία και επαναφέρει όσα αντικατέστησε.",
+        ["Close the game first. The launcher removes the files and puts back the ones it replaced."] =
+            "Κλείσε πρώτα το παιχνίδι. Ο launcher αφαιρεί τα αρχεία και επαναφέρει όσα αντικατέστησε.",
         ["{0} removed."] = "Το {0} αφαιρέθηκε.",
         ["Uninstall everything?"] = "Απεγκατάσταση όλων;",
-        ["Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."] =
-            "Το πρόγραμμα εγκατάστασης αφαιρεί το Apex Radiance και ό,τι εγκατέστησε σε αυτό το παιχνίδι, και επαναφέρει κάθε αρχείο που αντικατέστησε. Οι ρυθμίσεις σου στο Documents μένουν.",
-        ["Everything Setup installed was removed."] = "Ό,τι εγκατέστησε το πρόγραμμα εγκατάστασης αφαιρέθηκε.",
-        ["Setup fixes this"] = "Το πρόγραμμα εγκατάστασης το διορθώνει",
+        ["The launcher removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."] =
+            "Ο launcher αφαιρεί το Apex Radiance και ό,τι εγκατέστησε σε αυτό το παιχνίδι, και επαναφέρει κάθε αρχείο που αντικατέστησε. Οι ρυθμίσεις σου στο Documents μένουν.",
+        ["Everything the launcher installed was removed."] = "Ό,τι εγκατέστησε ο launcher αφαιρέθηκε.",
+        ["The launcher fixes this"] = "Ο launcher το διορθώνει",
         ["Read more"] = "Περισσότερα",
         ["Fixed."] = "Διορθώθηκε.",
         ["No incompatible settings found."] = "Δεν βρέθηκαν ασύμβατες ρυθμίσεις.",
@@ -96,8 +96,8 @@ public static partial class Strings
             "Το ts3native του Sims 3 Modernization είναι φτιαγμένο για την άλλη έκδοση του παιχνιδιού και δεν κάνει τίποτα. Ενεργοποίησέ το στα Στοιχεία για να εγκατασταθεί το σωστό.",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
             "Το Sims 3 Modernization δεν έχει έκδοση για αυτή την έκδοση του παιχνιδιού ({0}), οπότε το ts3native του δεν κάνει τίποτα. Απενεργοποίησέ το στα Στοιχεία.",
-        ["{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder."] =
-            "Το {0} στο Game\\Bin είναι δεύτερο αντίγραφο του {1}· φορτώνουν και τα δύο. Το πρόγραμμα εγκατάστασης το μετακινεί στον φάκελο αντιγράφων ασφαλείας.",
+        ["{0} in Game\\Bin is a second copy of {1}; both load. The launcher moves it to the backup folder."] =
+            "Το {0} στο Game\\Bin είναι δεύτερο αντίγραφο του {1}· φορτώνουν και τα δύο. Ο launcher το μετακινεί στον φάκελο αντιγράφων ασφαλείας.",
         ["Mods has {0} .package files but no Resource.cfg, so the game loads none of them."] =
             "Ο φάκελος Mods έχει {0} αρχεία .package αλλά κανένα Resource.cfg, οπότε το παιχνίδι δεν φορτώνει κανένα από αυτά.",
         ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =
@@ -106,18 +106,18 @@ public static partial class Strings
             "Το NRaas ErrorTrap δεν έχει έκδοση που να λειτουργεί σίγουρα στο EA app 1.69.47.",
         ["{0} overrides game code Sims 3 Modernization also patches (not tested together)."] =
             "Το {0} αντικαθιστά κώδικα του παιχνιδιού που αλλάζει και το Sims 3 Modernization (δεν έχουν δοκιμαστεί μαζί).",
-        ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
-            "Το {0} είναι παλιά έκδοση με ενσωματωμένο το Apex· όσο βρίσκεται στο Game\\Bin, το Apex Radiance μένει ανενεργό. Το πρόγραμμα εγκατάστασης το μετακινεί στον φάκελο αντιγράφων ασφαλείας (αν το χρησιμοποιούσες, εγκατάστησε στη θέση του το επίσημο Sims3SettingsSetter).",
-        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
-            "Τα ShortWaitSpin και ThreadStackDiet του Sims3Performance συγκρούονται με το Sims 3 Modernization. Το πρόγραμμα εγκατάστασης τα ορίζει και τα δύο σε 0 (κρατά αντίγραφο ως Sims3Performance.ini.apex-backup).",
-        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
-            "Οι μη συμπιεσμένες υφές του Sims3SettingsSetter κάνουν το παιχνίδι να κολλάει με το RTX Remix bridge. Το πρόγραμμα εγκατάστασης τις απενεργοποιεί (κρατά αντίγραφο ως S3SS.toml.apex-backup).",
+        ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
+            "Το {0} είναι παλιά έκδοση με ενσωματωμένο το Apex· όσο βρίσκεται στο Game\\Bin, το Apex Radiance μένει ανενεργό. Ο launcher το μετακινεί στον φάκελο αντιγράφων ασφαλείας (αν το χρησιμοποιούσες, εγκατάστησε στη θέση του το επίσημο Sims3SettingsSetter).",
+        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. The launcher sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
+            "Τα ShortWaitSpin και ThreadStackDiet του Sims3Performance συγκρούονται με το Sims 3 Modernization. Ο launcher τα ορίζει και τα δύο σε 0 (κρατά αντίγραφο ως Sims3Performance.ini.apex-backup).",
+        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
+            "Οι μη συμπιεσμένες υφές του Sims3SettingsSetter κάνουν το παιχνίδι να κολλάει με το RTX Remix bridge. Ο launcher τις απενεργοποιεί (κρατά αντίγραφο ως S3SS.toml.apex-backup).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
             "Το {0} ορίζει client.targetProcess = {1}, αλλά αυτό το παιχνίδι είναι το {2}: το bridge δεν ξεκινά.",
         ["dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
             "Στο dxvk.conf λείπει το {0} ή έχει άλλες τιμές: χωρίς αυτές, το παιχνίδι επαναφέρει τις επιλογές γραφικών του ή παγώνει όταν αλλάζεις ανάλυση με το bridge.",
-        ["Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
-            "Το Mods\\Resource.cfg δεν διαβάζει το {0}, οπότε το παιχνίδι δεν το φορτώνει. Το πρόγραμμα εγκατάστασης προσθέτει τις γραμμές του φακέλου Packages (κρατά αντίγραφο ως Resource.cfg.apex-backup).",
+        ["Mods\\Resource.cfg does not read {0}, so the game does not load it. The launcher adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
+            "Το Mods\\Resource.cfg δεν διαβάζει το {0}, οπότε το παιχνίδι δεν το φορτώνει. Ο launcher προσθέτει τις γραμμές του φακέλου Packages (κρατά αντίγραφο ως Resource.cfg.apex-backup).",
         ["Fix settings"] = "Διόρθωση ρυθμίσεων",
         ["Everything is installed and up to date."] = "Όλα είναι εγκατεστημένα και ενημερωμένα.",
         ["Will be removed"] = "Θα αφαιρεθεί",
@@ -125,7 +125,7 @@ public static partial class Strings
         ["Nothing to apply"] = "Τίποτα για εφαρμογή",
         ["Preview"] = "Προεπισκόπηση",
         ["This is a preview: nothing was installed."] = "Αυτή είναι προεπισκόπηση: δεν εγκαταστάθηκε τίποτα.",
-        ["Setup is applying changes"] = "Γίνεται εφαρμογή αλλαγών",
+        ["The launcher is applying changes"] = "Ο launcher εφαρμόζει αλλαγές",
         ["Wait until it finishes before closing."] = "Περίμενε να τελειώσει πριν κλείσεις.",
         ["Checking the latest versions…"] = "Έλεγχος των τελευταίων εκδόσεων…",
         ["Checking for updates…"] = "Αναζήτηση ενημερώσεων…",
@@ -177,19 +177,19 @@ public static partial class Strings
         ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Τρέχει το παιχνίδι σε Vulkan μέσω του RTX Remix bridge: λιγότερα κολλήματα και περίπου 600 MB περισσότερη ελεύθερη μνήμη για μεγάλους κόσμους. Αν το παιχνίδι δυσλειτουργεί με αυτό ή η κάρτα γραφικών σας δεν μπορεί να το τρέξει, χρησιμοποιήστε το DXVK.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Το Apex Radiance λειτουργεί μόνο του, αλλά ταιριάζει καλά με το Sims3SettingsSetter του sims3fiend: περιοριστής καρέ, λιγότερα κολλήματα και πολλές επιπλέον ρυθμίσεις παιχνιδιού.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Μεταφέρει το DXVK σε δική του διεργασία 64 bit: το παιχνίδι κρατά περίπου 600 MB περισσότερη ελεύθερη μνήμη για μεγάλες συνεδρίες και μεγάλους κόσμους.",
-        ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "Το {0} έχει {1} = {2}, που το πρόγραμμα εγκατάστασης δεν μπορεί να διαβάσει. Το πρόγραμμα εγκατάστασης αφήνει το αρχείο ως έχει.",
+        ["{0} has {1} = {2}, which the launcher cannot read. The launcher leaves the file as it is."] = "Το {0} έχει {1} = {2}, που ο launcher δεν μπορεί να διαβάσει. Ο launcher αφήνει το αρχείο ως έχει.",
         // restore points (Repair or remove)
         ["Install {0}"] = "Εγκατάσταση {0}",
         ["Restore points"] = "Σημεία επαναφοράς",
-        ["Setup keeps a copy of every file it changes. Restoring a point undoes that change and every later one."] = "Το πρόγραμμα εγκατάστασης κρατά αντίγραφο κάθε αρχείου που αλλάζει. Η επαναφορά ενός σημείου αναιρεί εκείνη την αλλαγή και όλες τις επόμενες.",
+        ["The launcher keeps a copy of every file it changes. Restoring a point undoes that change and every later one."] = "Ο launcher κρατά αντίγραφο κάθε αρχείου που αλλάζει. Η επαναφορά ενός σημείου αναιρεί εκείνη την αλλαγή και όλες τις επόμενες.",
         ["Before: {0}"] = "Πριν από: {0}",
         ["{0} · 1 file"] = "{0} · 1 αρχείο",
         ["{0} · {1} files"] = "{0} · {1} αρχεία",
         ["Restore"] = "Επαναφορά",
-        ["No restore points yet. Setup makes one before every change."] = "Δεν υπάρχουν ακόμη σημεία επαναφοράς. Το πρόγραμμα εγκατάστασης δημιουργεί ένα πριν από κάθε αλλαγή.",
+        ["No restore points yet. The launcher makes one before every change."] = "Δεν υπάρχουν ακόμη σημεία επαναφοράς. Ο launcher δημιουργεί ένα πριν από κάθε αλλαγή.",
         ["Restore this point?"] = "Επαναφορά αυτού του σημείου;",
-        ["Setup puts back the files as they were before this change, and undoes every change made after it. Close the game first."] = "Το πρόγραμμα εγκατάστασης επαναφέρει τα αρχεία όπως ήταν πριν από αυτή την αλλαγή και αναιρεί όλες τις αλλαγές που έγιναν μετά. Κλείσε πρώτα το παιχνίδι.",
-        ["Setup could not put back {0}."] = "Το πρόγραμμα εγκατάστασης δεν μπόρεσε να επαναφέρει {0}.",
+        ["The launcher puts back the files as they were before this change, and undoes every change made after it. Close the game first."] = "Ο launcher επαναφέρει τα αρχεία όπως ήταν πριν από αυτή την αλλαγή και αναιρεί όλες τις αλλαγές που έγιναν μετά. Κλείσε πρώτα το παιχνίδι.",
+        ["The launcher could not put back {0}."] = "Ο launcher δεν μπόρεσε να επαναφέρει {0}.",
         ["Changes undone."] = "Οι αλλαγές αναιρέθηκαν.",
         ["Undo these changes"] = "Αναίρεση αυτών των αλλαγών",
         ["This restore point is gone."] = "Αυτό το σημείο επαναφοράς δεν υπάρχει πια.",
@@ -197,8 +197,8 @@ public static partial class Strings
         ["Update now"] = "Ενημέρωση τώρα",
         ["{0} {1} → {2}"] = "{0} {1} → {2}",
         ["Removes MonoPatcher.asi and its package."] = "Αφαιρεί το MonoPatcher.asi και το πακέτο του.",
-        ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. Setup moves it to the backup folder (S3SS does the same job)."] =
-            "Το TS3Patch.asi του Smooth Patch αλλάζει τον ίδιο κώδικα του παιχνιδιού με το Smooth Patch του Sims3SettingsSetter. Το πρόγραμμα εγκατάστασης το μετακινεί στον φάκελο αντιγράφων ασφαλείας (το S3SS κάνει την ίδια δουλειά).",
+        ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. The launcher moves it to the backup folder (S3SS does the same job)."] =
+            "Το TS3Patch.asi του Smooth Patch αλλάζει τον ίδιο κώδικα του παιχνιδιού με το Smooth Patch του Sims3SettingsSetter. Ο launcher το μετακινεί στον φάκελο αντιγράφων ασφαλείας (το S3SS κάνει την ίδια δουλειά).",
         ["simler90's Gameplay Core Mod and NRaas StoryProgression replace the same game code. Keep one of them."] =
             "Το Gameplay Core Mod του simler90 και το NRaas StoryProgression αντικαθιστούν τον ίδιο κώδικα του παιχνιδιού. Κράτα μόνο ένα από τα δύο.",
         ["MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed."] =
@@ -223,12 +223,12 @@ public static partial class Strings
         ["Vulkan, DXVK"] = "Vulkan, DXVK",
         ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan με περισσότερη μνήμη (RTX Remix bridge, προτείνεται)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "Το DXVK και το RTX Remix bridge χρειάζονται κάρτα γραφικών με Vulkan 1.3 (βρέθηκε: {0}).",
-        ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Το πρόγραμμα οδήγησης γραφικών είναι πολύ παλιό για το DXVK και το RTX Remix bridge (λείπει: {0}). Ενημερώστε το πρόγραμμα οδήγησης γραφικών και ανοίξτε ξανά το Setup.",
+        ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open the launcher again."] = "Το πρόγραμμα οδήγησης γραφικών είναι πολύ παλιό για το DXVK και το RTX Remix bridge (λείπει: {0}). Ενημερώστε το πρόγραμμα οδήγησης γραφικών και ανοίξτε ξανά τον launcher.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "Το {0} δεν μπορεί να ξεκινήσει με αυτό το πρόγραμμα οδήγησης γραφικών (λείπει: {1}), οπότε το παιχνίδι κλείνει κατά την εκκίνηση. Ενημερώστε το πρόγραμμα οδήγησης ή επιλέξτε Προεπιλογή των Windows (Direct3D 9) στο Αλλαγή στοιχείων.",
         ["{0} cannot start on this graphics card ({1}), so the game closes at start. Choose Windows default (Direct3D 9) in Change components."] = "Το {0} δεν μπορεί να ξεκινήσει σε αυτή την κάρτα γραφικών ({1}), οπότε το παιχνίδι κλείνει κατά την εκκίνηση. Επιλέξτε Προεπιλογή των Windows (Direct3D 9) στο Αλλαγή στοιχείων.",
         ["1 update for The Sims 3 · {0}"] = "1 ενημέρωση για το The Sims 3 · {0}",
         ["Change"] = "Αλλαγή",
-        ["Close the game before you start. Everything comes from each author's official GitHub, and Setup keeps a copy of every file it changes."] = "Κλείστε το παιχνίδι πριν ξεκινήσετε. Όλα προέρχονται από το επίσημο GitHub κάθε δημιουργού και το πρόγραμμα εγκατάστασης κρατά αντίγραφο κάθε αρχείου που αλλάζει.",
+        ["Close the game before you start. Everything comes from each author's official GitHub, and the launcher keeps a copy of every file it changes."] = "Κλείστε το παιχνίδι πριν ξεκινήσετε. Όλα προέρχονται από το επίσημο GitHub κάθε δημιουργού και ο launcher κρατά αντίγραφο κάθε αρχείου που αλλάζει.",
         ["Everything is updated"] = "Όλα ενημερώθηκαν",
         ["Game, components and installation"] = "Παιχνίδι, στοιχεία και εγκατάσταση",
         ["How the game draws"] = "Πώς σχεδιάζει το παιχνίδι",
@@ -236,7 +236,7 @@ public static partial class Strings
         ["Optional mods"] = "Προαιρετικά mods",
         ["Replaces {0}"] = "Αντικαθιστά: {0}",
         ["See what's new"] = "Δείτε τι νέο υπάρχει",
-        ["Setup makes a restore point before it changes any file, so you can undo this."] = "Το πρόγραμμα εγκατάστασης δημιουργεί σημείο επαναφοράς πριν αλλάξει οποιοδήποτε αρχείο, ώστε να μπορείτε να το αναιρέσετε.",
+        ["The launcher makes a restore point before it changes any file, so you can undo this."] = "Ο launcher δημιουργεί σημείο επαναφοράς πριν αλλάξει οποιοδήποτε αρχείο, ώστε να μπορείτε να το αναιρέσετε.",
         ["Something looks wrong in the game? This puts back everything as it was before this update."] = "Κάτι φαίνεται λάθος στο παιχνίδι; Αυτό επαναφέρει τα πάντα όπως ήταν πριν από αυτή την ενημέρωση.",
         ["Step {0} of {1}: {2}"] = "Βήμα {0} από {1}: {2}",
         ["The Sims 3 · {0} found"] = "Βρέθηκε το The Sims 3 · {0}",
@@ -256,8 +256,8 @@ public static partial class Strings
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Κρατά περίπου 600 MB περισσότερη ελεύθερη μνήμη για μεγάλους κόσμους. Χρειάζεται κάρτα γραφικών με Vulkan. Αν το παιχνίδι δεν λειτουργεί σωστά με αυτό, διάλεξε DXVK.",
         ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Λειτουργεί, αλλά με το RTX Remix bridge ή το DXVK το Apex Radiance τρέχει καλύτερα.",
-        ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
-            "Οι ρυθμίσεις γραφικών του παιχνιδιού μπορεί να επανέλθουν μία φορά. Το πρόγραμμα εγκατάστασης κρατά αντίγραφο και το επαναφέρει αν γυρίσεις πίσω.",
+        ["Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back."] =
+            "Οι ρυθμίσεις γραφικών του παιχνιδιού μπορεί να επανέλθουν μία φορά. Ο launcher κρατά αντίγραφο και το επαναφέρει αν γυρίσεις πίσω.",
         ["Fixes for game and graphics settings."] = "Διορθώσεις για τις ρυθμίσεις του παιχνιδιού και των γραφικών.",
         ["Fixes stutters, Sims getting stuck and crashes."] =
             "Διορθώνει κολλήματα, Sims που κολλάνε και κρασαρίσματα.",
@@ -272,16 +272,16 @@ public static partial class Strings
         ["Automatic"] = "Αυτόματα",
         ["This file has no Sims3Performance.asi."] = "Αυτό το αρχείο δεν έχει Sims3Performance.asi.",
         ["Dry run: Setup changes nothing."] = "Δοκιμαστική εκτέλεση: το πρόγραμμα εγκατάστασης δεν αλλάζει τίποτα.",
-        ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases."] =
-            "Apex Radiance από τον loinyx. Το RTX Remix bridge είναι της NVIDIA, μεταφερμένο στο The Sims 3 από τους dalexlol και alexvixell35-stack. Το Sims3SettingsSetter είναι του sims3fiend, το Sims 3 Modernization του rodneypantonial και το Ultimate ASI Loader του ThirteenAG: το πρόγραμμα εγκατάστασης τα κατεβάζει από τις δικές τους εκδόσεις στο GitHub.",
+        ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: the launcher downloads them from their own GitHub releases."] =
+            "Apex Radiance από τον loinyx. Το RTX Remix bridge είναι της NVIDIA, μεταφερμένο στο The Sims 3 από τους dalexlol και alexvixell35-stack. Το Sims3SettingsSetter είναι του sims3fiend, το Sims 3 Modernization του rodneypantonial και το Ultimate ASI Loader του ThirteenAG: ο launcher τα κατεβάζει από τις δικές τους εκδόσεις στο GitHub.",
         ["RTX Remix bridge: third-party notices"] = "RTX Remix bridge: σημειώσεις τρίτων",
         ["Read"] = "Ανάγνωση",
         ["Licence text"] = "Κείμενο άδειας",
         ["OK"] = "OK",
         ["Cancel"] = "Ακύρωση",
-        ["A new Setup is available"] = "Υπάρχει νέο Setup",
-        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Το Apex Radiance Setup {0} κατέβηκε και ελέγχθηκε. Ενημέρωσε το Setup και θα ανοίξει ξανά.",
-        ["Update Setup"] = "Ενημέρωση Setup",
+        ["A new Apex Launcher is available"] = "Υπάρχει νέο Apex Launcher",
+        ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Το Apex Launcher {0} κατέβηκε και ελέγχθηκε. Ενημέρωσε τον launcher και θα ανοίξει ξανά.",
+        ["Update the launcher"] = "Ενημέρωση του launcher",
         // restart host (experimental)
         ["Restart host"] = "Επανεκκίνηση παιχνιδιού",
         ["Experimental"] = "Πειραματικό",
@@ -292,7 +292,7 @@ public static partial class Strings
         ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "Ενεργό για το The Sims 3 στον οδηγό της NVIDIA. Λειτουργεί καλύτερα με όριο καρέ του Apex στα 60 έως 90 fps.",
         ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "Ενεργό για το The Sims 3 στον οδηγό NVIDIA. Το όριο καρέ του Apex είναι τώρα 60 fps, ο ρυθμός που λειτουργεί καλύτερα.",
         ["Off for The Sims 3."] = "Ανενεργό για το The Sims 3.",
-        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "Υπάρχει ήδη στο προφίλ σας NVIDIA \"{0}\": το Setup δεν το αγγίζει.",
+        ["Already in your NVIDIA profile \"{0}\": the launcher leaves it as it is."] = "Υπάρχει ήδη στο προφίλ σας NVIDIA \"{0}\": ο launcher δεν το αγγίζει.",
         ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "Χρειάζεται κάρτα NVIDIA GeForce RTX σειράς 40 ή 50 (βρέθηκε: {0}).",
         ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "Χρειάζεται οδηγό NVIDIA 571.86 ή νεότερο (βρέθηκε: {0}).",
         ["Needs the RTX Remix bridge as the graphics choice."] = "Χρειάζεται το RTX Remix bridge ως επιλογή γραφικών.",
@@ -316,7 +316,7 @@ public static partial class Strings
         ["no limit"] = "χωρίς όριο",
         ["Custom"] = "Προσαρμοσμένο",
         ["Could not change Apex's frame limit: {0}"] = "Δεν ήταν δυνατή η αλλαγή του ορίου καρέ του Apex: {0}",
-        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Ενεργοποιήθηκε εκτός Setup, στις ρυθμίσεις του οδηγού NVIDIA: το Setup δεν το αγγίζει.",
+        ["Turned on outside the launcher, in the NVIDIA driver settings: the launcher leaves it as it is."] = "Ενεργοποιήθηκε εκτός launcher, στις ρυθμίσεις του οδηγού NVIDIA: ο launcher δεν το αγγίζει.",
         ["{0} fps → about {1} fps on screen with {2}"] = "{0} FPS → περίπου {1} FPS στην οθόνη με {2}",
         ["No limit: about double your frame rate on screen with {0}"] = "Χωρίς όριο: περίπου διπλάσια καρέ στην οθόνη με {0}",
         ["Turns on when you apply the changes."] = "Ενεργοποιείται όταν εφαρμόσετε τις αλλαγές.",
@@ -324,41 +324,41 @@ public static partial class Strings
         ["Changes to {0} when you apply the changes."] = "Γίνεται {0} όταν εφαρμόσετε τις αλλαγές.",
         ["Apex frame limit: {0}"] = "Όριο καρέ του Apex: {0}",
         ["To apply: {0}"] = "Προς εφαρμογή: {0}",
-        ["Windows did not let Setup change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again."] = "Τα Windows δεν άφησαν το Setup να αλλάξει τις ρυθμίσεις του οδηγού. Κλείστε το NVIDIA App και το NVIDIA Profile Inspector και δοκιμάστε ξανά.",
+        ["Windows did not let the launcher change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again."] = "Τα Windows δεν άφησαν τον launcher να αλλάξει τις ρυθμίσεις του οδηγού. Κλείστε το NVIDIA App και το NVIDIA Profile Inspector και δοκιμάστε ξανά.",
         ["The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."] = "Ο οδηγός της AMD δεν δέχτηκε την αλλαγή. Μπορείτε να το ενεργοποιήσετε με το χέρι στο AMD Software: Gaming > Graphics > AMD Fluid Motion Frames.",
         ["The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector."] = "Ο οδηγός της NVIDIA δεν δέχτηκε την αλλαγή. Μπορείτε να το ενεργοποιήσετε με το χέρι με το NVIDIA Profile Inspector.",
         ["How to do it by hand"] = "Πώς γίνεται με το χέρι",
         ["GitHub's download limit was reached; try again in {0} minutes."] = "Συμπληρώθηκε το όριο λήψεων του GitHub· δοκιμάστε ξανά σε {0} λεπτά.",
-        ["Your antivirus removed or blocked {0}; add an exception for {1} and run Setup again."] = "Το antivirus σας αφαίρεσε ή μπλόκαρε το {0}· προσθέστε εξαίρεση για το {1} και ανοίξτε ξανά το Setup.",
+        ["Your antivirus removed or blocked {0}; add an exception for {1} and open the launcher again."] = "Το antivirus σας αφαίρεσε ή μπλόκαρε το {0}· προσθέστε εξαίρεση για το {1} και ανοίξτε ξανά τον launcher.",
         ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again."] = "Κλείστε το The Sims 3, τον launcher, την επανεκκίνηση του παιχνιδιού (ts3wrap.exe) και το RTX Remix bridge (NvRemixBridge.exe) και δοκιμάστε ξανά.",
-        ["Setup cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; or move the game out of a protected folder."] = "Το Setup δεν μπορεί να γράψει στο {0}. Αν η Ελεγχόμενη πρόσβαση φακέλων της Ασφάλειας των Windows είναι ενεργή, επιτρέψτε εκεί το ApexRadianceSetup.exe· ή μετακινήστε το παιχνίδι από προστατευμένο φάκελο.",
-        ["Setup needs {0} MB free on drive {1}. Free some space, then try again."] = "Το Setup χρειάζεται {0} MB ελεύθερα στον δίσκο {1}. Ελευθερώστε χώρο και δοκιμάστε ξανά.",
-        ["Setup did not find The Sims 3's folder in Documents. Start the game once, then run Setup again for the settings it writes there."] = "Το Setup δεν βρήκε τον φάκελο του The Sims 3 στα Έγγραφα. Ανοίξτε το παιχνίδι μία φορά και μετά ξανά το Setup, για τις ρυθμίσεις που γράφει εκεί.",
+        ["The launcher cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; or move the game out of a protected folder."] = "Ο launcher δεν μπορεί να γράψει στο {0}. Αν η Ελεγχόμενη πρόσβαση φακέλων της Ασφάλειας των Windows είναι ενεργή, επιτρέψτε εκεί το ApexLauncher.exe· ή μετακινήστε το παιχνίδι από προστατευμένο φάκελο.",
+        ["The launcher needs {0} MB free on drive {1}. Free some space, then try again."] = "Ο launcher χρειάζεται {0} MB ελεύθερα στον δίσκο {1}. Ελευθερώστε χώρο και δοκιμάστε ξανά.",
+        ["The launcher did not find The Sims 3's folder in Documents. Start the game once, then open the launcher again for the settings it writes there."] = "Ο launcher δεν βρήκε τον φάκελο του The Sims 3 στα Έγγραφα. Ανοίξτε το παιχνίδι μία φορά και μετά ξανά τον launcher, για τις ρυθμίσεις που γράφει εκεί.",
         ["{0} (d3d9.dll) is set aside in Game\\Bin\\Apex Radiance backup; removing the renderer in Repair or remove puts it back."] = "Το {0} (d3d9.dll) μπαίνει στην άκρη στο Game\\Bin\\Apex Radiance backup· η αφαίρεση του renderer στο Επισκευή ή αφαίρεση το επαναφέρει.",
-        ["Two ASI loaders ({0}): Setup keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup."] = "Δύο ASI loaders ({0}): το Setup κρατά το {1} και βάζει τα άλλα στο Game\\Bin\\Apex Radiance backup.",
-        ["Before Setup can continue"] = "Πριν μπορέσει να συνεχίσει το Setup",
-        ["Before Setup continues"] = "Πριν συνεχίσει το Setup",
+        ["Two ASI loaders ({0}): the launcher keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup."] = "Δύο ASI loaders ({0}): ο launcher κρατά το {1} και βάζει τα άλλα στο Game\\Bin\\Apex Radiance backup.",
+        ["Before the launcher can continue"] = "Πριν μπορέσει να συνεχίσει ο launcher",
+        ["Before the launcher continues"] = "Πριν συνεχίσει ο launcher",
         ["Continue"] = "Συνέχεια",
-        ["Windows did not let Setup change a file. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; a read-only or locked file can also cause this."] = "Τα Windows δεν άφησαν το Setup να αλλάξει ένα αρχείο. Αν η Ελεγχόμενη πρόσβαση φακέλων είναι ενεργή, επιτρέψτε εκεί το ApexRadianceSetup.exe· μπορεί να φταίει και ένα αρχείο μόνο για ανάγνωση ή κλειδωμένο.",
-        ["A file Setup needed is in use or could not be written. Close the game and other programs using it, then try again."] = "Ένα αρχείο που χρειάζεται το Setup χρησιμοποιείται ή δεν γράφτηκε. Κλείστε το παιχνίδι και άλλα προγράμματα που το χρησιμοποιούν και δοκιμάστε ξανά.",
-        ["Setup ran into a problem it did not expect."] = "Το Setup συνάντησε απρόσμενο πρόβλημα.",
+        ["Windows did not let the launcher change a file. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; a read-only or locked file can also cause this."] = "Τα Windows δεν άφησαν τον launcher να αλλάξει ένα αρχείο. Αν η Ελεγχόμενη πρόσβαση φακέλων είναι ενεργή, επιτρέψτε εκεί το ApexLauncher.exe· μπορεί να φταίει και ένα αρχείο μόνο για ανάγνωση ή κλειδωμένο.",
+        ["A file the launcher needed is in use or could not be written. Close the game and other programs using it, then try again."] = "Ένα αρχείο που χρειάζεται ο launcher χρησιμοποιείται ή δεν γράφτηκε. Κλείστε το παιχνίδι και άλλα προγράμματα που το χρησιμοποιούν και δοκιμάστε ξανά.",
+        ["The launcher ran into a problem it did not expect."] = "Ο launcher συνάντησε απρόσμενο πρόβλημα.",
         ["Copy details"] = "Αντιγραφή λεπτομερειών",
         ["Open log folder"] = "Άνοιγμα φακέλου καταγραφής",
-        ["Setup puts back the files it changed."] = "Το Setup επαναφέρει τα αρχεία που άλλαξε.",
+        ["The launcher puts back the files it changed."] = "Ο launcher επαναφέρει τα αρχεία που άλλαξε.",
         ["Keep what was installed"] = "Κράτησε ό,τι εγκαταστάθηκε",
         ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."] = "Κλείστε το The Sims 3, τον launcher, την επανεκκίνηση του παιχνιδιού (ts3wrap.exe) και το RTX Remix bridge (NvRemixBridge.exe) για να συνεχίσετε.",
         ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update."] = "Κλείστε το The Sims 3, τον launcher, την επανεκκίνηση του παιχνιδιού (ts3wrap.exe) και το RTX Remix bridge (NvRemixBridge.exe) για να ενημερώσετε.",
-        ["Setup could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again."] = "Το Setup δεν βρήκε το {0}. Κατεβάστε ξανά το Sims 3 Performance Patch ή επιλέξτε ξανά το αρχείο που κατεβάσατε.",
-        ["Setup could not put the files back while The Sims 3, its launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove."] = "Το Setup δεν μπόρεσε να επαναφέρει τα αρχεία όσο τρέχει το The Sims 3, ο launcher, η επανεκκίνηση του παιχνιδιού ή το RTX Remix bridge. Κλείστε τα και πατήστε Επαναφορά στο πιο πρόσφατο σημείο στο Επισκευή ή αφαίρεση.",
+        ["The launcher could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again."] = "Ο launcher δεν βρήκε το {0}. Κατεβάστε ξανά το Sims 3 Performance Patch ή επιλέξτε ξανά το αρχείο που κατεβάσατε.",
+        ["The launcher could not put the files back while The Sims 3, the game's own launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove."] = "Ο launcher δεν μπόρεσε να επαναφέρει τα αρχεία όσο τρέχει το The Sims 3, ο launcher του ίδιου του παιχνιδιού, η επανεκκίνηση του παιχνιδιού ή το RTX Remix bridge. Κλείστε τα και πατήστε Επαναφορά στο πιο πρόσφατο σημείο στο Επισκευή ή αφαίρεση.",
         ["Frame generation was turned off with the removal and stays off; turn it on again in Components if you want it."] = "Η δημιουργία καρέ απενεργοποιήθηκε με την αφαίρεση και μένει ανενεργή· ενεργοποιήστε την ξανά στα Στοιχεία αν τη θέλετε.",
-        ["Setup could not update itself"] = "Το Setup δεν μπόρεσε να ενημερωθεί",
+        ["The launcher could not update itself"] = "Ο launcher δεν μπόρεσε να ενημερωθεί",
         ["Some changes did not apply"] = "Κάποιες αλλαγές δεν εφαρμόστηκαν",
         ["Not changed: {0}"] = "Δεν άλλαξε: {0}",
         ["The AMD driver did not accept the change. You can turn it off by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."] = "Ο οδηγός της AMD δεν δέχτηκε την αλλαγή. Μπορείτε να το απενεργοποιήσετε με το χέρι στο AMD Software: Gaming > Graphics > AMD Fluid Motion Frames.",
         ["The NVIDIA driver did not accept the change. You can turn it off by hand with NVIDIA Profile Inspector."] = "Ο οδηγός της NVIDIA δεν δέχτηκε την αλλαγή. Μπορείτε να το απενεργοποιήσετε με το χέρι με το NVIDIA Profile Inspector.",
-        ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Τα Windows δεν άφησαν το Setup να αλλάξει τις ρυθμίσεις του οδηγού. Κλείστε το AMD Software και δοκιμάστε ξανά.",
+        ["Windows did not let the launcher change the driver settings. Close AMD Software, then try again."] = "Τα Windows δεν άφησαν τον launcher να αλλάξει τις ρυθμίσεις του οδηγού. Κλείστε το AMD Software και δοκιμάστε ξανά.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "Η λήψη του {0} ήταν κατεστραμμένη. Δοκιμάστε ξανά· αν επαναληφθεί, ίσως μια προστασία web του antivirus ή ένας proxy αλλάζει τις λήψεις.",
-        ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "Το antivirus σας μπλόκαρε ένα αρχείο που χρειάζεται το Setup· προσθέστε εξαίρεση για το {0} και ανοίξτε ξανά το Setup.",
+        ["Your antivirus blocked a file the launcher needs; add an exception for {0} and open the launcher again."] = "Το antivirus σας μπλόκαρε ένα αρχείο που χρειάζεται ο launcher· προσθέστε εξαίρεση για το {0} και ανοίξτε ξανά τον launcher.",
 
         // Apex Launcher: install choice, Mods library, merge, hunt and Health checks
         ["Same as {0}"] = "Ίδιο με {0}",
