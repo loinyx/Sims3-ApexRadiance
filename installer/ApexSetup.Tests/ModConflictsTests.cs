@@ -70,8 +70,38 @@ static class ModConflictsTests
     static (uint, uint, ulong, byte[]) Xml(ulong i, string s) => (ModConflicts.TypeXml, 0u, i, Encoding.UTF8.GetBytes(s));
     static byte[] Pkg(params (uint, uint, ulong, byte[])[] r) => ModConflicts.WritePackage(r);
 
+    // the hook table: format checks, download fallbacks, edition filter, out-of-date builds
+    static void RunHooks(Action<bool, string> check)
+    {
+        var embedded = ModConflicts.HookTable.Embedded();
+        check(embedded.Editions.Count == 3 && embedded.Hooks.Any(h => h.Mod == "ts3native" && h.Edition == "steam-1.67") && embedded.Hooks.Any(h => h.Mod == "S3SS"),
+            "hook table: the embedded copy parses, with three editions");
+        const string head = "date,2030-01-01\nedition,steam-1.67,0x52DEC247\nedition,retail-1.67,0x52D872DA\nmod,A,^a\\.asi$,1.0,\n";
+        foreach (var bad in new[] { head, head + "hook,A,steam-1.67,0x10,imm,low address\n", head + "hook,Z,steam-1.67,0x500000,imm,unknown mod\n",
+                                     head + "hook,A,ea-9,0x500000,imm,unknown edition\n", head + "hook,A,steam-1.67,500000,imm,no 0x\n", "<html>not found</html>\n" })
+        {
+            var rejected = false;
+            try { ModConflicts.HookTable.Parse(bad, "test"); } catch (InvalidDataException) { rejected = true; }
+            check(rejected, $"hook table: a bad file is rejected ({bad.Split('\n')[^2]})");
+        }
+        var good = head + "hook,A,steam-1.67,0x500000,imm,a\n";
+        var cache = Path.Combine(Directory.CreateTempSubdirectory("ApexHookCache-").FullName, "hook-table.csv");
+        try
+        {
+            var calls = 0;
+            check(ModConflicts.HookTable.Load(false, cache, () => throw new HttpRequestException("offline")).Source == "embedded copy", "hook table: a failed download falls back to the embedded copy");
+            check(ModConflicts.HookTable.Load(false, cache, () => "<html>").Source == "embedded copy" && !File.Exists(cache), "hook table: an invalid download is not used or cached");
+            check(ModConflicts.HookTable.Load(true, cache, () => { calls++; return good; }).Source == "embedded copy" && calls == 0, "hook table: --offline never downloads");
+            var got = ModConflicts.HookTable.Load(false, cache, () => good);
+            check(got.Date == "2030-01-01" && got.Source == ModConflicts.HookTableUrl && File.Exists(cache), "hook table: a newer valid download is used and cached");
+            check(ModConflicts.HookTable.Load(true, cache).Date == "2030-01-01", "hook table: offline, the newer cached copy is used");
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(cache)!, true); }
+    }
+
     public static void Run(Action<bool, string> check)
     {
+        RunHooks(check);
         // the rule table's own examples
         var rules = ModConflicts.Rules.Load();
         var bad = new List<string>();
@@ -156,6 +186,57 @@ static class ModConflictsTests
             File.WriteAllBytes(Path.Combine(dup, "one.package"), Pkg(S3sa("A", modA)));
             File.WriteAllBytes(Path.Combine(dup, "two.package"), Pkg(S3sa("A", modA)));
             check(Kind(ModConflicts.Scan(new() { Roots = { dup }, Rules = rules }), "interaction").Count == 0, "mod conflicts: the same build twice is no interaction conflict");
+
+            // hook table: rows of the game's edition only, listed builds only; another build of a listed mod is INFO
+            {
+                var gb = Path.Combine(tmp, "HookBin");
+                Directory.CreateDirectory(gb);
+                string Sha(byte[] b) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(b)).ToLowerInvariant();
+                var table = ModConflicts.HookTable.Parse(
+                    "date,2030-01-01\nedition,steam-1.67,0x52DEC247\nedition,retail-1.67,0x52D872DA\n"
+                    + $"mod,A,^a\\.asi$,1.0,{Sha(stub)}\nmod,B,^b\\.asi$,1.0,{Sha(modR)}\nmod,C,^c\\.asi$,1.0,{new string('0', 64)}\n"
+                    + "hook,A,steam-1.67,0x500000,detour,A's detour\nhook,B,steam-1.67,0x500000,call,B's call\nhook,C,steam-1.67,0x500000,imm,C's patch\n"
+                    + "hook,A,retail-1.67,0x700000,detour,A moved\nhook,B,retail-1.67,0x600000,call,B moved\n", "test");
+                File.WriteAllBytes(Path.Combine(gb, "a.asi"), stub);
+                File.WriteAllBytes(Path.Combine(gb, "b.asi"), modR);
+                File.WriteAllBytes(Path.Combine(gb, "c.asi"), modA);
+                void Exe(uint stamp)
+                {
+                    var exe = (byte[])stub.Clone();
+                    BitConverter.GetBytes(stamp).CopyTo(exe, BitConverter.ToInt32(exe, 0x3c) + 8); // COFF TimeDateStamp
+                    File.WriteAllBytes(Path.Combine(gb, "TS3W.exe"), exe);
+                }
+                var empty = Path.Combine(tmp, "NoMods");
+                Directory.CreateDirectory(empty);
+                ModConflicts.Report HookScan() => ModConflicts.Scan(new() { Roots = { empty }, Rules = rules, Bin = gb, Hooks = table });
+                Exe(0x52DEC247);
+                var steam = HookScan();
+                check(Kind(steam, "native hook") is [{ } h1] && string.Join(",", h1.Parties) == "a,b" && h1.Evidence[0] == "0x500000 (A's detour / B's call)"
+                      && steam.Info.Any(i => i.Party == "hook table" && i.Text.Contains("game build steam-1.67")),
+                    "hook table: on Steam, two listed builds sharing an address conflict, with both purposes");
+                check(steam.Info.Any(i => i.Party == "c" && i.Text.StartsWith("hook table may be out of date for c.asi (table dated 2030-01-01)")) && !Kind(steam, "native hook").Any(c => c.Parties.Contains("c")),
+                    "hook table: a build the table does not list is INFO, never a conflict");
+                Exe(0x52D872DA);
+                check(Kind(HookScan(), "native hook").Count == 0, "hook table: on retail, the retail rows apply (no shared address)");
+                Exe(0x12345678);
+                var unknownExe = HookScan();
+                check(Kind(unknownExe, "native hook").Count == 0 && unknownExe.Info.Any(i => i.Text.Contains("game build not identified")), "hook table: an unknown game build applies no rows");
+            }
+
+            // no extractor that reads an archive: unknown with the 7-Zip command, which the command line offers
+            {
+                var saved = ModConflicts.Extractors;
+                ModConflicts.Extractors = () => new();
+                try
+                {
+                    var rar = Path.Combine(tmp, "Rar");
+                    Directory.CreateDirectory(rar);
+                    File.WriteAllBytes(Path.Combine(rar, "x.rar"), new byte[] { 0x52, 0x61, 0x72, 0x21 });
+                    var rr = ModConflicts.Scan(new() { Roots = { rar }, Rules = rules });
+                    check(rr.NeedsSevenZip && rr.Unknown.Single().Text.Contains(ModConflicts.SevenZipInstall), "mod conflicts: an archive no extractor reads names the 7-Zip install command");
+                }
+                finally { ModConflicts.Extractors = saved; }
+            }
 
             // archives: names that leave the folder are refused; a 7z with a nested zip is read (when this tar can write 7z)
             var names = new (string, bool)[] { ("a/b.package", true), ("x..y/z", true), ("../evil", false), ("a/../../evil", false), ("/etc/x", false), ("C:\\x", false), ("\\\\srv\\x", false), ("a\\..\\b", false), ("", false) };

@@ -12,8 +12,8 @@ using System.Text.RegularExpressions;
 
 namespace ApexSetup;
 
-// Mod-vs-mod conflict scan: which installed mods clash with each other, by fixed rules only. Read-only and offline: links
-// found inside mods are printed, never fetched. Output names types, members, resource keys and counts, never mod code.
+// Mod-vs-mod conflict scan: which installed mods clash with each other, by fixed rules only. Read-only: links
+// found inside mods are printed, never fetched (the only download is the hook table, ModConflictsHooks.cs). Output names types, members, resource keys and counts, never mod code.
 //   CONFLICT: one resource key in packages of 2+ mods with different bytes (and the likely winner by load order); 2+ core
 //     mods replacing one game assembly; one script assembly name with different builds; 2+ mods storing the same game
 //     interaction Singleton; 2+ ASIs with known hook tables sharing an exe address.
@@ -22,7 +22,7 @@ namespace ApexSetup;
 //   INFO: identical copies, alternatives inside one archive or mod, descriptions and links (Describe).
 //   unknown: archives that cannot be read, ASIs without a hook table, assemblies or method bodies that cannot be decoded.
 // Ported from sims3-modernization's compat-scan (tools/mod-conflicts.ts), same rules and rule table.
-public static class ModConflicts
+public static partial class ModConflicts
 {
     public sealed record Conflict(string Kind, string Text, string[] Parties, string[] Evidence);
     public sealed record WarningParty(string Name, string[] Calls);
@@ -35,6 +35,7 @@ public static class ModConflicts
         public List<Note> Info { get; } = new();
         public List<Note> Unknown { get; } = new();
         public Dictionary<string, int> Summary { get; } = new();
+        public bool NeedsSevenZip { get; set; }             // an archive Windows' tar.exe could not read, and 7-Zip is not installed
     }
 
     // an ASI whose patched TS3W.exe addresses are known (Match is tested on its file name)
@@ -50,6 +51,7 @@ public static class ModConflicts
         public bool Describe { get; init; }
         public bool ModFolders { get; init; }               // every first-level folder is one mod (its files are versions of it)
         public List<KnownAsi> KnownAsi { get; init; } = new();
+        public HookTable? Hooks { get; init; }              // applied to the edition of the exe in Bin (or Game)
     }
 
     // ---------- rule table ----------
@@ -500,80 +502,118 @@ public static class ModConflicts
         a.Item1 != b.Item1 ? a.Item1.CompareTo(b.Item1) : a.Item2 != b.Item2 ? a.Item2.CompareTo(b.Item2) : string.CompareOrdinal(a.Item3, b.Item3);
 
     // ---------- archives (untrusted input) ----------
-    // .rar / .7z through Windows' tar.exe (bsdtar, libarchive), called with an argument list, no shell. The listing is
-    // checked first: no absolute paths, no '..', no links, at most UnpackFiles entries and UnpackCap bytes in total. Each
-    // archive goes into a new temp folder that the scan deletes when it ends. Nothing extracted is run. Password-protected
-    // archives and some RAR5 variants fail in tar and come back as unknown with its message.
+    // .rar / .7z through Windows' tar.exe (bsdtar, libarchive), else 7-Zip when it is installed; called with an argument list,
+    // no shell. The listing is checked first: no absolute paths, no '..', no links, at most UnpackFiles entries and UnpackCap
+    // bytes in total. Each archive goes into a new temp folder that the scan deletes when it ends. Nothing extracted is run.
+    // Password-protected archives fail in the extractor and come back as unknown with its message.
     public const long UnpackCap = 2L << 30;
     public const int UnpackFiles = 20000;
+    public const string SevenZipInstall = "winget install --id 7zip.7zip -e";
 
     // an entry name that stays inside the folder: relative, no '..' segment, no drive or UNC prefix, no NUL
     public static bool SafeName(string n) =>
         n.Length > 0 && !Regex.IsMatch(n, @"^([\\/]|[A-Za-z]:)") && !n.Split('/', '\\').Contains("..") && !n.Contains('\0');
 
+    // the extractors at hand, in order: Windows' tar.exe, then 7-Zip
+    public static Func<List<(string Kind, string Exe)>> Extractors = () =>
+    {
+        var o = new List<(string, string)>();
+        var tar = Path.Combine(Environment.SystemDirectory, "tar.exe");
+        if (File.Exists(tar)) o.Add(("tar", tar));
+        var seven = new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 }
+            .Select(f => Path.Combine(Environment.GetFolderPath(f), "7-Zip", "7z.exe"))
+            .Concat((Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Where(d => d.Length > 0).Select(d => Path.Combine(d, "7z.exe")))
+            .FirstOrDefault(File.Exists);
+        if (seven is not null) o.Add(("7z", seven));
+        return o;
+    };
+
     // the extracted folder and its files ('/' names, sorted), or why not
     public static (string? Dir, List<string> Files, string? Unknown) Extract(string archive)
     {
-        var tar = Path.Combine(Environment.SystemDirectory, "tar.exe");
-        if (!File.Exists(tar)) return (null, new(), $"no extractor for {Path.GetExtension(archive)} (Windows' tar.exe is missing): unpack it, then scan again");
-        string[] names, longs;
-        try
+        var tools = Extractors();
+        var hint = tools.Any(t => t.Kind == "7z") ? "" : $"; 7-Zip may read it ({SevenZipInstall}), then scan again";
+        if (tools.Count == 0) return (null, new(), $"no extractor for {Path.GetExtension(archive)}{hint}");
+        var errs = new List<string>();
+        foreach (var (kind, exe) in tools)
         {
-            names = Tar(tar, "-tf", archive).Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToArray();
-            longs = Tar(tar, "-tvf", archive).Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToArray();
-            if (names.Length != longs.Length) throw new InvalidDataException("listing mismatch");
-        }
-        catch (Exception e) when (e is InvalidDataException or System.ComponentModel.Win32Exception)
-        {
-            return (null, new(), $"not extracted (password, damaged or unsupported variant such as some RAR5): {e.Message}");
-        }
-        long total = 0;
-        for (var i = 0; i < names.Length; i++)
-        {
-            if (!SafeName(names[i]) || longs[i][0] is 'l' or 'h')
-                return (null, new(), $"archive refused: unsafe entry \"{(names[i].Length > 80 ? names[i][..80] : names[i])}\" (absolute path, '..' or link)");
-            total += long.TryParse(longs[i].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).ElementAtOrDefault(4), out var n) ? n : 0;
-        }
-        if (names.Length > UnpackFiles) return (null, new(), $"archive refused: {names.Length} entries (cap {UnpackFiles})");
-        if (total > UnpackCap) return (null, new(), $"archive refused: over {UnpackCap >> 30} GB unpacked");
-        var dir = Directory.CreateTempSubdirectory("modscan-").FullName;
-        try
-        {
-            Tar(tar, "-xf", archive, "-C", dir);
-            var files = new List<string>();
-            total = 0;
-            void Walk(string d)
+            List<(string Name, long Size, char Type)> entries;
+            try { entries = kind == "tar" ? ListTar(exe, archive) : List7z(exe, archive); }
+            catch (Exception e) when (e is InvalidDataException or System.ComponentModel.Win32Exception) { errs.Add($"{kind}: {e.Message}"); continue; }
+            if (entries.FirstOrDefault(x => !SafeName(x.Name) || x.Type is 'l' or 'h') is { Name: not null } bad)
+                return (null, new(), $"archive refused: unsafe entry \"{(bad.Name.Length > 80 ? bad.Name[..80] : bad.Name)}\" (absolute path, '..' or link)");
+            if (entries.Count > UnpackFiles) return (null, new(), $"archive refused: {entries.Count} entries (cap {UnpackFiles})");
+            if (entries.Sum(x => Math.Max(0, x.Size)) > UnpackCap) return (null, new(), $"archive refused: over {UnpackCap >> 30} GB unpacked");
+            var dir = Directory.CreateTempSubdirectory("modscan-").FullName;
+            try
             {
-                foreach (var e in new DirectoryInfo(d).EnumerateFileSystemInfos())
+                if (kind == "tar") Run(exe, "-xf", archive, "-C", dir);
+                else Run(exe, "x", "-y", "-snl-", "-o" + dir, "--", archive);
+                var files = new List<string>();
+                long total = 0;
+                void Walk(string d)
                 {
-                    if (e.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue; // links are not followed
-                    if (e is DirectoryInfo sub) Walk(sub.FullName);
-                    else { files.Add(Slash(Path.GetRelativePath(dir, e.FullName))); total += ((FileInfo)e).Length; }
+                    foreach (var e in new DirectoryInfo(d).EnumerateFileSystemInfos())
+                    {
+                        if (e.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue; // links are not followed
+                        if (e is DirectoryInfo sub) Walk(sub.FullName);
+                        else { files.Add(Slash(Path.GetRelativePath(dir, e.FullName))); total += ((FileInfo)e).Length; }
+                    }
                 }
+                Walk(dir);
+                if (total > UnpackCap || files.Count > UnpackFiles) { Remove(dir); return (null, new(), "archive refused: over the size or file cap after extraction"); }
+                files.Sort(StringComparer.Ordinal);
+                return (dir, files, null);
             }
-            Walk(dir);
-            if (total > UnpackCap || files.Count > UnpackFiles) { Remove(dir); return (null, new(), "archive refused: over the size or file cap after extraction"); }
-            files.Sort(StringComparer.Ordinal);
-            return (dir, files, null);
+            catch (Exception e) when (e is InvalidDataException or IOException or System.ComponentModel.Win32Exception)
+            {
+                Remove(dir);
+                errs.Add($"{kind}: {e.Message}");
+            }
         }
-        catch (Exception e) when (e is InvalidDataException or IOException or System.ComponentModel.Win32Exception)
-        {
-            Remove(dir);
-            return (null, new(), $"not extracted (password, damaged or unsupported variant such as some RAR5): {e.Message}");
-        }
+        return (null, new(), $"not extracted (password, damaged or unsupported variant such as some RAR5): {string.Join("; ", errs)}{hint}");
     }
     static void Remove(string dir) { try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
 
-    static string Tar(string tar, params string[] args)
+    // bsdtar: names from -t, size and type from -tv (same order)
+    static List<(string, long, char)> ListTar(string tar, string archive)
     {
-        var psi = new ProcessStartInfo(tar) { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, CreateNoWindow = true };
+        static string[] Lines(string s) => s.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToArray();
+        var names = Lines(Run(tar, "-tf", archive));
+        var longs = Lines(Run(tar, "-tvf", archive));
+        if (names.Length != longs.Length) throw new InvalidDataException("listing mismatch");
+        return names.Select((n, i) => (n, long.TryParse(longs[i].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).ElementAtOrDefault(4), out var z) ? z : 0, longs[i][0])).ToList();
+    }
+
+    // 7-Zip's technical listing: blocks of "Path = ", "Size = ", "Attributes = " after the "----------" line
+    static List<(string, long, char)> List7z(string exe, string archive)
+    {
+        var o = new List<(string, long, char)>();
+        var text = Run(exe, "l", "-slt", "--", archive);
+        var at = text.IndexOf("\n----------", StringComparison.Ordinal);
+        string? name = null; long size = 0; var attr = "";
+        void Flush() { if (name is not null) o.Add((name, size, attr.Contains('D') ? 'd' : attr.Contains('l', StringComparison.OrdinalIgnoreCase) ? 'l' : '-')); name = null; size = 0; attr = ""; }
+        foreach (var raw in (at < 0 ? "" : text[(at + 1)..]).Split('\n'))
+        {
+            var l = raw.TrimEnd('\r');
+            if (l.StartsWith("Path = ")) { Flush(); name = l[7..]; }
+            else if (l.StartsWith("Size = ")) size = long.TryParse(l[7..], out var z) ? z : 0;
+            else if (l.StartsWith("Attributes = ")) attr = l[13..];
+        }
+        Flush();
+        return o;
+    }
+
+    static string Run(string exe, params string[] args)
+    {
+        var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, CreateNoWindow = true };
         foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
         p.StandardInput.Close(); // (an encrypted archive fails instead of asking for a password)
         var err = p.StandardError.ReadToEndAsync();
         var outp = p.StandardOutput.ReadToEndAsync();
-        if (!p.WaitForExit(300_000)) { try { p.Kill(true); } catch (InvalidOperationException) { } throw new InvalidDataException("tar timed out"); }
-        if (p.ExitCode != 0) throw new InvalidDataException("tar: " + err.Result.Trim().Split('\n')[0].Trim());
+        if (!p.WaitForExit(300_000)) { try { p.Kill(true); } catch (InvalidOperationException) { } throw new InvalidDataException($"{Path.GetFileName(exe)} timed out"); }
+        if (p.ExitCode != 0) throw new InvalidDataException((err.Result.Trim() is { Length: > 0 } m ? m : outp.Result.Trim()).Split('\n')[0].Trim());
         return outp.Result;
     }
 
@@ -588,6 +628,7 @@ public static class ModConflicts
         public readonly Dictionary<string, Dictionary<string, int>> Writes = new();
         public readonly List<string> Info = new(), Unknown = new();
         public HashSet<uint>? Addrs;
+        public Dictionary<uint, string>? Purposes;
         public string? KnownTable;
         public void AddWrite(string area, string call)
         {
@@ -653,6 +694,9 @@ public static class ModConflicts
             }
             catch (Exception e) when (e is BadImageFormatException or InvalidDataException) { }
         var report = new Report();
+        var edition = o.Hooks?.EditionOf(o.Bin ?? (o.Game is null ? null : Path.Combine(o.Game, "Game", "Bin")));
+        if (o.Hooks is { } table)
+            report.Info.Add(new("hook table", $"dated {table.Date}, {table.Source}; " + (edition is null ? "game build not identified, so it is not applied" : $"game build {edition}")));
         static bool OneMod(IEnumerable<Party> ps) => ps.Select(p => p.Mod).Distinct().Count() == 1;
 
         void DoAsm(Party p, byte[] img, string where)
@@ -687,7 +731,8 @@ public static class ModConflicts
             }
         }
 
-        void DoAsi(Party p, byte[] img, string file)
+        // path: the file on disk (for its version resource), null inside an archive
+        void DoAsi(Party p, byte[] img, string file, string? path)
         {
             p.Kind.Add("asi");
             (List<string> Imports, List<string> Strings, HashSet<uint> Addrs) f;
@@ -695,8 +740,26 @@ public static class ModConflicts
             catch (Exception e) when (e is BadImageFormatException or InvalidDataException or ArgumentException) { p.Unknown.Add($"ASI not a readable PE ({e.Message})"); return; }
             foreach (var s in f.Imports.Concat(f.Strings))
                 foreach (var a in NativeAreas(R, s)) p.AddWrite(a, s.Length > 60 ? s[..57] + "..." : s);
-            if (o.KnownAsi.FirstOrDefault(k => k.Match.IsMatch(Path.GetFileName(file))) is { } known) { p.Addrs = known.Addrs; p.KnownTable = known.Source; }
-            else { p.Addrs = f.Addrs; p.Unknown.Add($"ASI hook sites unknown: no hook table; {f.Addrs.Count} code-address immediates (candidates, not proven hooks)"); }
+            var name = Path.GetFileName(file);
+            if (o.KnownAsi.FirstOrDefault(k => k.Match.IsMatch(name)) is { } known) { p.Addrs = known.Addrs; p.KnownTable = known.Source; return; }
+            // the hook table applies to a build it lists (by hash or version) on the identified game edition; another build of
+            // a listed mod is INFO, its addresses may have moved
+            if (o.Hooks is { } ht && edition is not null && ht.Mods.FirstOrDefault(m => m.File.IsMatch(name)) is { } hm)
+            {
+                var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(img)).ToLowerInvariant();
+                var version = path is null ? null : FileVersionInfo.GetVersionInfo(path).FileVersion;
+                if (hm.Sha256.Contains(sha) || version == hm.Version)
+                {
+                    var rows = ht.Hooks.Where(h => h.Mod == hm.Name && h.Edition == edition).ToList();
+                    p.Addrs = rows.Select(h => h.Address).ToHashSet();
+                    p.Purposes = rows.GroupBy(h => h.Address).ToDictionary(g => g.Key, g => g.First().Purpose);
+                    p.KnownTable = $"hook table {ht.Date}";
+                    return;
+                }
+                p.Info.Add($"hook table may be out of date for {name} (table dated {ht.Date}): this build is not listed, its hooks are not compared");
+            }
+            p.Addrs = f.Addrs;
+            p.Unknown.Add($"ASI hook sites unknown: no hook table; {f.Addrs.Count} code-address immediates (candidates, not proven hooks)");
         }
 
         void DoPackage(Party p, Func<Package> open, string label, string rel, List<Directive> dirs)
@@ -741,7 +804,7 @@ public static class ModConflicts
                 var p = new Party(Path.GetFileNameWithoutExtension(f), file, o.ModFolders && relRoot.Contains('/') ? $"{rootName}/{relRoot.Split('/')[0]}" : file);
                 parties.Add(p);
                 if (ext == ".dbc") { p.Unknown.Add("DCCache .dbc (installed .sims3pack content): not scanned"); continue; }
-                if (ext == ".asi") { DoAsi(p, File.ReadAllBytes(f), f); continue; }
+                if (ext == ".asi") { DoAsi(p, File.ReadAllBytes(f), f, f); continue; }
                 if (ext == ".package") { DoPackage(p, () => Package.Open(f), p.File, rel, dirs); continue; }
                 // as if unpacked into a folder named after the archive (unverified: players unpack that way or flatten)
                 OpenArchive(p, f, null, ext, p.File, rel[..^ext.Length], dirs, 0);
@@ -754,7 +817,7 @@ public static class ModConflicts
             var e = Path.GetExtension(name).ToLowerInvariant();
             byte[] Buf() => data ?? File.ReadAllBytes(path!);
             if (e == ".package") DoPackage(p, () => path is not null ? Package.Open(path) : Package.Open(data!), $"{lab}!{name}", $"{rel}/{name}", dirs);
-            else if (e == ".asi") DoAsi(p, Buf(), name);
+            else if (e == ".asi") DoAsi(p, Buf(), name, path);
             else if (e is ".zip" or ".rar" or ".7z")
             {
                 if (depth >= 1) p.Unknown.Add($"{lab}!{name}: archive nested more than one level, unpack it by hand");
@@ -803,7 +866,7 @@ public static class ModConflicts
                 var p = new Party(Path.GetFileNameWithoutExtension(f), $"Bin/{Slash(Path.GetRelativePath(o.Bin, f))}", "");
                 p.Mod = p.File;
                 parties.Add(p);
-                DoAsi(p, File.ReadAllBytes(f), f);
+                DoAsi(p, File.ReadAllBytes(f), f, f);
             }
 
         // (1) resource keys: the likely winner by load order; identical bytes = duplicate; one archive or mod = alternatives
@@ -878,7 +941,7 @@ public static class ModConflicts
                 var shared = a.Addrs!.Where(b.Addrs!.Contains).OrderBy(x => x).ToList();
                 if (shared.Count > 0) report.Conflicts.Add(new("native hook",
                     $"{a.Name} and {b.Name} patch {shared.Count} of the same TS3W.exe addresses ({a.KnownTable} / {b.KnownTable}): install order decides which patch survives",
-                    new[] { a.Name, b.Name }, shared.Take(8).Select(x => $"0x{x:X}").ToArray()));
+                    new[] { a.Name, b.Name }, shared.Take(8).Select(x => $"0x{x:X}" + (a.Purposes?.GetValueOrDefault(x) is { } pa && b.Purposes?.GetValueOrDefault(x) is { } pb ? $" ({pa} / {pb})" : "")).ToArray()));
             }
         foreach (var p in parties.Where(p => p.Addrs is not null && p.KnownTable is null))
             foreach (var t in tabled)
@@ -912,6 +975,7 @@ public static class ModConflicts
             foreach (var t in p.Info) report.Info.Add(new(p.Name, t));
             foreach (var t in p.Unknown) report.Unknown.Add(new(p.Name, t));
         }
+        report.NeedsSevenZip = report.Unknown.Any(u => u.Text.Contains(SevenZipInstall));
         var s = report.Summary;
         s["files"] = parties.Count; s["packages"] = recs.Count; s["assemblies"] = parties.Sum(p => p.Asms.Count); s["asi"] = parties.Count(p => p.Kind.Contains("asi"));
         s["gameAssemblies"] = game.Count; s["eventNames"] = eventNames.Count;
