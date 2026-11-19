@@ -104,7 +104,7 @@ public sealed class ModRow : INotifyPropertyChanged
         ModKind.Sims3Pack => "package", ModKind.World => "globe", ModKind.Lot => "house", ModKind.Household => "users", _ => "puzzle",
     };
 
-    public static string SizeText(long n) => n >= 1 << 20 ? $"{n / (1024.0 * 1024):0.#} MB" : $"{Math.Max(1, n / 1024)} KB";
+    public static string SizeText(long n) => n >= 1L << 30 ? $"{n / (1024.0 * 1024 * 1024):0.#} GB" : n >= 1 << 20 ? $"{n / (1024.0 * 1024):0.#} MB" : $"{Math.Max(1, n / 1024)} KB";
 
     // where a mod is, as the side pane names it ("Packages › NRaas"); the game folder, Downloads or the Library
     public static string Place(ModFile f) => f.FileType switch

@@ -817,6 +817,32 @@
                                 </TransitionCollection>
                             </GridView.ItemContainerTransitions>
                         </GridView>
+                        <!-- what the game's own launcher installed (its cache): read only -->
+                        <GridView x:Name="InstalledGrid" Grid.Row="3" Grid.RowSpan="2" SelectionMode="None" IsItemClickEnabled="False" Margin="0,0,-24,0" Padding="0,0,24,24"
+                                  Visibility="Collapsed" ContainerContentChanging="OnInstalledTile" SizeChanged="OnInstalledSized" AutomationProperties.Name="Installed content">
+                            <GridView.ItemContainerStyle>
+                                <Style TargetType="GridViewItem" BasedOn="{StaticResource DefaultGridViewItemStyle}">
+                                    <Setter Property="VerticalContentAlignment" Value="Top" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Margin" Value="0,0,8,8" />
+                                </Style>
+                            </GridView.ItemContainerStyle>
+                            <GridView.ItemTemplate>
+                                <DataTemplate x:DataType="local:InstalledRow">
+                                    <StackPanel Spacing="6" Padding="0,0,0,8" ToolTipService.ToolTip="{x:Bind Name}">
+                                        <Border Height="128" CornerRadius="10" Background="{StaticResource ApexPillBrush}">
+                                            <Grid>
+                                                <local:LucideIcon Kind="{x:Bind KindIcon}" Size="32" Stroke="{StaticResource ApexMutedBrush}" StrokeWidth="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                  Visibility="{x:Bind Placeholder, Mode=OneWay}" />
+                                                <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="Uniform" Margin="6" />
+                                            </Grid>
+                                        </Border>
+                                        <TextBlock Text="{x:Bind Name}" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind Kind}" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </GridView.ItemTemplate>
+                        </GridView>
                         <StackPanel x:Name="ModsEmpty" Grid.Row="4" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,56,0,0" Visibility="Collapsed">
                             <local:LucideIcon x:Name="ModsEmptyIcon" Kind="folder-open" Size="32" HorizontalAlignment="Center" Stroke="{StaticResource ApexMutedBrush}" />
                             <TextBlock x:Name="ModsEmptyText" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" TextAlignment="Center" MaxWidth="320" />

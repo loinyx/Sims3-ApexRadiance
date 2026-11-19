@@ -20,7 +20,9 @@ namespace ApexSetup;
 public sealed partial class MainWindow
 {
     const string DefaultMods = "*default", AllMods = "*all", NewMods = "*new", LookMods = "*look", DupMods = "*dup", OffMods = "*off",
-        AsiMods = "*asi", PackMods = "*sims3pack", LibraryMods = "*library", NewTag = "*newtag";
+        AsiMods = "*asi", PackMods = "*sims3pack", LibraryMods = "*library", NewTag = "*newtag", InstalledMods = "*installed";
+    // what the game's own launcher installed into its cache (null: not read yet)
+    List<InstalledRow>? _installed;
     string _modPlace = AllMods;
     List<ModRow> _modRows = [];
     readonly ObservableCollection<ModRow> _modShown = [];
@@ -81,6 +83,7 @@ public sealed partial class MainWindow
             _modsLoaded = true;
             Safe(LoadModPicturesAsync(_modRows));
             Safe(LoadDefaultsAsync(g, _modRows));
+            Safe(LoadInstalledAsync());
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not read your mods"), ErrorText(e)); }
         finally { _modsLoading = false; }
@@ -155,6 +158,9 @@ public sealed partial class MainWindow
             var shown = Sorted(inPlace.Where(Matches)).ToList();
             ModRow.ShowPlace = !IsFolder(_modPlace);
             Sync(shown);
+            if (_modPlace == InstalledMods) { FillInstalled(); return; }
+            InstalledGrid.Visibility = Visibility.Collapsed;
+            ModsSelectAll.Visibility = ModsSelectNone.Visibility = Visibility.Visible;
             ModList.Visibility = ModListHead.Visibility = _modsGrid ? Visibility.Collapsed : Visibility.Visible;
             ModGrid.Visibility = _modsGrid ? Visibility.Visible : Visibility.Collapsed;
             ModsViewList.IsChecked = !_modsGrid;
@@ -214,6 +220,7 @@ public sealed partial class MainWindow
     {
         AllMods => ("", T("All mods")), NewMods => ("", T("New since last play")), DefaultMods => ("", T("Default replacements")), LookMods => ("", T("Needs a look")), DupMods => ("", T("Duplicates")),
         OffMods => ("", T("Turned off")), AsiMods => ("", T("Game plugins")), PackMods => ("", "Sims3Packs"), LibraryMods => ("", T("Library")),
+        InstalledMods => ("", T("Installed content")),
         _ when place.StartsWith('#') => (T("Tag"), place[1..]),
         "" => ("", "Mods"),
         _ => (string.Join(" › ", new[] { "Mods" }.Concat(place.Split(Path.DirectorySeparatorChar).SkipLast(1))), Path.GetFileName(place)),
@@ -294,7 +301,8 @@ public sealed partial class MainWindow
             ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", _mods.Count(m => InDir(m, d)), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
             ("tags", T("TAGS"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
             ("game", T("GAME"), null, new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)), new(PackMods, "Sims3Packs", "package", N(PackMods)),
-                new(LibraryMods, T("Library"), "library", N(LibraryMods)) }.Where(p => p.Count > 0).ToList()),
+                new(LibraryMods, T("Library"), "library", N(LibraryMods)), new(InstalledMods, T("Installed content"), "package", _installed?.Count ?? 0) }
+                .Where(p => p.Count > 0 || p.Key == _modPlace).ToList()),
         };
         if (!groups.SelectMany(g => g.Items).Any(p => p.Key.Equals(_modPlace, StringComparison.OrdinalIgnoreCase))) _modPlace = AllMods;
 
@@ -1147,6 +1155,66 @@ public sealed partial class MainWindow
     }
 
     void CloseModDetails() { ModList.SelectedItems.Clear(); ModGrid.SelectedItems.Clear(); FillModDetails(); FillFooter(); }
+
+    // ---------- what the game's own launcher installed ----------
+
+    async Task LoadInstalledAsync()
+    {
+        var docs = Docs;
+        var items = await Task.Run(() => InstalledContent.Read(docs));
+        _installed = items.OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase).Select(i => new InstalledRow(i, KindLabel(i.Kind), KindIcon(i.Kind))).ToList();
+        _folderSig = "";
+        if (_step == ModsScreen) FillMods();
+    }
+
+    // read only: searched by name and type, its pictures read as the tiles show
+    void FillInstalled()
+    {
+        var all = _installed ?? [];
+        var q = ModSearch.Text?.Trim() ?? "";
+        var shown = q.Length == 0 ? all : all.Where(r => r.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || r.Kind.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        InstalledGrid.ItemsSource = shown;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => OnInstalledSized(InstalledGrid, null!)); // (the panel exists once the items are set)
+        InstalledGrid.Visibility = Visibility.Visible;
+        ModsSelectAll.Visibility = ModsSelectNone.Visibility = Visibility.Collapsed;
+        ModList.Visibility = ModListHead.Visibility = ModGrid.Visibility = Visibility.Collapsed;
+        ModsEmpty.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        (ModsEmptyIcon.Kind, ModsEmptyText.Text) = _installed is null ? ("loader-circle", T("Reading what the game's launcher installed…"))
+            : all.Count > 0 ? ("search", T("Nothing matches the search."))
+            : ("package", T("The game's launcher installed nothing here."));
+        var (crumb, title) = PlaceTitle(_modPlace);
+        ModsCrumb.Visibility = Visibility.Collapsed;
+        ModsTitle.Text = ModsPlacesText.Text = title;
+        ModsSummary.Text = string.Join(" · ", new[] { T("{0} items", all.Count), ModRow.SizeText(InstalledContent.Bytes(Docs)), T("added and removed in the game's own launcher") });
+        ModsAdd.IsEnabled = true;
+        HuntBanner();
+        FillChips();
+        FillSortText();
+        ModsFooter.Text = shown.Count == all.Count ? T("{0} shown", shown.Count) : T("{0} of {1} shown", shown.Count, all.Count);
+    }
+
+    // as many columns as fit, stretched to the full width (the list stays virtual: thousands of tiles)
+    void OnInstalledSized(object sender, SizeChangedEventArgs e)
+    {
+        if (InstalledGrid.ItemsPanelRoot is not ItemsWrapGrid wrap) return;
+        // (the grid's width less its padding: the panel itself shrinks to its tiles, so it cannot be the measure)
+        var width = InstalledGrid.ActualWidth - InstalledGrid.Padding.Left - InstalledGrid.Padding.Right;
+        if (width <= 0) return;
+        var cols = CardGrid.Columns(width, 128, 8);
+        wrap.ItemWidth = Math.Floor(width / cols) - 8; // (each tile's 8 px margin comes on top of its width)
+        wrap.ItemHeight = 206; // (picture, two lines of name, the type: every row the same height)
+    }
+
+    void OnInstalledTile(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.InRecycleQueue || args.Item is not InstalledRow r || r.Image is not null || r.Loading) return;
+        r.Loading = true;
+        _ = Task.Run(() => InstalledContent.Thumbnail(r.Item)).ContinueWith(async t =>
+        {
+            try { if (await SaveCard.ImageOf(t.IsCompletedSuccessfully ? t.Result : null) is { } img) r.Image = img; }
+            catch (Exception e) { App.Log(e); }
+        }, TaskScheduler.FromCurrentSynchronizationContext());
+    }
 
     // the player's choice of type, else the package's own
     static void ApplyKinds(ModRow r)

@@ -150,6 +150,19 @@ static class DefaultReplacementsTests
         check(rebuilt, "defaults: a damaged game package and a damaged cache rebuild the index without throwing");
         File.WriteAllBytes(Path.Combine(Paths.Data, "game-names.bin"), [1, 2, 3]);
         check(DefaultReplacements.Analyze(DefaultReplacements.Cached(g)!, mod).Objects.Any(o => o.Name == "Game Sofa"), "defaults: a damaged names cache is built again");
+
+        // what the game's launcher installed: items read from DCCache\dcdb*.dbc with their English names and thumbnails, the
+        // .tmp copies left out
+        var docs = Path.Combine(dir, "Docs");
+        Write(Path.Combine(docs, InstalledContent.Folder, "dcdb0.dbc"),
+            (ModKinds.Objd, 0, 0x900, ModKindsTests.ObjdBytes(0x16, 0x800, 0, name: 0xDDD)),
+            (ModKinds.Stbl, 0, 0x0000000000000002, Stbl((0xDDD, "Store Lamp"))),
+            (Thum, 0, 0x900, Png));
+        Write(Path.Combine(docs, InstalledContent.Folder, "dcdb1.dbc.tmp"), (ModKinds.Objd, 0, 0x901, ModKindsTests.ObjdBytes(0x16, 0x800, 0, name: 0xDDD)));
+        var installed = InstalledContent.Read(docs);
+        check(installed.Count(i => i.Type == ModKinds.Objd) == 1 && installed[0].Name == "Store Lamp" && InstalledContent.Thumbnail(installed[0]) is { Length: > 0 }
+              && InstalledContent.Read(Path.Combine(dir, "NoDocs")).Count == 0,
+            "installed content: the game launcher's items are read from its cache by name with their thumbnail; .tmp copies and a missing cache give none");
     }
 
     // Progress<T> posts to the thread pool; the checks want the reports in order and done when Index returns
