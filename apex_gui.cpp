@@ -3558,7 +3558,7 @@ void AboutTab() {
         CreditLine("Smooth flat surfaces in Ambient Occlusion: based on Intel's XeGTAO (MIT).");
         CreditLine("Upper-floor ground light: Arro's technique, adapted in Apex Radiance.");
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
-        CreditLine("Scene update safety: contribution by @rodneypantonial.");
+        CreditLine("Scene update safety, new Performance and Ambient Occlusion options, and RTX Remix bridge fixes: contributions by @rodneypantonial.");
         CreditLine("Looks and Capture: contributed by @ModestPixels.");
         CreditLine("Restart host: adapted from Dalexlol's wrapper in sims3-modernization.");
         CreditLine("Thanks to @boringbones for testing every build.");

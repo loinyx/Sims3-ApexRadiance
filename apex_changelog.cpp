@@ -6,6 +6,34 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k407Added[] = {
+    "Performance: Fewer mouse picks when still and Frame deadline while moving, on by default",
+    "Ambient Occlusion: six options under Advanced for smoother, lighter shade, on by default",
+    "Setup: an Experimental channel for Sims 3 Modernization test builds",
+    nullptr};
+
+constexpr const char* k407Improved[] = {
+    "Performance: lots share one lighting budget while the camera moves",
+    "Night Lights: the walls of every story light up at once when a lamp is switched on",
+    "Night Lights: half walls on the top story follow a dragged lamp at once",
+    "RTX Remix bridge: the game keeps its graphics settings on every start",
+    nullptr};
+
+constexpr const char* k407Fixed[] = {
+    "Night Lights: no lamp light through a wall at its end or just behind it",
+    "Night Lights: no band of lamp light on the floor or ground beside a wall",
+    "Night Lights: no indoor lamp light on the ground under the house",
+    "Start-up: the game no longer locks up in a rare case while starting",
+    "Sims 3 Modernization: no routing error at start when both are installed",
+    nullptr};
+
+constexpr const char* k407Highlights[] = {
+    "Lamp light stays behind walls",
+    "Instant lamp light on every story",
+    "New performance options",
+    "Smoother Ambient Occlusion",
+    nullptr};
+
 constexpr const char* k406Improved[] = {
     "Night Lights: potted plants shade lamp light with their leaves, custom content too",
     "Night Lights: pots and planters keep a solid shadow under the leaves",
@@ -728,6 +756,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.0.7", "2026-11-19", k407Added, k407Improved, k407Fixed, "Lamp light stays behind walls and follows every switch and drag at once", k407Highlights},
     {"4.0.6", "2026-11-18", nullptr, k406Improved, nullptr, "Potted plants cast soft, leaf-shaped shadows under your lamps", k406Highlights},
     {"4.0.5", "2026-11-18", k405Added, k405Improved, k405Fixed,
      "A simpler Shaders page: build a look and add its shaders without leaving it", k405Highlights},
