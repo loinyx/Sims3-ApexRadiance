@@ -70,7 +70,7 @@ public sealed class MergeRecord
 // launcher's data is gone, and splitting there could stop halfway on a replaced original.
 // Shortcut: the merged file's load position replaces each original's, so a key also in a package outside the merge may
 // now win or lose against it; not checked, a plan over the whole Mods folder would show it.
-public static class ModMerge
+public static partial class ModMerge
 {
     public const string FolderName = "Merged (Apex Launcher)";
     public static string Folder(string docs) => Path.Combine(docs, "Mods", FolderName);

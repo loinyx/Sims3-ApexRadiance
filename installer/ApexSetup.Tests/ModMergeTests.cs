@@ -217,6 +217,18 @@ static class ModMergeTests
             check(ModMerge.IsMerged(renamed) && File.Exists(renamed.Path), "split: the inner merge comes back, still a merge after a rename");
             ModMerge.Split(docs, renamed);
             check(Same(before2, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "split: both splits restore every original identical by hash");
+
+            // one mod taken out: it is back identical, the other two are merged again under the same name; taking one of
+            // two out leaves both plain mods
+            Pkg(Path.Combine(mods, @"Packages\d.package"), Raw(10, 10, "D10"));
+            var before3 = Snap(docs);
+            var three = ModMerge.Run(ModMerge.Plan(docs, [M(A), M(B), M(@"Packages\d.package")], "Three", "Packages", false), null, default).Merged;
+            var outA = ModMerge.TakeOut(docs, three, [Path.Combine("Mods", A)]);
+            var aBack = File.Exists(Path.Combine(mods, A)) && Sha(Path.Combine(mods, A)) == before3[Path.Combine("Mods", A)];
+            check(aBack && outA.Remerged is { Mods: 2 } rm && rm.Merged.Name == "Three.package" && ModMerge.Info(rm.Merged)!.Originals.Count == 2 && !File.Exists(Path.Combine(mods, B)),
+                "take out: the mod comes back identical, the rest is merged again under the same name");
+            var outB = ModMerge.TakeOut(docs, outA.Remerged!.Merged, [Path.Combine("Mods", B)]);
+            check(outB.Remerged is null && Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "take out: one of two out leaves both plain, every file identical");
         }
         catch (Exception e) { check(false, "merge: exception " + e); }
         finally

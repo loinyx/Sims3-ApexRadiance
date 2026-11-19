@@ -1260,6 +1260,7 @@ public sealed partial class MainWindow
             Fact(T("Merged from"), made);
         }
         host.Children.Add(facts);
+        if (ModMerge.IsMerged(m) && ModMerge.Info(m) is { } mergeInfo) host.Children.Add(MergedPanel(r, mergeInfo));
         if (m.FileType is "package" or "library") host.Children.Add(InsidePanel(r));
 
         // what needs a look
@@ -1426,6 +1427,57 @@ public sealed partial class MainWindow
     {
         try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); }
         catch (Exception e) { App.Log(e); }
+    }
+
+    // ---------- a merge's own mods ----------
+
+    // the mods a merged package was made of, each with Take out (put back, the rest merged again), and Split for all
+    UIElement MergedPanel(ModRow r, MergeRecord info)
+    {
+        var panel = new StackPanel { Spacing = 6 };
+        panel.Children.Add(new TextBlock { Text = T("INSIDE THIS MERGE · {0} MODS", info.Originals.Count), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 60, Foreground = Res("ApexMutedBrush") });
+        foreach (var o in info.Originals.OrderBy(o => o.Rel, StringComparer.OrdinalIgnoreCase))
+        {
+            var g = new Grid { ColumnSpacing = 8 };
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var name = new TextBlock { Text = Path.GetFileNameWithoutExtension(o.Rel), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+            ToolTipService.SetToolTip(name, o.Rel);
+            g.Children.Add(name);
+            var size = new TextBlock { Text = ModRow.SizeText(o.Size), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(size, 1);
+            g.Children.Add(size);
+            var take = IconButton("folder-input", T("Take {0} out of the merge", Path.GetFileNameWithoutExtension(o.Rel)));
+            take.Width = take.Height = 28;
+            var rel = o.Rel;
+            take.Click += (_, _) => _ = TakeOutAsync(r, [rel]);
+            Grid.SetColumn(take, 2);
+            g.Children.Add(take);
+            panel.Children.Add(g);
+        }
+        var split = WideButton("merge", T("Split it back into its {0} mods", info.Originals.Count), () => _ = SplitAsync(r));
+        split.Margin = new Thickness(0, 4, 0, 0);
+        panel.Children.Add(split);
+        return panel;
+    }
+
+    async Task TakeOutAsync(ModRow r, List<string> rels)
+    {
+        var name = Path.GetFileNameWithoutExtension(rels[0]);
+        if (!await Confirm(T("Take {0} out of the merge?", name), T("It goes back where it was, checked against the copy kept at the merge. The others are merged again into {0}, written and verified the same way.", r.Name), T("Take it out"))) return;
+        ModsInfo.IsOpen = true;
+        ModsInfo.Severity = InfoBarSeverity.Informational;
+        ModsInfo.Title = T("Taking {0} out of the merge…", name);
+        ModsInfo.Message = "";
+        ModMerge.TakeOutResult? res = null;
+        try { res = await Task.Run(() => ModMerge.TakeOut(Docs, r.File, rels)); }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merge was not changed as asked"), ErrorText(e)); }
+        if (res is not null)
+            ModsResult(res.Remerged is { } m ? T("{0} is back on its own; {1} now holds {2} mods", name, m.Merged.Name, m.Mods) : T("{0} is back on its own; the other mod is back too", name), null);
+        _modsLoaded = false;
+        _folderSig = "";
+        await LoadModsAsync();
     }
 
     // ---------- what a package holds ----------
