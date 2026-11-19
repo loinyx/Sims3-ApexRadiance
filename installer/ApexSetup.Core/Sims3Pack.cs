@@ -13,6 +13,11 @@ public static class Sims3Pack
     public sealed record Packed(string Name, long Offset, long Length, string ContentType);
     public sealed record Info(string Type, string DisplayName, string Description, long DataStart, List<Packed> Files)
     {
+        // what it needs installed, as the manifest's <Dependency> ids: "0x" then a 32-bit id, 8 zero digits, the id again
+        public IReadOnlyList<uint> Dependencies { get; init; } = [];
+        // the store items among them (the base game's 050cffe8 and the packs' 062d9a.. ids set aside: which pack each is
+        // is unverified)
+        public IEnumerable<uint> StoreDependencies => Dependencies.Where(d => d != 0x050CFFE8 && d >> 12 != 0x062D9);
         // (what the launcher can take out into Mods; the rest is left to the game's launcher)
         public bool Extractable => Type is not ("lot" or "household" or "world" or "") && Files.Any(f => f.Name.EndsWith(".package", StringComparison.OrdinalIgnoreCase));
     }
@@ -40,8 +45,11 @@ public static class Sims3Pack
                 if (name.Length == 0 || off < 0 || len <= 0 || dataStart + off + len > f.Length) return null; // (a manifest that points outside the file)
                 files.Add(new(name, off, len, (string?)p.Element("ContentType") ?? ""));
             }
+            var deps = root.Elements("Dependencies").Elements("Dependency").Select(x => ((string?)x)?.Trim() ?? "")
+                .Where(s => s.Length >= 10 && s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                .Select(s => uint.TryParse(s.AsSpan(2, 8), System.Globalization.NumberStyles.HexNumber, null, out var v) ? v : 0).Where(v => v != 0).Distinct().ToList();
             return new((string?)root.Attribute("Type") ?? "", (string?)root.Element("DisplayName") ?? Path.GetFileNameWithoutExtension(path),
-                (string?)root.Element("Description") ?? "", dataStart, files);
+                (string?)root.Element("Description") ?? "", dataStart, files) { Dependencies = deps };
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Xml.XmlException or EndOfStreamException or ArgumentException) { return null; }
     }

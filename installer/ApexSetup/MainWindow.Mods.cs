@@ -23,6 +23,7 @@ public sealed partial class MainWindow
         AsiMods = "*asi", PackMods = "*sims3pack", LibraryMods = "*library", NewTag = "*newtag", InstalledMods = "*installed";
     // what the game's own launcher installed into its cache (null: not read yet)
     List<InstalledRow>? _installed;
+    HashSet<uint>? _installedIds;
     string _modPlace = AllMods;
     List<ModRow> _modRows = [];
     readonly ObservableCollection<ModRow> _modShown = [];
@@ -1162,6 +1163,7 @@ public sealed partial class MainWindow
     {
         var docs = Docs;
         var items = await Task.Run(() => InstalledContent.Read(docs));
+        _installedIds = await Task.Run(() => InstalledContent.InstalledIds(docs));
         _installed = items.OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase).Select(i => new InstalledRow(i, KindLabel(i.Kind), KindIcon(i.Kind))).ToList();
         _folderSig = "";
         if (_step == ModsScreen) FillMods();
@@ -1423,6 +1425,15 @@ public sealed partial class MainWindow
         }
         Fact(T("Type"), kinds);
         Fact(T("File"), Val(m.Name));
+        // a lot or world in Downloads: the store items it uses, installed or not
+        if (m.FileType == "sims3pack" && _installedIds is { } have && Sims3Pack.Read(m.Path) is { } pack && pack.StoreDependencies.ToList() is { Count: > 0 } needs)
+        {
+            var missing = needs.Count(d => !have.Contains(d));
+            var v = Val(missing == 0 ? (needs.Count == 1 ? T("1, installed") : T("{0}, all installed", needs.Count))
+                : T("{0} of {1} not installed: get them from the store, or the lot shows without them", missing, needs.Count));
+            if (missing > 0) v.Foreground = Res("ApexWarningBrush");
+            Fact(T("Store items"), v);
+        }
         // the creator: the guess shows as the box's hint until the player writes one
         var (who, guessed) = ModCreators.Of(m, _modCreatorGuess);
         var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 12, MinWidth = 0, Padding = new Thickness(8, 4, 8, 4) };

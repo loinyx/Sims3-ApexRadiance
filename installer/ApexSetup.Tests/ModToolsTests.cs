@@ -125,6 +125,17 @@ static class ModToolsTests
                 && File.Exists(Path.Combine(mods, "Packages", "Pretty Chairs", "a.package")) && !File.Exists(Path.Combine(mods, "Packages", "Pretty Chairs", "b.package"))
                 && File.Exists(Path.Combine(docs, "Downloads", "lot.sims3pack")) && s3.Skipped.Any(x => x.Contains("b.package")),
                 "sims3pack: an object set taken out into its own folder, a broken package in it refused, a lot left for the game's launcher");
+            // what a lot needs: its manifest's dependencies, the base game and the packs set aside; and the installed ids the
+            // game's cache directory records (bytes 8 to 11 of each item's 16-byte id)
+            File.WriteAllBytes(Path.Combine(drop, "needs.sims3pack"), Sims3PackDeps("lot", "0x5ad2691e000000005ad2691e00000000", "0x050cffe800000000050cffe800000000", "0x062d9a0700000000062d9a0700000000"));
+            var needs = Sims3Pack.Read(Path.Combine(drop, "needs.sims3pack"));
+            var record = new byte[52];
+            byte[] id = [1, 2, 3, 4, 5, 6, 7, 8, 0x5A, 0xD2, 0x69, 0x1E, 9, 10, 11, 12];
+            id.CopyTo(record, 4); id.CopyTo(record, 36);
+            byte[] base3 = [0x05, 0x0C, 0xFF, 0xE8]; base3.CopyTo(record, 20); base3.CopyTo(record, 28);
+            check(needs is { Dependencies.Count: 3 } && needs.StoreDependencies.SequenceEqual([0x5AD2691Eu]) && InstalledContent.IdsIn(record).SequenceEqual([0x5AD2691Eu])
+                  && !InstalledContent.IdsIn(new byte[52]).Any(),
+                "sims3pack: the store items a lot needs, matched to the ids of what the game's launcher installed");
 
             // a folder so deep that the file would pass the game's 260-character path: not installed, said why
             var deep = Path.Combine("Packages", new string('d', 120), new string('e', 120));
@@ -191,6 +202,15 @@ static class ModToolsTests
     }
 
     // a Sims3Pack as the game writes one: uint32 7, "TS3Pack", uint16 version, uint32 manifest length, the manifest, the files
+    static byte[] Sims3PackDeps(string type, params string[] deps)
+    {
+        var x = System.Text.Encoding.UTF8.GetBytes($"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Sims3Package Type=\"{type}\"><DisplayName>needs</DisplayName><Dependencies>{string.Concat(deps.Select(d => $"<Dependency>{d}</Dependency>"))}</Dependencies></Sims3Package>");
+        using var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        w.Write(7u); w.Write("TS3Pack"u8.ToArray()); w.Write((ushort)0x0501); w.Write((uint)x.Length); w.Write(x);
+        return ms.ToArray();
+    }
+
     static byte[] Sims3PackFile(string type, string name, params (string Name, byte[] Data)[] files)
     {
         var xml = new System.Text.StringBuilder($"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Sims3Package Type=\"{type}\" SubType=\"0x00000000\"><DisplayName>{name}</DisplayName>");

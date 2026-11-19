@@ -119,7 +119,7 @@ public static class ModKinds
             foreach (var k in direct[e.Type]) Add(k);
         try
         {
-            using var f = File.OpenRead(path);
+            using var f = Dbpf.OpenShared(path);
             var parsed = 0;
             foreach (var e in index)
             {
@@ -155,7 +155,7 @@ public static class ModKinds
         if (items.Count < MaxItems)
             try
             {
-                using var f = File.OpenRead(path);
+                using var f = Dbpf.OpenShared(path);
                 foreach (var e in index.Where(e => e.Type != Cwal && CommonAt.ContainsKey(e.Type)).Take(MaxItems - items.Count))
                     if (Dbpf.Read(f, e, 1 << 20) is { } d && Catalog(e.Type, e.Instance, d) is { } item) items.Add(item);
             }

@@ -9,11 +9,14 @@ public static class Dbpf
 
     const int MaxEntries = 200_000; // (no real package comes close; a bigger count is a damaged header)
 
+    // read only, alongside a program that has the file open to write (the game holds its DCCache this way while it runs)
+    public static FileStream OpenShared(string path) => new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
     public static List<Entry> Index(string path)
     {
         try
         {
-            using var f = File.OpenRead(path);
+            using var f = Dbpf.OpenShared(path);
             return Index(f);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or EndOfStreamException) { return []; }
@@ -58,7 +61,7 @@ public static class Dbpf
     {
         try
         {
-            using var f = File.OpenRead(path);
+            using var f = Dbpf.OpenShared(path);
             return Read(f, e, max);
         }
         catch (Exception x) when (x is IOException or UnauthorizedAccessException) { return null; }

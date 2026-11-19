@@ -48,6 +48,37 @@ public static class InstalledContent
         return list;
     }
 
+    // The ids other content names installed items by: each cache file's directory (type 0x7672F0C5, big-endian) holds a
+    // record per installed item: a record number, the item's 16-byte id, the product it needs (16 bytes: an id, 4 zero
+    // bytes, the id, 4 zero bytes), the item's id again, then its resources. A Sims3Pack's <Dependency> on a store item is
+    // bytes 8 to 11 of that item's id (checked: the 13 store items a player's 9 lots and worlds use, each found once in
+    // 5,927 records).
+    public const uint DirectoryType = 0x7672F0C5;
+    public static HashSet<uint> InstalledIds(string docs)
+    {
+        var ids = new HashSet<uint>();
+        foreach (var f in Files(docs))
+            try
+            {
+                foreach (var e in Dbpf.Index(f).Where(e => e.Type == DirectoryType))
+                    if (Dbpf.Read(f, e) is { } d) ids.UnionWith(IdsIn(d));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) { Engine.Log(e); }
+        return ids;
+    }
+
+    public static IEnumerable<uint> IdsIn(byte[] d)
+    {
+        for (var i = 0; i + 52 <= d.Length; i++)
+        {
+            var s = d.AsSpan(i);
+            if (!s.Slice(4, 16).SequenceEqual(s.Slice(36, 16)) || !s.Slice(20, 4).SequenceEqual(s.Slice(28, 4))
+                || s.Slice(24, 4).IndexOfAnyExcept((byte)0) >= 0 || s.Slice(32, 4).IndexOfAnyExcept((byte)0) >= 0 || s.Slice(4, 16).IndexOfAnyExcept((byte)0) < 0) continue;
+            yield return System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(s.Slice(12, 4));
+            i += 51;
+        }
+    }
+
     // an item's thumbnail from the same file: an object's THUM by its instance or ICON by its picture, a part's own
     static readonly Dictionary<string, List<Dbpf.Entry>> Indexes = new(StringComparer.OrdinalIgnoreCase);
     public static byte[]? Thumbnail(InstalledItem item)
