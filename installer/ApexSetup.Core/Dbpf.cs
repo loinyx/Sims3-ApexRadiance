@@ -79,7 +79,7 @@ public static class Dbpf
             f.ReadExactly(data);
             return e.Compressed ? RefPack.Decode(data, max) : data;
         }
-        catch (Exception x) when (x is IOException or UnauthorizedAccessException or EndOfStreamException or InvalidDataException) { return null; }
+        catch (Exception x) when (x is IOException or UnauthorizedAccessException or EndOfStreamException or InvalidDataException or IndexOutOfRangeException) { return null; }
     }
 
     // the first resource of one of the types, in that order of preference
@@ -99,6 +99,7 @@ public static class RefPack
     {
         if (src.Length < 5 || src[1] != 0xFB) throw new InvalidDataException("Not RefPack");
         var large = (src[0] & 0x80) != 0;
+        if (large && src.Length < 6) throw new InvalidDataException("Not RefPack");
         int pos = 2, size = large ? src[2] << 24 | src[3] << 16 | src[4] << 8 | src[5] : src[2] << 16 | src[3] << 8 | src[4];
         pos += large ? 4 : 3;
         if (size < 0 || size > max) throw new InvalidDataException("RefPack size");

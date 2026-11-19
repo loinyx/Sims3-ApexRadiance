@@ -43,6 +43,21 @@ public sealed class ConflictCheck : IModCheck
     {
         var fp = Fingerprint(mods);
         if (Load() is { } cached && cached.Fingerprint == fp) return Last = cached;
+        // one scan at a time per set of mods: a second check while it runs (Play checks twice) waits on that one
+        Task<ConflictResult> scan;
+        lock (Gate)
+        {
+            if (Running is { } run && run.Fp == fp && !run.Scan.IsCompleted) scan = run.Scan;
+            else { scan = Start(fp, game, docs); Running = (fp, scan); }
+        }
+        if (!scan.Wait(Timeout)) { Engine.Log(new TimeoutException($"Mod conflict scan over {Timeout.TotalSeconds:0} s; kept for the next check when it ends")); return null; }
+        return Last = scan.Result;
+    }
+
+    static (string Fp, Task<ConflictResult> Scan)? Running;
+
+    Task<ConflictResult> Start(string fp, Game game, string docs)
+    {
         Scans++;
         var o = new ModConflicts.Options
         {
@@ -61,8 +76,7 @@ public sealed class ConflictCheck : IModCheck
             Save(result);
             return result;
         });
-        if (!scan.Wait(Timeout)) { Engine.Log(new TimeoutException($"Mod conflict scan over {Timeout.TotalSeconds:0} s; kept for the next check when it ends")); return null; }
-        return Last = scan.Result;
+        return scan;
     }
 
     public IEnumerable<ModFinding> Check(IReadOnlyList<ModFile> mods, Game game, string docs)

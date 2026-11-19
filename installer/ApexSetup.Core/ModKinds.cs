@@ -148,7 +148,7 @@ public static class ModKinds
                 }
             }
         }
-        catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+        catch (Exception x) when (x is IOException or UnauthorizedAccessException or EndOfStreamException or InvalidDataException or IndexOutOfRangeException) { }
 
         // catalog types besides OBJD/CWAL: their names and thumbnails, for the details pane
         // (shortcut: only the first MaxItems items are kept, enough for the Mods screen's list)
@@ -159,7 +159,7 @@ public static class ModKinds
                 foreach (var e in index.Where(e => e.Type != Cwal && CommonAt.ContainsKey(e.Type)).Take(MaxItems - items.Count))
                     if (Dbpf.Read(f, e, 1 << 20) is { } d && Catalog(e.Type, e.Instance, d) is { } item) items.Add(item);
             }
-            catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            catch (Exception x) when (x is IOException or UnauthorizedAccessException or EndOfStreamException or InvalidDataException or IndexOutOfRangeException) { }
 
         // blend geometry is a slider's on its own, a hair's or beard's morphs inside a CAS package (Cabelos.package,
         // Barbas.package); a light (LITE, _INI) is a lighting mod's on its own, an object's own lamp beside an OBJD

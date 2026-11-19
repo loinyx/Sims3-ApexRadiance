@@ -92,6 +92,9 @@ static class ModMergeTests
             var packed = Pack(plain);
             check(RefPack.Decode(packed).AsSpan().SequenceEqual(plain) && ModConflicts.RefPack(packed).AsSpan().SequenceEqual(plain) && packed.Length < plain.Length,
                 "merge: the test's RefPack stream decodes with both readers");
+            var cut = false;
+            try { RefPack.Decode([0x90, 0xFB, 0, 0, 1]); } catch (InvalidDataException) { cut = true; }
+            check(cut, "refpack: a 5-byte stream with the large flag is refused as data, not an index error");
             string A = @"Packages\a.package", B = @"Overrides\b.package", S = @"Packages\s.package";
             Pkg(Path.Combine(mods, A), Raw(1, 1, "A1"), (2, 2, packed, true, plain.Length), Raw(3, 3, "fromA"));
             Pkg(Path.Combine(mods, B), Raw(3, 3, "fromB"), Raw(4, 4, "B4"));

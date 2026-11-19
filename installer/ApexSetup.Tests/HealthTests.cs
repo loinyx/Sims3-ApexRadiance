@@ -217,6 +217,10 @@ static class HealthTests
         var warm = new ConflictCheck { Offline = true };
         warm.Check(Mods(), g, docs).ToList();
         check(warm.Scans == 0, "conflicts: the slow scan finished in the background and is reused");
+        File.Delete(Path.Combine(Paths.Data, "conflicts.json"));
+        var (one, two) = (new ConflictCheck { Offline = true, Scan = o => { Thread.Sleep(500); return ModConflicts.Scan(o); } }, new ConflictCheck { Offline = true });
+        Parallel.Invoke(() => one.Check(Mods(), g, docs).ToList(), () => { Thread.Sleep(100); two.Check(Mods(), g, docs).ToList(); });
+        check(one.Scans + two.Scans == 1 && two.Last is not null, $"conflicts: a second check while one scans waits on it, no second scan ({one.Scans} + {two.Scans})");
     }
 
     // read-only on the player's folders: what each analyzer finds

@@ -72,7 +72,7 @@ public sealed partial class MainWindow
         {
             try
             {
-                if (mods is null) try { mods = read = Mods.List(g, docs); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
+                if (mods is null) try { mods = read = Mods.List(g, docs, kinds: false); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
                 return Health.Gather(g, s, docs, apex, mods, mods is null ? null : conflicts);
             }
             catch (Exception e) { App.Log(e); return []; }
