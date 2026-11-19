@@ -17,14 +17,14 @@ public static class Uninstall
         var dir = Manifest.DirOf(g.Bin);
         if (Manifest.Load(g.Bin).Files.Count == 0)
         {
-            try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+            try { if (Directory.Exists(dir)) Fs.Retry(() => Directory.Delete(dir, true)); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(dir); }
         }
         else left.Add(dir); // (a file could not be put back: its backup stays where Repair can find it)
         if (!keepSettings)
         {
             var apex = Path.Combine(docs, "Apex Radiance");
-            try { if (Directory.Exists(apex)) Directory.Delete(apex, true); }
+            try { if (Directory.Exists(apex)) Fs.Retry(() => Directory.Delete(apex, true)); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(apex); }
         }
         return left;

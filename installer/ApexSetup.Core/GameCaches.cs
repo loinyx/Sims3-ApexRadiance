@@ -83,7 +83,9 @@ public static class GameCaches
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             Fs.Retry(() => File.Move(f, dest, true));
         }
-        Directory.Delete(from, true);
+        // (an emptied backup an antivirus still holds is dropped like an old one: hidden now, deleted by the next Clean or Forget)
+        try { Fs.Retry(() => Directory.Delete(from, true)); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); Forget(); }
         return true;
     }
 

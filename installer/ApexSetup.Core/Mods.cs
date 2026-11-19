@@ -144,10 +144,10 @@ public static class Mods
         {
             var target = Free(Path.Combine(docs, m.Rel));
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Move(m.Path, target);
+            Fs.Retry(() => File.Move(m.Path, target));
             n++;
         }
-        try { if (Directory.Exists(Disabled(docs)) && !Directory.EnumerateFileSystemEntries(Disabled(docs), "*", SearchOption.AllDirectories).Any(e => File.Exists(e))) Directory.Delete(Disabled(docs), true); }
+        try { if (Directory.Exists(Disabled(docs)) && !Directory.EnumerateFileSystemEntries(Disabled(docs), "*", SearchOption.AllDirectories).Any(e => File.Exists(e))) Fs.Retry(() => Directory.Delete(Disabled(docs), true)); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return n;
     }
