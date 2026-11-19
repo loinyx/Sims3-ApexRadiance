@@ -43,7 +43,7 @@ public partial class App : Application
 
     static readonly Queue<string> Recent = new();
 
-    public static void Log(Exception? e)
+    public static void Log(object? e)
     {
         string ctx;
         try { ctx = Context(); } catch (Exception) { ctx = ""; }

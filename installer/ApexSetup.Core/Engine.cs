@@ -30,6 +30,9 @@ public sealed class Manifest
     public List<ManifestFile> Files { get; set; } = new();
     public Dictionary<string, string> Versions { get; set; } = new();
     public string? OptionsBackup { get; set; }     // copy of Options.ini taken before the bridge replaced the game's own D3D9
+    // Sims 3 Modernization's channel the player chose: "experimental", or null for stable (left out of the file when null)
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModernizationChannel { get; set; }
     [System.Text.Json.Serialization.JsonIgnore] public string Bin { get; private set; } = "";
 
     public static string DirOf(string bin) => System.IO.Path.Combine(bin, "Apex Radiance backup");
@@ -110,6 +113,8 @@ public sealed class Manifest
 public interface ISource
 {
     Task<(List<(string Src, string Dest)> Files, string Version)> FetchAsync(string component, Game g, string docs, CancellationToken ct);
+    // Sims 3 Modernization from its experimental channel (-exp. prereleases), stable when off
+    bool ModernizationExperimental => false;
 }
 
 public sealed class GitHubSource : ISource
@@ -120,6 +125,8 @@ public sealed class GitHubSource : ISource
 
     // the releases Setup showed, by repo: every component of a run comes from them, not from a newer one published since
     public IReadOnlyDictionary<string, Release?>? Shown { get; init; }
+    public bool ModernizationExperimental { get; init; }
+    public Action<string>? Log { get; init; }
     readonly Dictionary<string, Task<Release>> _rel = new();
     Task<Release> Latest(string repo, CancellationToken ct) =>
         _rel.TryGetValue(repo, out var t) ? t : _rel[repo] = Shown?.GetValueOrDefault(repo) is { } r ? Task.FromResult(r) : Releases.LatestAsync(repo, ct);
@@ -221,10 +228,13 @@ public sealed class GitHubSource : ISource
             {
                 var r = await Latest(Releases.Modernization, ct);
                 // a release can ship without this edition's build (v0.2.11: no ts3native-ea169): the newest recent one with it,
-                // its ts3native and ts3fixes.package together
-                if (!Engine.HasModernizationBuild(r, g.Edition))
-                    r = (await Releases.RecentAsync(Releases.Modernization, ct)).FirstOrDefault(x => Engine.HasModernizationBuild(x, g.Edition))
+                // its ts3native and ts3fixes.package together. The experimental channel takes the newest -exp. release with the
+                // edition's build, else stable (Setup's shown release is already that pick)
+                var exp = ModernizationExperimental && !Releases.IsExperimental(r.Tag);
+                if (exp || !Engine.HasModernizationBuild(r, g.Edition))
+                    r = Engine.PickModernization(r, await Releases.RecentAsync(Releases.Modernization, ct, exp), g.Edition, exp)
                         ?? throw new InvalidOperationException($"Sims 3 Modernization has no build for the {(g.Edition == Edition.EA ? "EA app" : "Steam")} version in its recent releases. Turn it off in Components and install again.");
+                Log?.Invoke($"Sims 3 Modernization {r.Tag}: {(Releases.IsExperimental(r.Tag) ? "experimental" : ModernizationExperimental ? "stable (no experimental build for this edition)" : "stable")}");
                 var prefix = Engine.ModernizationPrefix(g.Edition);
                 var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n.StartsWith(prefix) && n.EndsWith(".zip")), _tmp, ct));
                 AddTree(files, dir, bin);
@@ -275,6 +285,21 @@ public static class Engine
     public static string ModernizationPrefix(Edition e) => e == Edition.EA ? "ts3native-ea169-" : "ts3native-v";
     public static bool HasModernizationBuild(Release r, Edition e) =>
         r.Assets.Any(a => a.Name.StartsWith(ModernizationPrefix(e)) && a.Name.EndsWith(".zip")) && r.Assets.Any(a => a.Name == "ts3fixes.package");
+
+    // The release to install: experimental, the newest -exp. one with this edition's build; else (or none) the latest stable
+    // release when it has the build, else the newest recent stable one with it; null when none has. recent null: the listing
+    // failed; then experimental is unknown (null: no update and no channel change shown, the install lists again)
+    public static Release? PickModernization(Release? latest, IEnumerable<Release>? recent, Edition e, bool experimental)
+    {
+        if (recent is null)
+            return experimental ? null : latest is not null && !Releases.IsExperimental(latest.Tag) && HasModernizationBuild(latest, e) ? latest : null;
+        Release? best = null;
+        if (experimental)
+            foreach (var r in recent)
+                if (Releases.IsExperimental(r.Tag) && HasModernizationBuild(r, e) && (best is null || Releases.Newer(r.Version, best.Version))) best = r;
+        return best ?? (latest is not null && !Releases.IsExperimental(latest.Tag) && HasModernizationBuild(latest, e) ? latest
+            : recent.FirstOrDefault(r => !Releases.IsExperimental(r.Tag) && HasModernizationBuild(r, e)));
+    }
 
     // Files a component may own although Setup did not install them (installed by hand): removed by Remove, never restored.
     internal static readonly Dictionary<string, string[]> Known = new()
@@ -493,20 +518,24 @@ public static class Engine
                 }
                 // a bridge installed by hand is this component's own files, not foreign ones to back up and restore on removal
                 var own = c == Components.Bridge && s.Layer == Layer.Bridge;
+                // Sims 3 Modernization moved between stable and experimental: that channel's ts3native.ini replaces the player's
+                var channelLeft = c == Components.Modernization && m.Versions.GetValueOrDefault(c) is { Length: > 0 } was
+                    && Releases.IsExperimental(was) != Releases.IsExperimental(version) ? Releases.IsExperimental(was) ? "experimental" : "stable" : null;
                 // each file's size before it is placed: afterwards every file must be there whole, else an antivirus took it
                 var sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
                 foreach (var (from, to) in files)
                 {
                     try
                     {
-                        // (the player's ts3native.ini is kept as it is: no size to check)
-                        if (!(Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))) sizes[to] = new FileInfo(from).Length;
-                        Place(m, c, from, to, own);
+                        // (the player's ts3native.ini is kept as it is, except on a channel change: no size to check)
+                        if (channelLeft is not null || !(Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))) sizes[to] = new FileInfo(from).Length;
+                        Place(m, c, from, to, own, channelLeft);
                     }
                     catch (FileNotFoundException e) { throw Antivirus(e.FileName ?? from, File.Exists(from) ? g.Bin : GitHubSource.TempRoot); }
                     catch (IOException e) when (IsVirusBlock(e)) { throw Antivirus(Path.GetFileName(to), g.Bin); }
                 }
                 if (Missing(sizes) is { Count: > 0 } gone) throw Antivirus(string.Join(", ", gone), g.Bin);
+                if (c == Components.Modernization) m.ModernizationChannel = src.ModernizationExperimental ? "experimental" : null;
                 if (c == Components.Bridge)
                     foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
                         SetTargetProcess(conf, g.Exe);
@@ -597,12 +626,19 @@ public static class Engine
             if (c == Components.Apex || s.Manifest.Versions.ContainsKey(c) || s.Manifest.Files.Any(f => f.Component == c)) Remove(g, c, docs);
     }
 
-    static void Place(Manifest m, string c, string from, string to, bool own = false)
+    static void Place(Manifest m, string c, string from, string to, bool own = false, string? channelLeft = null)
     {
         var owned = m.Files.FirstOrDefault(f => Same(f.Path, to));
-        // the player's ts3native.ini holds their feature switches: kept, only a missing one is written
+        // the player's ts3native.ini holds their feature switches: kept, only a missing one is written; on a channel change
+        // it is copied next to itself as the left channel's copy (one per channel, the last one kept), and the channel's own
+        // ini written
         if (Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))
         {
+            if (channelLeft is not null)
+            {
+                Fs.Copy(to, $"{to}.{channelLeft}.bak");
+                Fs.Copy(from, to);
+            }
             if (owned is null) m.Files.Add(new ManifestFile { Component = c, Path = to });
             else owned.Component = c;
             return;
