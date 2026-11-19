@@ -557,12 +557,12 @@ struct Params {
     float hairStrength = 0.0f;
     float simMaxShade = 0.11f;
     bool transparentHair = true;
-    bool zoomSlices = false;   // fewer slices when the camera looks far (one count per frame)
-    bool blendNormals = false; // blended normals (no per-pixel pick of the neighbour)
-    bool zoomHysteresis = false; // zoomSlices: the count switches 10% past a threshold and back 10% before it
-    bool edgeBlur = false;     // edge-aware 4x4 box from the AO pass's edge weights, no tent
-    bool blockSlices = false;  // half the directions in 4x4 blocks where the depth does not bend within reach
-    bool temporalStill = false; // Quality Low: accumulate frames with other directions while the camera is still
+    bool zoomSlices = true;   // fewer slices when the camera looks far (one count per frame)
+    bool blendNormals = true; // blended normals (no per-pixel pick of the neighbour)
+    bool zoomHysteresis = true; // zoomSlices: the count switches 10% past a threshold and back 10% before it
+    bool edgeBlur = true;     // edge-aware 4x4 box from the AO pass's edge weights, no tent
+    bool blockSlices = true;  // half the directions in 4x4 blocks where the depth does not bend within reach
+    bool temporalStill = true; // Quality Low: accumulate frames with other directions while the camera is still
 };
 
 struct State {
@@ -1762,27 +1762,30 @@ class AmbientOcclusionPatch : public ApexPatch {
             g.p.quality = kQualityShown[std::clamp(shown, 0, kQualityCount - 1)];
             changed = true;
         }
-        changed |= ApexUi::SwitchRow("Fewer directions when far", &g.p.zoomSlices,
-                                     "Fewer directions per pixel when the camera looks far away; lighter on the graphics card",
-                                     kDefaults.zoomSlices);
-        ImGui::BeginDisabled(!g.p.zoomSlices);
-        changed |= ApexUi::SwitchRow("Steady direction count", &g.p.zoomHysteresis,
-                                     "Keeps the direction count steady while the camera rests near a switch distance",
-                                     kDefaults.zoomHysteresis);
-        ImGui::EndDisabled();
-        changed |= ApexUi::SwitchRow("Fewer directions in the open", &g.p.blockSlices,
-                                     "Fewer directions where nothing is near enough to cast shade; lighter on the graphics card",
-                                     kDefaults.blockSlices);
-        changed |= ApexUi::SwitchRow("Smooth flat surfaces", &g.p.blendNormals,
-                                     "Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", kDefaults.blendNormals);
-        changed |= ApexUi::SwitchRow("Edge-aware smoothing", &g.p.edgeBlur,
-                                     "Smooths the shade without letting it bleed across the edges of objects",
-                                     kDefaults.edgeBlur);
-        ImGui::BeginDisabled(g.p.quality != 0);
-        changed |= ApexUi::SwitchRow("Refine while the camera is still", &g.p.temporalStill,
-                                     "Quality Low: builds a smoother shade over a few frames while the camera is still",
-                                     kDefaults.temporalStill);
-        ImGui::EndDisabled();
+        if (ApexUi::BeginAdvanced("AoOptions", "Advanced")) {
+            changed |= ApexUi::SwitchRow("Fewer directions when far", &g.p.zoomSlices,
+                                         "Fewer directions per pixel when the camera looks far away; lighter on the graphics card",
+                                         kDefaults.zoomSlices);
+            ImGui::BeginDisabled(!g.p.zoomSlices);
+            changed |= ApexUi::SwitchRow("Steady direction count", &g.p.zoomHysteresis,
+                                         "Keeps the direction count steady while the camera rests near a switch distance",
+                                         kDefaults.zoomHysteresis);
+            ImGui::EndDisabled();
+            changed |= ApexUi::SwitchRow("Fewer directions in the open", &g.p.blockSlices,
+                                         "Fewer directions where nothing is near enough to cast shade; lighter on the graphics card",
+                                         kDefaults.blockSlices);
+            changed |= ApexUi::SwitchRow("Smooth flat surfaces", &g.p.blendNormals,
+                                         "Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", kDefaults.blendNormals);
+            changed |= ApexUi::SwitchRow("Edge-aware smoothing", &g.p.edgeBlur,
+                                         "Smooths the shade without letting it bleed across the edges of objects",
+                                         kDefaults.edgeBlur);
+            ImGui::BeginDisabled(g.p.quality != 0);
+            changed |= ApexUi::SwitchRow("Refine while the camera is still", &g.p.temporalStill,
+                                         "Quality Low: builds a smoother shade over a few frames while the camera is still",
+                                         kDefaults.temporalStill);
+            ImGui::EndDisabled();
+            ApexUi::EndAdvanced();
+        }
         ApexUi::CardGroup("Map view");
         changed |= ApexUi::SwitchRow("Also in map view", &g.p.inMapView, "Soft shade around houses and trees when the map view is open", kDefaults.inMapView);
         if (changed) NotifySettingChanged();
