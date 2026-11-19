@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [4.0.8](4.0.8.md): no crash at start with Turbo Simulation Engine under the RTX Remix bridge (Turbo gets the device Apex draws on).
 - [4.0.7](4.0.7.md): lamp light no longer past wall ends, beside walls or under roofed rooms; switched-on lamps and top-story half walls lit at once on every story; Fewer mouse picks when still, Frame deadline while moving, the shared room solve time and six Ambient Occlusion options on by default; RTX Remix bridge fixes and Setup 1.2.7, contributed by @rodneypantonial.
 - [4.0.6](4.0.6.md): potted plants shade lamp light with soft balls baked from their mesh (87 game models, custom content baked at start), solid pots under the leaves.
 - [4.0.5](4.0.5.md): Image > Shaders in two tabs, Look and Installed shaders; Add shaders in a modal that downloads a pack as one of its shaders is added; New look; Get more packs with a search; the Apex menu drawn at the frame's own EndScene; a steady header.

@@ -8,7 +8,7 @@ worlds. Apex Radiance detects the bridge on its own and runs under it with every
 
 | | |
 |---|---|
-| Availability | Released in 3.0.0 as a separate download (`Apex-Radiance-RTX-Remix-bridge.zip`). Its `dxvk.conf` with `d3d9.countLosableResources = False` (no freeze on a switch to exclusive fullscreen or a new resolution): published again after 3.0.0. A folded install guide in Settings > Compatibility, the uncompressed-textures card and Fullscreen as Borderless under the bridge: Released in 3.1.0. Patches 0011 to 0013, Apex's guard for the old client's vertex input, the bridge logs in captures and the bridge's own Nexus file: Released in 3.1.1. Changed in 3.1.2: its `dxvk.conf` no longer forces 16x anisotropic filtering (`d3d9.samplerAnisotropy`), which marred specular on hair and other glossy textures; filtering follows the game's and the driver's settings. Patch 0014 (a new client copy starts zeroed): Released in 3.2.0. Turbo Simulation Engine's second device answered with the game's: Released in 3.2.2 |
+| Availability | Released in 3.0.0 as a separate download (`Apex-Radiance-RTX-Remix-bridge.zip`). Its `dxvk.conf` with `d3d9.countLosableResources = False` (no freeze on a switch to exclusive fullscreen or a new resolution): published again after 3.0.0. A folded install guide in Settings > Compatibility, the uncompressed-textures card and Fullscreen as Borderless under the bridge: Released in 3.1.0. Patches 0011 to 0013, Apex's guard for the old client's vertex input, the bridge logs in captures and the bridge's own Nexus file: Released in 3.1.1. Changed in 3.1.2: its `dxvk.conf` no longer forces 16x anisotropic filtering (`d3d9.samplerAnisotropy`), which marred specular on hair and other glossy textures; filtering follows the game's and the driver's settings. Patch 0014 (a new client copy starts zeroed): Released in 3.2.0. Turbo Simulation Engine's second device answered with the game's: Released in 3.2.2; with the device Apex draws on (no crash when the first device was a released probe): Released in 4.0.8 |
 | Default | Not installed |
 | Menu | Settings > Compatibility: *RTX Remix bridge: Installed* when it runs; while DXVK runs inside the game, the bridge is offered under *Optional* |
 | Configuration | `bridge.conf` (in `Game\Bin` and in `Game\Bin\.trex`) and `dxvk.conf` (in `Game\Bin`); nothing in `ApexRadiance.toml` |
@@ -91,7 +91,9 @@ Shipped in the package; players do not need to change them.
   the server (the client logs `no response from server`, then `Still waiting on the Present semaphore`) and the game
   hangs at start. With `Turbo.asi` loaded and the bridge running, Apex answers exactly that request with the game's
   device and one more reference, which Turbo's release gives back (`Hooked_CreateDevice`); the log says
-  `Second device asked with Turbo.asi loaded`. Any other request, and every setup without the bridge, goes to the
+  `Second device asked with Turbo.asi loaded`. The device given is the one Apex draws on (set at its first `EndScene`),
+  not the first HAL device created: that one can be a 0x0 probe released before Turbo asks (a crash in 4.0.7). Before
+  the game's first frame the request goes to the bridge. Any other request, and every setup without the bridge, goes to the
   client as before. Turbo's split game packages need `Turbo.asi`; its menu key, F7, also fires on Apex's Ctrl+Shift+F7.
 - **EA app 1.69.47:** works with `client.targetProcess = TS3.exe` in both `bridge.conf` files.
 - **DXVK in the game:** the bridge replaces it; the package's `d3d9.dll` takes its place.

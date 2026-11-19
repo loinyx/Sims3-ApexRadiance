@@ -126,6 +126,8 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 | 2026-11-13 | 3.2.1 (published) | Turbo Simulation Engine V3.4 (`Turbo.asi` and its split packages), no Sims3SettingsSetter, in-game runner on a town save | hang at start: the client logged `no response from server` right after Turbo's second device, then `Still waiting on the Present semaphore`; the save never loaded |
 | 2026-11-13 | release/3.2.2 c2697794, standard flavour | The same with Sims3SettingsSetter, the whole route (orbits, a pan over 8 lots, 7 min) | pass, no error in the log; `Second device asked with Turbo.asi loaded` once; 107 shaders from the ASI, 0 to compile |
 | 2026-11-13 | release/3.2.2 c2697794, standard flavour | Without Turbo, same route | pass, no error, one device as before |
+| 2026-11-19 | 4.0.7 (published), a player's crash report | Turbo and the bridge; a 0x0 HAL device created first, then the game's 1920x1080 one | crash at the start of the world load: access violation at `AddRef` in `Hooked_CreateDevice` on the released 0x0 device |
+| 2026-11-19 | release/4.0.8 fix, standard flavour, without Turbo | Start and world load under the bridge | pass, one device, no error |
 
 ### Rewind mode (patch 0015)
 
@@ -168,6 +170,8 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 
 ## Open checks
 
+- 4.0.8's Turbo fix in game: Turbo Simulation Engine under the bridge with a 0x0 device created before the game's
+  (the crash report's setup). Not run: no `Turbo.asi` on the test machine.
 - Rewind mode (patch 0015) in game: the mode on and idle for a session, the numbers of a plan in a loaded world,
   and one rewind. The rewind Op itself (queue positions, the server's wait for the client) has no offline test:
   it needs a host that puts the game process back.
