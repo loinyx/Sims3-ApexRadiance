@@ -1041,6 +1041,58 @@ void PenumbraCheck() {
     }
 }
 
+// A wall's end at a T joint (as a recorded lot has it): room A's wall on x = 9 runs on past the joint, the wall on z = 21 closing
+// room B ends on it, B's lamp 2 m behind that wall. A's end texels sit 6 cm past the joint's line, so the ray to the lamp
+// crosses B's wall about 7.5 cm before the point, between what the walk's last step and the centre ray's test saw: part of the
+// disc passed (25 to 44% of the lamp, a band one texel wide at the joint)
+void TJointCheck() {
+    std::printf("\n[shadows] a wall's end at a T joint, the lamp of the room behind the other wall\n");
+    using namespace RtLampProxy;
+    Scene sc;
+    sc.name = "T joint";
+    const int W = 24, H = 32;
+    Story st;
+    st.story = 0, st.w = W, st.h = H;
+    st.floorY.assign(W * H, kNoFloor);
+    st.roofed.assign(W * H, 0);
+    st.ceil.assign(W * H, kNoFloor);
+    st.placed.assign(W * H, 0);
+    st.plane = 0.0f;
+    for (int z = 17; z < 25; z++) st.edges.push_back(EdgeX(9, z, -0.02f, 2.98f));
+    for (int x = 9; x < 12; x++) st.edges.push_back(EdgeZ(x, 21, -0.02f, 2.98f));
+    sc.lot.stories.push_back(std::move(st));
+    LampDef l;
+    l.pos[0] = 10.5f, l.pos[1] = 2.19f, l.pos[2] = 19.0f;
+    l.name = "room B's lamp";
+    sc.lamps.push_back(l);
+    for (const float z : {21.06f, 21.18f, 21.3f})
+        for (float y = 0.12f; y < 2.9f; y += 0.125f) sc.recv.push_back(Receiver{{9.05f, y, z}, {1, 0, 0}, 0, 0});
+    ShadowTally t;
+    ShadowCompare(sc, 256, 0.15f, t, true);
+    Check(t.n > 0 && t.within2 == t.n, std::format("T joint: {} of {} wall texels by the joint take light from the lamp behind the other wall", t.n - t.within2, t.n));
+}
+// Floor texels just behind a solid wall, a lamp close on its other side (a red band on the ground along an outer wall).
+// Every lamp distance and height, the floor 6.25 to 20 cm behind the wall: no texel more than 2/255 off the reference (before the
+// centre ray's wider window, 13 to 26 of 1344 texels leaked from 6.25 to 7 cm)
+void BesideWallFloorCheck() {
+    std::printf("\n[shadows] the floor just behind a wall, the lamp close on its other side\n");
+    for (const float behind : {0.039f, 0.055f, 0.0625f, 0.07f, 0.09f, 0.125f, 0.2f}) {
+        long n = 0, off = 0;
+        for (const float lampZ : {9.6f, 9.3f, 8.9f, 8.0f})
+            for (const float lampY : {0.5f, 1.2f, 2.2f}) {
+                Scene sc = WallScene("solid wall", false, false, lampZ, lampY);
+                sc.recv.clear();
+                for (float x = 6.0f; x < 13.0f; x += 0.0625f) sc.recv.push_back(Receiver{{x, 0.0f, 10.0f + behind}, {0, 1, 0}, 1, 0});
+                ShadowTally t;
+                ShadowCompare(sc, 256, 0.15f, t, false);
+                n += t.n, off += t.n - t.within2;
+            }
+        std::printf("  floor %.4f m behind the wall: %ld texels, %ld more than 2/255 off the reference\n", behind, n, off);
+        // (no floor texel centre lies closer to a wall's line than half a sharper floor texel; closer rows are printed only)
+        if (behind >= 0.0625f) Check(n > 0 && off == 0, std::format("the floor {:.4f} m behind a wall: {} of {} texels take light through it", behind, off, n));
+    }
+}
+
 // ---------------------------------------------------------------- 3. the bake split and the blur, bit for bit
 bool SplitCheck() {
     std::printf("\n[bake split] base + GPU lamps against the game's texel (no occluder: share 1)\n");
@@ -4999,6 +5051,11 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (!MakeShaders()) return 1;
+    if (std::getenv("RT_ONLY_JOINTS")) { // (a quick run of the wall joint and wall-side floor scenes alone)
+        TJointCheck();
+        BesideWallFloorCheck();
+        return failures ? 1 : 0;
+    }
     TileDragTiming();
     FloorLineSweep();
     SplitCheck();
@@ -5016,6 +5073,8 @@ int main(int argc, char** argv) {
     Room0PhysCheck();
     SharperTargetCheck();
     PenumbraCheck();
+    TJointCheck();
+    BesideWallFloorCheck();
 #ifdef RT_OBJECT_SHAPES
     ObjectParityCheck();
 #endif
