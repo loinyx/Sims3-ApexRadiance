@@ -1,33 +1,47 @@
-0012: SetFVF and SetVertexDeclaration replace each other in the client's state, as in d3d9 and DXVK. Upstream kept the previous declaration after SetFVF and the previous FVF after SetVertexDeclaration, so GetVertexDeclaration returned an old declaration while an FVF was in use; a caller that saves the vertex input and restores it with 'declaration if any, else FVF' (Apex Radiance's high-precision scene resolve on the loading screen) put a game shader's declaration back, and the game drew its fixed-function UI with it (a black quadrant). After SetVertexDeclaration GetFVF now returns 0, as in d3d9. After SetFVF GetVertexDeclaration returns no declaration, where d3d9 returns one made for the FVF; restoring the FVF gives the same result. The FVF moves into the client's State so a state block captures and applies it with the declaration (upstream applied the declaration and left the FVF as it was).
+0012: SetFVF and SetVertexDeclaration replace each other in the client's state, as in d3d9 and DXVK. Upstream kept the previous declaration after SetFVF and the previous FVF after SetVertexDeclaration, so GetVertexDeclaration returned an old declaration while an FVF was in use; a caller that saves the vertex input and restores it with 'declaration if any, else FVF' (Apex Radiance's high-precision scene resolve on the loading screen) put a game shader's declaration back, and the game drew its fixed-function UI with it (a black quadrant). After SetVertexDeclaration GetFVF now returns 0, as in d3d9. After SetFVF GetVertexDeclaration returns no declaration, where d3d9 returns one made for the FVF; restoring the FVF gives the same result. The FVF moves into the client's State so a state block captures and applies it with the declaration (upstream applied the declaration and left the FVF as it was). SetFVF(0) leaves the state as it is, because d3d9 ignores an FVF of 0. While a state block is recorded, both setters write the FVF and the declaration into the recorded block and mark its vertex declaration dirty, and the device's state stays as it is, as on the server; Apply then sets the pair (from the review of dxvk-remix pull request 170).
 
 Applies after 0001-0011 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
 
 diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
-index 680aecb..33e6403 100644
+index 680aecb..77f1aa0 100644
 --- a/bridge/src/client/d3d9_device.cpp
 +++ b/bridge/src/client/d3d9_device.cpp
-@@ -2587,6 +2587,7 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::SetVertexDeclaration(IDirect3DVertexD
+@@ -2586,7 +2586,13 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::SetVertexDeclaration(IDirect3DVertexD
+   {
      {
        BRIDGE_DEVICE_LOCKGUARD();
-       m_state.vertexDecl = MakeD3DAutoPtr(pLssVtxDecl);
-+      m_state.fvf = 0; // a declaration replaces the FVF, as in d3d9 (GetFVF returns 0)
+-      m_state.vertexDecl = MakeD3DAutoPtr(pLssVtxDecl);
++      // While a state block is recorded, the pair goes into the block and the device's state stays, as on the server.
++      State& state = m_stateRecording ? m_stateRecording->m_captureState : m_state;
++      state.vertexDecl = MakeD3DAutoPtr(pLssVtxDecl);
++      state.fvf = 0; // a declaration replaces the FVF, as in d3d9 (GetFVF returns 0)
++      if (m_stateRecording) {
++        m_stateRecording->m_dirtyFlags.vertexDecl = true;
++      }
      }
      {
        BRIDGE_DEVICE_LOCKGUARD();
-@@ -2630,7 +2631,11 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::SetFVF(DWORD FVF) {
+@@ -2630,7 +2636,18 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::SetFVF(DWORD FVF) {
    {
      {
        BRIDGE_DEVICE_LOCKGUARD();
 -      m_FVF = FVF;
-+      m_state.fvf = FVF;
-+      // An FVF replaces the declaration. d3d9 then returns a declaration made for the FVF from GetVertexDeclaration;
-+      // the client returns none, so a caller that saves and restores the input puts the FVF back, not the previous
-+      // declaration (Apex Radiance's resolve did and the game drew its loading-screen UI with a game shader's layout)
-+      m_state.vertexDecl.reset(nullptr);
++      // d3d9 ignores an FVF of 0, so the declaration stays.
++      if (FVF != 0) {
++        State& state = m_stateRecording ? m_stateRecording->m_captureState : m_state;
++        state.fvf = FVF;
++        // An FVF replaces the declaration. d3d9 then returns a declaration made for the FVF from GetVertexDeclaration;
++        // the client returns none, so a caller that saves and restores the input puts the FVF back, not the previous
++        // declaration (Apex Radiance's resolve did and the game drew its loading-screen UI with a game shader's layout)
++        state.vertexDecl.reset(nullptr);
++        if (m_stateRecording) {
++          m_stateRecording->m_dirtyFlags.vertexDecl = true;
++        }
++      }
      }
      {
        BRIDGE_DEVICE_LOCKGUARD();
-@@ -2656,7 +2661,7 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::GetFVF(DWORD* pFVF) {
+@@ -2656,7 +2673,7 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::GetFVF(DWORD* pFVF) {
  
    {
      BRIDGE_DEVICE_LOCKGUARD();
