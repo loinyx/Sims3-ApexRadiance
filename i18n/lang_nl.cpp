@@ -179,6 +179,7 @@ const I18n::Pair kPairs[] = {
     {"Shader packs from the menu", "Shaderpakketten via het menu"},
     {"RTX Remix bridge: no more solid blue frames on loading and save screens", "RTX Remix bridge: geen blauwe beelden meer op laad- en opslagschermen"},
     {"Display: Turn off G-SYNC removed, and the NVIDIA setting it changed put back", "Beeldscherm: G-SYNC uitschakelen verwijderd, de NVIDIA-instelling die het wijzigde wordt hersteld"},
+    {"RTX Remix bridge: no longer crashes at start with Turbo Simulation Engine installed", "RTX Remix bridge: crasht niet meer bij het starten met Turbo Simulation Engine geïnstalleerd"},
     {"RTX Remix bridge: no longer freezes at start with Turbo Simulation Engine installed", "RTX Remix bridge: loopt niet meer vast bij het starten met Turbo Simulation Engine geïnstalleerd"},
     {"Apex Radiance Setup: no longer offers DXVK when the graphics driver cannot run it", "Apex Radiance Setup: biedt DXVK niet meer aan als de videodriver het niet kan draaien"},
     {"Display: a switch to turn off G-SYNC for the game", "Beeldscherm: een schakelaar om G-SYNC voor het spel uit te schakelen"},
