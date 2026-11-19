@@ -54,6 +54,9 @@ namespace ExtraHooks {
 VertexInputMark MarkVertexInput() { return {}; }
 void RestoreVertexInput(VertexInputMark) {}
 } // namespace ExtraHooks
+namespace D3D9Hooks {
+void SettleDeferredShaders(IDirect3DDevice9*) {} // (no lazy restore without the hooks)
+} // namespace D3D9Hooks
 
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
@@ -64,11 +67,6 @@ inline float Offset(unsigned x, unsigned y) {
     return static_cast<float>(g - 0.5);
 }
 } // namespace RoomMapDither
-// the engine keeps the game's vertex input around its draws (d3d9_extra_hooks.cpp); here nothing is hooked
-namespace ExtraHooks {
-VertexInputMark MarkVertexInput() { return {}; }
-void RestoreVertexInput(VertexInputMark) {}
-} // namespace ExtraHooks
 #include "shaders/rt_lamps_hlsl.h"
 
 #ifdef RT_OBJECT_SHAPES
@@ -1140,6 +1138,9 @@ void BesideWallFloorCheck() {
         Check(RtLampProxy::RoofedRoomAt(lot, 0, in) == 11 && RtLampProxy::RoofedRoomAt(lot, 0, yard) == 0 && RtLampProxy::RoofedRoomAt(lot, 0, out) == 0 &&
                   RtLampProxy::RoofedRoomAt(lot, 0, past) == 0 && RtLampProxy::RoofedRoomAt(lot, 1, in) == 0,
               "RoofedRoomAt: only a roofed room's quadrant of the point's story");
+        const float up[3] = {0, 1, 0}, wall[3] = {0, 0, -1}, onLine[3] = {1.5f, 1.0f, 0.01f}; // (an outside wall's texel on the line z = 0, its quadrant room 11's)
+        Check(RtLampProxy::GroundUnderRoof(lot, 0, in, up) && !RtLampProxy::GroundUnderRoof(lot, 0, onLine, wall) && RtLampProxy::RoofedRoomAt(lot, 0, onLine) == 11,
+              "GroundUnderRoof: the ground under a roofed room, never an outside wall's texel on its line");
     }
 }
 
