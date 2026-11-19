@@ -1,0 +1,1689 @@
+0021: GI server, R-06 and R-04's region scope. A lamp with a region box solves only the texels in its box, listed a lamp (server.giListDispatch, default on; off visits every texel and gives the same layer). Each settled solve writes the lamp's touch box (the texels its sum layer lights over 0.5/255) to the GI block; RemixBridge_GiReadTouch reads it. RemixBridge_GiQueryPoints and RemixBridge_GiReadPoints: the irradiance at up to 256 points (position, normal) from every settled layer, each lamp weighted, one dispatch (gi_solve.comp pass 3). Scene and lamp blobs with a NaN or an infinity are refused. GI block layout version 3. Test: test-gi.cmd (test_gi_device, modes lots and lots-full).
+Applies after 0020 (MC-2 mesh casters) on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only), with 0018 and 0019 before it.
+diff --git a/bridge/bridge.conf b/bridge/bridge.conf
+index 97ded32da983cd3e2d62a95ff29f7911fa8c1228..beb57b2af64eb7f2ee44543f4f0522c7134a8df7 100644
+--- a/bridge/bridge.conf
++++ b/bridge/bridge.conf
+@@ -142,7 +142,7 @@
+ # Lets callers of the client exports RemixBridge_GiOpen, RemixBridge_GiSolve and RemixBridge_GiPoll
+ # have a worker in the server, on its own Vulkan device, compute into a DEFAULT-pool texture they name.
+ # RemixBridge_GiSubmit sends the scene and the lamps the worker solves. The server copies results in on
+-# its command thread. Its GI block takes about 900 KB of the client's address space once
++# its command thread. Its GI block takes about 915 KB of the client's address space once
+ # RemixBridge_GiOpen maps it.
+ #
+ # Supported values: True, False
+@@ -174,6 +174,14 @@
+ 
+ # server.giSliceIdleUs = 0
+ 
++#
++# A lamp with a region box solves only the texels in its box (a list a lamp). False visits every
++# texel and skips the ones outside, which is slower and gives the same layer.
++#
++# Supported values: True, False
++
++# server.giListDispatch = True
++
+ #
+ # The highest GI level the worker uses: 2 uses ray queries when the GPU has them, 1 stays on compute.
+ #
+diff --git a/bridge/src/client/d3d9_gi.cpp b/bridge/src/client/d3d9_gi.cpp
+index b78a51f6244206935528d259bd43e56a0c331daf..b23e91402e3db85ba0d1f3f0d41116c40204d8d6 100644
+--- a/bridge/src/client/d3d9_gi.cpp
++++ b/bridge/src/client/d3d9_gi.cpp
+@@ -20,6 +20,7 @@
+ #include "pch.h"
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cstring>
+ #include <mutex>
+ 
+@@ -55,6 +56,17 @@
+ // object carries GiObjectRemoved. The server reads the game's packages once, at the first batch, and keeps the latest
+ // record of each object. Words 14 to 21 of the counters follow it (GiObjectCounter).
+ //   S_OK when sent. E_NOTIMPL before RemixBridge_GiOpen. D3DERR_INVALIDCALL for a null list.
++// RemixBridge_GiQueryPoints(points, count, scales, lamps, sceneTicket, &ticket) asks for the irradiance at up to 256
++// points (six floats each: position, normal) from every lamp of the scene whose layer is settled, each lamp's layer
++// weighted by scales (three floats a lamp; nullptr or lamps past the end weigh 1). The unit is the layers' own: a point
++// on a texel with its normal gets about the texel's sum layer.
++//   S_OK with a ticket. D3DERR_WASSTILLDRAWING while the previous query or all tickets are in flight.
++//   D3DERR_INVALIDCALL for no points or more than 256. A point that is not finite or has no normal polls D3DERR_INVALIDCALL.
++// RemixBridge_GiReadPoints(ticket, out, count) polls a query ticket as RemixBridge_GiPoll does, and on S_OK copies
++// four floats a point (rgb, alpha 1) for at most count points.
++// RemixBridge_GiReadTouch(lamp, box, &texels) copies the lamp's touch box (six floats: min, max), the box of the texels
++// its sum layer lights over 0.5/255, written by its last solve with settled bounces.
++//   S_OK, with texels 0 when the lamp lights none. S_FALSE before such a solve. D3DERR_INVALIDCALL for a lamp over 255.
+ // A finished, failed or cancelled ticket is unknown afterwards.
+ 
+ namespace {
+@@ -64,6 +76,7 @@ namespace {
+   uint32_t s_pending[GiSharedBlock::kMaxTickets] = {};  // ticket a slot, 0 when free
+   uint32_t s_submitSeq[GiSharedBlock::kSubmitSlots] = {};  // the part a submit slot holds until the server took it, else 0
+   uint32_t s_seq = 0;
++  uint32_t s_queryTicket = 0;  // the query in flight, else 0
+   bool s_openSent = false;
+   bool s_noServer = false;
+   ULONGLONG s_openDeadline = 0;
+@@ -87,6 +100,25 @@ namespace {
+     }
+     return nullptr;
+   }
++
++  // RemixBridge_GiPoll under s_mutex.
++  HRESULT pollLocked(uint32_t ticket) {
++    uint32_t* const pPending = findTicket(ticket);
++    GiSharedBlock* const pBlock = openedBlock();
++    if (pPending == nullptr || pBlock == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    const bridge_util::GiAnswerSlot& slot = pBlock->answers[pPending - s_pending];
++    if (slot.answeredSeq.load(std::memory_order_acquire) != ticket) {
++      if (gbBridgeRunning) {
++        return S_FALSE;
++      }
++      *pPending = 0;
++      return D3DERR_DEVICELOST;
++    }
++    *pPending = 0;
++    return (HRESULT) slot.hresult;
++  }
+ }
+ 
+ // Exported by name through d3d9_lss.def.
+@@ -219,21 +251,91 @@ extern "C" {
+ 
+   HRESULT __stdcall RemixBridge_GiPoll(uint32_t ticket) {
+     std::lock_guard<std::mutex> lock(s_mutex);
+-    uint32_t* const pPending = findTicket(ticket);
++    return pollLocked(ticket);
++  }
++
++  HRESULT __stdcall RemixBridge_GiQueryPoints(const float* pPoints, uint32_t count, const float* pScales, uint32_t lamps,
++                                              uint32_t sceneTicket, uint32_t* pTicket) {
++    if (pPoints == nullptr || pTicket == nullptr || count == 0 || count > bridge_util::GiQueryAnswer::kMaxPoints ||
++        lamps > GiSharedBlock::kMaxLamps) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (!giEnabled() || openedBlock() == nullptr) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    std::lock_guard<std::mutex> lock(s_mutex);
++    // One query at a time: the block holds one answer, which stays readable until the next query.
++    if (s_queryTicket != 0 && findTicket(s_queryTicket) != nullptr) {
++      return D3DERR_WASSTILLDRAWING;
++    }
++    uint32_t slot = GiSharedBlock::kMaxTickets;
++    for (uint32_t i = 0; i < GiSharedBlock::kMaxTickets && slot == GiSharedBlock::kMaxTickets; ++i) {
++      if (s_pending[i] == 0) {
++        slot = i;
++      }
++    }
++    if (slot == GiSharedBlock::kMaxTickets) {
++      return D3DERR_WASSTILLDRAWING;
++    }
++    if (++s_seq == 0) {
++      ++s_seq;
++    }
++    s_pending[slot] = s_seq;
++    s_queryTicket = s_seq;
++    {
++      ClientMessage c(Commands::Bridge_GiQuery, sceneTicket, Commands::FlagBits::AsyncResult);
++      c.send_data(slot);
++      c.send_data(s_seq);
++      c.send_data(count * 6 * sizeof(float), pPoints);
++      c.send_data(pScales != nullptr ? lamps * 3 * sizeof(float) : 0, pScales);
++    }
++    *pTicket = s_seq;
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_GiReadPoints(uint32_t ticket, float* pIrradiance, uint32_t count) {
++    if (pIrradiance == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    std::lock_guard<std::mutex> lock(s_mutex);
++    const HRESULT result = ticket == s_queryTicket ? pollLocked(ticket) : D3DERR_INVALIDCALL;
+     GiSharedBlock* const pBlock = openedBlock();
+-    if (pPending == nullptr || pBlock == nullptr) {
++    if (result != S_OK || pBlock == nullptr) {
++      return result;
++    }
++    if (pBlock->query.seq != ticket) {
++      return E_FAIL;
++    }
++    memcpy(pIrradiance, pBlock->query.irradiance, size_t(std::min(count, pBlock->query.points)) * 4 * sizeof(float));
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_GiReadTouch(uint32_t lamp, float* pBox, uint32_t* pTexels) {
++    if (pBox == nullptr || pTexels == nullptr || lamp >= GiSharedBlock::kMaxLamps) {
+       return D3DERR_INVALIDCALL;
+     }
+-    const bridge_util::GiAnswerSlot& slot = pBlock->answers[pPending - s_pending];
+-    if (slot.answeredSeq.load(std::memory_order_acquire) != ticket) {
+-      if (gbBridgeRunning) {
+-        return S_FALSE;
++    GiSharedBlock* const pBlock = openedBlock();
++    if (pBlock == nullptr) {
++      return E_NOTIMPL;
++    }
++    const bridge_util::GiTouchEntry& entry = pBlock->touch[lamp];
++    for (;;) {
++      const uint32_t version = entry.version.load(std::memory_order_acquire);
++      if (version & 1) {
++        continue;  // The server's play thread is writing the entry, a matter of nanoseconds.
++      }
++      const uint32_t solveSeq = entry.solveSeq;
++      *pTexels = entry.texels;
++      memcpy(pBox, entry.boxMin, sizeof(float) * 3);
++      memcpy(pBox + 3, entry.boxMax, sizeof(float) * 3);
++      std::atomic_thread_fence(std::memory_order_acquire);
++      if (entry.version.load(std::memory_order_relaxed) == version) {
++        return solveSeq != 0 ? S_OK : S_FALSE;
+       }
+-      *pPending = 0;
+-      return D3DERR_DEVICELOST;
+     }
+-    *pPending = 0;
+-    return (HRESULT) slot.hresult;
+   }
+ 
+   HRESULT __stdcall RemixBridge_GiCancel(uint32_t ticket) {
+diff --git a/bridge/src/client/d3d9_lss.def b/bridge/src/client/d3d9_lss.def
+index da8c0937c053a070419355c09ee139d9268ecae8..212d3e83a7d610c04ad8e2242572cec51a6ce22a 100644
+--- a/bridge/src/client/d3d9_lss.def
++++ b/bridge/src/client/d3d9_lss.def
+@@ -37,3 +37,6 @@ EXPORTS
+   RemixBridge_GiPixelReadCounters
+ 
+   RemixBridge_GiObjects
++  RemixBridge_GiQueryPoints
++  RemixBridge_GiReadPoints
++  RemixBridge_GiReadTouch
+diff --git a/bridge/src/server/gi_server.h b/bridge/src/server/gi_server.h
+index 0730dec4a595c95a187a531b1adbd1e141a31996..55c2d8c0b912a76227135118df2cee89d53382d5 100644
+--- a/bridge/src/server/gi_server.h
++++ b/bridge/src/server/gi_server.h
+@@ -85,6 +85,31 @@ namespace gi_server {
+     ++pBlock->jobsDone;
+   }
+ 
++  // Writes what a finished job returns besides its answer: a query's irradiance, a solve's touch box. A query's answer
++  // is read by the client after its ticket, and a touch entry is odd while it is written.
++  inline void publish(const gi::Job& job) {
++    GiSharedBlock* const pBlock = bridge_util::giBlock();
++    if (job.kind == gi::JobKind::Query && SUCCEEDED(job.hresult)) {
++      bridge_util::GiQueryAnswer& query = pBlock->query;
++      query.seq = job.seq;
++      query.points = uint32_t(job.irradiance.size() / 4);
++      query.lampsUsed = job.lampsUsed;
++      memcpy(query.irradiance, job.irradiance.data(), job.irradiance.size() * sizeof(float));
++    }
++    const uint32_t lamp = job.layer & 0xffff;
++    if (job.kind == gi::JobKind::Solve && SUCCEEDED(job.hresult) && job.touchValid && lamp < GiSharedBlock::kMaxLamps) {
++      bridge_util::GiTouchEntry& entry = pBlock->touch[lamp];
++      const uint32_t version = entry.version.load(std::memory_order_relaxed);
++      entry.version.store(version | 1, std::memory_order_relaxed);
++      std::atomic_thread_fence(std::memory_order_release);
++      entry.texels = job.touchTexels;
++      entry.solveSeq = job.seq;
++      memcpy(entry.boxMin, job.touchBox, sizeof(float) * 3);
++      memcpy(entry.boxMax, job.touchBox + 3, sizeof(float) * 3);
++      entry.version.store((version | 1) + 1, std::memory_order_release);
++    }
++  }
++
+   // Returns the texture under a client id, or nullptr when the id names none (destroyed, unlinked or not a texture).
+   inline IDirect3DTexture9* findTexture(const ResourceMap& resources, uint32_t id) {
+     const auto it = resources.find(id);
+@@ -279,6 +304,33 @@ namespace gi_server {
+     gi::queueJob(job);
+   }
+ 
++  // Bridge_GiQuery: irradiance at points (six floats each: position, normal) from the settled layers of the scene,
++  // each lamp's layer weighted by scales (three floats a lamp; lamps past the end weigh 1).
++  inline void query(uint32_t sceneSeq, const void* pPoints, uint32_t pointBytes, const void* pScales, uint32_t scaleBytes, uint32_t slot, uint32_t seq) {
++    GiSharedBlock* const pBlock = bridge_util::giBlock();
++    if (!g_started || pBlock == nullptr || slot >= GiSharedBlock::kMaxTickets) {
++      return;
++    }
++    auto job = std::make_shared<gi::Job>();
++    job->kind = gi::JobKind::Query;
++    job->sceneSeq = sceneSeq;
++    job->slot = slot;
++    job->seq = seq;
++    const uint8_t* const pPointBytes = static_cast<const uint8_t*>(pPoints);
++    job->blob.assign(pPointBytes, pPointBytes + (pPoints != nullptr ? pointBytes : 0));
++    job->scales.resize(pScales != nullptr ? scaleBytes / sizeof(float) : 0);
++    if (!job->scales.empty()) {
++      memcpy(job->scales.data(), pScales, job->scales.size() * sizeof(float));
++    }
++    if (pBlock->level.load(std::memory_order_acquire) == bridge_util::GiLevelNone) {
++      answer(*job, E_FAIL);
++      return;
++    }
++    ++pBlock->jobsQueued;
++    g_jobs.push_back(job);
++    gi::queueJob(job);
++  }
++
+   // Bridge_GiCancel: a cancelled job is never answered, so its slot can take the next ticket at once.
+   inline void cancel(uint32_t seq) {
+     for (auto it = g_jobs.begin(); it != g_jobs.end(); ++it) {
+@@ -312,6 +364,7 @@ namespace gi_server {
+         superseded = hasTarget(**later) && (*later)->targetId == job.targetId && (*later)->layer == job.layer;
+       }
+       if (superseded || FAILED(job.hresult) || !hasTarget(job)) {
++        publish(job);
+         answer(job, superseded ? S_OK : job.hresult, superseded ? bridge_util::GiAnswerSuperseded : bridge_util::GiAnswerCopied);
+         it = g_jobs.erase(it);
+         continue;
+@@ -345,6 +398,7 @@ namespace gi_server {
+       if (SUCCEEDED(hresult) && job.rowsDone < job.height) {
+         break;
+       }
++      publish(job);
+       answer(job, hresult, bridge_util::GiAnswerCopied, SUCCEEDED(hresult) ? uint32_t(job.texels.size()) : 0, job.uploadUs);
+       it = g_jobs.erase(it);
+     }
+diff --git a/bridge/src/server/gi_solve.comp b/bridge/src/server/gi_solve.comp
+index b1fd992c06a681c7341b7f5df971f4a3ab32bcc9..5429c6a66bb77b964442415850a63720327b03c6 100644
+--- a/bridge/src/server/gi_solve.comp
++++ b/bridge/src/server/gi_solve.comp
+@@ -4,7 +4,9 @@
+ // PASS 0: the links. For each texel and ray, the texel a cosine-weighted ray hits. Lamp independent, traced once a scene.
+ // PASS 1: one lamp's direct light, by shadow rays to points on its ball.
+ // PASS 2: one bounce of one lamp's layer: a gather over the links with no ray.
+-// A pass is dispatched in slices: texel0 and ray0 are the slice's first texel and ray.
++// PASS 3: point queries: the irradiance at free points from every settled layer, one workgroup a point.
++// A pass is dispatched in slices: texel0 and ray0 are the slice's first texel and ray. With listed > 0 passes 1 and 2
++// run only on the lamp's region list: invocation k takes texel region[k].
+ #ifdef RAYQUERY
+ #extension GL_EXT_ray_query : require
+ layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+@@ -37,6 +39,10 @@ layout(std430, set = 0, binding = 6) readonly buffer PatchMap { int patchMap[];
+ layout(std430, set = 0, binding = 7) buffer Links { uint link[]; };                 // texels x rays
+ layout(std430, set = 0, binding = 8) buffer Direct { vec4 direct[]; };              // lamps x texels
+ layout(std430, set = 0, binding = 9) buffer Ind { vec4 ind[]; };                    // 2 (feedback halves) x lamps x texels
++layout(std430, set = 0, binding = 10) readonly buffer Region { uint region[]; };     // the texels in the lamp's box
++// Pass 3: lamps x 5 (position and radius, colour x weight and the settled half or -1, weight, box min, box max),
++// then points x 2 (position, normal), then the answers, one a point.
++layout(std430, set = 0, binding = 11) buffer Query { vec4 query[]; };
+ layout(push_constant) uniform PC {
+   vec4 lampPos;  // w: the ball's radius
+   vec4 lampCol;
+@@ -45,6 +51,7 @@ layout(push_constant) uniform PC {
+   uint texels, rays, lamp, src;
+   uint shadowRays, lamps, texel0, ray0;
+   int gx0, gz0, gw, gh;
++  uint listed, pad0, pad1, pad2;
+ } pc;
+ 
+ const uint kNone = 0xFFFFFFFFu;
+@@ -123,19 +130,116 @@ uint Pcg(uint v) {
+   return (w >> 22u) ^ w;
+ }
+ 
++// A cosine-weighted direction about N from one hash.
++vec3 CosineRay(vec3 N, uint seed)
++{
++  const uint h1 = Pcg(seed), h2 = Pcg(h1);
++  const float u1 = (float(h1 >> 8) + 0.5) / 16777216.0, phi = 6.2831853 * (float(h2 >> 8) + 0.5) / 16777216.0;
++  const vec3 T = normalize(cross(abs(N.y) < 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0), N)), B = cross(N, T);
++  const float rad = sqrt(u1);
++  return normalize(T * (rad * cos(phi)) + B * (rad * sin(phi)) + N * sqrt(1.0 - u1));
++}
++
++// The share of the lamp's ball P sees, by shadow rays to a Fibonacci sphere on it.
++float LampShare(vec3 P, vec4 lampPos)
++{
++  float share = 0.0;
++  for (uint k = 0u; k < pc.shadowRays; k++)
++  {
++    const float y = 1.0 - (2.0 * float(k) + 1.0) / float(pc.shadowRays), rr = sqrt(1.0 - y * y), a = 2.39996323 * float(k);
++    const vec3 e = lampPos.xyz + lampPos.w * vec3(rr * cos(a), y, rr * sin(a)) - P;
++    const float len = length(e);
++    float t;
++    uint prim;
++    if (!Trace(P, e / len, 1e-3, len - 1e-3, t, prim))
++    {
++      share += 1.0;
++    }
++  }
++  return share / float(pc.shadowRays);
++}
++
++#if PASS == 3
++shared vec3 s_sum[64];
++
++// pc.lamp lamps and pc.src points. Lanes share a point's lamps (direct) and its rays (bounce light from the hit texels).
++void QueryPoint()
++{
++  const uint q = gl_WorkGroupID.x, lane = gl_LocalInvocationID.x, L = pc.lamp;
++  const vec3 P = query[L * 5u + q * 2u].xyz, N = query[L * 5u + q * 2u + 1u].xyz;
++  vec3 sum = vec3(0.0);
++  for (uint l = lane; l < L; l += 64u)
++  {
++    const vec4 col = query[l * 5u + 1u];
++    if (col.w >= 0.0 && all(greaterThanEqual(P, query[l * 5u + 3u].xyz)) && all(lessThanEqual(P, query[l * 5u + 4u].xyz)))
++    {
++      const vec4 lampPos = query[l * 5u];
++      const vec3 toLamp = lampPos.xyz - P;
++      const float d2 = dot(toLamp, toLamp), c = dot(N, toLamp) * inversesqrt(d2);
++      if (c > 0.0)
++      {
++        sum += col.rgb * (c / d2 * LampShare(P, lampPos));
++      }
++    }
++  }
++  vec3 bounce = vec3(0.0);
++  for (uint r = lane; r < pc.rays; r += 64u)
++  {
++    const vec3 d = CosineRay(N, (q * pc.rays + r) ^ 0x80000000u);
++    float t;
++    uint prim;
++    if (!Trace(P, d, 1e-3, 1e4, t, prim))
++    {
++      continue;
++    }
++    const int j = TexelAt(P + d * t, d, prim);
++    if (j < 0)
++    {
++      continue;
++    }
++    vec3 radiance = vec3(0.0);
++    for (uint l = 0u; l < L; l++)
++    {
++      const vec4 col = query[l * 5u + 1u];
++      if (col.w >= 0.0 && all(greaterThanEqual(P, query[l * 5u + 3u].xyz)) && all(lessThanEqual(P, query[l * 5u + 4u].xyz)))
++      {
++        radiance += query[l * 5u + 2u].rgb * (direct[l * pc.texels + uint(j)].rgb + ind[(uint(col.w) * pc.lamps + l) * pc.texels + uint(j)].rgb);
++      }
++    }
++    bounce += texel[j].alb.rgb * radiance;
++  }
++  s_sum[lane] = sum + bounce / float(pc.rays);
++  barrier();
++  for (uint stride = 32u; stride > 0u; stride >>= 1u)
++  {
++    if (lane < stride)
++    {
++      s_sum[lane] += s_sum[lane + stride];
++    }
++    barrier();
++  }
++  if (lane == 0u)
++  {
++    query[L * 5u + pc.src * 2u + q] = vec4(s_sum[0], 1.0);
++  }
++}
++#endif
++
+ void main() {
+-  const uint i = gl_GlobalInvocationID.x + pc.texel0;
+-  if (i >= pc.texels) return;
++#if PASS == 3
++  QueryPoint();
++#else
++  uint i = gl_GlobalInvocationID.x + pc.texel0;
++  if (pc.listed != 0u) {
++    if (i >= pc.listed) return;
++    i = region[i];
++  } else if (i >= pc.texels) return;
+   const vec3 P = texel[i].pos.xyz, N = texel[i].nrm.xyz;
+ #if PASS == 0
+   // Ray r of texel i is the same every solve: the result is a fixed linear system, so a settled layer holds no noise in time.
+   const uint r = gl_GlobalInvocationID.y + pc.ray0;
+   if (r >= pc.rays) return;
+-  const uint h1 = Pcg(i * pc.rays + r), h2 = Pcg(h1);
+-  const float u1 = (float(h1 >> 8) + 0.5) / 16777216.0, phi = 6.2831853 * (float(h2 >> 8) + 0.5) / 16777216.0;
+-  const vec3 T = normalize(cross(abs(N.y) < 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0), N)), B = cross(N, T);
+-  const float rad = sqrt(u1);
+-  const vec3 d = normalize(T * (rad * cos(phi)) + B * (rad * sin(phi)) + N * sqrt(1.0 - u1));
++  const vec3 d = CosineRay(N, i * pc.rays + r);
+   float t;
+   uint prim;
+   uint to = kNone;
+@@ -151,18 +255,7 @@ void main() {
+   }
+   const vec3 L = pc.lampPos.xyz - P;
+   const float d2 = dot(L, L), c = dot(N, L) * inversesqrt(d2);
+-  float share = 0.0;
+-  if (c > 0.0) {
+-    for (uint k = 0u; k < pc.shadowRays; k++) {  // a Fibonacci sphere on the lamp's ball
+-      const float y = 1.0 - (2.0 * float(k) + 1.0) / float(pc.shadowRays), rr = sqrt(1.0 - y * y), a = 2.39996323 * float(k);
+-      const vec3 e = pc.lampPos.xyz + pc.lampPos.w * vec3(rr * cos(a), y, rr * sin(a)) - P;
+-      const float len = length(e);
+-      float t;
+-      uint prim;
+-      if (!Trace(P, e / len, 1e-3, len - 1e-3, t, prim)) share += 1.0;
+-    }
+-    share /= float(pc.shadowRays);
+-  }
++  const float share = c > 0.0 ? LampShare(P, pc.lampPos) : 0.0;
+   direct[pc.lamp * pc.texels + i] = vec4(pc.lampCol.rgb * (max(c, 0.0) / d2 * share), share);
+ #else
+   // Cosine-weighted rays: irradiance = the mean of the hit texels' albedo x (direct + the previous indirect).
+@@ -178,4 +271,5 @@ void main() {
+   }
+   ind[to + i] = vec4(sum / float(pc.rays), 1.0);
+ #endif
++#endif
+ }
+diff --git a/bridge/src/server/gi_worker.cpp b/bridge/src/server/gi_worker.cpp
+index 1467b0519dd0c1e55b5c333f1c9b21d21ab5a52d..0c2689c3bc450a4d7018b525768a434ea81439df 100644
+--- a/bridge/src/server/gi_worker.cpp
++++ b/bridge/src/server/gi_worker.cpp
+@@ -40,6 +40,8 @@
+ #include "gi_links_rq_spv.h"
+ #include "gi_links_sw_spv.h"
+ #include "gi_pattern_spv.h"
++#include "gi_query_rq_spv.h"
++#include "gi_query_sw_spv.h"
+ #include "util_common.h"
+ #include "util_gi.h"
+ #include "gi_objects.h"
+@@ -65,6 +67,16 @@ namespace gi {
+       return false;
+     }
+ 
++    // True when every float is finite: a NaN or an infinity in a scene or lamp blob would poison every layer it reaches.
++    bool finite(const float* pValues, size_t count) {
++      for (size_t i = 0; i < count; ++i) {
++        if (!std::isfinite(pValues[i])) {
++          return false;
++        }
++      }
++      return true;
++    }
++
+     class Device {
+     public:
+       // Creates the instance and device. Returns the level, or GiLevelNone with lastError set.
+@@ -72,11 +84,11 @@ namespace gi {
+       VkResult run(Job& job);
+ 
+     private:
+-      // The buffers of gi_solve.comp, in the order of its bindings 1 to 9.
+-      enum : uint32_t { kTris, kCellStart, kCellTris, kTexels, kPatches, kPatchMap, kLinks, kDirect, kIndirect, kSolveBuffers };
+-      enum : uint32_t { kPassLinks, kPassDirect, kPassBounce, kPassCount };
++      // The buffers of gi_solve.comp, in the order of its bindings 1 to 11.
++      enum : uint32_t { kTris, kCellStart, kCellTris, kTexels, kPatches, kPatchMap, kLinks, kDirect, kIndirect, kRegion, kQuery, kSolveBuffers };
++      enum : uint32_t { kPassLinks, kPassDirect, kPassBounce, kPassQuery, kPassCount };
+       static constexpr uint64_t kMaxLinks = 128ull << 20;  // texels x rays, 512 MB of device memory
+-      static constexpr size_t kMaxLamps = 256;
++      static constexpr size_t kMaxLamps = GiSharedBlock::kMaxLamps;
+ 
+       struct Buffer {
+         VkBuffer buffer = VK_NULL_HANDLE;
+@@ -91,7 +103,9 @@ namespace gi {
+         uint32_t texels, rays, lamp, src;
+         uint32_t shadowRays, lamps, texel0, ray0;
+         int32_t gx0, gz0, gw, gh;
++        uint32_t listed, pad[3];  // texels in the region list; 0: every texel
+       };
++      static_assert(sizeof(Push) == 128, "Vulkan guarantees 128 bytes of push constants");
+ 
+       VkResult createPipeline();
+       VkResult createSolvePipelines();
+@@ -103,14 +117,16 @@ namespace gi {
+       void destroy(Buffer& buffer);
+       void destroyScene();
+       VkDeviceAddress address(const Buffer& buffer);
+-      VkResult buildStructures(uint32_t triangles, uint32_t& gpuUs);
++      VkResult buildStructures(uint32_t triangles, uint32_t& gpuUs, uint32_t& sliceUsMax);
+       bool buildGrid(const bridge_util::GiSceneTriangle* pTriangles, uint32_t triangles, std::vector<uint32_t>& cellStart, std::vector<uint32_t>& cellTris);
+       VkResult allocateLamps();
++      VkResult replaceBuffer(uint32_t index, const void* pData, size_t size);
+       VkResult runSliced(uint32_t pass, uint32_t rowsY, Job& job);
+       VkResult runPattern(Job& job);
+       VkResult setScene(Job& job);
+       VkResult setLamps(Job& job);
+       VkResult solve(Job& job);
++      VkResult query(Job& job);
+ 
+       VkInstance m_instance = VK_NULL_HANDLE;
+       VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+@@ -135,7 +151,8 @@ namespace gi {
+       float m_timestampPeriod = 1.0f;
+       uint32_t m_sliceUs = 2000;
+       uint32_t m_sliceIdleUs = 0;
+-      uint32_t m_sliceUnits[kPassCount] = { 16, 16, 16 };  // columns x rays a slice, adapted to the GPU budget
++      bool m_listDispatch = true;
++      uint32_t m_sliceUnits[kPassCount] = { 16, 16, 16, 16 };  // columns x rays a slice, adapted to the GPU budget
+       VkQueryPool m_queryPool = VK_NULL_HANDLE;
+       VkDescriptorSetLayout m_solveSetLayout = VK_NULL_HANDLE;
+       VkPipelineLayout m_solveLayout = VK_NULL_HANDLE;
+@@ -151,6 +168,7 @@ namespace gi {
+       Buffer m_structureBuffers[5];
+       VkAccelerationStructureKHR m_structures[2] = {};
+       std::vector<uint32_t> m_pixels;
++      std::vector<float> m_positions;  // three a texel, for the lamps' region lists
+       std::vector<bridge_util::GiLamp> m_lamps;
+       std::vector<uint8_t> m_directValid;
+       std::vector<int8_t> m_indirectHalf;  // the feedback half holding the lamp's settled bounces, -1: not solved
+@@ -257,6 +275,7 @@ namespace gi {
+       m_timestampPeriod = properties.limits.timestampPeriod;
+       m_sliceUs = std::max<uint32_t>(bridge_util::Config::getOption<uint32_t>("server.giSliceUs", 2000), 50);
+       m_sliceIdleUs = bridge_util::Config::getOption<uint32_t>("server.giSliceIdleUs", 0);
++      m_listDispatch = bridge_util::Config::getOption<bool>("server.giListDispatch", true);
+ 
+       const float priority = 0.0f;
+       VkDeviceQueueCreateInfo queueInfo { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
+@@ -540,7 +559,8 @@ namespace gi {
+       const struct { const uint32_t* pCode; size_t size; } shaders[kPassCount] = {
+         { m_rays ? g_giLinksRqSpv : g_giLinksSwSpv, m_rays ? sizeof(g_giLinksRqSpv) : sizeof(g_giLinksSwSpv) },
+         { m_rays ? g_giDirectRqSpv : g_giDirectSwSpv, m_rays ? sizeof(g_giDirectRqSpv) : sizeof(g_giDirectSwSpv) },
+-        { g_giBounceSpv, sizeof(g_giBounceSpv) } };
++        { g_giBounceSpv, sizeof(g_giBounceSpv) },
++        { m_rays ? g_giQueryRqSpv : g_giQuerySwSpv, m_rays ? sizeof(g_giQueryRqSpv) : sizeof(g_giQuerySwSpv) } };
+       for (uint32_t i = 0; i < kPassCount; ++i) {
+         VkShaderModuleCreateInfo moduleInfo { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+         moduleInfo.codeSize = shaders[i].size;
+@@ -663,7 +683,7 @@ namespace gi {
+ 
+     // One bottom-level structure over the scene's triangles and a top level with its one instance.
+     // shortcut: built in one submit of a few milliseconds for a 10 k triangle proxy; slice it by geometry when scenes grow.
+-    VkResult Device::buildStructures(uint32_t triangles, uint32_t& gpuUs) {
++    VkResult Device::buildStructures(uint32_t triangles, uint32_t& gpuUs, uint32_t& sliceUsMax) {
+       for (uint32_t level = 0; level < 2; ++level) {
+         VkAccelerationStructureGeometryKHR geometry { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+         geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+@@ -730,6 +750,7 @@ namespace gi {
+           return result;
+         }
+         gpuUs += us;
++        sliceUsMax = std::max(sliceUsMax, us);
+         destroy(scratch);
+       }
+       return VK_SUCCESS;
+@@ -839,11 +860,29 @@ namespace gi {
+       return VK_SUCCESS;
+     }
+ 
+-    // Runs a pass over groupsX columns of 64 texels and rowsY rays in slices of about the GPU budget each.
+-    // A slice is whole columns, or a run of rays of one column when a column is over the budget.
++    // Replaces a buffer of gi_solve.comp with one holding the data, and points its binding at it.
++    VkResult Device::replaceBuffer(uint32_t index, const void* pData, size_t size) {
++      destroy(m_sceneBuffers[index]);
++      const VkResult result = makeBuffer(pData, size, 0, m_sceneBuffers[index]);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      const VkDescriptorBufferInfo bufferInfo { m_sceneBuffers[index].buffer, 0, VK_WHOLE_SIZE };
++      VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
++      write.dstSet = m_solveSet;
++      write.dstBinding = index + 1;
++      write.descriptorCount = 1;
++      write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
++      write.pBufferInfo = &bufferInfo;
++      vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
++      return VK_SUCCESS;
++    }
++
++    // Runs a pass over groupsX columns of 64 texels (of the region list when there is one) and rowsY rays in slices of
++    // about the GPU budget each. A slice is whole columns, or a run of rays of one column when a column is over the budget.
+     // The slice size follows the measured GPU time. Returns VK_NOT_READY when the job was cancelled between slices.
+     VkResult Device::runSliced(uint32_t pass, uint32_t rowsY, Job& job) {
+-      const uint32_t groupsX = (m_push.texels + 63) / 64;
++      const uint32_t groupsX = ((m_push.listed ? m_push.listed : m_push.texels) + 63) / 64;
+       uint32_t& units = m_sliceUnits[pass];
+       for (uint32_t x = 0, y = 0; x < groupsX;) {
+         if (job.cancelled.load(std::memory_order_acquire)) {
+@@ -923,7 +962,7 @@ namespace gi {
+       std::vector<Vertex> vertices(size_t(header.triangles) * 3);
+       for (uint32_t i = 0; i < header.triangles; ++i) {
+         const GiSceneTriangle& triangle = triangles[i];
+-        if (triangle.patchFront < -1 || triangle.patchFront >= int32_t(header.patches) ||
++        if (!finite(&triangle.v[0][0], 9) || triangle.patchFront < -1 || triangle.patchFront >= int32_t(header.patches) ||
+             triangle.patchBack < -1 || triangle.patchBack >= int32_t(header.patches)) {
+           return VK_SUCCESS;
+         }
+@@ -936,7 +975,7 @@ namespace gi {
+       std::vector<Patch> gpuPatches(std::max<size_t>(header.patches, 1));
+       for (uint32_t i = 0; i < header.patches; ++i) {
+         const GiScenePatch& patch = patches[i];
+-        if (patch.nu == 0 || patch.nv == 0 || patch.nu > 65536 || patch.nv > 65536 ||
++        if (!finite(patch.origin, 9) || patch.nu == 0 || patch.nv == 0 || patch.nu > 65536 || patch.nv > 65536 ||
+             uint64_t(patch.mapOffset) + uint64_t(patch.nu) * patch.nv > header.mapEntries) {
+           return VK_SUCCESS;
+         }
+@@ -953,12 +992,19 @@ namespace gi {
+           return VK_SUCCESS;
+         }
+       }
++      for (const GiSceneTexel& texel : texels) {
++        if (!finite(texel.position, 9)) {
++          return VK_SUCCESS;
++        }
++      }
+       // The blob passed its checks, so it replaces the scene the worker holds.
+       destroyScene();
+       struct Texel { float position[4]; float normal[4]; float albedo[4]; };
+       std::vector<Texel> gpuTexels(header.texels);
+       m_pixels.resize(header.texels);
++      m_positions.resize(size_t(header.texels) * 3);
+       for (uint32_t i = 0; i < header.texels; ++i) {
++        memcpy(&m_positions[size_t(i) * 3], texels[i].position, sizeof(float) * 3);
+         memcpy(gpuTexels[i].position, texels[i].position, sizeof(float) * 3);
+         memcpy(gpuTexels[i].normal, texels[i].normal, sizeof(float) * 3);
+         memcpy(gpuTexels[i].albedo, texels[i].albedo, sizeof(float) * 3);
+@@ -997,15 +1043,23 @@ namespace gi {
+       if (result == VK_SUCCESS) {
+         result = makeBuffer(VkDeviceSize(header.texels) * header.rays * 4, 0, m_sceneBuffers[kLinks]);
+       }
++      // The region list and the query buffer are replaced by each solve and query. Until then a binding needs a buffer.
++      if (result == VK_SUCCESS) {
++        result = makeBuffer(16, 0, m_sceneBuffers[kRegion]);
++      }
++      if (result == VK_SUCCESS) {
++        result = makeBuffer(16, 0, m_sceneBuffers[kQuery]);
++      }
+       uint32_t structureUs = 0;
+       if (result == VK_SUCCESS && m_rays) {
+-        result = buildStructures(header.triangles, structureUs);
++        result = buildStructures(header.triangles, structureUs, job.sliceUsMax);
+       }
+       if (result == VK_SUCCESS) {
+         result = allocateLamps();
+       }
+       if (result == VK_SUCCESS) {
+         job.gpuUs = structureUs;
++        job.slices = m_rays ? 2 : 0;
+         result = runSliced(kPassLinks, header.rays, job);
+       }
+       if (result != VK_SUCCESS) {
+@@ -1027,6 +1081,15 @@ namespace gi {
+       }
+       std::vector<bridge_util::GiLamp> lamps(count);
+       memcpy(lamps.data(), job.blob.data(), job.blob.size());
++      for (const bridge_util::GiLamp& lamp : lamps) {
++        // The box may be infinite (the whole scene), never NaN.
++        if (!finite(lamp.position, 7) || !(lamp.radius >= 0.0f) ||
++            std::isnan(lamp.boxMin[0]) || std::isnan(lamp.boxMin[1]) || std::isnan(lamp.boxMin[2]) ||
++            std::isnan(lamp.boxMax[0]) || std::isnan(lamp.boxMax[1]) || std::isnan(lamp.boxMax[2])) {
++          job.hresult = D3DERR_INVALIDCALL;
++          return VK_SUCCESS;
++        }
++      }
+       const bool resized = count != m_lamps.size() || count != m_directValid.size();
+       for (size_t i = 0; i < count && !resized; ++i) {
+         if (memcmp(&lamps[i], &m_lamps[i], sizeof(bridge_util::GiLamp)) != 0) {
+@@ -1080,22 +1143,51 @@ namespace gi {
+       m_push.lamp = lamp;
+       const VkDeviceSize layer = VkDeviceSize(m_push.texels) * 16;
+       VkResult result = VK_SUCCESS;
+-      if (!m_directValid[lamp]) {
+-        m_indirectHalf[lamp] = -1;
+-        result = runSliced(kPassDirect, 1, job);
++      const bool directDue = !m_directValid[lamp];
++      const bool indirectDue = (directDue || m_indirectHalf[lamp] < 0) && what != bridge_util::GiLayerDirect;
++
++      // A scoped lamp runs only on the texels in its box, listed in the region buffer. Texels outside the list are never
++      // written, so the lamp's direct light and its second feedback half start at zero (the first is cleared below).
++      bool empty = false;
++      if (scoped && m_listDispatch && (directDue || indirectDue)) {
++        std::vector<uint32_t> list;
++        for (uint32_t i = 0; i < m_push.texels; ++i) {
++          const float* const p = &m_positions[size_t(i) * 3];
++          if (p[0] >= source.boxMin[0] && p[1] >= source.boxMin[1] && p[2] >= source.boxMin[2] &&
++              p[0] <= source.boxMax[0] && p[1] <= source.boxMax[1] && p[2] <= source.boxMax[2]) {
++            list.push_back(i);
++          }
++        }
++        empty = list.empty();
++        result = empty ? VK_SUCCESS : replaceBuffer(kRegion, list.data(), list.size() * 4);
+         if (result != VK_SUCCESS) {
+           return result;
+         }
+-        m_directValid[lamp] = 1;
++        m_push.listed = uint32_t(list.size());
++        begin();
++        if (directDue) {
++          vkCmdFillBuffer(m_commandBuffer, m_sceneBuffers[kDirect].buffer, lamp * layer, layer, 0);
++        }
++        if (indirectDue) {
++          vkCmdFillBuffer(m_commandBuffer, m_sceneBuffers[kIndirect].buffer, (VkDeviceSize(m_push.lamps) + lamp) * layer, layer, 0);
++        }
++        result = end(nullptr);
++      }
++      if (result == VK_SUCCESS && directDue) {
++        m_indirectHalf[lamp] = -1;
++        result = empty ? VK_SUCCESS : runSliced(kPassDirect, 1, job);
++        if (result == VK_SUCCESS) {
++          m_directValid[lamp] = 1;
++        }
+       }
+-      if (m_indirectHalf[lamp] < 0 && what != bridge_util::GiLayerDirect) {
++      if (result == VK_SUCCESS && indirectDue) {
+         // The first gather reads half 0 as the previous bounce, which is none.
+         begin();
+         vkCmdFillBuffer(m_commandBuffer, m_sceneBuffers[kIndirect].buffer, lamp * layer, layer, 0);
+         result = end(nullptr);
+         m_push.src = 0;
+-        const uint32_t groupsX = (m_push.texels + 63) / 64;
+-        for (uint32_t bounce = 0; bounce < m_bounces && result == VK_SUCCESS;) {
++        const uint32_t groupsX = ((m_push.listed ? m_push.listed : m_push.texels) + 63) / 64;
++        for (uint32_t bounce = 0; bounce < m_bounces && result == VK_SUCCESS && !empty;) {
+           uint32_t& units = m_sliceUnits[kPassBounce];
+           const uint32_t batch = std::min(units / groupsX, m_bounces - bounce);
+           if (batch < 2) {
+@@ -1107,7 +1199,8 @@ namespace gi {
+           // Several whole gathers fit the GPU budget, so they go in one submission: a gather a submission is bound
+           // by the submit and wait, not by its work.
+           if (job.cancelled.load(std::memory_order_acquire)) {
+-            return VK_NOT_READY;
++            result = VK_NOT_READY;
++            break;
+           }
+           m_push.texel0 = 0;
+           m_push.ray0 = 0;
+@@ -1133,10 +1226,13 @@ namespace gi {
+             std::this_thread::sleep_for(std::chrono::microseconds(m_sliceIdleUs));
+           }
+         }
+-        if (result != VK_SUCCESS) {
+-          return result;
++        if (result == VK_SUCCESS) {
++          m_indirectHalf[lamp] = int8_t(m_push.src);
+         }
+-        m_indirectHalf[lamp] = int8_t(m_push.src);
++      }
++      m_push.listed = 0;
++      if (result != VK_SUCCESS) {
++        return result;
+       }
+ 
+       result = reserve(layer * 2);
+@@ -1157,6 +1253,24 @@ namespace gi {
+       }
+       const float* const pDirect = static_cast<const float*>(m_pMapped);
+       const float* const pIndirect = pDirect + size_t(m_push.texels) * 4;
++
++      // The touch box: the texels the sum layer lights over 0.5/255 (wp/X-REBAKE.md), once the bounces are settled.
++      job.touchValid = m_indirectHalf[lamp] >= 0;
++      job.touchTexels = 0;
++      for (uint32_t i = 0; i < m_push.texels && job.touchValid; ++i) {
++        const float* const d = pDirect + size_t(i) * 4;
++        const float* const n = pIndirect + size_t(i) * 4;
++        if (std::max({ d[0] + n[0], d[1] + n[1], d[2] + n[2] }) <= 0.5f / 255.0f) {
++          continue;
++        }
++        const float* const p = &m_positions[size_t(i) * 3];
++        for (uint32_t c = 0; c < 3; ++c) {
++          job.touchBox[c] = job.touchTexels ? std::min(job.touchBox[c], p[c]) : p[c];
++          job.touchBox[c + 3] = job.touchTexels ? std::max(job.touchBox[c + 3], p[c]) : p[c];
++        }
++        ++job.touchTexels;
++      }
++
+       const size_t pixels = size_t(job.width) * job.height;
+       const bool half = job.format == TexelFormat::Rgba16f;
+       job.texels.assign(pixels * (half ? 8 : 4), 0);
+@@ -1186,11 +1300,89 @@ namespace gi {
+       return VK_SUCCESS;
+     }
+ 
++    // Point queries: each point's irradiance from every lamp with a settled layer, weighted by the job's scales: the
++    // lamps' direct light by shadow rays, and the hit texels' light along the scene's count of cosine-weighted rays.
++    // A query at a texel's point and normal gives about its sum layer, one gather further.
++    // shortcut: one submission for up to 256 points, about a millisecond at 256 rays; slice by points if callers send more.
++    VkResult Device::query(Job& job) {
++      const uint32_t points = uint32_t(job.blob.size() / (6 * sizeof(float)));
++      if (m_sceneSeq == 0 || job.sceneSeq != m_sceneSeq || points == 0 || points > bridge_util::GiQueryAnswer::kMaxPoints ||
++          job.blob.size() != size_t(points) * 6 * sizeof(float) || job.scales.size() % 3 != 0 || !finite(job.scales.data(), job.scales.size())) {
++        job.hresult = D3DERR_INVALIDCALL;
++        return VK_SUCCESS;
++      }
++      const uint32_t lamps = uint32_t(m_lamps.size());
++      std::vector<float> data((size_t(lamps) * 5 + size_t(points) * 3) * 4, 0.0f);
++      const float* const pIn = reinterpret_cast<const float*>(job.blob.data());
++      for (uint32_t q = 0; q < points; ++q) {
++        const float* const p = pIn + size_t(q) * 6;
++        const float length = std::sqrt(p[3] * p[3] + p[4] * p[4] + p[5] * p[5]);
++        if (!finite(p, 6) || !(length > 1e-6f)) {
++          job.hresult = D3DERR_INVALIDCALL;
++          return VK_SUCCESS;
++        }
++        float* const pPoint = &data[(size_t(lamps) * 5 + size_t(q) * 2) * 4];
++        memcpy(pPoint, p, sizeof(float) * 3);
++        for (uint32_t c = 0; c < 3; ++c) {
++          pPoint[4 + c] = p[3 + c] / length;
++        }
++      }
++      for (uint32_t l = 0; l < lamps; ++l) {
++        const bridge_util::GiLamp& lamp = m_lamps[l];
++        float* const pLamp = &data[size_t(l) * 20];
++        const bool settled = m_directValid[l] && m_indirectHalf[l] >= 0;
++        const bool scoped = lamp.boxMin[0] <= lamp.boxMax[0] && lamp.boxMin[1] <= lamp.boxMax[1] && lamp.boxMin[2] <= lamp.boxMax[2];
++        memcpy(pLamp, lamp.position, sizeof(float) * 3);
++        pLamp[3] = lamp.radius;
++        for (uint32_t c = 0; c < 3; ++c) {
++          const float scale = l * 3 + c < job.scales.size() ? job.scales[l * 3 + c] : 1.0f;
++          pLamp[4 + c] = lamp.colour[c] * scale;
++          pLamp[8 + c] = scale;
++          pLamp[12 + c] = scoped ? lamp.boxMin[c] : -1e30f;
++          pLamp[16 + c] = scoped ? lamp.boxMax[c] : 1e30f;
++        }
++        pLamp[7] = settled ? float(m_indirectHalf[l]) : -1.0f;
++        job.lampsUsed += settled ? 1 : 0;
++      }
++      VkResult result = replaceBuffer(kQuery, data.data(), data.size() * sizeof(float));
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      m_push.lamp = lamps;
++      m_push.src = points;
++      m_push.listed = 0;
++      const VkDeviceSize answerOffset = (VkDeviceSize(lamps) * 5 + VkDeviceSize(points) * 2) * 16;
++      begin();
++      vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_solvePipelines[kPassQuery]);
++      vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_solveLayout, 0, 1, &m_solveSet, 0, nullptr);
++      vkCmdPushConstants(m_commandBuffer, m_solveLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(m_push), &m_push);
++      vkCmdDispatch(m_commandBuffer, points, 1, 1);
++      VkMemoryBarrier toCopy { VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT };
++      vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &toCopy, 0, nullptr, 0, nullptr);
++      const VkBufferCopy answerCopy { answerOffset, 0, VkDeviceSize(points) * 16 };
++      vkCmdCopyBuffer(m_commandBuffer, m_sceneBuffers[kQuery].buffer, m_buffer, 1, &answerCopy);
++      VkMemoryBarrier toHost { VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT };
++      vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &toHost, 0, nullptr, 0, nullptr);
++      uint32_t us = 0;
++      result = end(&us);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      job.gpuUs = us;
++      job.slices = 1;
++      job.sliceUsMax = us;
++      const float* const pAnswer = static_cast<const float*>(m_pMapped);
++      job.irradiance.assign(pAnswer, pAnswer + size_t(points) * 4);
++      job.hresult = S_OK;
++      return VK_SUCCESS;
++    }
++
+     VkResult Device::run(Job& job) {
+       switch (job.kind) {
+       case JobKind::Scene: return setScene(job);
+       case JobKind::Lamps: return setLamps(job);
+       case JobKind::Solve: return solve(job);
++      case JobKind::Query: return query(job);
+       default: return runPattern(job);
+       }
+     }
+@@ -1242,6 +1434,7 @@ namespace gi {
+         }
+         job->hresult = hresult;
+         job->blob = std::vector<uint8_t>();
++        job->scales = std::vector<float>();
+         pBlock->gpuUsLast = job->gpuUs;
+         if (job->kind != JobKind::Pattern) {
+           pBlock->sliceUsMax = job->sliceUsMax;
+diff --git a/bridge/src/server/gi_worker.h b/bridge/src/server/gi_worker.h
+index fce75f94f3a5e2c363a9640a41384f4d0b844ea9..c2a8e1ecd3f699d89f0bbe9540b7357ffbc72e2e 100644
+--- a/bridge/src/server/gi_worker.h
++++ b/bridge/src/server/gi_worker.h
+@@ -38,6 +38,7 @@ namespace gi {
+     Scene,    // GiSubmitScene: blob holds the scene
+     Lamps,    // GiSubmitLamps: blob holds the lamp table
+     Objects,  // RemixBridge_GiObjects: blob holds GiObject records (gi_objects.h). Never answered
++    Query,    // RemixBridge_GiQueryPoints: blob holds the points (position, normal), scales the lamps' weights
+   };
+ 
+   struct Job {
+@@ -62,6 +63,16 @@ namespace gi {
+     uint32_t slices = 0;
+     uint32_t sliceUsMax = 0;
+     std::vector<uint8_t> texels;  // tightly packed rows
++
++    // Query: the weight of each lamp's layer (rgb a lamp, missing lamps weigh 1), and the answer, four floats a point.
++    std::vector<float> scales;
++    std::vector<float> irradiance;
++    uint32_t lampsUsed = 0;
++
++    // Solve: the lamp's touch box, when its sum layer is settled (touchValid).
++    bool touchValid = false;
++    uint32_t touchTexels = 0;
++    float touchBox[6] = {};  // min xyz, max xyz
+   };
+ 
+   // Starts the worker once. The handles are DXVK's VkInstance and VkPhysicalDevice, or nullptr when the server's
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index 4fc2039aaa96c5c6137aeac797921554f46489d6..7fb3d9db18e80a4d1d1ab090e3b1cf8116de9fa0 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -3014,6 +3014,18 @@ void ProcessDeviceCommandQueue() {
+         gi_server::submit(submitSlot, submitKind, submitSize, ticketSlot, submitSeq);
+         break;
+       }
++      case Bridge_GiQuery:
++      {
++        GET_HDR_VAL(querySceneSeq);
++        PULL_U(querySlot);
++        PULL_U(querySeq);
++        void* pQueryPoints = nullptr;
++        const uint32_t queryPointBytes = DeviceBridge::get_data(&pQueryPoints);
++        void* pQueryScales = nullptr;
++        const uint32_t queryScaleBytes = DeviceBridge::get_data(&pQueryScales);
++        gi_server::query(querySceneSeq, pQueryPoints, queryPointBytes, pQueryScales, queryScaleBytes, querySlot, querySeq);
++        break;
++      }
+       case Bridge_GiCancel:
+       {
+         GET_HDR_VAL(cancelSeq);
+diff --git a/bridge/src/server/meson.build b/bridge/src/server/meson.build
+index d43bb8ecd5d2082f1d716c1130f94b650b83aa24..607bf7d597927e5d85b8b02f5110f55642ad2ca2 100644
+--- a/bridge/src/server/meson.build
++++ b/bridge/src/server/meson.build
+@@ -42,7 +42,7 @@ gi_spirv = [custom_target('gi_pattern_spv',
+ # gi_solve.comp once a pass and level: output name, variable, pass, ray queries (SPIR-V 1.4; the compute level stays at Vulkan 1.1).
+ foreach v : [['links_rq', 'g_giLinksRqSpv', '0', true], ['direct_rq', 'g_giDirectRqSpv', '1', true],
+              ['links_sw', 'g_giLinksSwSpv', '0', false], ['direct_sw', 'g_giDirectSwSpv', '1', false],
+-             ['bounce', 'g_giBounceSpv', '2', false]]
++             ['bounce', 'g_giBounceSpv', '2', false], ['query_rq', 'g_giQueryRqSpv', '3', true], ['query_sw', 'g_giQuerySwSpv', '3', false]]
+   gi_spirv += custom_target('gi_' + v[0] + '_spv',
+     input   : 'gi_solve.comp',
+     output  : 'gi_' + v[0] + '_spv.h',
+diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
+index e3894f1ef3485c5815bb3169ff708b4b2281a23a..0e633ca9566f581d4c08dda1650b1d410ef4b2ef 100644
+--- a/bridge/src/util/util_commands.h
++++ b/bridge/src/util/util_commands.h
+@@ -73,6 +73,7 @@ namespace Commands {
+     Bridge_GiPixelPass,
+     // Mesh casters (client/d3d9_gi.cpp RemixBridge_GiObjects), sent with FlagBits::AsyncResult.
+     Bridge_GiObjects,
++    Bridge_GiQuery,
+     // These are not actually official D3D9 API calls.
+     IDirect3DDevice9Ex_LinkSwapchain,
+     IDirect3DDevice9Ex_LinkBackBuffer,
+@@ -513,6 +514,7 @@ namespace Commands {
+     case Bridge_GiPixelOpen: return "Bridge_GiPixelOpen";
+     case Bridge_GiPixelPass: return "Bridge_GiPixelPass";
+     case Bridge_GiObjects: return "Bridge_GiObjects";
++    case Bridge_GiQuery: return "Bridge_GiQuery";
+     
+     case Bridge_UnlinkResource: return "Bridge_UnlinkResource";
+     case Bridge_UnlinkVolumeResource: return "Bridge_UnlinkVolumeResource";
+diff --git a/bridge/src/util/util_gi.h b/bridge/src/util/util_gi.h
+index fb8299c4078ec00564d9f357a91a0479c4365743..4d42eec501fe4cfd183d5f8da96e531d27b43d58 100644
+--- a/bridge/src/util/util_gi.h
++++ b/bridge/src/util/util_gi.h
+@@ -141,9 +141,33 @@ namespace bridge_util {
+     uint8_t data[kBytes];
+   };
+ 
++  // RemixBridge_GiQueryPoints: the answer of the last query, written by the play thread before it answers the ticket.
++  struct GiQueryAnswer {
++    static constexpr uint32_t kMaxPoints = 256;
++    uint32_t seq;        // the query's ticket
++    uint32_t points;
++    uint32_t lampsUsed;  // lamps whose settled layer the answer holds
++    uint32_t reserved;
++    float irradiance[kMaxPoints][4];  // rgb in the layers' units (a sum layer's value at a texel there), alpha 1
++  };
++
++  // A lamp's touch box: the box of the texels its sum layer lights over 0.5/255, written by every solve of the lamp's
++  // settled layer. version is odd while the play thread writes the entry.
++  struct GiTouchEntry {
++    std::atomic<uint32_t> version;
++    uint32_t texels;  // texels over the threshold. 0: the lamp lights none, or is not solved yet (solveSeq 0)
++    uint32_t solveSeq;
++    uint32_t reserved;
++    float boxMin[3];
++    float boxMax[3];
++    uint32_t reserved2[2];
++  };
++  static_assert(sizeof(GiTouchEntry) == 48 && sizeof(GiQueryAnswer) == 16 + 256 * 16, "The GI block must have the same layout in both processes");
++
+   struct GiSharedBlock {
+     static constexpr uint32_t kMagic = 0x31304947;  // "GI01"
+-    static constexpr uint32_t kLayoutVersion = 2;
++    static constexpr uint32_t kLayoutVersion = 3;
++    static constexpr uint32_t kMaxLamps = 256;
+     static constexpr uint32_t kMaxTickets = 64;
+     static constexpr uint32_t kSubmitSlots = 2;
+     static constexpr uint32_t kCounterWords = 22;   // level .. objectCounters, read by RemixBridge_GiReadCounters
+@@ -167,9 +191,11 @@ namespace bridge_util {
+     uint32_t objectCounters[8];         // 64: counter words 14 to 21, written by the worker for RemixBridge_GiObjects (GiObjectCounter)
+     GiAnswerSlot answers[kMaxTickets];  // 96
+     GiSubmitSlot submits[kSubmitSlots]; // 2144
+-    // R-06 adds the point-query slot here (layoutVersion 3).
++    GiQueryAnswer query;                // 919680: layoutVersion 3
++    GiTouchEntry touch[kMaxLamps];      // 923792
+   };
+-  static_assert(offsetof(GiSharedBlock, level) == 8 && offsetof(GiSharedBlock, answers) == 96 && offsetof(GiSharedBlock, submits) == 2144,
++  static_assert(offsetof(GiSharedBlock, level) == 8 && offsetof(GiSharedBlock, answers) == 96 && offsetof(GiSharedBlock, submits) == 2144 &&
++                offsetof(GiSharedBlock, query) == 919680 && offsetof(GiSharedBlock, touch) == 923792,
+                 "GiSharedBlock must have the same layout in both processes");
+ 
+   // Maps the block on first use; nullptr when the mapping failed.
+diff --git a/bridge/test/rtx/unit/test_gi_device.cpp b/bridge/test/rtx/unit/test_gi_device.cpp
+index 2245e37002b6d10ef3e043b5bb3e712bae66bd0b..9b87550e0414c90deaaa8cca50d80a28673549ea 100644
+--- a/bridge/test/rtx/unit/test_gi_device.cpp
++++ b/bridge/test/rtx/unit/test_gi_device.cpp
+@@ -24,7 +24,9 @@
+ // stock (server.giServer = False, expects level none). REMIX_GI_TEST_DXVK: a d3d9vk_x64.dll for the server, so the
+ // worker matches DXVK's GPU. REMIX_GI_TEST_SCENE: a file with a scene, its lamps, an offline solve of it and the room
+ // means of a path-traced reference. The test submits the scene through RemixBridge_GiSubmit, solves every lamp's
+-// layers and compares them with both.
++// layers and compares them with both, then checks the lamps' touch boxes and point queries (RemixBridge_GiQueryPoints)
++// against a CPU reference. Modes lots and lots-full (server.giListDispatch = False): REMIX_GI_TEST_LOTS names lots
++// (paths split by ';') whose every lamp is solved scoped to its box, with the GPU time a layer.
+ 
+ #include <algorithm>
+ #include <cmath>
+@@ -48,6 +50,9 @@ namespace {
+   using PFN_GiSubmit = HRESULT (__stdcall*)(const void*, uint32_t, uint32_t, uint32_t*);
+   using PFN_GiTicket = HRESULT (__stdcall*)(uint32_t);
+   using PFN_GiReadCounters = HRESULT (__stdcall*)(uint32_t*, uint32_t);
++  using PFN_GiQueryPoints = HRESULT (__stdcall*)(const float*, uint32_t, const float*, uint32_t, uint32_t, uint32_t*);
++  using PFN_GiReadPoints = HRESULT (__stdcall*)(uint32_t, float*, uint32_t);
++  using PFN_GiReadTouch = HRESULT (__stdcall*)(uint32_t, float*, uint32_t*);
+ 
+   // Word indices of RemixBridge_GiReadCounters, from the block's level field on (util_gi.h).
+   enum Counter { kLevel, kCapBits, kHeartbeat, kWorkerHeartbeat, kLastError, kJobsQueued, kJobsDone, kGpuUsLast,
+@@ -61,6 +66,9 @@ namespace {
+   PFN_GiTicket g_poll = nullptr;
+   PFN_GiTicket g_cancel = nullptr;
+   PFN_GiReadCounters g_readCounters = nullptr;
++  PFN_GiQueryPoints g_queryPoints = nullptr;
++  PFN_GiReadPoints g_readPoints = nullptr;
++  PFN_GiReadTouch g_readTouch = nullptr;
+ 
+   void check(HRESULT result, const char* pCall) {
+     if (FAILED(result)) {
+@@ -197,8 +205,10 @@ namespace {
+ 
+   SceneFile loadScene(const char* pPath) {
+     SceneFile file;
+-    std::ifstream in(pPath, std::ios::binary);
+-    file.bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
++    std::ifstream in(pPath, std::ios::binary | std::ios::ate);
++    file.bytes.resize(in ? size_t(in.tellg()) : 0);
++    in.seekg(0);
++    in.read(reinterpret_cast<char*>(file.bytes.data()), std::streamsize(file.bytes.size()));
+     uint32_t head[5] = {};
+     if (file.bytes.size() >= sizeof(head)) {
+       memcpy(head, file.bytes.data(), sizeof(head));
+@@ -221,14 +231,8 @@ namespace {
+     return file;
+   }
+ 
+-  // Solves one layer of the scene and returns it by texel, read from the pixel the scene gave each texel (texels - 1 - i).
+-  std::vector<float> solveLayer(IDirect3DDevice9* pDevice, const Target& target, uint32_t texels, uint32_t layer, uint32_t sceneTicket, const char* pName) {
+-    uint32_t ticket = 0;
+-    check(g_solve(target.pTexture.Get(), layer, sceneTicket, &ticket), "RemixBridge_GiSolve (scene)");
+-    expect(waitForAnswer(pDevice, ticket), S_OK, "RemixBridge_GiPoll (scene layer)");
+-    const auto values = counters();
+-    std::printf("  %s: %u GPU slices, longest %u us, %u us of GPU time, upload %u us.\n", pName, values[kSlicesLast], values[kSliceUsMax],
+-                values[kGpuUsLast], values[kUploadUsLast]);
++  // Reads a layer of the scene back by texel, from the pixel the scene gave each texel (texels - 1 - i).
++  std::vector<float> readLayer(IDirect3DDevice9* pDevice, const Target& target, uint32_t texels) {
+     ComPtr<IDirect3DSurface9> pLevel;
+     check(target.pTexture->GetSurfaceLevel(0, &pLevel), "GetSurfaceLevel");
+     check(pDevice->GetRenderTargetData(pLevel.Get(), target.pReadback.Get()), "GetRenderTargetData");
+@@ -251,6 +255,17 @@ namespace {
+     return layerValues;
+   }
+ 
++  // Solves one layer of the scene and returns it by texel.
++  std::vector<float> solveLayer(IDirect3DDevice9* pDevice, const Target& target, uint32_t texels, uint32_t layer, uint32_t sceneTicket, const char* pName) {
++    uint32_t ticket = 0;
++    check(g_solve(target.pTexture.Get(), layer, sceneTicket, &ticket), "RemixBridge_GiSolve (scene)");
++    expect(waitForAnswer(pDevice, ticket), S_OK, "RemixBridge_GiPoll (scene layer)");
++    const auto values = counters();
++    std::printf("  %s: %u GPU slices, longest %u us, %u us of GPU time, upload %u us.\n", pName, values[kSlicesLast], values[kSliceUsMax],
++                values[kGpuUsLast], values[kUploadUsLast]);
++    return readLayer(pDevice, target, texels);
++  }
++
+   // Counts the texels whose colour is more than the tolerance (in 1/255 of the 8-bit range) from scale x the expected one,
+   // and the texels that hold light where the expected layer holds exactly none (a leak).
+   // pPositions: the scene's texels (GiSceneTexel, ten words each), to name the first texels that differ.
+@@ -285,6 +300,440 @@ namespace {
+     }
+   }
+ 
++  // The scene blob's parts, for the CPU reference of the point queries (util_gi.h layouts).
++  struct SceneView {
++    struct Triangle { float v[3][3]; int32_t front; int32_t back; };
++    struct Patch { float origin[3]; float u[3]; float v[3]; uint32_t nu; uint32_t nv; uint32_t mapOffset; };
++    struct Texel { float position[3]; float normal[3]; float albedo[3]; uint32_t pixel; };
++    struct Lamp { float position[3]; float radius; float colour[3]; uint32_t reserved; float boxMin[3]; float boxMax[3]; };
++    uint32_t rays = 0;
++    uint32_t shadowRays = 0;
++    std::vector<Triangle> triangles;
++    std::vector<Patch> patches;
++    std::vector<int32_t> map;
++    std::vector<Texel> texels;
++    std::vector<Lamp> lamps;
++  };
++
++  SceneView viewScene(const SceneFile& file) {
++    SceneView view;
++    uint32_t header[12];
++    memcpy(header, file.pScene, sizeof(header));
++    view.rays = header[6];
++    view.shadowRays = header[7];
++    const uint8_t* pRead = file.pScene + sizeof(header);
++    const auto take = [&pRead](auto& out, size_t count) {
++      out.resize(count);
++      memcpy(out.data(), pRead, count * sizeof(out[0]));
++      pRead += count * sizeof(out[0]);
++    };
++    take(view.triangles, header[2]);
++    take(view.patches, header[3]);
++    take(view.map, header[4]);
++    take(view.texels, header[5]);
++    pRead = file.pLamps;
++    take(view.lamps, file.lampsSize / sizeof(SceneView::Lamp));
++    return view;
++  }
++
++  struct Vec { float x, y, z; };
++  Vec operator+(Vec a, Vec b) { return { a.x + b.x, a.y + b.y, a.z + b.z }; }
++  Vec operator-(Vec a, Vec b) { return { a.x - b.x, a.y - b.y, a.z - b.z }; }
++  Vec operator*(Vec a, float s) { return { a.x * s, a.y * s, a.z * s }; }
++  float dot(Vec a, Vec b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
++  Vec cross(Vec a, Vec b) { return { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
++  Vec normalize(Vec a) { return a * (1.0f / std::sqrt(dot(a, a))); }
++  Vec load(const float* p) { return { p[0], p[1], p[2] }; }
++
++  uint32_t pcg(uint32_t v) {
++    const uint32_t s = v * 747796405u + 2891336453u;
++    const uint32_t w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
++    return (w >> 22u) ^ w;
++  }
++
++  // gi_solve.comp's CosineRay, Trace (both sides, edges taken a little wide), TexelAt and LampShare, on the CPU.
++  Vec cosineRay(Vec n, uint32_t seed) {
++    const uint32_t h1 = pcg(seed);
++    const uint32_t h2 = pcg(h1);
++    const float u1 = (float(h1 >> 8) + 0.5f) / 16777216.0f;
++    const float phi = 6.2831853f * (float(h2 >> 8) + 0.5f) / 16777216.0f;
++    const Vec t = normalize(cross(std::fabs(n.y) < 0.9f ? Vec { 0, 1, 0 } : Vec { 1, 0, 0 }, n));
++    const Vec b = cross(n, t);
++    const float rad = std::sqrt(u1);
++    return normalize(t * (rad * std::cos(phi)) + b * (rad * std::sin(phi)) + n * std::sqrt(1.0f - u1));
++  }
++
++  bool trace(const SceneView& view, Vec o, Vec d, float tMin, float tMax, float& tHit, uint32_t& prim) {
++    bool hit = false;
++    tHit = tMax;
++    for (uint32_t i = 0; i < view.triangles.size(); ++i) {
++      const Vec a = load(view.triangles[i].v[0]);
++      const Vec e1 = load(view.triangles[i].v[1]) - a;
++      const Vec e2 = load(view.triangles[i].v[2]) - a;
++      const Vec p = cross(d, e2);
++      const float det = dot(e1, p);
++      if (std::fabs(det) < 1e-12f) {
++        continue;
++      }
++      const float inv = 1.0f / det;
++      const float edge = 1e-5f;
++      const Vec s = o - a;
++      const float u = dot(s, p) * inv;
++      if (u < -edge || u > 1.0f + edge) {
++        continue;
++      }
++      const Vec q = cross(s, e1);
++      const float v = dot(d, q) * inv;
++      if (v < -edge || u + v > 1.0f + edge) {
++        continue;
++      }
++      const float t = dot(e2, q) * inv;
++      if (t > tMin && t < tHit) {
++        tHit = t;
++        prim = i;
++        hit = true;
++      }
++    }
++    return hit;
++  }
++
++  int texelAt(const SceneView& view, Vec p, Vec d, uint32_t prim) {
++    const SceneView::Triangle& triangle = view.triangles[prim];
++    const Vec n = cross(load(triangle.v[1]) - load(triangle.v[0]), load(triangle.v[2]) - load(triangle.v[0]));
++    const int32_t id = dot(n, d) < 0.0f ? triangle.front : triangle.back;
++    if (id < 0) {
++      return -1;
++    }
++    const SceneView::Patch& patch = view.patches[id];
++    const Vec r = p - load(patch.origin);
++    const int cu = std::min(std::max(int(std::floor(dot(r, load(patch.u)))), 0), int(patch.nu) - 1);
++    const int cv = std::min(std::max(int(std::floor(dot(r, load(patch.v)))), 0), int(patch.nv) - 1);
++    return view.map[patch.mapOffset + size_t(cv) * patch.nu + cu];
++  }
++
++  float lampShare(const SceneView& view, Vec p, const SceneView::Lamp& lamp) {
++    float share = 0.0f;
++    for (uint32_t k = 0; k < view.shadowRays; ++k) {
++      const float y = 1.0f - (2.0f * float(k) + 1.0f) / float(view.shadowRays);
++      const float rr = std::sqrt(1.0f - y * y);
++      const float a = 2.39996323f * float(k);
++      const Vec e = load(lamp.position) + Vec { rr * std::cos(a), y, rr * std::sin(a) } * lamp.radius - p;
++      const float length = std::sqrt(dot(e, e));
++      float t;
++      uint32_t prim;
++      share += trace(view, p, e * (1.0f / length), 1e-3f, length - 1e-3f, t, prim) ? 0.0f : 1.0f;
++    }
++    return share / float(view.shadowRays);
++  }
++
++  bool inBox(const SceneView::Lamp& lamp, Vec p) {
++    const bool scoped = lamp.boxMin[0] <= lamp.boxMax[0] && lamp.boxMin[1] <= lamp.boxMax[1] && lamp.boxMin[2] <= lamp.boxMax[2];
++    return !scoped || (p.x >= lamp.boxMin[0] && p.y >= lamp.boxMin[1] && p.z >= lamp.boxMin[2] &&
++                       p.x <= lamp.boxMax[0] && p.y <= lamp.boxMax[1] && p.z <= lamp.boxMax[2]);
++  }
++
++  // The irradiance gi_solve.comp's pass 3 computes at point q, from the given layers (lamps x texels x 4 floats each).
++  void referencePoint(const SceneView& view, uint32_t q, const float* pPoint, const float* pScales, const float* pDirect, const float* pIndirect, float out[3]) {
++    const Vec p = load(pPoint);
++    const Vec n = normalize(load(pPoint + 3));
++    const size_t texels = view.texels.size();
++    double sum[3] = {};
++    for (size_t l = 0; l < view.lamps.size(); ++l) {
++      const SceneView::Lamp& lamp = view.lamps[l];
++      const Vec toLamp = load(lamp.position) - p;
++      const float d2 = dot(toLamp, toLamp);
++      const float c = dot(n, toLamp) / std::sqrt(d2);
++      if (!inBox(lamp, p) || c <= 0.0f) {
++        continue;
++      }
++      const float light = c / d2 * lampShare(view, p, lamp);
++      for (int k = 0; k < 3; ++k) {
++        sum[k] += lamp.colour[k] * pScales[l * 3 + k] * light;
++      }
++    }
++    for (uint32_t r = 0; r < view.rays; ++r) {
++      const Vec d = cosineRay(n, (q * view.rays + r) ^ 0x80000000u);
++      float t;
++      uint32_t prim;
++      if (!trace(view, p, d, 1e-3f, 1e4f, t, prim)) {
++        continue;
++      }
++      const int j = texelAt(view, p + d * t, d, prim);
++      if (j < 0) {
++        continue;
++      }
++      for (size_t l = 0; l < view.lamps.size(); ++l) {
++        if (!inBox(view.lamps[l], p)) {
++          continue;
++        }
++        for (int k = 0; k < 3; ++k) {
++          const size_t at = (l * texels + size_t(j)) * 4 + k;
++          sum[k] += double(view.texels[j].albedo[k]) * pScales[l * 3 + k] * (pDirect[at] + pIndirect[at]) / view.rays;
++        }
++      }
++    }
++    for (int k = 0; k < 3; ++k) {
++      out[k] = float(sum[k]);
++    }
++  }
++
++  // Sends a query and waits for its answer, presenting as a game does. Returns the poll's result.
++  HRESULT queryPoints(IDirect3DDevice9* pDevice, const std::vector<float>& points, const std::vector<float>& scales, uint32_t sceneTicket,
++                      std::vector<float>& irradiance) {
++    uint32_t ticket = 0;
++    check(g_queryPoints(points.data(), uint32_t(points.size() / 6), scales.data(), uint32_t(scales.size() / 3), sceneTicket, &ticket), "RemixBridge_GiQueryPoints");
++    uint32_t second = 0;
++    expect(g_queryPoints(points.data(), 1, nullptr, 0, sceneTicket, &second), D3DERR_WASSTILLDRAWING, "RemixBridge_GiQueryPoints while one is in flight");
++    irradiance.assign(points.size() / 6 * 4, -1.0f);
++    const ULONGLONG deadline = GetTickCount64() + 30000;
++    HRESULT result;
++    while ((result = g_readPoints(ticket, irradiance.data(), uint32_t(points.size() / 6))) == S_FALSE) {
++      if (GetTickCount64() >= deadline) {
++        throw std::runtime_error("The GI query was not answered within thirty seconds");
++      }
++      check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++    }
++    return result;
++  }
++
++  // Point queries on the synthetic scene, all lamps solved: texel points and points in the air of every room, against
++  // the CPU reference from the offline layers and against the bridge's own sum layers at the texel points.
++  void testQueries(IDirect3DDevice9* pDevice, const SceneFile& file, uint32_t sceneTicket, const std::vector<std::vector<float>>& sums) {
++    logLine("Testing point queries...");
++    const SceneView view = viewScene(file);
++    std::vector<float> points;
++    std::vector<uint32_t> onTexel;
++    constexpr uint32_t kTexelPoints = 192;
++    for (uint32_t k = 0; k < kTexelPoints; ++k) {
++      const uint32_t i = uint32_t(uint64_t(k) * file.texels / kTexelPoints);
++      points.insert(points.end(), view.texels[i].position, view.texels[i].position + 6);
++      onTexel.push_back(i);
++    }
++    // Sixteen points 1 m over the floor of each room (rooms of tools/gi_server_test/check.cpp: z 10 to 16; x 10 to 16,
++    // 16 to 22, 22 to 28 below, x 10 to 16 upstairs), facing up, down and the four walls in turn.
++    const float roomX[4] = { 10.0f, 16.0f, 22.0f, 10.0f };
++    const Vec normals[6] = { { 0, 1, 0 }, { 1, 0, 0 }, { -1, 0, 0 }, { 0, 0, 1 }, { 0, 0, -1 }, { 0, -1, 0 } };
++    for (uint32_t k = 0; k < 64; ++k) {
++      const uint32_t room = k / 16;
++      const Vec n = normals[k % 6];
++      const float point[6] = { roomX[room] + 1.0f + float(k % 4) * 1.3f, room == 3 ? 4.0f : 1.0f, 11.0f + float((k / 4) % 4) * 1.3f, n.x, n.y, n.z };
++      points.insert(points.end(), point, point + 6);
++    }
++    std::vector<float> scales;
++    for (uint32_t l = 0; l < file.lamps; ++l) {
++      const float scale[3] = { 1.0f - 0.3f * float(l), 0.5f + 0.2f * float(l), 1.0f };
++      scales.insert(scales.end(), scale, scale + 3);
++    }
++    std::vector<float> irradiance;
++    expect(queryPoints(pDevice, points, scales, sceneTicket, irradiance), S_OK, "RemixBridge_GiReadPoints");
++    const auto values = counters();
++    std::printf("  %zu points, %u lamps: %u us of GPU time.\n", points.size() / 6, file.lamps, values[kGpuUsLast]);
++
++    const size_t count = points.size() / 6;
++    const size_t layer = size_t(file.texels) * 4;
++    size_t off = 0;
++    float worst = 0.0f;
++    float worstLayer = 0.0f;
++    double sumLayer = 0.0;
++    double biasLayer = 0.0;
++    for (size_t q = 0; q < count; ++q) {
++      float expected[3];
++      referencePoint(view, uint32_t(q), &points[q * 6], scales.data(), file.pDirect, file.pIndirect, expected);
++      float difference = 0.0f;
++      for (int c = 0; c < 3; ++c) {
++        difference = std::max(difference, std::fabs(toByte(irradiance[q * 4 + c]) - toByte(expected[c])));
++      }
++      if (!std::isfinite(irradiance[q * 4]) || irradiance[q * 4 + 3] != 1.0f) {
++        throw std::runtime_error("A query answer is not finite or not written");
++      }
++      worst = std::max(worst, difference);
++      off += difference > 1.0f ? 1 : 0;
++      if (difference > 1.0f && off <= 4) {
++        std::printf("    point %zu at (%.2f, %.2f, %.2f): green %.4f, CPU %.4f.\n", q, points[q * 6], points[q * 6 + 1], points[q * 6 + 2], irradiance[q * 4 + 1], expected[1]);
++      }
++      if (q < onTexel.size()) {
++        float layerDifference = 0.0f;
++        for (int c = 0; c < 3; ++c) {
++          float sum = 0.0f;
++          for (uint32_t l = 0; l < file.lamps; ++l) {
++            sum += scales[l * 3 + c] * sums[l][size_t(onTexel[q]) * 4 + c];
++          }
++          const float signedDifference = toByte(irradiance[q * 4 + c]) - toByte(sum);
++          layerDifference = std::max(layerDifference, std::fabs(signedDifference));
++          biasLayer += signedDifference / 3.0;
++        }
++        worstLayer = std::max(worstLayer, layerDifference);
++        sumLayer += layerDifference;
++      }
++    }
++    std::printf("    against the CPU reference: %.2f %% of %zu points within 1/255, worst %.2f/255.\n", 100.0 * double(count - off) / double(count), count, worst);
++
++    // A query gathers along its own rays, not the texel's links, so a texel point differs from the layer by the noise of
++    // one gather. The mean over the points must hold no bias.
++    const double bias = biasLayer / double(onTexel.size());
++    const double meanLayer = sumLayer / double(onTexel.size());
++    std::printf("    texel points against the bridge's sum layers: mean %.2f/255, bias %+.2f/255, worst %.2f/255.\n", meanLayer, bias, worstLayer);
++    if (off * 100 > count) {
++      throw std::runtime_error("The point queries differ from the CPU reference");
++    }
++    if (std::fabs(bias) > 1.0 || meanLayer > 8.0) {
++      throw std::runtime_error("The point queries at texels differ from the layers there");
++    }
++
++    // Lamp 0 alone at half weight is half of lamp 0 at full weight: the weights are linear.
++    std::vector<float> one(points.begin(), points.begin() + 6 * 8);
++    std::vector<float> full;
++    std::vector<float> halfWeight;
++    std::vector<float> weights(size_t(file.lamps) * 3, 0.0f);
++    weights[0] = weights[1] = weights[2] = 1.0f;
++    expect(queryPoints(pDevice, one, weights, sceneTicket, full), S_OK, "RemixBridge_GiReadPoints (lamp 0)");
++    weights[0] = weights[1] = weights[2] = 0.5f;
++    expect(queryPoints(pDevice, one, weights, sceneTicket, halfWeight), S_OK, "RemixBridge_GiReadPoints (lamp 0 at half)");
++    for (size_t i = 0; i < full.size(); ++i) {
++      if (i % 4 != 3 && std::fabs(halfWeight[i] - 0.5f * full[i]) > 1e-6f + 1e-5f * full[i]) {
++        throw std::runtime_error("A lamp's weight does not scale its answer");
++      }
++    }
++
++    // Refusals: no point, too many, a NaN, a zero normal, a stale scene.
++    uint32_t ticket = 0;
++    expect(g_queryPoints(points.data(), 0, nullptr, 0, sceneTicket, &ticket), D3DERR_INVALIDCALL, "RemixBridge_GiQueryPoints (no point)");
++    std::vector<float> many(257 * 6, 1.0f);
++    expect(g_queryPoints(many.data(), 257, nullptr, 0, sceneTicket, &ticket), D3DERR_INVALIDCALL, "RemixBridge_GiQueryPoints (257 points)");
++    std::vector<float> bad(one);
++    bad[1] = std::nanf("");
++    expect(queryPoints(pDevice, bad, {}, sceneTicket, full), D3DERR_INVALIDCALL, "RemixBridge_GiReadPoints (NaN point)");
++    bad = one;
++    bad[3] = bad[4] = bad[5] = 0.0f;
++    expect(queryPoints(pDevice, bad, {}, sceneTicket, full), D3DERR_INVALIDCALL, "RemixBridge_GiReadPoints (no normal)");
++    expect(queryPoints(pDevice, one, {}, sceneTicket + 1000, full), D3DERR_INVALIDCALL, "RemixBridge_GiReadPoints (stale scene)");
++  }
++
++  // Counts the texels of a sum layer over 0.5/255 and their box.
++  uint32_t litTexels(const SceneView& view, const float* pDirect, const float* pIndirect, float box[6]) {
++    uint32_t count = 0;
++    for (size_t i = 0; i < view.texels.size(); ++i) {
++      float value = 0.0f;
++      for (int c = 0; c < 3; ++c) {
++        value = std::max(value, pDirect[i * 4 + c] + (pIndirect != nullptr ? pIndirect[i * 4 + c] : 0.0f));
++      }
++      if (value <= 0.5f / 255.0f) {
++        continue;
++      }
++      for (int c = 0; c < 3; ++c) {
++        box[c] = count ? std::min(box[c], view.texels[i].position[c]) : view.texels[i].position[c];
++        box[c + 3] = count ? std::max(box[c + 3], view.texels[i].position[c]) : view.texels[i].position[c];
++      }
++      ++count;
++    }
++    return count;
++  }
++
++  // Reads a lamp's touch box and checks it against the texels its sum layer lights.
++  uint32_t checkTouch(const SceneView& view, uint32_t lamp, const float* pDirect, const float* pIndirect, const char* pName) {
++    float box[6] = {};
++    uint32_t texels = 0;
++    expect(g_readTouch(lamp, box, &texels), S_OK, "RemixBridge_GiReadTouch");
++    float expectedBox[6] = {};
++    const uint32_t expected = litTexels(view, pDirect, pIndirect, expectedBox);
++    float boxDifference = 0.0f;
++    for (int c = 0; c < 6; ++c) {
++      boxDifference = std::max(boxDifference, std::fabs(box[c] - expectedBox[c]));
++    }
++    // The layer read back is half float, so a texel at the threshold may count on one side only.
++    const uint32_t slack = 2 + expected / 100;
++    if (texels + slack < expected || texels > expected + slack || (expected > 0 && boxDifference > 1.0f)) {
++      std::printf("    %s: touch box of %u texels (%.1f %.1f %.1f .. %.1f %.1f %.1f), the layer lights %u, box off by %.2f m.\n", pName, texels,
++                  box[0], box[1], box[2], box[3], box[4], box[5], expected, boxDifference);
++      throw std::runtime_error("A touch box differs from the texels its layer lights");
++    }
++    return texels;
++  }
++
++  // The lots of tools/gi_server_test/rebake_check.cpp --dump (60, 120 and 200 lamps, each scoped to its room grown by one
++  // room): every lamp's sum layer through the bridge, against the offline unscoped solve inside the lamp's box, its
++  // touch box, and the GPU time a layer. Run with server.giListDispatch on and off (modes lots and lots-full).
++  void testLots(IDirect3DDevice9* pDevice, const std::string& paths) {
++    size_t start = 0;
++    while (start < paths.size()) {
++      const size_t end = std::min(paths.find(';', start), paths.size());
++      const std::string path = paths.substr(start, end - start);
++      start = end + 1;
++      if (path.empty()) {
++        continue;
++      }
++      const SceneFile file = loadScene(path.c_str());
++      const SceneView view = viewScene(file);
++      std::printf("  Lot %s: %u texels, %u lamps, %zu triangles.\n", path.c_str(), file.texels, file.lamps, view.triangles.size());
++      const uint32_t sceneTicket = submitBlob(pDevice, file.pScene, file.sceneSize, 1);
++      expect(waitForAnswer(pDevice, sceneTicket), S_OK, "RemixBridge_GiPoll (lot)");
++      auto values = counters();
++      std::printf("    structures and links: %u us of GPU time in %u slices, longest %u us.\n", values[kGpuUsLast], values[kSlicesLast], values[kSliceUsMax]);
++      expect(waitForAnswer(pDevice, submitBlob(pDevice, file.pLamps, file.lampsSize, 2)), S_OK, "RemixBridge_GiPoll (lot lamps)");
++      const UINT width = 128;
++      const Target target = createTarget(pDevice, width, (file.texels + width - 1) / width, D3DFMT_A16B16G16R16F);
++      std::vector<double> gpuUs;
++      std::vector<double> touched;
++      std::vector<double> offline;
++      uint32_t sliceMax = 0;
++      size_t off = 0;
++      size_t inside = 0;
++      size_t leaks = 0;
++      uint64_t hash = 1469598103934665603ull;
++      for (uint32_t lamp = 0; lamp < file.lamps; ++lamp) {
++        uint32_t ticket = 0;
++        check(g_solve(target.pTexture.Get(), lamp | (2u << 16), sceneTicket, &ticket), "RemixBridge_GiSolve (lot)");
++        expect(waitForAnswer(pDevice, ticket), S_OK, "RemixBridge_GiPoll (lot layer)");
++        values = counters();
++        gpuUs.push_back(values[kGpuUsLast]);
++        sliceMax = std::max(sliceMax, values[kSliceUsMax]);
++        const std::vector<float> sum = readLayer(pDevice, target, file.texels);
++        for (float value : sum) {
++          uint32_t bits;
++          memcpy(&bits, &value, 4);
++          hash = (hash ^ bits) * 1099511628211ull;
++        }
++        const SceneView::Lamp& box = view.lamps[lamp];
++        const size_t at = size_t(lamp) * file.texels * 4;
++        for (uint32_t i = 0; i < file.texels; ++i) {
++          const Vec p = load(view.texels[i].position);
++          float difference = 0.0f;
++          bool lit = false;
++          for (int c = 0; c < 3; ++c) {
++            difference = std::max(difference, std::fabs(toByte(sum[size_t(i) * 4 + c]) - toByte(file.pDirect[at + size_t(i) * 4 + c] + file.pIndirect[at + size_t(i) * 4 + c])));
++            lit = lit || sum[size_t(i) * 4 + c] != 0.0f;
++          }
++          if (inBox(box, p)) {
++            ++inside;
++            off += difference > 1.0f ? 1 : 0;
++          } else {
++            leaks += lit ? 1 : 0;
++          }
++        }
++        float unused[6];
++        offline.push_back(litTexels(view, file.pDirect + at, file.pIndirect + at, unused));
++        touched.push_back(checkTouch(view, lamp, sum.data(), nullptr, "lot lamp"));
++      }
++      const auto pct = [](std::vector<double> v, double p) {
++        std::sort(v.begin(), v.end());
++        return v[std::min(v.size() - 1, size_t(p * double(v.size())))];
++      };
++      double total = 0.0;
++      for (double us : gpuUs) {
++        total += us;
++      }
++      std::printf("    a layer (direct + 16 gathers): GPU %.0f us median, %.0f us p90, %.0f us max, all %u layers %.1f ms; longest slice %u us.\n",
++                  pct(gpuUs, 0.5), pct(gpuUs, 0.9), pct(gpuUs, 1.0), file.lamps, total / 1000.0, sliceMax);
++      std::printf("    touch box: median %.0f texels, max %.0f; the offline unscoped layer lights median %.0f, max %.0f.\n", pct(touched, 0.5), pct(touched, 1.0),
++                  pct(offline, 0.5), pct(offline, 1.0));
++      std::printf("    inside the boxes %.3f %% of %zu texel values within 1/255 of the offline solve; %zu lit texels outside a box; layers hash %016llx.\n",
++                  100.0 * double(inside - off) / double(inside), inside, leaks, static_cast<unsigned long long>(hash));
++      if (leaks != 0) {
++        throw std::runtime_error("A scoped lamp lit a texel outside its box");
++      }
++    }
++  }
++
+   // The scene of tools/gi_server_test through the bridge: every lamp's direct and indirect layer against the offline
+   // solve by texel and against the path-traced reference by room mean, then a lamp change, a stale scene and a bad blob.
+   void testScene(IDirect3DDevice9* pDevice, const char* pPath) {
+@@ -300,6 +749,8 @@ namespace {
+     const UINT width = 128;
+     const Target target = createTarget(pDevice, width, (file.texels + width - 1) / width, D3DFMT_A16B16G16R16F);
+     const size_t layer = size_t(file.texels) * 4;
++    const SceneView view = viewScene(file);
++    std::vector<std::vector<float>> sums;
+     for (uint32_t lamp = 0; lamp < file.lamps; ++lamp) {
+       char name[32];
+       std::snprintf(name, sizeof(name), "Lamp %u direct", lamp);
+@@ -309,6 +760,13 @@ namespace {
+       const std::vector<float> indirect = solveLayer(pDevice, target, file.texels, lamp, sceneTicket, name);
+       compareLayer(indirect, file.pIndirect + lamp * layer, nullptr, 1.0f, 1.0f, "indirect",
+                    reinterpret_cast<const float*>(file.pScene + file.sceneSize - size_t(file.texels) * 40));
++      const uint32_t touched = checkTouch(view, lamp, direct.data(), indirect.data(), name);
++      float offlineBox[6];
++      std::printf("    touch box: %u texels; the offline layer lights %u.\n", touched, litTexels(view, file.pDirect + lamp * layer, file.pIndirect + lamp * layer, offlineBox));
++      sums.push_back(direct);
++      for (size_t i = 0; i < direct.size(); ++i) {
++        sums.back()[i] += indirect[i];
++      }
+ 
+       // Room means of the green channel against the path-traced reference: within 5 %, or 0.5/255 in a nearly dark room.
+       double mean[kRooms][2] = {};
+@@ -335,6 +793,8 @@ namespace {
+       }
+     }
+ 
++    testQueries(pDevice, file, sceneTicket, sums);
++
+     logLine("Testing a lamp change, an 8-bit target, a stale scene ticket and a refused blob...");
+     std::vector<uint8_t> lamps(file.pLamps, file.pLamps + file.lampsSize);
+     for (int c = 0; c < 3; ++c) {
+@@ -367,6 +827,17 @@ namespace {
+     std::vector<uint8_t> broken(file.pScene, file.pScene + file.sceneSize);
+     broken[sizeof(uint32_t) * 2] ^= 1;  // one triangle more or less than the blob holds
+     expect(waitForAnswer(pDevice, submitBlob(pDevice, broken.data(), broken.size(), 1)), D3DERR_INVALIDCALL, "RemixBridge_GiPoll (refused scene)");
++    std::vector<uint8_t> notFinite(file.pScene, file.pScene + file.sceneSize);
++    const float nan = std::nanf("");
++    memcpy(notFinite.data() + 48 + 4, &nan, 4);  // the first triangle's first vertex
++    expect(waitForAnswer(pDevice, submitBlob(pDevice, notFinite.data(), notFinite.size(), 1)), D3DERR_INVALIDCALL, "RemixBridge_GiPoll (NaN in the scene)");
++    notFinite.assign(file.pScene, file.pScene + file.sceneSize);
++    const float infinity = INFINITY;
++    memcpy(notFinite.data() + file.sceneSize - 40, &infinity, 4);  // the last texel's position
++    expect(waitForAnswer(pDevice, submitBlob(pDevice, notFinite.data(), notFinite.size(), 1)), D3DERR_INVALIDCALL, "RemixBridge_GiPoll (infinity in the scene)");
++    std::vector<uint8_t> badLamps(file.pLamps, file.pLamps + file.lampsSize);
++    memcpy(badLamps.data() + 4, &nan, 4);
++    expect(waitForAnswer(pDevice, submitBlob(pDevice, badLamps.data(), badLamps.size(), 2)), D3DERR_INVALIDCALL, "RemixBridge_GiPoll (NaN lamp)");
+     solveLayer(pDevice, target, file.texels, 1, sceneTicket, "Lamp 1 indirect after the refused scene");
+     expect(g_submit(broken.data(), 449 * 1024, 1, &ticket), D3DERR_INVALIDCALL, "RemixBridge_GiSubmit (part over the slot size)");
+   }
+@@ -488,11 +959,20 @@ namespace {
+     if (level == 0) {
+       throw std::runtime_error("The GI server reported level none");
+     }
+-    char mode[8] = {};
++    char mode[16] = {};
+     GetEnvironmentVariableA("REMIX_GI_TEST_CASE", mode, sizeof(mode));
+     if (std::string(mode) == "compute" && level != 1) {
+       throw std::runtime_error("server.giMaxLevel = 1 did not keep the worker on the compute level");
+     }
++    if (std::string(mode).rfind("lots", 0) == 0) {
++      logLine(std::string(mode) == "lots" ? "Solving the lots, list-scoped dispatch..." : "Solving the lots, every texel visited...");
++      std::vector<char> lots(32768);
++      if (GetEnvironmentVariableA("REMIX_GI_TEST_LOTS", lots.data(), DWORD(lots.size())) == 0) {
++        throw std::runtime_error("REMIX_GI_TEST_LOTS names no lot");
++      }
++      testLots(pDevice, lots.data());
++      return;
++    }
+ 
+     logLine("Testing passes into A16B16G16R16F and A8R8G8B8 targets...");
+     const Target patch = createTarget(pDevice, 64, 64, D3DFMT_A16B16G16R16F);
+@@ -541,7 +1021,7 @@ namespace {
+ 
+ int main() {
+   std::setvbuf(stdout, nullptr, _IONBF, 0);
+-  char mode[8] = {};
++  char mode[16] = {};
+   GetEnvironmentVariableA("REMIX_GI_TEST_CASE", mode, sizeof(mode));
+   const std::string testCase = mode[0] ? mode : "on";
+   char dxvk[MAX_PATH] = {};
+@@ -558,6 +1038,7 @@ int main() {
+     config << "client.giServer = " << (testCase == "off" ? "False" : "True") << "\n"
+            << "server.giServer = " << (testCase == "stock" ? "False" : "True") << "\n"
+            << "server.giMaxLevel = " << (testCase == "compute" ? 1 : 2) << "\n"
++           << "server.giListDispatch = " << (testCase == "lots-full" ? "False" : "True") << "\n"
+            << "sendCreateFunctionServerResponses = True\n";
+     if (dxvk[0] != 0) {
+       if (!CopyFileA(dxvk, ".trex\\d3d9vk_x64.dll", FALSE)) {
+@@ -577,7 +1058,11 @@ int main() {
+     g_poll = reinterpret_cast<PFN_GiTicket>(GetProcAddress(hClient, "RemixBridge_GiPoll"));
+     g_cancel = reinterpret_cast<PFN_GiTicket>(GetProcAddress(hClient, "RemixBridge_GiCancel"));
+     g_readCounters = reinterpret_cast<PFN_GiReadCounters>(GetProcAddress(hClient, "RemixBridge_GiReadCounters"));
+-    if (g_open == nullptr || g_solve == nullptr || g_submit == nullptr || g_poll == nullptr || g_cancel == nullptr || g_readCounters == nullptr) {
++    g_queryPoints = reinterpret_cast<PFN_GiQueryPoints>(GetProcAddress(hClient, "RemixBridge_GiQueryPoints"));
++    g_readPoints = reinterpret_cast<PFN_GiReadPoints>(GetProcAddress(hClient, "RemixBridge_GiReadPoints"));
++    g_readTouch = reinterpret_cast<PFN_GiReadTouch>(GetProcAddress(hClient, "RemixBridge_GiReadTouch"));
++    if (g_open == nullptr || g_solve == nullptr || g_submit == nullptr || g_poll == nullptr || g_cancel == nullptr || g_readCounters == nullptr ||
++        g_queryPoints == nullptr || g_readPoints == nullptr || g_readTouch == nullptr) {
+       throw std::runtime_error("The client does not export the GI functions");
+     }
+     const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));

@@ -238,7 +238,8 @@ struct BlockerTable {
                     const float reach = std::sqrt(dot(d, d)) + p.r + kPostReach;
                     r2 = std::max(r2, reach * reach);
                 }
-            for (const Blocker& k : rc.b) {
+            static const std::vector<Blocker> kNone;
+            for (const Blocker& k : rc.meshed ? kNone : rc.b) {
                 const bool quad = k.vt == kQuadVt;
                 // a plant: its balls stand in for its upright sheets; a level blocker (a pot's or a planter's top) stays
                 if (!rc.puffs.empty() && std::fabs(k.v(quad ? 0x90 : 0x40).y) < 0.5f) continue;

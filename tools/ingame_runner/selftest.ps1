@@ -49,6 +49,72 @@ foreach ($bad in '12:00:03.000 [WARNING] [SceneBudget] Node 0x0a0b0c0d was found
     Check (-not (Test-ApexLog @($bad) @() $script:DefaultFailPatterns).Ok) "fails a load: $($bad.Substring(13, 40))"
 }
 
+# Real-time GI start line and profiler-arm patterns, taken from the shipped jobs
+$giStart = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[0]
+foreach ($ok in '12:00:00.000 [INFO] [RealtimeGI] On: lots=0 cap=class0 scale=1 indirect=off backend=d3d9',
+                '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
+                '12:00:00.000 [INFO] [RealtimeGI] On: lots=3 cap=hold scale=2 indirect=atlas backend=serverRays') {
+    Check ($ok -match $giStart) "GI start line matches: $($ok.Substring(13))"
+}
+foreach ($bad in '12:00:00.000 [INFO] [RealtimeGI] Off: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class0 scale=1 indirect=off',
+                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=x cap=class0 scale=1 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class3 scale=1 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class0 scale=3 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RealtimeGIX] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RtOutdoorLamps] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9') {
+    Check ($bad -notmatch $giStart) "GI start line rejected: $($bad.Substring(13))"
+}
+# The GI jobs set only keys the module registers (features/realtime_gi.cpp), so a job never relies on a key that is ignored
+$giSrc = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../features/realtime_gi.cpp') -Raw
+$giKeys = @('enabled') + @([regex]::Matches($giSrc, 'Register\w*Setting\(&\w+, "(\w+)"') | ForEach-Object { $_.Groups[1].Value })
+foreach ($job in @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'jobs') -Filter '*.json' | Where-Object { $_.Name -like 'realtime-gi-*' -or $_.Name -like 'gi-*' })) {
+    $j = Get-Content -LiteralPath $job.FullName -Raw | ConvertFrom-Json
+    foreach ($v in @($j.variants.PSObject.Properties)) {
+        $t = $v.Value.toml.'patches.RealtimeGI'
+        if ($t) { foreach ($k in $t.PSObject.Properties.Name) { Check ($k -in $giKeys) "$($job.BaseName) $($v.Name): RealtimeGI key $k is registered" } }
+    }
+}
+# Lamp index counter lines (lamp-index-smoke): objects, fences and windows, the line RealtimeGI OnPresent writes
+$li = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/lamp-index-smoke.json') -Raw | ConvertFrom-Json
+$liCompare = @($li.variants.compare.expect)[1]; $liDraw = @($li.variants.draw.expect)[1]; $liBad = @($li.variants.compare.fail)[0]
+$liLine = '12:00:00.000 [INFO] [RealtimeGI] Lamp index counters: mode={0} builds=3 cells=12288 draws={1} fallbacks=40 compared={2} mismatches: offCentre=10 height=4 cellFull=0 group={3} unexplained={4} fences: draws={5} compared={6} windows: draws=0 compared=0'
+Check (($liLine -f 'compare', 0, 900, 50, 0, 0, 120) -match $liCompare) 'lamp index compare line matches (fences compared, windows 0)'
+Check (($liLine -f 'compare', 0, 900, 50, 0, 0, 0) -notmatch $liCompare) 'lamp index compare line rejected without fence compares'
+Check (($liLine -f 'compare', 0, 900, 50, 2, 0, 120) -notmatch $liCompare) 'lamp index compare line rejected with unexplained differences'
+Check (($liLine -f 'compare', 0, 900, 50, 2, 0, 120) -match $liBad) 'lamp index fail matches unexplained differences'
+Check (($liLine -f 'compare', 0, 900, 50, 0, 0, 120) -notmatch $liBad) 'lamp index fail ignores unexplained=0'
+Check (($liLine -f 'draw', 700, 0, 0, 0, 300, 0) -match $liDraw) 'lamp index draw line matches (fence draws)'
+Check (($liLine -f 'draw', 700, 0, 0, 0, 0, 0) -notmatch $liDraw) 'lamp index draw line rejected without fence draws'
+Check (($liLine -f 'draw', 0, 0, 0, 0, 300, 0) -notmatch $liDraw) 'lamp index draw line rejected without draws'
+# The indirect light smoke (S2-05): its counters pattern takes a line with ready texels and draws, not one without
+$giInd = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gi-indirect-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[2]
+$giLine = '12:00:10.000 [INFO] [RealtimeGI] Counters: frames=600 backend=serverRays draws=4 deviceCalls=2 lamps=12 lots=1 lampChanges=0 indirect=atlas atlasReady={0} gridTexels=900 indirectDraws={1} wallDraws=12 rigs=40 rigDraws={2} rigReads=2 rigSkipped=0 wallSm2={3} wallSm2Fog=0; must be 0: capSolves=0 syncReadbacks=0 locks=0 redrawDiffs=0 readFaults=0 lampTableDiffs=0'
+Check (($giLine -f 640, 37, 300, 9) -match $giInd) 'GI indirect counters match with ready texels and draws'
+foreach ($bad in @(@(0, 37, 300), @(640, 0, 300), @(640, 37, 0))) { Check (($giLine -f $bad[0], $bad[1], $bad[2], 9) -notmatch $giInd) "GI indirect counters rejected: atlasReady=$($bad[0]) indirectDraws=$($bad[1]) rigDraws=$($bad[2])" }
+# (S2-06 item 9) the shader model 2 walls: wallSm2 > 0 and the object vs lot space line; an upgrade refusal fails the load
+$giJob = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gi-indirect-smoke.json') -Raw | ConvertFrom-Json
+$giSm2 = @($giJob.variants.on.expect)[3]; $giSpace = @($giJob.variants.on.expect)[4]; $giRefused = @($giJob.fail)[1]
+Check (($giLine -f 640, 37, 300, 9) -match $giSm2) 'GI sm2 wall counter matches wallSm2=9'
+Check (($giLine -f 640, 37, 300, 0) -notmatch $giSm2) 'GI sm2 wall counter rejects wallSm2=0'
+Check ('12:00:00.000 [INFO] [LotLightBridge] Real-time GI: sm2 wall VS 1A2B3C4D world rows c4..c6 (1.000 0.000 0.000 4.000) (0.000 1.000 0.000 0.000) (0.000 0.000 1.000 8.000); object vs lot space: rotation off identity by 0.0000, object origin at lot (0.000, 0.000, 0.000)' -match $giSpace) 'GI sm2 object vs lot space line matches'
+Check ('12:00:00.000 [INFO] [LotLightBridge] Real-time GI: wall vertex shader 1A2B3C4D writes the grid uv' -notmatch $giSpace) 'GI sm2 space pattern ignores the wall VS line'
+Check ('12:00:00.000 [INFO] [LotLightBridge] Real-time GI: copy 1A2B3C4D cannot read the GI grid (walls) (ps_2_0: shader model 3 upgrade refused: more than 10 inputs)' -match $giRefused) 'GI sm2 upgrade refusal fails the load'
+Check ('12:00:00.000 [INFO] [LotLightBridge] Real-time GI: copy 1A2B3C4D reads the GI grid (walls) (230 slots, 19 added, ps_2_0 upgraded to ps_3_0)' -notmatch $giRefused) 'GI sm2 upgraded copy line does not fail the load'
+
+# The G-buffer bridge view (WP11): the counter line with views and no fault, not one with a fault; the off line fails
+$gbJob = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gbuffer-motion-smoke.json') -Raw | ConvertFrom-Json
+$gbView = @($gbJob.variants.bridge.expect)[2]; $gbOff = @($gbJob.fail)[-1]
+Check ('12:00:10.000 [INFO] [GBuffer] Bridge view: views=600 viewFaults=0' -match $gbView) 'bridge view counters match with views and no fault'
+foreach ($bad in 'views=0 viewFaults=0', 'views=600 viewFaults=2') { Check ("12:00:10.000 [INFO] [GBuffer] Bridge view: $bad" -notmatch $gbView) "bridge view counters rejected: $bad" }
+Check ('12:00:00.000 [INFO] [GBuffer] Bridge view off: no bridge export (needs the bridge pair of patch 0024)' -match $gbOff) 'bridge view off line fails the load'
+Check ('12:00:00.000 [INFO] [GBuffer] Bridge view on' -notmatch $gbOff) 'bridge view on line does not fail the load'
+$prof = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-profile.json') -Raw | ConvertFrom-Json
+Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: timing run (hitch 2.0 x median, floor 8 ms)' -match @($prof.expect)[0]) 'profile arm expect matches the preset line'
+Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: sampling run (hitch)' -notmatch @($prof.expect)[0]) 'profile arm expect rejects the sampling preset'
+Check ('12:00:00.000 [WARNING] [FrameProfiler] Room solve: rebuild: not found' -match @($prof.fail)[0]) 'profile arm fail matches a missing counter'
+Check ('12:00:00.000 [INFO] [FrameProfiler] Lot room solve: Timed' -notmatch @($prof.fail)[0]) 'profile arm fail ignores the Lot room solve line'
+
 # Frame statistics: 100 focused frames of 16 ms, one of 120 ms, 10 unfocused frames that do not count
 $csv = Join-Path ([IO.Path]::GetTempPath()) ('apex-ingame-selftest-' + [Guid]::NewGuid().ToString('N') + '.csv')
 $rows = @('epochMs,qpcMs,frameMs,workMs,fg') + (1..100 | ForEach-Object { "$_,$_,16,5,1" }) + @('101,101,120,5,1') + (1..10 | ForEach-Object { "$_,$_,33,5,0" })
@@ -227,11 +293,11 @@ try {
     Check ((Run-Watch @((Obs 30 5), (Obs 60 5 0 $false $null $false))) -match 'closed .*exit code 3') 'game closed'
     Check ((Run-Watch @((Obs 30 5), (Obs 60 5.5), (Obs 90 5.9))) -match 'no progress for 60 s') 'two flat checks fail'
     Check ($null -eq (Run-Watch @((Obs 30 5), (Obs 60 5.5), (Obs 90 9)))) 'one flat check is tolerated'
-    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 60 9 200 $true), (Obs 90 13 300 $true), (Obs 120 17 400 $true))) -match 'did not load: no ApexTestAgent marker') 'agent not loaded 90 s after the features'
-    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 120 17 400 $true '<ApexTestAgent stage="loaded" />'))) -match 'loaded \(<ApexTestAgent.*mailbox was not found') 'agent loaded, mailbox not found'
+    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 60 9 200 $true), (Obs 90 13 300 $true), (Obs 120 17 400 $true), (Obs 150 21 500 $true), (Obs 180 25 600 $true), (Obs 210 29 700 $true))) -match 'did not load: no ApexTestAgent marker') 'agent not loaded 180 s after the features'
+    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 210 17 400 $true '<ApexTestAgent stage="loaded" />'))) -match 'loaded \(<ApexTestAgent.*mailbox was not found') 'agent loaded, mailbox not found'
     $noApex = { param($List) $st = @{}; foreach ($x in $List) { $why = Step-StartWatch $st $x -NoApex; if ($why) { return $why } }; return $null }
     Check ($null -eq (& $noApex @((Obs 30 5 -1), (Obs 60 9 -1), (Obs 90 13 -1)))) 'without the mod a missing log is fine'
-    Check ((& $noApex @((Obs 120 17 -1), (Obs 150 21 -1), (Obs 180 25 -1), (Obs 210 29 -1))) -match 'did not load: no ApexTestAgent marker') 'without the mod the agent deadline counts from 120 s'
+    Check ((& $noApex @((Obs 120 17 -1), (Obs 150 21 -1), (Obs 180 25 -1), (Obs 210 29 -1), (Obs 240 33 -1), (Obs 270 37 -1), (Obs 300 41 -1))) -match 'did not load: no ApexTestAgent marker') 'without the mod the agent deadline counts from 120 s'
     $st = @{}; $null = Step-StartWatch $st (Obs 30 5 100 $true); $found = Obs 150 30 900 $true; $found.Found = $true; $found.Beat = 4
     Check ($null -eq (Step-StartWatch $st $found)) 'a found mailbox never fails the agent rule'
 } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }

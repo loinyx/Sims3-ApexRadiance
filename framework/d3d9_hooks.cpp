@@ -7,6 +7,7 @@
 #include "hook_guard.h"
 #include "perf_toggles.h"
 #include "apex_memory.h"
+#include "const_range_histogram.h"
 #include <detours/detours.h>
 #include <intrin.h>
 #include <algorithm>
@@ -509,6 +510,36 @@ inline void CountCall(CallSlot s) {
     if (!kPublicBuild) g_calls[s].store(g_calls[s].load(std::memory_order_relaxed) + 1, std::memory_order_relaxed); // no locked instruction
 }
 
+// ---- developer mode: register ranges of Set*ShaderConstantF by calling site (const_range_histogram.h, real-time GI S0-14) ----
+ConstRange::Histogram g_constRange;
+uint64_t g_constRangeLogged = 0; // render thread: frame of the last [ConstRange] summary line
+uint32_t g_constRangeVersion = 0;
+int ConstRangeOwner(uintptr_t ret) {
+    HMODULE m = nullptr, self = nullptr;
+    constexpr DWORD kFlags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+    if (!GetModuleHandleExW(kFlags, reinterpret_cast<LPCWSTR>(ret), &m) || !m) return ConstRange::kOther;
+    if (m == GetModuleHandleW(nullptr)) return ConstRange::kGame;
+    GetModuleHandleExW(kFlags, reinterpret_cast<LPCWSTR>(&ConstRangeOwner), &self);
+    return m == self ? ConstRange::kApex : ConstRange::kOther;
+}
+inline void NoteConstants(ConstRange::Kind k, void* ret, UINT r, UINT n) {
+    if (kDevToolsBuild && !kPublicBuild) g_constRange.Note(k, reinterpret_cast<uintptr_t>(ret), r, n, ConstRangeOwner);
+}
+// Render thread, at Present: a write of another module into the reserved registers is logged once a site; the summary
+// line follows a new site or a new highest register, at most every 600 frames
+void ConstRangePresent() {
+    if (!kDevToolsBuild || kPublicBuild) return;
+    g_constRange.EndFrame();
+    for (const std::string& line : g_constRange.TakeNewReserved([](uintptr_t a) { return HookChain::AddressText(reinterpret_cast<const void*>(a)); }))
+        LOG_WARNING("[ConstRange] Reserved register written: " + line);
+    const uint64_t f = g_constRange.Frames();
+    if (g_constRange.Version() != g_constRangeVersion && f - g_constRangeLogged >= 600 && g_constRange.SiteCount()) {
+        g_constRangeVersion = g_constRange.Version();
+        g_constRangeLogged = f;
+        LOG_INFO("[ConstRange] " + g_constRange.Summary());
+    }
+}
+
 // ---- detours (IDirect3DDevice9 vtable slots) ----
 using DrawIndexedPrimitive_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
 using DrawPrimitive_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
@@ -576,6 +607,7 @@ IDirect3DDevice9* g_boundDev = nullptr;
 IDirect3DPixelShader9* g_boundPs = nullptr;
 IDirect3DVertexShader9* g_boundVs = nullptr;
 bool g_boundPsKnown = false, g_boundVsKnown = false;
+IDirect3DPixelShader9* g_callerPs = nullptr; // the last shader a caller passed to SetPixelShader (render thread)
 // (2.15.3) the textures of pixel samplers 0..15 (BoundTexture), on the same terms; bit s of g_boundTexKnown = s is known
 IDirect3DBaseTexture9* g_boundTex[16] = {};
 uint32_t g_boundTexKnown = 0;
@@ -634,6 +666,7 @@ HRESULT STDMETHODCALLTYPE H_SetRenderTarget(IDirect3DDevice9* d, DWORD i, IDirec
 }
 HRESULT STDMETHODCALLTYPE H_SetPixelShader(IDirect3DDevice9* d, IDirect3DPixelShader9* s) {
     CountCall(kCallSetPS);
+    if (OnRenderThread()) g_callerPs = s; // before the callbacks: what the caller asked for (CallerPixelShader)
     HRESULT hr = S_OK;
     if (!Run(g_sps, d, hr, s)) return hr; // (a callback that skipped it and set one itself did so through CallOriginal*: followed there)
     hr = o_sps(d, s);
@@ -661,7 +694,7 @@ HRESULT STDMETHODCALLTYPE H_Present(IDirect3DDevice9* d, const RECT* sr, const R
     HRESULT hr = S_OK;
     ForgetBoundShaders(); // (the menu overlay's state block restored them at EndScene; a Reset may follow)
     ReclaimRetired();
-    if (!kPublicBuild && ThreadId() == g_renderTid.load(std::memory_order_relaxed)) LogDispatchCost();
+    if (!kPublicBuild && ThreadId() == g_renderTid.load(std::memory_order_relaxed)) LogDispatchCost(), ConstRangePresent();
     if (!Run(g_present, d, hr, sr, dr, w, rg)) return hr;
     if (const Trace* tr = CurrentTrace(); tr && tr->present) tr->present(d);
     hr = o_present(d, sr, dr, w, rg);
@@ -713,12 +746,14 @@ HRESULT STDMETHODCALLTYPE H_CreateVertexShader(IDirect3DDevice9* d, const DWORD*
 }
 HRESULT STDMETHODCALLTYPE H_SetPixelShaderConstantF(IDirect3DDevice9* d, UINT r, const float* c, UINT n) {
     CountCall(kCallSetPSC);
+    NoteConstants(ConstRange::kPs, _ReturnAddress(), r, n); // what the caller asked, before any callback
     HRESULT hr = S_OK;
     if (!Run(g_psc, d, hr, r, c, n)) return hr;
     return o_psc(d, r, c, n);
 }
 HRESULT STDMETHODCALLTYPE H_SetVertexShaderConstantF(IDirect3DDevice9* d, UINT r, const float* c, UINT n) {
     CountCall(kCallSetVSC);
+    NoteConstants(ConstRange::kVs, _ReturnAddress(), r, n); // what the caller asked, before any callback
     HRESULT hr = S_OK;
     if (!Run(g_vsc, d, hr, r, c, n)) return hr;
     return o_vsc(d, r, c, n);
@@ -823,6 +858,8 @@ void ObserveReissuedDraws(const std::string& name) {
 
 void SetRenderTargetSubstitute(RenderTargetSubstitute fn) { g_rtSubstitute.store(fn); }
 
+bool Reissuing() { return t_reissue != 0; }
+IDirect3DPixelShader9* CallerPixelShader() { return g_callerPs; }
 void BeginReissue() { ++t_reissue; }
 void EndReissue() { --t_reissue; }
 
@@ -957,6 +994,10 @@ StateCallCounts ReadStateCallCounts() {
 }
 
 uint32_t OffThreadDispatches() { return g_offThread.load(std::memory_order_relaxed); }
+std::string ConstantRangeReport() {
+    if (!kDevToolsBuild) return {};
+    return g_constRange.Report([](uintptr_t a) { return HookChain::AddressText(reinterpret_cast<const void*>(a)); });
+}
 
 // ---- install ----
 bool Install(IDirect3DDevice9* device) {

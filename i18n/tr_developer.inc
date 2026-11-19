@@ -353,6 +353,8 @@ const I18n::Entry kDevBuildExtra[] = {
 {"Classic: show all floors together", "Clássico: todos os andares juntos", "Clásico: todos los pisos a la vez", "Classique : tous les étages ensemble"},
 {"After a lamp edit every floor shows its new light in the same frame", "Depois de editar uma lâmpada, todos os andares mostram a luz nova no mesmo quadro", "Tras editar una lámpara, todos los pisos muestran su nueva luz en el mismo fotograma", "Après une modification de lampe, tous les étages montrent leur nouvelle lumière dans la même image"},
 {"Instant (GPU) kept data", "Dados guardados do Instantâneo (GPU)", "Datos guardados de Instantáneo (GPU)", "Données conservées d'Instantané (GPU)"},
+{"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Modo de desenvolvedor: envia ao servidor da ponte a malha de cada objeto como projetor de sombra", "Modo de desarrollador: envía al servidor del puente la malla de cada objeto como proyector de sombra", "Mode développeur : donne au serveur du pont le maillage de chaque objet comme source d’ombre"},
+{"Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)", "Modo de desenvolvedor: desenha a malha de cada objeto nos blocos de sombra das lâmpadas (precisa da ponte)", "Modo de desarrollador: dibuja la malla de cada objeto en los mosaicos de sombra de las lámparas (necesita el puente)", "Mode développeur : dessine le maillage de chaque objet dans les tuiles d’ombre des lampes (nécessite le pont)"},
 };
 const I18n::Table kDevBuildExtraTable(kDevBuildExtra, std::size(kDevBuildExtra));
 }

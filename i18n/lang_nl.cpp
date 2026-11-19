@@ -3135,6 +3135,8 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "Het pakket kon niet in de map Shaders worden opgeslagen"},
     {"The download failed", "Het downloaden is mislukt"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "Shaderpakketten: gedownload van de GitHub van hun makers, onder de licentie van elke maker."},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Ontwikkelaarsmodus: geef de bridgeserver het eigen mesh van elk object als schaduwwerper"},
+    {"Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)", "Ontwikkelaarsmodus: teken het eigen mesh van elk object in de schaduwtegels van de lampen (vereist de bridge)"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Dutch, kPairs, std::size(kPairs));

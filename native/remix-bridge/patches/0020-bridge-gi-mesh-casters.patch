@@ -1,0 +1,1016 @@
+0020: mesh casters for the GI server (real-time GI work package MC-2). Client export RemixBridge_GiObjects(objects, count) sends placed objects (GiObject in util/util_gi.h: object id, LITE instance, a 3x4 model-to-world matrix, a removed flag) as Bridge_GiObjects commands of at most 256 records, with no answer. The server hands each batch to the GI worker (patch 0018), which builds the index of the game's packages at the first batch (server.giMeshGame, default three levels up from .trex; server.giMeshMods, default the Documents Mods folder, "off" for none) with ts3_meshes.h, resolves each LITE to its model's caster mesh (shadow LOD, else LOD 0) and keeps the latest record of each object. Counter words 14-21 of RemixBridge_GiReadCounters: objects, models resolved, models missing, index ready, LITEs linked, index milliseconds, records dropped. The per-pixel pass (patch 0019) takes the table at its next pass: one bottom level a model, built in the pass that first needs it, and the 1024 objects nearest the camera as static instances after the capsules and boxes (custom index 0, mask 1, no culling). The [GiPixel] line and its shared words gain meshes and models. Test: test-gi-mesh.cmd (test_gi_mesh_device). The server compiles ts3_meshes.h, which native/remix-bridge/build.cmd copies in from native/remix-bridge/server.
+Applies after 0019.
+diff --git a/bridge/src/client/d3d9_gi.cpp b/bridge/src/client/d3d9_gi.cpp
+index 595e1ad1..b2d050b6 100644
+--- a/bridge/src/client/d3d9_gi.cpp
++++ b/bridge/src/client/d3d9_gi.cpp
+@@ -19,6 +19,7 @@
+  */
+ #include "pch.h"
+ 
++#include <algorithm>
+ #include <cstring>
+ #include <mutex>
+ 
+@@ -50,6 +51,10 @@
+ //   It returns the server's error, D3DERR_INVALIDCALL for an unknown ticket, or D3DERR_DEVICELOST without a server.
+ // RemixBridge_GiCancel(ticket) frees a ticket the caller gives up on.
+ // RemixBridge_GiReadCounters(out, count) copies the block's counters from its level field on.
++// RemixBridge_GiObjects(objects, count) sends placed objects (GiObject, util_gi.h) for the mesh casters; a removed
++// object carries GiObjectRemoved. The server reads the game's packages once, at the first batch, and keeps the latest
++// record of each object. Words 14 to 21 of the counters follow it (GiObjectCounter).
++//   S_OK when sent. E_NOTIMPL before RemixBridge_GiOpen. D3DERR_INVALIDCALL for a null list.
+ // A finished, failed or cancelled ticket is unknown afterwards.
+ 
+ namespace {
+@@ -242,6 +247,24 @@ extern "C" {
+     return S_OK;
+   }
+ 
++  HRESULT __stdcall RemixBridge_GiObjects(const bridge_util::GiObject* pObjects, uint32_t count) {
++    if (pObjects == nullptr && count != 0) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (!giEnabled() || openedBlock() == nullptr) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    for (uint32_t first = 0; first < count; first += bridge_util::kGiObjectsPerCommand) {
++      const uint32_t part = std::min(count - first, bridge_util::kGiObjectsPerCommand);
++      ClientMessage c(Commands::Bridge_GiObjects, part, Commands::FlagBits::AsyncResult);
++      c.send_data(part * uint32_t(sizeof(bridge_util::GiObject)), pObjects + first);
++    }
++    return S_OK;
++  }
++
+   HRESULT __stdcall RemixBridge_GiReadCounters(uint32_t* pCounters, uint32_t count) {
+     GiSharedBlock* const pBlock = openedBlock();
+     if (pCounters == nullptr) {
+diff --git a/bridge/src/client/d3d9_lss.def b/bridge/src/client/d3d9_lss.def
+index ffcb5717..e8b88e8e 100644
+--- a/bridge/src/client/d3d9_lss.def
++++ b/bridge/src/client/d3d9_lss.def
+@@ -35,3 +35,5 @@ EXPORTS
+   RemixBridge_GiPixelOpen
+   RemixBridge_GiPixelPass
+   RemixBridge_GiPixelReadCounters
++
++  RemixBridge_GiObjects
+diff --git a/bridge/src/server/gi_objects.h b/bridge/src/server/gi_objects.h
+new file mode 100644
+index 00000000..82505ec6
+--- /dev/null
++++ b/bridge/src/server/gi_objects.h
+@@ -0,0 +1,193 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#pragma once
++
++#include <windows.h>
++#include <shlobj.h>
++
++#include <chrono>
++#include <cmath>
++#include <cstring>
++#include <deque>
++#include <filesystem>
++#include <map>
++#include <memory>
++#include <mutex>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++#include "ts3_meshes.h"
++#include "util_gi.h"
++#include "config/config.h"
++#include "log/log.h"
++
++#pragma comment(lib, "shell32.lib")
++
++// Server side of RemixBridge_GiObjects (mesh casters, MC-2). The GI worker builds the package index once, at the first
++// batch (batches sent meanwhile wait in its queue), and resolves each object's LITE to its model's caster mesh
++// (ts3_meshes.h: the shadow LOD, else LOD 0). The play thread hands the meshes and the placed objects to the per-pixel
++// pass (gi_pixel_server.h). The game's data is read from the player's install; nothing of it leaves the process.
++//   server.giMeshGame: the game's folder (default: three levels up from this executable's folder, Game\Bin\.trex)
++//   server.giMeshMods: the Mods folder (default: Documents\Electronic Arts\The Sims 3\Mods; "off": none)
++namespace gi_objects {
++  using bridge_util::GiObject;
++
++  struct Mesh {
++    std::vector<float> pos;     // xyz a vertex, model space
++    std::vector<uint32_t> tri;  // abc a triangle
++  };
++  struct Placed {
++    uint32_t mesh;  // index into g_meshes
++    float m[12];
++  };
++
++  // Written by the worker, read by the play thread, both under g_mutex
++  inline std::mutex g_mutex;
++  inline std::deque<Mesh> g_meshes;                  // append-only
++  inline std::unordered_map<uint64_t, Placed> g_placed;  // the objects with a mesh, by id
++  inline uint32_t g_generation = 0;                   // grows with every change of the two above
++
++  // Worker only
++  constexpr uint32_t kMissing = ~0u;
++  constexpr size_t kMaxObjects = 1u << 16;  // shortcut: a table over 65536 live objects refuses new ones; raise if the counter shows drops
++  inline std::unique_ptr<ts3mesh::Library> g_library;
++  inline std::unordered_map<uint64_t, uint32_t> g_liteMesh;  // LITE instance -> mesh, or kMissing
++  inline std::map<ts3mesh::Key, uint32_t> g_modelMesh;       // MODL -> mesh (two LITEs may name one model)
++  inline std::unordered_map<uint64_t, uint64_t> g_live;      // every placed object (with a mesh or not) -> its LITE
++
++  inline std::filesystem::path gameFolder() {
++    const std::string option = bridge_util::Config::getOption<std::string>("server.giMeshGame", "");
++    if (!option.empty()) {
++      return std::filesystem::u8path(option);
++    }
++    wchar_t exe[MAX_PATH] = {};
++    GetModuleFileNameW(nullptr, exe, MAX_PATH);
++    return std::filesystem::path(exe).parent_path().parent_path().parent_path().parent_path();
++  }
++
++  inline std::filesystem::path modsFolder() {
++    const std::string option = bridge_util::Config::getOption<std::string>("server.giMeshMods", "");
++    if (option == "off") {
++      return {};
++    }
++    if (!option.empty()) {
++      return std::filesystem::u8path(option);
++    }
++    PWSTR documents = nullptr;
++    std::filesystem::path path;
++    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &documents))) {
++      path = std::filesystem::path(documents) / L"Electronic Arts" / L"The Sims 3" / L"Mods";
++    }
++    CoTaskMemFree(documents);
++    return path;
++  }
++
++  inline void buildIndex(bridge_util::GiSharedBlock* pBlock) {
++    const auto start = std::chrono::steady_clock::now();
++    g_library = std::make_unique<ts3mesh::Library>();
++    std::error_code ec;
++    g_library->AddFolder(gameFolder(), true);
++    const uint32_t gamePackages = g_library->GetStats().packages;
++    const std::filesystem::path mods = modsFolder();
++    if (!mods.empty() && std::filesystem::is_directory(mods, ec)) {
++      g_library->AddFolder(mods, false);
++    }
++    const ts3mesh::Library::Stats& stats = g_library->BuildLinks();
++    const uint32_t ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
++    pBlock->objectCounters[bridge_util::GiIndexLinks] = uint32_t(g_library->LinkCount());
++    pBlock->objectCounters[bridge_util::GiIndexMs] = ms;
++    pBlock->objectCounters[bridge_util::GiIndexReady] = gamePackages != 0 ? 1 : 2;
++    bridge_util::Logger::info(bridge_util::format_string(
++      "[GiMesh] Package index: %u packages (%u of the game, %u unreadable), %u LITEs linked to a model, %u ms.", stats.packages, gamePackages,
++      stats.unreadablePackages, uint32_t(g_library->LinkCount()), ms));
++    if (gamePackages == 0) {
++      bridge_util::Logger::warn("[GiMesh] No game package was found (server.giMeshGame), so no object gets a mesh.");
++    }
++  }
++
++  // The mesh of a LITE, read once; kMissing when the index has no model for it or the model has no readable mesh
++  inline uint32_t resolve(uint64_t lite, bridge_util::GiSharedBlock* pBlock) {
++    const auto known = g_liteMesh.find(lite);
++    if (known != g_liteMesh.end()) {
++      return known->second;
++    }
++    uint32_t index = kMissing;
++    if (const ts3mesh::Key* pModel = g_library->ModelOfLite(lite)) {
++      const auto shared = g_modelMesh.find(*pModel);
++      if (shared != g_modelMesh.end()) {
++        index = shared->second;
++      } else {
++        ts3mesh::Mesh mesh;
++        if (g_library->Load(*pModel, mesh, true)) {
++          std::lock_guard<std::mutex> lock(g_mutex);
++          g_meshes.push_back(Mesh { std::move(mesh.pos), std::move(mesh.tri) });
++          index = uint32_t(g_meshes.size() - 1);
++        }
++        g_modelMesh.emplace(*pModel, index);
++      }
++    }
++    g_liteMesh.emplace(lite, index);
++    ++pBlock->objectCounters[index != kMissing ? bridge_util::GiModelsResolved : bridge_util::GiModelsMissing];
++    return index;
++  }
++
++  // Worker: one batch of GiObject records, in order
++  inline void apply(const std::vector<uint8_t>& blob) {
++    bridge_util::GiSharedBlock* const pBlock = bridge_util::giBlock();
++    if (pBlock == nullptr || blob.size() % sizeof(GiObject) != 0) {
++      return;
++    }
++    if (!g_library) {
++      buildIndex(pBlock);
++    }
++    const size_t count = blob.size() / sizeof(GiObject);
++    for (size_t i = 0; i < count; ++i) {
++      GiObject object;
++      std::memcpy(&object, blob.data() + i * sizeof(GiObject), sizeof(GiObject));
++      if (object.flags & bridge_util::GiObjectRemoved) {
++        g_live.erase(object.id);
++        std::lock_guard<std::mutex> lock(g_mutex);
++        g_generation += g_placed.erase(object.id) != 0 ? 1 : 0;
++        continue;
++      }
++      bool finite = true;
++      for (float v : object.m) {
++        finite = finite && std::isfinite(v) && std::fabs(v) < 1e6f;
++      }
++      if (!finite || (g_live.size() >= kMaxObjects && g_live.count(object.id) == 0)) {
++        ++pBlock->objectCounters[bridge_util::GiObjectsDropped];
++        continue;
++      }
++      g_live[object.id] = object.lite;
++      const uint32_t mesh = resolve(object.lite, pBlock);
++      std::lock_guard<std::mutex> lock(g_mutex);
++      if (mesh != kMissing) {
++        Placed& placed = g_placed[object.id];
++        placed.mesh = mesh;
++        std::memcpy(placed.m, object.m, sizeof(placed.m));
++      } else {
++        g_placed.erase(object.id);  // (its LITE changed to one without a mesh)
++      }
++      ++g_generation;
++    }
++    pBlock->objectCounters[bridge_util::GiObjectsLive] = uint32_t(g_live.size());
++  }
++}
+diff --git a/bridge/src/server/gi_pixel_server.h b/bridge/src/server/gi_pixel_server.h
+index 082319e5..32294c0c 100644
+--- a/bridge/src/server/gi_pixel_server.h
++++ b/bridge/src/server/gi_pixel_server.h
+@@ -24,8 +24,11 @@
+ 
+ #include <d3d9.h>
+ 
++#include <vector>
++
+ #include "gi_pixel_spv.h"
+ #include "gi_pixel_pass.h"
++#include "gi_objects.h"
+ #include "log/log.h"
+ #include "util_gi_pixel.h"
+ 
+@@ -51,6 +54,8 @@ namespace gi_pixel {
+     pShared->gpuUs = c.gpuUs;
+     pShared->width = c.width;
+     pShared->height = c.height;
++    pShared->meshes = c.meshes;
++    pShared->models = c.models;
+     if (log && c.passes != g_loggedAt) {
+       g_loggedAt = c.passes;
+       char line[256];
+@@ -77,6 +82,31 @@ namespace gi_pixel {
+     pShared->state.store(state, std::memory_order_release);
+   }
+ 
++  // The mesh casters of the object table (gi_objects.h), handed to the pass when the table changed
++  inline uint32_t g_objectsSeen = ~0u;
++  inline std::vector<uint32_t> g_modelOf;  // gi_objects mesh -> the pass's model
++  inline void syncMeshes() {
++    std::lock_guard<std::mutex> lock(gi_objects::g_mutex);
++    if (gi_objects::g_generation == g_objectsSeen) {
++      return;
++    }
++    g_objectsSeen = gi_objects::g_generation;
++    while (g_modelOf.size() < gi_objects::g_meshes.size()) {
++      const gi_objects::Mesh& mesh = gi_objects::g_meshes[g_modelOf.size()];
++      g_modelOf.push_back(g_pass.addModel(mesh.pos.data(), uint32_t(mesh.pos.size() / 3), mesh.tri.data(), uint32_t(mesh.tri.size() / 3)));
++    }
++    std::vector<GiPixelMesh> meshes;
++    meshes.reserve(gi_objects::g_placed.size());
++    for (const auto& [id, placed] : gi_objects::g_placed) {
++      if (g_modelOf[placed.mesh] != GiPixelPass::kNoModel) {
++        GiPixelMesh& mesh = meshes.emplace_back();
++        mesh.model = g_modelOf[placed.mesh];
++        std::memcpy(mesh.m, placed.m, sizeof(mesh.m));
++      }
++    }
++    g_pass.setMeshes(meshes.data(), uint32_t(meshes.size()));
++  }
++
+   inline IDirect3DBaseTexture9* find(const ResourceMap& resources, uint32_t id) {
+     const auto it = id != 0 ? resources.find(id) : resources.end();
+     if (it == resources.end() || it->second == nullptr || it->second->GetType() != D3DRTYPE_TEXTURE) {
+@@ -90,6 +120,7 @@ namespace gi_pixel {
+     if (!g_pass.ready() || pBlock == nullptr || size != sizeof(GiPixelBlock)) {
+       return;
+     }
++    syncMeshes();
+     IDirect3DBaseTexture9* outputs[kGiPixelOutputs];
+     IDirect3DBaseTexture9* const pClass = find(resources, classId);
+     // An id that names no texture must not pass as "absent": the run below would then succeed without it.
+diff --git a/bridge/src/server/gi_server.h b/bridge/src/server/gi_server.h
+index 462077a2..781425e7 100644
+--- a/bridge/src/server/gi_server.h
++++ b/bridge/src/server/gi_server.h
+@@ -267,6 +267,18 @@ namespace gi_server {
+     gi::queueJob(job);
+   }
+ 
++  // Bridge_GiObjects: hands a batch of GiObject records to the worker, in order with the other jobs. No answer.
++  inline void objects(const void* pData, uint32_t size) {
++    if (!g_started || pData == nullptr || size == 0 || size % sizeof(bridge_util::GiObject) != 0 ||
++        size / sizeof(bridge_util::GiObject) > bridge_util::kGiObjectsPerCommand) {
++      return;
++    }
++    auto job = std::make_shared<gi::Job>();
++    job->kind = gi::JobKind::Objects;
++    job->blob.assign(static_cast<const uint8_t*>(pData), static_cast<const uint8_t*>(pData) + size);
++    gi::queueJob(job);
++  }
++
+   // Bridge_GiCancel: a cancelled job is never answered, so its slot can take the next ticket at once.
+   inline void cancel(uint32_t seq) {
+     for (auto it = g_jobs.begin(); it != g_jobs.end(); ++it) {
+diff --git a/bridge/src/server/gi_worker.cpp b/bridge/src/server/gi_worker.cpp
+index 3b4c1a09..2d5143c3 100644
+--- a/bridge/src/server/gi_worker.cpp
++++ b/bridge/src/server/gi_worker.cpp
+@@ -42,6 +42,7 @@
+ #include "gi_pattern_spv.h"
+ #include "util_common.h"
+ #include "util_gi.h"
++#include "gi_objects.h"
+ #include "config/config.h"
+ #include "log/log.h"
+ 
+@@ -1217,6 +1218,12 @@ namespace gi {
+         if (job->cancelled.load(std::memory_order_acquire)) {
+           continue;
+         }
++        // Objects are CPU work (the package index and the meshes): they need no device and nobody waits for them.
++        if (job->kind == JobKind::Objects) {
++          gi_objects::apply(job->blob);
++          pBlock->workerHeartbeat.fetch_add(1, std::memory_order_relaxed);
++          continue;
++        }
+         HRESULT hresult = E_FAIL;
+         if (level != bridge_util::GiLevelNone) {
+           const VkResult result = device.run(*job);
+diff --git a/bridge/src/server/gi_worker.h b/bridge/src/server/gi_worker.h
+index bcb6ec86..d844446a 100644
+--- a/bridge/src/server/gi_worker.h
++++ b/bridge/src/server/gi_worker.h
+@@ -37,6 +37,7 @@ namespace gi {
+     Solve,    // one lamp's layer of the scene into the target
+     Scene,    // GiSubmitScene: blob holds the scene
+     Lamps,    // GiSubmitLamps: blob holds the lamp table
++    Objects,  // RemixBridge_GiObjects: blob holds GiObject records (gi_objects.h). Never answered
+   };
+ 
+   struct Job {
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index 90c7f9db..91759335 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -3127,6 +3127,13 @@ void ProcessDeviceCommandQueue() {
+         gi_server::cancel(cancelSeq);
+         break;
+       }
++      case Bridge_GiObjects:
++      {
++        void* pObjects = nullptr;
++        const uint32_t objectBytes = DeviceBridge::get_data(&pObjects);
++        gi_server::objects(pObjects, objectBytes);
++        break;
++      }
+       case Bridge_GiPixelOpen:
+         gi_pixel::open(gpD3DDevices);
+         break;
+diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
+index d7cfa06a..d4fc4ca2 100644
+--- a/bridge/src/util/util_commands.h
++++ b/bridge/src/util/util_commands.h
+@@ -71,6 +71,8 @@ namespace Commands {
+     // Per-pixel shadow pass exports (client/d3d9_gi_pixel.cpp), sent with FlagBits::AsyncResult.
+     Bridge_GiPixelOpen,
+     Bridge_GiPixelPass,
++    // Mesh casters (client/d3d9_gi.cpp RemixBridge_GiObjects), sent with FlagBits::AsyncResult.
++    Bridge_GiObjects,
+     // These are not actually official D3D9 API calls.
+     IDirect3DDevice9Ex_LinkSwapchain,
+     IDirect3DDevice9Ex_LinkBackBuffer,
+@@ -513,6 +515,7 @@ namespace Commands {
+     case Bridge_GiCancel: return "Bridge_GiCancel";
+     case Bridge_GiPixelOpen: return "Bridge_GiPixelOpen";
+     case Bridge_GiPixelPass: return "Bridge_GiPixelPass";
++    case Bridge_GiObjects: return "Bridge_GiObjects";
+     
+     case Bridge_UnlinkResource: return "Bridge_UnlinkResource";
+     case Bridge_UnlinkVolumeResource: return "Bridge_UnlinkVolumeResource";
+diff --git a/bridge/src/util/util_gi.h b/bridge/src/util/util_gi.h
+index 8550db1c..c28a00fd 100644
+--- a/bridge/src/util/util_gi.h
++++ b/bridge/src/util/util_gi.h
+@@ -108,6 +108,32 @@ namespace bridge_util {
+   static_assert(sizeof(GiSceneHeader) == 48 && sizeof(GiSceneTriangle) == 44 && sizeof(GiScenePatch) == 48 &&
+                 sizeof(GiSceneTexel) == 40 && sizeof(GiLamp) == 56, "The GI scene blob must have the same layout in both processes");
+ 
++  // RemixBridge_GiObjects: one placed object a record (MC-2). The worker resolves the LITE through the game's packages
++  // to its model's caster mesh; the per-pixel pass traces the object as a static occluder.
++  enum GiObjectFlags : uint32_t {
++    GiObjectRemoved = 1,  // the object left the world: m is not read
++  };
++  struct GiObject {
++    uint64_t id;    // the game's object id
++    uint64_t lite;  // instance of the object's LITE resource (LightObjectAttach)
++    float m[12];    // three rows of four, model to world (metres)
++    uint32_t flags; // GiObjectFlags
++    uint32_t reserved;
++  };
++  static_assert(sizeof(GiObject) == 72, "GiObject must have the same layout in both processes");
++  constexpr uint32_t kGiObjectsPerCommand = 256;  // the client splits a larger batch
++
++  // objectCounters[] (counter words 14 to 21 of RemixBridge_GiReadCounters)
++  enum GiObjectCounter : uint32_t {
++    GiObjectsLive = 0,       // objects placed and not removed
++    GiModelsResolved = 1,    // LITEs whose model's caster mesh was read
++    GiModelsMissing = 2,     // LITEs with no model link or no readable mesh
++    GiIndexReady = 3,        // 1 once the package index is built (2: built, but no package was found)
++    GiIndexLinks = 4,        // LITEs the index links to a model
++    GiIndexMs = 5,           // time the index took on the worker, milliseconds
++    GiObjectsDropped = 6,    // records refused: a full table or a broken matrix
++  };
++
+   struct GiSubmitSlot {
+     static constexpr uint32_t kBytes = 448 * 1024;
+     std::atomic<uint32_t> consumedSeq;  // the play thread stores the part's sequence once it has copied the data out
+@@ -138,7 +164,7 @@ namespace bridge_util {
+     uint32_t behaviorFlags;             // 52: the server device's D3DCREATE_* flags
+     uint32_t sliceUsMax;                // 56: longest GPU slice of the last solve, microseconds
+     uint32_t slicesLast;                // 60: GPU slices of the last solve
+-    uint32_t objectCounters[8];         // 64: counter words 14 to 21, kept for the object export (objects, models resolved, models missing, index ready, four spare)
++    uint32_t objectCounters[8];         // 64: counter words 14 to 21, written by the worker for RemixBridge_GiObjects (GiObjectCounter)
+     GiAnswerSlot answers[kMaxTickets];  // 96
+     GiSubmitSlot submits[kSubmitSlots]; // 2144
+     // R-06 adds the point-query slot here (layoutVersion 3).
+diff --git a/bridge/src/util/util_gi_pixel.h b/bridge/src/util/util_gi_pixel.h
+index 31a0c5a0..f999238b 100644
+--- a/bridge/src/util/util_gi_pixel.h
++++ b/bridge/src/util/util_gi_pixel.h
+@@ -48,7 +48,9 @@ namespace bridge_util {
+     uint32_t gpuUs;               // dispatch time of a recent pass by device timestamps, microseconds
+     uint32_t width;               // of the outputs
+     uint32_t height;
+-    uint32_t reserved[7];
++    uint32_t meshes;              // mesh caster instances of the last pass
++    uint32_t models;              // models with a bottom level on the renderer's device
++    uint32_t reserved[5];
+   };
+   static_assert(sizeof(GiPixelShared) == GiPixelShared::kWords * 4, "GiPixelShared must have the same layout in both processes");
+ 
+diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
+index b62ca7d1..c21e1818 100644
+--- a/bridge/test/rtx/unit/meson.build
++++ b/bridge/test/rtx/unit/meson.build
+@@ -84,7 +84,7 @@ endif
+ 
+ # Remix API Bridge App Tests
+ # Each x86 app runs against the client and server from a regular bridge build in _output.
+-bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'device_refcount_device', 'async_readback_device', 'gi_device', 'gi_pixel_device' ]
++bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'device_refcount_device', 'async_readback_device', 'gi_device', 'gi_pixel_device', 'gi_mesh_device' ]
+ if (cpu_family == 'x86')
+ foreach name : bridge_app_tests
+   tests += executable(
+diff --git a/bridge/test/rtx/unit/test_gi_mesh_device.cpp b/bridge/test/rtx/unit/test_gi_mesh_device.cpp
+new file mode 100644
+index 00000000..f911266c
+--- /dev/null
++++ b/bridge/test/rtx/unit/test_gi_mesh_device.cpp
+@@ -0,0 +1,513 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++// Sends placed objects through RemixBridge_GiObjects and checks what the server made of them: the package index of the
++// game's folder, a chair's LITE resolved to its caster mesh, an unknown LITE counted missing, a removed object gone.
++// With the per-pixel pass on (REMIX_GI_TEST_CASE=on, a DXVK with external passes and ray queries in REMIX_GI_TEST_DXVK),
++// the chair then shadows the floor: each quarter pixel's share of the lamp's 16 rays that pass the chair (den with the
++// chair over den without it) is compared with a CPU ray cast of the same rays against the same triangles.
++// REMIX_GI_MESH_GAME: the game's folder. REMIX_GI_MESH_OBJECTS: the chair's file of meshes_check.cpp --objects (its
++// LITE and its caster mesh, which the server must read the same).
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <fstream>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++#include <DirectXMath.h>
++#include <wrl/client.h>
++
++#include "test_remix_api_bridge_app.h"
++#include "../../../src/util/gi_pixel_block.h"
++
++using Microsoft::WRL::ComPtr;
++using namespace bridge_app_test;
++using namespace DirectX;
++
++namespace {
++  struct GiObject {  // util_gi.h
++    uint64_t id;
++    uint64_t lite;
++    float m[12];
++    uint32_t flags;
++    uint32_t reserved;
++  };
++  static_assert(sizeof(GiObject) == 72, "GiObject layout");
++
++  using PFN_GiOpen = HRESULT (__stdcall*)(uint32_t*);
++  using PFN_GiObjects = HRESULT (__stdcall*)(const GiObject*, uint32_t);
++  using PFN_GiReadCounters = HRESULT (__stdcall*)(uint32_t*, uint32_t);
++  using PFN_GiPixelOpen = HRESULT (__stdcall*)(uint32_t*);
++  using PFN_GiPixelPass = HRESULT (__stdcall*)(const void*, uint32_t, IDirect3DTexture9*, IDirect3DTexture9*, IDirect3DTexture9* const*);
++  using PFN_GiPixelReadCounters = HRESULT (__stdcall*)(uint32_t*, uint32_t);
++
++  // Words of RemixBridge_GiReadCounters: 14 + GiObjectCounter
++  enum { kLive = 14, kResolved, kMissing, kReady, kLinks, kIndexMs, kDropped, kWords = 22 };
++
++  constexpr UINT kWidthFull = 640;
++  constexpr UINT kHeightFull = 360;
++  constexpr UINT kWidthQuarter = kWidthFull / 4;
++  constexpr UINT kHeightQuarter = kHeightFull / 4;
++  constexpr uint64_t kUnknownLite = 0x0123456789ABCDEFull;
++
++  PFN_GiOpen g_giOpen = nullptr;
++  PFN_GiObjects g_objects = nullptr;
++  PFN_GiReadCounters g_giCounters = nullptr;
++  PFN_GiPixelOpen g_pixelOpen = nullptr;
++  PFN_GiPixelPass g_pass = nullptr;
++  PFN_GiPixelReadCounters g_pixelCounters = nullptr;
++
++  void check(HRESULT result, const char* pCall) {
++    if (FAILED(result)) {
++      std::printf("FAILED: %s returned 0x%08lX.\n", pCall, static_cast<unsigned long>(result));
++      throw std::runtime_error(pCall);
++    }
++  }
++
++  void require(bool condition, const char* pWhat) {
++    if (!condition) {
++      std::printf("FAILED: %s.\n", pWhat);
++      throw std::runtime_error(pWhat);
++    }
++  }
++
++  float halfToFloat(uint16_t half) {
++    const int exponent = (half >> 10) & 31;
++    const int mantissa = half & 1023;
++    const float value = exponent == 0 ? std::ldexp(float(mantissa), -24) : std::ldexp(float(mantissa | 1024), exponent - 25);
++    return (half & 0x8000) ? -value : value;
++  }
++
++  struct Chair {
++    uint64_t lite = 0;
++    std::vector<float> pos;
++    std::vector<uint32_t> tri;
++  };
++
++  // meshes_check.cpp --objects: "MCOB", LITE (u64), vertices (u32), triangles (u32), xyz each, abc each
++  Chair readChair(const char* pPath) {
++    std::ifstream f(pPath, std::ios::binary);
++    char magic[4] = {};
++    uint32_t vertices = 0;
++    uint32_t triangles = 0;
++    Chair chair;
++    f.read(magic, 4);
++    f.read(reinterpret_cast<char*>(&chair.lite), 8);
++    f.read(reinterpret_cast<char*>(&vertices), 4);
++    f.read(reinterpret_cast<char*>(&triangles), 4);
++    require(f && std::memcmp(magic, "MCOB", 4) == 0 && vertices > 0 && vertices < (1u << 20) && triangles > 0 && triangles < (1u << 20),
++            "The objects file reads");
++    chair.pos.resize(size_t(vertices) * 3);
++    chair.tri.resize(size_t(triangles) * 3);
++    f.read(reinterpret_cast<char*>(chair.pos.data()), chair.pos.size() * 4);
++    f.read(reinterpret_cast<char*>(chair.tri.data()), chair.tri.size() * 4);
++    require(bool(f), "The objects file reads");
++    return chair;
++  }
++
++  // The chair turned by 30 degrees about the vertical and moved: model to world, three rows of four.
++  void chairMatrix(float m[12]) {
++    const float c = std::cos(0.5235988f);
++    const float s = std::sin(0.5235988f);
++    const float rows[12] = { c, 0, s, 0.2f, 0, 1, 0, 0, -s, 0, c, 0.1f };
++    std::memcpy(m, rows, sizeof(rows));
++  }
++
++  struct Scene {
++    XMMATRIX view;
++    XMMATRIX projection;
++    XMMATRIX viewProj;
++    XMVECTOR eye;
++    GiPixelBlock block = {};
++
++    Scene() {
++      eye = XMVectorSet(0.3f, 3.5f, -2.5f, 1);
++      view = XMMatrixLookAtLH(eye, XMVectorSet(0.2f, 0, 0.3f, 1), XMVectorSet(0, 1, 0, 0));
++      projection = XMMatrixPerspectiveFovLH(XM_PI / 3, float(kWidthFull) / kHeightFull, 0.1f, 50.0f);
++      viewProj = view * projection;
++      XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(block.invViewProj), XMMatrixInverse(nullptr, viewProj));
++      XMStoreFloat3(reinterpret_cast<XMFLOAT3*>(block.cam), eye);
++      XMStoreFloat3(reinterpret_cast<XMFLOAT3*>(block.viewZ), XMVector3Normalize(XMVectorSubtract(XMVectorSet(0.2f, 0, 0.3f, 1), eye)));
++      block.ambient = 0.05f;
++      block.zFar = 50.0f;
++      block.bias = 0.01f;
++      block.radiusScale = 1.0f;
++      block.samples = 16;
++      block.lamps = 1;
++      block.lamp[0] = { { 0.5f, 2.2f, 0.4f }, 0.08f, { 10, 10, 10 }, 0 };
++      // No capsule and no caster bounds: the chair's mesh bounds alone must make the pass trace (XR-08).
++      block.capsules = 0;
++      block.casters = 0;
++    }
++  };
++
++  struct Targets {
++    ComPtr<IDirect3DTexture9> pDepth;
++    ComPtr<IDirect3DSurface9> pDepthSurface;
++    ComPtr<IDirect3DTexture9> pColor;
++    ComPtr<IDirect3DSurface9> pColorSurface;
++    ComPtr<IDirect3DTexture9> outputs[kGiPixelOutputs];
++
++    void create(IDirect3DDevice9* pDevice) {
++      check(pDevice->CreateTexture(kWidthFull, kHeightFull, 1, D3DUSAGE_DEPTHSTENCIL, static_cast<D3DFORMAT>(MAKEFOURCC('I', 'N', 'T', 'Z')),
++                                   D3DPOOL_DEFAULT, &pDepth, nullptr), "CreateTexture (INTZ)");
++      check(pDepth->GetSurfaceLevel(0, &pDepthSurface), "GetSurfaceLevel (depth)");
++      check(pDevice->CreateTexture(kWidthFull, kHeightFull, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &pColor, nullptr),
++            "CreateTexture (color)");
++      check(pColor->GetSurfaceLevel(0, &pColorSurface), "GetSurfaceLevel (color)");
++      for (auto& pOutput : outputs) {
++        check(pDevice->CreateTexture(kWidthQuarter, kHeightQuarter, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT,
++                                     &pOutput, nullptr), "CreateTexture (output)");
++      }
++    }
++  };
++
++  // The floor alone goes into the depth: the chair is a caster only, so the floor under it is shaded too.
++  void draw(IDirect3DDevice9* pDevice, const Targets& targets, const Scene& scene) {
++    static const float kFloor[4][3] = { { -8, 0, -8 }, { -8, 0, 8 }, { 8, 0, -8 }, { 8, 0, 8 } };
++    check(pDevice->SetRenderTarget(0, targets.pColorSurface.Get()), "SetRenderTarget");
++    check(pDevice->SetDepthStencilSurface(targets.pDepthSurface.Get()), "SetDepthStencilSurface");
++    check(pDevice->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0, 1.0f, 0), "Clear");
++    check(pDevice->BeginScene(), "BeginScene");
++    XMFLOAT4X4 matrix;
++    XMStoreFloat4x4(&matrix, scene.view);
++    pDevice->SetTransform(D3DTS_VIEW, reinterpret_cast<D3DMATRIX*>(&matrix));
++    XMStoreFloat4x4(&matrix, scene.projection);
++    pDevice->SetTransform(D3DTS_PROJECTION, reinterpret_cast<D3DMATRIX*>(&matrix));
++    pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
++    pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
++    pDevice->SetRenderState(D3DRS_ZENABLE, TRUE);
++    pDevice->SetFVF(D3DFVF_XYZ);
++    check(pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, kFloor, 12), "DrawPrimitiveUP");
++    check(pDevice->EndScene(), "EndScene");
++  }
++
++  // Returns the red channel of output `which` (2 num, 3 den) after a 16-sample pass, quarter resolution; with `pass` false
++  // reads the outputs of the last pass again.
++  std::vector<float> passRed(IDirect3DDevice9* pDevice, const Targets& targets, const Scene& scene, IDirect3DSurface9* pReadback, int which, bool pass = true) {
++    IDirect3DTexture9* const outputs[kGiPixelOutputs] = { targets.outputs[0].Get(), targets.outputs[1].Get(), targets.outputs[2].Get(),
++                                                          targets.outputs[3].Get() };
++    for (int frame = 0; pass && frame < 2; ++frame) {
++      draw(pDevice, targets, scene);
++      check(g_pass(&scene.block, sizeof(scene.block), targets.pDepth.Get(), nullptr, outputs), "RemixBridge_GiPixelPass");
++      check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++    }
++    ComPtr<IDirect3DSurface9> pSurface;
++    check(targets.outputs[which]->GetSurfaceLevel(0, &pSurface), "GetSurfaceLevel (output)");
++    check(pDevice->GetRenderTargetData(pSurface.Get(), pReadback), "GetRenderTargetData");
++    D3DLOCKED_RECT locked;
++    check(pReadback->LockRect(&locked, nullptr, D3DLOCK_READONLY), "LockRect");
++    std::vector<float> den(size_t(kWidthQuarter) * kHeightQuarter);
++    for (UINT y = 0; y < kHeightQuarter; ++y) {
++      const uint16_t* const pRow = reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(locked.pBits) + y * locked.Pitch);
++      for (UINT x = 0; x < kWidthQuarter; ++x) {
++        den[y * kWidthQuarter + x] = halfToFloat(pRow[x * 4]);
++      }
++    }
++    pReadback->UnlockRect();
++    return den;
++  }
++
++  // Möller-Trumbore, two-sided: the segment from o along the unit d up to tMax.
++  bool hits(const float* o, const float* d, float tMax, const float* a, const float* b, const float* c) {
++    const float e1[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
++    const float e2[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
++    const float p[3] = { d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0] };
++    const float det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
++    if (std::fabs(det) < 1e-12f) {
++      return false;
++    }
++    const float inv = 1.0f / det;
++    const float s[3] = { o[0] - a[0], o[1] - a[1], o[2] - a[2] };
++    const float u = (s[0] * p[0] + s[1] * p[1] + s[2] * p[2]) * inv;
++    if (u < 0 || u > 1) {
++      return false;
++    }
++    const float q[3] = { s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0] };
++    const float v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv;
++    if (v < 0 || u + v > 1) {
++      return false;
++    }
++    const float t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
++    return t > 0 && t < tMax;
++  }
++
++  // The kernel's rays for one quarter pixel (pixel_shadow.comp: the block's least-depth pixel, the biased origin, the
++  // Fibonacci set of 16 points on the emitter ball), cast on the CPU. Returns how many pass the chair, or -1 off the floor.
++  int cpuUnblocked(const Scene& scene, const std::vector<float>& world, int gx, int gy) {
++    const XMMATRIX inverse = XMMatrixInverse(nullptr, scene.viewProj);
++    float best = 4.0f;
++    float point[3] = {};
++    for (int j = 0; j < 4; ++j) {
++      for (int i = 0; i < 4; ++i) {
++        const float ndcX = (float(gx * 4 + i) + 0.5f) / kWidthFull * 2 - 1;
++        const float ndcY = 1 - (float(gy * 4 + j) + 0.5f) / kHeightFull * 2;
++        const XMVECTOR nearPoint = XMVector3TransformCoord(XMVectorSet(ndcX, ndcY, 0, 1), inverse);
++        const XMVECTOR farPoint = XMVector3TransformCoord(XMVectorSet(ndcX, ndcY, 1, 1), inverse);
++        const float y0 = XMVectorGetY(nearPoint);
++        const float y1 = XMVectorGetY(farPoint);
++        if (y0 <= 0 || y1 >= 0) {
++          continue;
++        }
++        const XMVECTOR onFloor = XMVectorLerp(nearPoint, farPoint, y0 / (y0 - y1));
++        const XMVECTOR clip = XMVector4Transform(XMVectorSetW(onFloor, 1), scene.viewProj);
++        const float depth = XMVectorGetZ(clip) / XMVectorGetW(clip);
++        if (depth < best - 1e-7f) {
++          best = depth;
++          XMStoreFloat3(reinterpret_cast<XMFLOAT3*>(point), onFloor);
++        }
++      }
++    }
++    // Only the floor around the chair.
++    if (best >= 1.0f || std::hypot(point[0] - 0.2f, point[2] - 0.1f) > 3.0f) {
++      return -1;
++    }
++    const float toCam = std::sqrt((scene.block.cam[0] - point[0]) * (scene.block.cam[0] - point[0]) + (scene.block.cam[1] - point[1]) * (scene.block.cam[1] - point[1]) +
++                                  (scene.block.cam[2] - point[2]) * (scene.block.cam[2] - point[2]));
++    const float origin[3] = { point[0], point[1] + scene.block.bias * (1 + 0.25f * toCam), point[2] };
++    const GiPixelLamp& lamp = scene.block.lamp[0];
++    int unblocked = 0;
++    for (int n = 0; n < 16; ++n) {
++      const float y = 1 - (2 * float(n) + 1) / 16;
++      const float r = std::sqrt(1 - y * y);
++      const float a = 2.39996323f * float(n);
++      const float e[3] = { lamp.pos[0] + lamp.radius * r * std::cos(a) - origin[0], lamp.pos[1] + lamp.radius * y - origin[1],
++                           lamp.pos[2] + lamp.radius * r * std::sin(a) - origin[2] };
++      const float length = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
++      const float d[3] = { e[0] / length, e[1] / length, e[2] / length };
++      bool blocked = false;
++      for (size_t t = 0; t + 9 <= world.size() && !blocked; t += 9) {
++        blocked = hits(origin, d, length - 1e-3f, &world[t], &world[t + 3], &world[t + 6]);
++      }
++      unblocked += blocked ? 0 : 1;
++    }
++    return unblocked;
++  }
++
++  void present(IDirect3DDevice9* pDevice) {
++    pDevice->Present(nullptr, nullptr, nullptr, nullptr);
++    Sleep(5);
++  }
++
++  void readCounters(uint32_t* pWords) {
++    check(g_giCounters(pWords, kWords), "RemixBridge_GiReadCounters");
++  }
++
++  // Presents until the server's object counters satisfy the condition, at most two minutes (a cold index takes seconds).
++  template <class F> void waitCounters(IDirect3DDevice9* pDevice, uint32_t* pWords, F&& done, const char* pWhat) {
++    for (int frame = 0; frame < 24000; ++frame) {
++      readCounters(pWords);
++      if (done(pWords)) {
++        return;
++      }
++      present(pDevice);
++    }
++    std::printf("FAILED: %s: objects=%u resolved=%u missing=%u indexReady=%u.\n", pWhat, pWords[kLive], pWords[kResolved], pWords[kMissing], pWords[kReady]);
++    throw std::runtime_error(pWhat);
++  }
++
++  void runMeshes(IDirect3DDevice9* pDevice, const Chair& chair, bool pixel) {
++    uint32_t level = 0;
++    HRESULT opened = S_FALSE;
++    for (int frame = 0; frame < 2000 && opened == S_FALSE; ++frame) {
++      opened = g_giOpen(&level);
++      check(opened, "RemixBridge_GiOpen");
++      present(pDevice);
++    }
++    require(opened == S_OK, "RemixBridge_GiOpen answers");
++    std::printf("GI level %u.\n", level);
++
++    GiObject objects[4] = {};
++    objects[0].id = 1, objects[0].lite = chair.lite;
++    chairMatrix(objects[0].m);
++    objects[1].id = 2, objects[1].lite = kUnknownLite;
++    chairMatrix(objects[1].m);
++    objects[2].id = 3, objects[2].lite = chair.lite;
++    chairMatrix(objects[2].m);
++    objects[2].m[3] = 5, objects[2].m[11] = 5;
++    objects[3] = objects[2];
++    objects[3].flags = 1;  // GiObjectRemoved
++    check(g_objects(objects, 4), "RemixBridge_GiObjects");
++    present(pDevice);
++
++    uint32_t words[kWords] = {};
++    waitCounters(pDevice, words, [](const uint32_t* w) { return w[kReady] != 0 && w[kLive] == 2; }, "The index is built and two objects live");
++    std::printf("[GiMesh] objects=%u resolved=%u missing=%u indexReady=%u links=%u indexMs=%u dropped=%u\n", words[kLive], words[kResolved],
++                words[kMissing], words[kReady], words[kLinks], words[kIndexMs], words[kDropped]);
++    require(words[kReady] == 1 && words[kLinks] > 0, "The index found the game's packages");
++    require(words[kResolved] == 1 && words[kMissing] == 1 && words[kDropped] == 0, "The chair resolved once, the unknown LITE is missing");
++    if (!pixel) {
++      return;
++    }
++
++    uint32_t state = 0;
++    HRESULT pixelOpened = S_FALSE;
++    for (int frame = 0; frame < 600 && pixelOpened == S_FALSE; ++frame) {
++      pixelOpened = g_pixelOpen(&state);
++      check(pixelOpened, "RemixBridge_GiPixelOpen");
++      present(pDevice);
++    }
++    require(pixelOpened == S_OK && state == 1, "The per-pixel pass is on");
++
++    Scene scene;
++    Targets targets;
++    targets.create(pDevice);
++    ComPtr<IDirect3DSurface9> pReadback;
++    check(pDevice->CreateOffscreenPlainSurface(kWidthQuarter, kHeightQuarter, D3DFMT_A16B16G16R16F, D3DPOOL_SYSTEMMEM, &pReadback, nullptr),
++          "CreateOffscreenPlainSurface");
++    const std::vector<float> den = passRed(pDevice, targets, scene, pReadback.Get(), 3);
++    const std::vector<float> num = passRed(pDevice, targets, scene, pReadback.Get(), 2, false);
++    uint32_t pixelWords[11] = {};
++    check(g_pixelCounters(pixelWords, 11), "RemixBridge_GiPixelReadCounters");
++    std::printf("[GiPixel] passes=%u faults=%u meshes=%u models=%u\n", pixelWords[1], pixelWords[2], pixelWords[9], pixelWords[10]);
++    require(pixelWords[2] == 0 && pixelWords[9] == 1 && pixelWords[10] == 1, "One mesh instance of one model, no fault");
++
++    // The same pass without the chair: no caster at all, so no pixel traces.
++    objects[0].flags = 1;
++    check(g_objects(objects, 1), "RemixBridge_GiObjects (removal)");
++    waitCounters(pDevice, words, [](const uint32_t* w) { return w[kLive] == 1; }, "The chair is removed");
++    const std::vector<float> without = passRed(pDevice, targets, scene, pReadback.Get(), 3);
++    check(g_pixelCounters(pixelWords, 11), "RemixBridge_GiPixelReadCounters");
++    require(pixelWords[9] == 0, "No mesh instance after the removal");
++    require(std::all_of(without.begin(), without.end(), [](float v) { return v == 0; }), "No pixel traces without a caster");
++
++    // The chair in the world, for the CPU rays.
++    float m[12];
++    chairMatrix(m);
++    std::vector<float> world;
++    for (uint32_t index : chair.tri) {
++      const float* p = &chair.pos[size_t(index) * 3];
++      for (int row = 0; row < 3; ++row) {
++        world.push_back(m[row * 4] * p[0] + m[row * 4 + 1] * p[1] + m[row * 4 + 2] * p[2] + m[row * 4 + 3]);
++      }
++    }
++    // The chair is a delta caster (MC-2, XR-08): den counts every sample that reached the lamp past the static occluders
++    // (all 16 here), num the share of those the chair blocked; a pixel out of the chair's reach traces nothing (den 0).
++    uint32_t compared = 0, shadowed = 0, off = 0, missed = 0;
++    double sumDiff = 0;
++    for (int gy = 0; gy < int(kHeightQuarter); ++gy) {
++      for (int gx = 0; gx < int(kWidthQuarter); ++gx) {
++        const int cpu = cpuUnblocked(scene, world, gx, gy);
++        if (cpu < 0) {
++          continue;
++        }
++        const float full = den[gy * kWidthQuarter + gx];
++        if (full <= 0) {
++          missed += cpu < 16 ? 1 : 0;
++          continue;
++        }
++        const float gpu = 16 - num[gy * kWidthQuarter + gx] / full * 16;
++        const float diff = std::fabs(gpu - float(cpu));
++        ++compared;
++        shadowed += cpu < 16 ? 1 : 0;
++        off += diff > 2.5f ? 1 : 0;
++        sumDiff += diff / 16;
++      }
++    }
++    const double mean = compared ? sumDiff / compared : 1;
++    std::printf("Chair shadow against the CPU rays: %u pixels compared, %u shadowed on the CPU, %u off by more than 2 of 16 rays, mean difference %.4f, "
++                "%u shadowed pixels out of reach.\n", compared, shadowed, off, mean, missed);
++    require(compared > 500 && shadowed > 100, "The chair shadows a part of the floor (pixels in its reach)");
++    require(missed == 0, "Every pixel the chair shadows is in the reach of its mesh bounds");
++    require(off <= compared / 100 && mean < 0.01, "The chair's shadow equals the CPU rays within tolerance");
++  }
++}
++
++int main() {
++  std::setvbuf(stdout, nullptr, _IONBF, 0);
++  char dxvk[MAX_PATH] = {};
++  GetEnvironmentVariableA("REMIX_GI_TEST_DXVK", dxvk, sizeof(dxvk));
++  char testCase[16] = {};
++  GetEnvironmentVariableA("REMIX_GI_TEST_CASE", testCase, sizeof(testCase));
++  char game[MAX_PATH] = {};
++  GetEnvironmentVariableA("REMIX_GI_MESH_GAME", game, sizeof(game));
++  char objectsFile[MAX_PATH] = {};
++  GetEnvironmentVariableA("REMIX_GI_MESH_OBJECTS", objectsFile, sizeof(objectsFile));
++  const bool pixel = std::string(testCase) == "on";
++  WNDCLASSW windowClass = {};
++  windowClass.lpfnWndProc = DefWindowProcW;
++  windowClass.hInstance = GetModuleHandleW(nullptr);
++  windowClass.lpszClassName = L"BridgeGiMeshTest";
++  RegisterClassW(&windowClass);
++  const HWND hWnd = CreateWindowExW(0, windowClass.lpszClassName, L"", WS_OVERLAPPEDWINDOW, 0, 0, 64, 64, nullptr, nullptr, windowClass.hInstance, nullptr);
++  if (hWnd == nullptr) {
++    logLine("FAILED: Could not create a test window.");
++    return 1;
++  }
++  bool passed = false;
++  try {
++    require(game[0] != 0 && objectsFile[0] != 0, "REMIX_GI_MESH_GAME and REMIX_GI_MESH_OBJECTS are set");
++    const Chair chair = readChair(objectsFile);
++    std::ofstream config(".trex/bridge.conf", std::ios::app);
++    config << "sendCreateFunctionServerResponses = True\n";
++    config << "client.giServer = True\n";
++    config << "server.giMeshGame = \"" << game << "\"\n";  // (a value with spaces needs the quotes)
++    config << "server.giMeshMods = off\n";
++    if (dxvk[0] != 0) {
++      if (!CopyFileA(dxvk, ".trex\\d3d9vk_x64.dll", FALSE)) {
++        throw std::runtime_error("Could not copy REMIX_GI_TEST_DXVK");
++      }
++      config << "server.useVanillaDxvk = True\n";
++    }
++    config.close();
++    std::printf("Chair LITE %016llX, %zu triangles; per-pixel pass %s.\n", static_cast<unsigned long long>(chair.lite), chair.tri.size() / 3,
++                pixel ? "on" : "not checked");
++    const HMODULE hClient = loadBridgeClient();
++    if (hClient == nullptr) {
++      throw std::runtime_error("loadBridgeClient");
++    }
++    g_giOpen = reinterpret_cast<PFN_GiOpen>(GetProcAddress(hClient, "RemixBridge_GiOpen"));
++    g_objects = reinterpret_cast<PFN_GiObjects>(GetProcAddress(hClient, "RemixBridge_GiObjects"));
++    g_giCounters = reinterpret_cast<PFN_GiReadCounters>(GetProcAddress(hClient, "RemixBridge_GiReadCounters"));
++    g_pixelOpen = reinterpret_cast<PFN_GiPixelOpen>(GetProcAddress(hClient, "RemixBridge_GiPixelOpen"));
++    g_pass = reinterpret_cast<PFN_GiPixelPass>(GetProcAddress(hClient, "RemixBridge_GiPixelPass"));
++    g_pixelCounters = reinterpret_cast<PFN_GiPixelReadCounters>(GetProcAddress(hClient, "RemixBridge_GiPixelReadCounters"));
++    if (!g_giOpen || !g_objects || !g_giCounters || !g_pixelOpen || !g_pass || !g_pixelCounters) {
++      throw std::runtime_error("The client does not export the GI object functions");
++    }
++    const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));
++    ComPtr<IDirect3D9> pD3D;
++    pD3D.Attach(pfnCreate != nullptr ? pfnCreate(D3D_SDK_VERSION) : nullptr);
++    if (pD3D == nullptr) {
++      throw std::runtime_error("Direct3DCreate9");
++    }
++    D3DPRESENT_PARAMETERS present = {};
++    present.Windowed = TRUE;
++    present.SwapEffect = D3DSWAPEFFECT_DISCARD;
++    present.BackBufferFormat = D3DFMT_UNKNOWN;
++    present.BackBufferWidth = 64;
++    present.BackBufferHeight = 64;
++    present.hDeviceWindow = hWnd;
++    ComPtr<IDirect3DDevice9> pDevice;
++    check(pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED,
++                              &present, &pDevice), "CreateDevice");
++    runMeshes(pDevice.Get(), chair, pixel);
++    passed = true;
++  } catch (const std::exception& error) {
++    std::printf("FAILED: %s.\n", error.what());
++  }
++  DestroyWindow(hWnd);
++  logLine(passed ? "PASSED" : "FAILED");
++  return passed ? 0 : 1;
++}

@@ -85,6 +85,7 @@ struct Record {
     // with it, its blockers tested on the segment moved back (occlude; RtLampGpu::BlockerTable::Offset)
     float off[2] = {0.0f, 0.0f};
     std::vector<Post> posts; // its object's legs (RtLampGpu::BlockerTable::Append); the game's tests here ignore them
+    bool meshed = false; // (meshTiles) its object's own mesh is in the shadow tiles: the GPU's table draws none of its blockers (ObjectLegs::MarkMeshed)
     std::vector<Puff> puffs; // a plant's leaves (RtLampGpu::BlockerTable::Append puts them in place of its blockers); the game's tests ignore them
     std::vector<uintptr_t> at; // its blockers' addresses in the game, as read: the object's move writes them in place (OutdoorDelta's live tables)
 };

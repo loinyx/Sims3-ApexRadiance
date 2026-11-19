@@ -158,6 +158,11 @@ using RenderTargetSubstitute = IDirect3DSurface9* (*)(DWORD index, IDirect3DSurf
 void SetRenderTargetSubstitute(RenderTargetSubstitute fn);
 void BeginReissue();
 void EndReissue();
+bool Reissuing(); // this thread is inside a ReissueScope
+// Render thread: the pixel shader the last SetPixelShader call through the device asked for, before any callback changed
+// it (not followed through CallOriginalSetPixelShader). In a re-issued draw it is the game's shader that the
+// replacement bound for the draw was made from. An identity only, no reference.
+IDirect3DPixelShader9* CallerPixelShader();
 struct ReissueScope {
     ReissueScope() { BeginReissue(); }
     ~ReissueScope() { EndReissue(); }
@@ -213,6 +218,9 @@ struct StateCallCounts {
 StateCallCounts ReadStateCallCounts();
 // Dispatches of the lock-free chains that came from a thread other than the render thread (they took the lock).
 uint32_t OffThreadDispatches();
+// Developer mode: the registers the device's Set*ShaderConstantF calls wrote, by owner and calling site
+// (const_range_histogram.h); empty before the first call. For the frame profiler report.
+std::string ConstantRangeReport();
 
 // ---- diagnostic trace (the no-scene frame trace, features/no_scene_trace.cpp) ----
 // Called with the values passed on towards the driver, whoever set them (the game, other modules, Apex's CallOriginal*),

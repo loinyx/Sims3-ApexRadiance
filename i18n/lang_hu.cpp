@@ -3134,6 +3134,8 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "A csomagot nem sikerült a Shaders mappába menteni"},
     {"The download failed", "A letöltés nem sikerült"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "Shadercsomagok: a szerzőik GitHubjáról letöltve, mindegyik a saját szerzője licence alatt."},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Fejlesztői mód: minden tárgy saját hálóját árnyékvetőként adja át a híd szerverének"},
+    {"Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)", "Fejlesztői mód: minden tárgy saját hálóját a lámpák árnyékcsempéibe rajzolja (a híd kell hozzá)"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Hungarian, kPairs, std::size(kPairs));

@@ -3135,6 +3135,8 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "無法將此包儲存到 Shaders 資料夾"},
     {"The download failed", "下載失敗"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "著色器包：從各作者的 GitHub 下載，遵循各作者的授權。"},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "開發者模式：將每個物品自身的網格作為投影體交給橋接伺服器"},
+    {"Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)", "開發者模式：將每個物品自身的網格繪入燈具的陰影圖塊（需要橋接）"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::ChineseTraditional, kPairs, std::size(kPairs));

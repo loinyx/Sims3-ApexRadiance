@@ -467,6 +467,7 @@ void __fastcall RemovalHook(uint8_t* level, void* edx, uint32_t idLo, uint32_t i
     using Fn = void(__fastcall*)(uint8_t*, void*, uint32_t, uint32_t);
     reinterpret_cast<Fn>(EntryChain::Next(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter))(level, edx, idLo, idHi);
     OutdoorDelta::NoteLightObjectRemoved();
+    ObjectLegs::NoteRemoved(static_cast<uint64_t>(idHi) << 32 | idLo);
 }
 // An occluder's point is in its lot's space (the moving occluder at (20.00 24.10) under a lamp at (849.07 1233.74) in the world,
 // a drag), the lamps' positions in the world's: taken to the world (the lot's rows, mgr+0xE0, a lot turning about

@@ -213,9 +213,14 @@
     <ClCompile Include="features\looks_preset.cpp" />
     <ClCompile Include="features\refpack_codec.cpp" />
     <ClCompile Include="features\resource_cache.cpp" />
+    <ClCompile Include="features\gi_pixel_shadows.cpp" />
+    <ClCompile Include="features\realtime_gi.cpp" />
+    <ClCompile Include="features\gi_sched.cpp" />
+    <ClCompile Include="features\gi_compose.cpp" />
     <ClCompile Include="features\rig_tracker.cpp" />
     <ClCompile Include="features\scene_budget.cpp" />
     <ClCompile Include="features\scene_dither.cpp" />
+    <ClCompile Include="features\gbuffer_movers.cpp" />
     <ClCompile Include="features\shader_patches.cpp" />
     <ClCompile Include="features\terrain_chunk_relight.cpp" />
     <ClCompile Include="features\terrain_stamps.cpp" />
@@ -251,6 +256,7 @@
     <ClCompile Include="patches\depth_blur_patch.cpp" />
     <ClCompile Include="patches\edge_smoothing_patch.cpp" />
     <ClCompile Include="patches\frame_capture_patch.cpp" />
+    <ClCompile Include="patches\gbuffer_patch.cpp" />
     <ClCompile Include="patches\looks_patch.cpp" />
     <ClCompile Include="patches\night_terrain_relight_patch.cpp" />
     <ClCompile Include="patches\performance_patches.cpp" />
@@ -296,6 +302,8 @@
     <ClInclude Include="build_flavor.h" />
     <ClInclude Include="features\depth_share.h" />
     <ClInclude Include="features\dxt_codec.h" />
+<ClInclude Include="features\gbuffer_motion.h" />
+<ClInclude Include="features\gbuffer_movers.h" />
     <ClInclude Include="features\fast_dxt.h" />
     <ClInclude Include="features\fast_refpack.h" />
     <ClInclude Include="features\cas_tri_sort.h" />
@@ -470,6 +478,7 @@
     <ClInclude Include="patches\night_lighting.h" />
     <ClInclude Include="patches\performance.h" />
     <ClInclude Include="shaders\floor_atlas_table.h" />
+    <ClInclude Include="shaders\gbuffer_ids.h" />
     <ClInclude Include="shaders\lightmap_smooth_hlsl.h" />
     <ClInclude Include="shaders\ground_shade_hlsl.h" />
     <ClInclude Include="shaders\terrain_bake_hlsl.h" />

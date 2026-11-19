@@ -175,6 +175,7 @@ for uniqueness on Steam with `sigcheck.pl` (it must still resolve every id to th
 | Display resolution (`GameResolution`, group `GameResolution`) | ResolutionRequest, RendererGlobal, ResolutionHandler, ResolutionUi | "[Screen] Game resolution request not available on this game version: ..." (the Resolution row then has no effect) |
 | Faster cache compression, record checksums (group `FastRecordCrc`) | RecordCrc, RecordCrcTable | "Not available on <version>: missing ..." |
 | Frame Profiler texture load counters (developer mode) | TexCreateCall, TexCreate, TexFillCall, TexFill | those counters are not installed |
+| Frame Profiler room solve split (developer mode) | RoomRebuildCall, RoomRebuild, RoomPassCall, RoomPass, WallAoDriver, LevelSolverSlot0..2 | those counters are not installed |
 | Loaded-world gate (`features/world_session.h`: start note, Depth Blur) | WorldManagerPtr, UiServiceGetter (its first bytes must be `A1 imm32 ... C3`) | the world counts as not loaded: no start note and no Depth Blur |
 
 The lighting parts that were Steam-only until 2.13.1 (light detail, smooth light maps, quick outdoor lamp edits, real-time
@@ -341,6 +342,11 @@ at +n" = the target of the CALL there, "dword at +n" = the value there.
 | WallAoStep | 0x0068B810 | Sig | `83 EC 34 55 56 8B F1 83 7E 04 00 74 14 E8 ?? ?? ?? ?? 8B 4E 04 50 E8 ?? ?? ?? ?? 8B E8 85 ED 75 18 8B 46 04 8A 80 80 02 00 00` +0<br>alt: `8B 46 04 8A 80 80 02 00 00 F6 D8 5E 5D 1B C0 83 E0 02 83 C4 34 C2 08 00 8B 85 DC 00 00 00 2B 85 D8 00 00 00` +-33 | matches 1 / 1 |
 | WallAoStepSlot | 0x00FF05B0 | SlotsOf(WallAoStep), 1 | - | 1 slot |
 | WallAoDriver | 0x00688920 | Sig | the whole body `56 8B F1 83 7E 14 02 74 27 ... 89 46 14 5E C2 08 00` +0<br>alt: its last 25 bytes `8B 06 8B 50 1C 51 8B 4C 24 0C D9 1C 24 51 8B CE FF D2 89 46 14 5E C2 08 00` +-27 | matches 1 / 1 |
+| LevelSolverSlot0..2 | 0x00FF0580, 0x00FF05A0, 0x00FF0720 | SlotsOf(WallAoDriver), 3 | - | 3 slots |
+| RoomRebuildCall | 0x006A8BAD | Sig | `80 BE 80 02 00 00 00 57 75 05 E8 ?? ?? ?? ?? 83 BE 88 00 00 00` +10 | matches 1 / - |
+| RoomRebuild | 0x006A7CF0 | Target(RoomRebuildCall) | - |  |
+| RoomPassCall | 0x006A8C0E | Sig | `8B CE E8 ?? ?? ?? ?? D9 44 24 10 51 D9 1C 24 57 8B CE E8 ?? ?? ?? ?? 5F 5E C2 08 00` +18 | matches 1 / - |
+| RoomPass | 0x006A88B0 | Target(RoomPassCall) | - |  |
 | ResKeyList | 0x004B1AE0 | Sig | `83 EC 10 53 33 C0 38 44 24 20 56 57 89 44 24 0C 0F 84 ?? ?? ?? ?? 8B B1 A0 00 00 00 8B B9 A4 00 00 00 3B F7` +0<br>alt: the derived function `8B 44 24 0C 8B 54 24 08 56 8B 74 24 08 50 52 56 E8 ?? ?? ?? ?? 85 C0 74 0D 85 F6 74 09 56 E8` call at +16 | matches 1 / 1 |
 | ResKeyListSlot | 0x00FB2DC0 | SlotsOf(ResKeyList), 1 | - | 1 slot |
 | ResKeyListDerived | 0x00736660 | Sig | the whole body `8B 44 24 0C 8B 54 24 08 56 8B 74 24 08 50 52 56 E8 ?? ?? ?? ?? 85 C0 74 0D 85 F6 74 09 56 E8 ?? ?? ?? ?? 83 C4 04 5E C2 0C 00` +0 | matches 1 |

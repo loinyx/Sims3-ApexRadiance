@@ -195,11 +195,18 @@ struct InstancedPatch {
     DWORD groundWeightConst = 0; // (a, b, 1, 0): atlas weight sat(N.y * a + b); (1, 0) with lamps, (0, 1) = every face (as before)
     DWORD coneConst = 0;         // per lamp k: its cones at coneConst + 2k / + 2k + 1 (= lampConst + 2 kObjectPixelLamps); the lamp colour .w = its spill
     DWORD reachConst = 0;        // reach variant: the 2 r0^2 rows (= coneConst + 2 kObjectPixelLamps); 0 = the first law
-    DWORD capConst = 0;          // optional two projection rows per lamp, then one shared softness row
-    int shadeSampler = -1;       // the ground lamp shade: the lot mask (atlasSampler + 1); -1 = none
+    DWORD capConst = 0;          // optional two projection rows per lamp, then one shared softness row (index: the softness row alone)
+    int shadeSampler = -1;       // the ground lamp shade: the lot mask (atlasSampler + 1, + 2 with index); -1 = none
     int shadeConst = -1;         // its 3 rows, right after the cones (first law) or the reach rows
+    DWORD indexSampler = 0;      // index: the lamp index texture (atlasSampler + 1); 0 = a per-draw copy
 };
-bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach = false, bool groundShade = true, bool capShadows = false);
+// index (real-time GI S3-02b, lamp_index.h): the per-pixel lamps from the lamp index cells at the pixel (AppendIndexLamps in
+// shader_patches.cpp), the same constant layout as the per-draw copy but no lamp, cone, reach or per-lamp floor shadow row is
+// read: the draw sets the atlas, strength, ground weight, the lamp parameter row cS (cS.z = 1: the group lies in the lot's
+// ground shade and keeps its lamps whole), the shade rows and the floor shadows' softness row. Visibility: the cell's, for a
+// loose object. Refused (t unchanged) without the per-pixel lamps or without room (a sampler, 7 temporaries, i0, every
+// constant under the frame block c208).
+bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach = false, bool groundShade = true, bool capShadows = false, bool index = false);
 
 // Snow lying on objects (fence tops, rails, props: the winter snow-cover mesh drawn over the object). Its vertex shader
 // morphs between two positions with flags in TEXCOORD1.x ("slt rX, cK, v.x") and writes world xz to TEXCOORD3.xy
@@ -251,8 +258,14 @@ struct ObjectLampPatch {
     DWORD coneConst = 0;      // two cone rows per lamp, evaluated at the pixel
     DWORD reachConst = 0;     // reach variant: the 2 r0^2 rows; 0 = the first law
     bool rigLamps = true;     // c5..c7 are the rig's lamp colours (false: no lamps in the pixel shader)
+    DWORD indexSampler = 0;   // index: the lamp index texture (lamp_index.h), point sampled
+    DWORD objectConst = 0;    // index: the one row a draw sets (LampIndex::ObjectRow)
 };
-bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach = false);
+// index (real-time GI S3-02, S3-02b, lamp_index.h; both laws): the lamps come from the lamp index texture at the pixel's cell,
+// read in a loop of LampIndex::kSlots, and every parameter from the frame constants c208..c214; the copy reads no
+// per-draw row but objectConst (atlasConst, strengthConst, lampParamConst, lampConst, coneConst stay 0). The ground
+// share and both height gates are taken at the pixel; with reach the r0^2 comes from table row 4. Refused (t unchanged) without room for it.
+bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach = false, bool index = false);
 
 // Indoor room light: the 4 directional room light maps ("basis maps", 64x64) read with a smooth (bicubic) filter.
 // BasisSamplers: the samplers of a basis-reading pixel shader, by direction (+X, -X, +Z, -Z). PatchBasisSmooth: its 4
@@ -414,8 +427,12 @@ struct WindowOutdoorPatch {
     DWORD planConst = 0;      // 2 constants: (du/dx, du/dz, 0, 0) x d, (dv/dx, dv/dz, 0, 0) x d
     DWORD reachConst = 0;     // reach variant: the 2 r0^2 rows; 0 = the first law
     int uvUsage = -1, uvIndex = -1; // the semantic of the basis uv input (the VS output to read the uv rows from)
+    DWORD indexSampler = 0;   // index: the lamp index texture (atlasSampler + 1); 0 = a per-draw copy
 };
-bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool reach = false);
+// index (real-time GI S3-02b, lamp_index.h): the lamps from the lamp index cells at the pixel, with the visibility for an
+// object set in a wall, without the lamps shining out of a house and with each lamp's cones per pixel (the per-draw copy
+// takes the cone at the window's origin); the same constant layout, no lamp or reach row read.
+bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool reach = false, bool index = false);
 // The vertex shader side: how its output (usage, index) .xy is made from the world position, either "dp4 oN.x/.y, rW,
 // cK" or "dp4 rA.c, rW, cK" then "mul oN.xy, rA.<cc>, cS.<ss>" (the game's basis uv: room light map uv x c.zw). rW must
 // be the world-position temp of the triple c[worldK .. worldK + 2]. row[k] = K, scale[k] = S (-1: none), scaleComp[k] =
@@ -443,6 +460,37 @@ DitherResult AddDither(std::vector<DWORD>& t, int* amountConst = nullptr);
 // temps: the grain does not fit in some ps_2_0). Refused: no free texture coordinate, temp or constant (32), subroutines.
 // The end writes oC0 once, fully.
 DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst = nullptr, int* texcoordOut = nullptr);
+// G-buffer outputs for a ps_3_0 or a ps_2_0 / ps_2_x (docs/features/realtime-gi/research/14-gbuffer-motion-vectors.md,
+// section 3.2), applied to the Banding Fix copy after AddDither / AddDither2 or to the game's shader. Only inserts
+// instructions: every game token stays, except that a ps_2_0 becomes ps_2_x (more slots; replicate swizzles only).
+//   oC1 = (albedo.rgb, material / 255): the result of the one texld on s<albedoSampler>, copied to a free temp right after
+//         it. Without one (no sampler, not read exactly once, a partial rgb mask): (0, 0, 0, 1), the "albedo unknown"
+//         id 255. A read inside a branch gives that value on the paths that do not read.
+//         Composited albedo (family rule, research 14 WP10; Sim skin overlay, terrain layers): with albedoAt >= 0 and no
+//         albedo sampler, rR.xyz (R = albedoReg) right after the albedoAt-th instruction that is not a dcl or def (the
+//         value where the textures are blended and the light is not yet applied); albedoReg 255: that instruction writes
+//         the unlit colour to oC0 (or to the temp AddDither renamed it to), and a copy of it into the free temp goes just
+//         before it. Counted without dcl and def, the index is the same before and after AddDither / AddDither2. Refused
+//         (no albedo) inside flow control or when the instruction does not fit the rule.
+//   oC2 = (octahedral normal.xy, roughness, motionClass / 3): the coordinate of the one texld on s<probeSampler> (the
+//         diffuse light probe is looked up by the world shading normal), copied just before it. Without one:
+//         (0.5, 0.5, 0, class): roughness 0 flags "no normal written, use the geometric one".
+// Both writes are appended after the last instruction, outside any branch, each once, fully, by mov (the ps_2_0 rule).
+// Refused (t unchanged): another version, subroutines or ret, relative constants, no 3 free temps (32) / 2 free
+// constants (224; ps_2_x 32), or the shader already writes another output than oC0.
+struct GBufferInfo {
+    int albedoSampler = -1, probeSampler = -1;
+    int albedoAt = -1, albedoReg = -1; // family rule (shaders/gbuffer_ids.h, kGBufferAlbedoRules)
+    int material = 255;     // 1..254 (255 = unknown)
+    int motionClass = 3;    // 0 static .. 3 unknown mover
+    float roughness = 0.5f; // (0, 1]; written only with a normal
+};
+enum class GBufferResult { Ok, NotPs30, Unreadable, Subroutines, RelativeConstants, NoFreeRegister, OutputsUsed };
+struct GBufferMade {
+    bool albedo = false, normal = false;
+    int firstTemp = -1, firstConst = -1; // the registers it took: 3 temps, 2 constants (the offline check strips by them)
+};
+GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBufferMade* made = nullptr);
 // vs_1_1 / vs_2_x: every write to oPos goes to a free temp, then oPos and oTk = that position, last (a game write to oTk
 // is dead with the pixel copy, which took k unused). False with no free temp, subroutines, or another version (vs_3_0
 // pairs with ps_3_0 only).
@@ -463,6 +511,45 @@ bool MakeAoReceiverMask(std::vector<DWORD>& vs, std::vector<DWORD>& ps, bool hai
 enum class JitterResult { Ok, NotVertexShader, Unreadable, NoPosition, Subroutines, PassThrough, NoFreeRegister, ConstantInUse, ProjectedWater };
 JitterResult AddJitterVs(std::vector<DWORD>& t, int jitterConst);
 
+// Motion vectors of moving objects and skinned Sims (G-buffer, research 14 WP8 / WP13 S2; GB-05). The position slice of
+// a game vertex shader: the instructions the position output depends on (component by component; flow control is kept
+// whole and nothing is killed inside it), with the constants they read. A replay shader built from it runs the slice
+// twice: bank A with the game's constants as the draw left them (this frame), bank B with the same code reading copies
+// at free registers (the values the same draw had last frame: bone palette, world rows, camera). Rigid movers, skinned
+// and morphed Sims need no pattern of their own: whatever the position reads is replayed.
+struct MotionSlice {
+    std::vector<DWORD> code;  // the game shader
+    std::vector<char> keep;   // per instruction (Parse order): part of the slice
+    std::vector<int> singles; // constant registers the slice reads by number (not set by def), sorted
+    struct Region {           // c[a0 + base + offset] (or aL) reads: base = the lowest; uploaded data, not def
+        int base = 0;
+        int maxExtent = 0;    // registers to the next one the shader reads by number, sets by def or indexes again
+        int lastOffset = 0;   // the highest offset read (an extent needs more)
+    };
+    std::vector<Region> regions;
+    int temps = 0;            // the game shader's highest temp + 1
+    int kept = 0;             // instructions kept (control flow included)
+    bool v3 = false;
+};
+enum class MotionSliceResult { Ok, NotVertexShader, Unreadable, Version, Subroutines, NoPosition, PassThrough, Predicated, RelativeOutput, Unsupported,
+                               NoFreeRegister, NoRoom };
+MotionSliceResult AnalyzeMotionSlice(const std::vector<DWORD>& vs, MotionSlice* out);
+// Bank B's place for one draw: extents[i] = registers region i uses this draw ([base, base + extent), clamped to
+// [lastOffset + 1, maxExtent]). Out: where each region's copy and each single's copy go, and the jitter register.
+struct MotionReplayLayout {
+    std::vector<int> extents;
+    std::vector<int> regionTo; // per region: first register of the copy
+    std::vector<int> singleTo; // per single: its copy
+    int jitter = -1;           // xy: this frame's jitter in clip units (0 without temporal AA)
+};
+// The replay vs_3_0 (any game version from vs_2_0): the game's input and sampler declarations, its defs, slice A then
+// slice B, then o0 = A's position moved by the jitter exactly as AddJitterVs moves the scene draw (same depth, same
+// pixels), o1 (TEXCOORD0) = A's clip position without jitter, o2 (TEXCOORD1) = B's. probe (offline check): o0 comes from an
+// extra float4 input declared TEXCOORD15 instead (one point per vertex at a chosen pixel). NoRoom: the copies do not fit
+// in 256 registers beside A's; NoFreeRegister: more than 32 temps.
+MotionSliceResult MakeMotionReplayVs(const MotionSlice& s, const std::vector<int>& extents, MotionReplayLayout* layout, std::vector<DWORD>* out,
+                                     bool probe = false);
+
 // The snowy and melting-snow lot light passes (lot_light_bridge DrawLotSnow / DrawLotMelt): after the lot map's texld
 // ("texld r0, v3, s2") and its basis factor, the max with the terrain light read at TEXCOORD1 (v7) from s<newSampler>, x4;
 // with mask, the room mask from s<newSampler + 1> at the uv rows PS c200 / c201 (kLotMaskConst) keeps the terrain out of rooms
@@ -474,5 +561,47 @@ bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampl
 // texture read; c205/c206 map terrain UVs to lot metres, c207 = (1/band, off, 3, 2).
 constexpr DWORD kLotEdgeConst = 205;
 bool PatchLotTerrainEdges(std::vector<DWORD>& t, bool exit = false);
+
+// (real-time GI S2-05 / S2-06, gi_indirect.h) A room-lit ps_3_0 pixel shader (the game's or any copy of PatchRoomMapSmooth)
+// whose ambient term is the one "mad rD.xyz, rL.w, cA, rL" (cA a constant the game sets, rL a temp), no flow control before it:
+// ahead of that mad the GI grid (GiIndirect::Grid, bound at out.sampler, bilinear, rgb premultiplied by its ready a) is read at
+// uv = TEXCOORD<texcoord>.xy x c[kGiUvConst].xy + .zw (floors: the floor VS's TEXCOORD4, lot / 64 + (1/1024, 1/512); walls:
+// TEXCOORD7 of PatchWallGiVs with (1, 1, 0, 0)), the place inside its texel held at the centre on the sides the flags texture
+// (out.flagSampler, point; GiIndirect::Grid::flags) closes, into G; the mad takes G for rL: rgb' = rL.rgb k.y + G k.x -
+// rL.w a L, alpha' = rL.w k.z, k = c[kGiKConst], L = c[kGiLampConst] (GiIndirect::Apply). c[kGiSizeConst] = (w, h, 1/w, 1/h)
+// of the grid; kGiSizeConst + 1 is the copy's def. rL itself is not changed. Constants in the reserved pixel range (research 15:
+// c208-c223; c208-c214 the lamp index). texcoord 0..15. Refused (t unchanged) for ps_2_0 / ps_2_x (c215 is out of their reach: UpgradePs2To3 first), no such mad,
+// no free temps, samplers or input, or a shader already reading c215 or above. out.slots / temps: of the patched copy;
+// out.ambientConst: the mad's cA (the room's ambient, read per draw for L).
+constexpr DWORD kGiUvConst = 215, kGiKConst = 216, kGiLampConst = 217, kGiSizeConst = 218;
+struct RoomMapGiPatch {
+    int sampler = -1, flagSampler = -1, ambientConst = -1;
+    int slots = 0, temps = 0, added = 0; // added: instruction slots the patch added
+};
+bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord = 4, bool zw = false); // zw: uv in TEXCOORD<texcoord>.zw
+// (real-time GI S2-06) A copy of a vs_3_0 wall vertex shader (InteriorWall's, precomp VS 8507 shape) that also writes the wall
+// pixel's GI grid uv to TEXCOORD7.xy (GiIndirect::WallUvCpu): after its world triple (three consecutive "dp4 rW.x/y/z, rP,
+// cK..cK+2"), the lot position (rW, 1) and the lot normal (the one normal decode, an instruction reading only the normal input
+// and constants, through cK..cK+2, normalised) go through the lot rows; the facing picks block and line. Per draw:
+// c[kWallGiVsConst] = GiIndirect::WallRows r0, +1 = r1, +3 .. +5 = the lot rows (worldToLot column k as (m0k, m1k, m2k, m3k));
+// +2 is the copy's def. Refused (t unchanged): not vs_3_0, flow control, relative constants, a constant >= kWallGiVsConst,
+// TEXCOORD7 already an output, no free output or temps, no single triple or normal decode. oPos is not touched.
+constexpr DWORD kWallGiVsConst = 242;
+// texcoord: the output's TEXCOORD index (7 for the game's vs_3_0). zw: write .zw of the TEXCOORD<texcoord> the shader already
+// declares and writes only .xy of (the upgraded vs_2_0 walls: TEXCOORD0, their eight TEXCOORDs and two COLORs fill ps_3_0's
+// ten inputs). Without the strict triple / decode order (the vs_2_0 walls: no world triple, or the decode rewritten before
+// it), the general form: the object position rP read whole by the clip dp4s on c0..c3, the world rows cK..cK+2 of the first
+// "dp3 x/y/z, rD<swz>, cK..cK+2" of the decode's temp; the world position (dp4 rP, cK..) and a copy of the decode go to new temps
+// just before the first clip dp4, the normal is that dp3 with its swizzle (S2-06 item 9: c4..c6 the world rows [I, live check]).
+bool PatchWallGiVs(std::vector<DWORD>& t, int texcoord = 7, bool zw = false);
+// (S2-06 item 9) Shader model 2 to 3, same results: the vs_2_0 / ps_2_0 InteriorWall pairs take the wall GI read only as
+// vs_3_0 / ps_3_0 (D3D9 pairs a vs_3_0 with a ps_3_0 only). Nullptr when done; else why refused (t unchanged).
+// Vertex: oTn stays on register n (TEXCOORDn), oPos and oDn take the next free outputs (oDn written _sat: vs_2_0 clamps colours).
+// sincos loses its vs_2 macro constants. Refused: not vs_2_0 / vs_2_x, flow control, oFog / oPts writes (fixed-function
+// fog or point size), more than 12 outputs.
+const char* UpgradeVs2To3(std::vector<DWORD>& t);
+// Pixel: tn becomes vn (TEXCOORDn), colour vn the input after the highest tn (COLORn). ps_3_0 has no fixed-function fog: the
+// caller must not draw the copy with D3DRS_FOGENABLE on. Refused: not ps_2_0 / ps_2_x, flow control, predication, more than 10 inputs.
+const char* UpgradePs2To3(std::vector<DWORD>& t);
 
 } // namespace ShaderPatches

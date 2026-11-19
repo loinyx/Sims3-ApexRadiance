@@ -3134,6 +3134,8 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "パックを Shaders フォルダーに保存できませんでした"},
     {"The download failed", "ダウンロードに失敗しました"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "シェーダーパック: 各作者の GitHub からダウンロードされ、それぞれの作者のライセンスに従います。"},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "開発者モード：各オブジェクト自身のメッシュを影を落とすものとしてブリッジサーバーに渡す"},
+    {"Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)", "開発者モード：各オブジェクト自身のメッシュをランプの影タイルに描く（ブリッジが必要）"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Japanese, kPairs, std::size(kPairs));

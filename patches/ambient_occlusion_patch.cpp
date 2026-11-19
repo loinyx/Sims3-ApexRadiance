@@ -49,6 +49,7 @@
 #include "sim_occlusion.h"
 #include "perf_toggles.h"
 #include "no_scene_trace.h"
+#include "gbuffer_motion.h"
 #include <unordered_map>
 #include <atomic>
 #include <d3d9.h>
@@ -85,6 +86,8 @@ constexpr float kFirstStep4K = 2.0f, kMipOffset = 2.0f, kMaxRadius = 0.30f;    /
 constexpr float kIsoK = 1.0f, kIsoT = 0.01f;                                    // isolated-pixel fade
 constexpr float kBlurTolerance = 0.03f;                                         // of z
 constexpr float kDeadZone = 0.05f;                                              // composite: faint shade dropped
+// Temporal filter (developer switch): 1/z mismatch that starts a new history, most frames averaged, clip width in sigmas
+constexpr float kTemporalDepthTolerance = 0.05f, kTemporalFrames = 8.0f, kTemporalClip = 1.5f;
 // Quality by stored index (the saved "qualidade": 0 Low, 1 Medium, 2 High as in 2.1.0, then 3 Ultra, 4 Very Low) and the
 // order the menu shows them in
 constexpr int kQualityCount = 5;
@@ -116,6 +119,17 @@ float4 cRot   : register(c9);  // x = cos(pi / SLICES), y = sin(pi / SLICES)
 float4 cDepth : register(c10); // x = A, y = 1 / (near A)   (1/z = (A - d) / (near A)), z = composite grain (Banding Fix strength / 255, 0 = off), w = its grain phase
 float4 cSim : register(c11); // body strength, opaque mask available, hair strength, maximum shade
 float4 cSimView : register(c12); // mask preview, transparent hair mask available
+// G-buffer (developer switches, research 14 WP6 / WP7; patches/gbuffer_patch.cpp)
+sampler2D sGbN : register(s7);   // render target 2: octahedral normal (rg), roughness (b, 0 = no normal written), motion class / 3 (a)
+sampler2D sHist : register(s8);  // last frame's history: shade, 1/z, material id / 255, frames (A16B16G16R16F)
+sampler2D sMotion : register(s9); // motion: current NDC - previous NDC (rg, above 1000 = no history), b = 1: a mover's own vector (A16B16G16R16F)
+sampler2D sGbA : register(s10);  // render target 1: albedo (rgb), material id / 255 (a)
+float4 cGbX : register(c13); // world -> view rows x (right), y (up), z (forward); cGbX.w = 1: use the G-buffer normal
+float4 cGbY : register(c14);
+float4 cGbZ : register(c15);
+float4 cTmp : register(c16); // temporal: x = 1 history valid, y = 1/z tolerance (relative), z = most frames, w = variance clip width (sigmas)
+float4 cTmpD : register(c17); // row 3 of the camera reprojection D (q.w = previous depth / this depth)
+float4 cPhase : register(c18); // xy: per-frame phase of the slice angle and the step offsets (jittered scene + temporal filter; 0 = fixed)
 
 static const float PI = 3.14159265;
 
@@ -170,6 +184,17 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     float nl = length(n);
     [branch] if (nl < 1e-12) return float4(1, w0, 0, 0);
     n /= nl;
+    // the scene shader's own world shading normal where it wrote one (no dashes along depth steps and seams), in view space
+    [branch] if (cGbX.w > 0.5) {
+        float4 g = tex2Dlod(sGbN, float4(uv, 0, 0));
+        if (g.b > 0) {
+            float2 f = g.rg * 2 - 1;
+            float3 d = float3(f, 1 - abs(f.x) - abs(f.y));
+            float t = saturate(-d.z);
+            d.xy += float2(d.x >= 0 ? -t : t, d.y >= 0 ? -t : t);
+            n = normalize(float3(dot(cGbX.xyz, d), dot(cGbY.xyz, d), dot(cGbZ.xyz, d)));
+        }
+    }
     n = dot(n, c) > 0 ? -n : n;
     float iso = max(min(abs(zr - z), abs(zl - z)), min(abs(zd - z), abs(zu - z))) * w0;
     float3 view = -normalize(c);
@@ -180,7 +205,7 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     float lg = log2(rMax / cMarch.x) / STEPS;
     float lodAdd = log2(1.0 - exp2(-lg)) - cMarch.y + log2(cMarch.x);
     float2 q = floor(pix);
-    float b1 = (Bayer4(q) + 0.5) / 16.0, b2 = (Bayer4(q.yx + float2(1, 2)) + 0.5) / 16.0;
+    float b1 = frac((Bayer4(q) + 0.5) / 16.0 + cPhase.x), b2 = frac((Bayer4(q.yx + float2(1, 2)) + 0.5) / 16.0 + cPhase.y);
     float2 fMul = float2(-1.0 / (0.615 * cRad.x), -1.0 / (0.615 * Rl));
     const float fAdd = 0.385 / 0.615 + 1.0;
     float2 om;
@@ -230,7 +255,7 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     occ *= 1 - cBlend.z * saturate((iso - cBlend.w) / cBlend.w);
     return float4(saturate(1 - occ), w0, 0, 0);
 }
-
+)HLSL" R"HLSL( // (two literals: one is limited to 16 KB)
 // separable depth-aware filter: box (0.5 1 1 1 0.5: one of each interleave offset) or tent (1 2 3 2 1)
 static const float BX[5] = { 0.5, 1.0, 1.0, 1.0, 0.5 };
 static const float TT[5] = { 1.0, 2.0, 3.0, 2.0, 1.0 };
@@ -247,6 +272,42 @@ float4 BlurPS(float2 uv : TEXCOORD0) : COLOR0
         ws += w;
     }
     return float4(ws > 0 ? sum / ws : c0.x, c0.y, 0, 0);
+}
+
+// Temporal filter over the blurred shade (research 14 WP7): last frame's value at this pixel's previous position (camera
+// motion), rejected where the 1/z, the material id or the motion class say it is another surface or a mover, clipped
+// to this pixel's 3x3 neighbourhood, and blended with weight 1 / frames. Out: shade, 1/z, id, frames (the next history).
+float4 TemporalPS(float2 uv : TEXCOORD0) : COLOR0
+{
+    float2 c0 = tex2Dlod(sAo, float4(uv, 0, 0)).rg;
+    [branch] if (c0.y <= 0.0) return float4(1, 0, 0, 0);
+    float id = tex2Dlod(sGbA, float4(uv, 0, 0)).a;
+    float cls = floor(tex2Dlod(sGbN, float4(uv, 0, 0)).a * 3 + 0.5);
+    float4 mvs = tex2Dlod(sMotion, float4(uv, 0, 0));
+    if (mvs.b > 0.5) cls = 1; // (GB-05) a mover whose own vector the motion pass took: exact
+    float m1 = 0, m2 = 0;
+    [unroll] for (int y = -1; y <= 1; y++)
+        [unroll] for (int x = -1; x <= 1; x++) {
+            float a = tex2Dlod(sAo, float4(uv + float2(x, y) / cSize.xy, 0, 0)).r;
+            m1 += a;
+            m2 += a * a;
+        }
+    m1 /= 9;
+    float sigma = sqrt(max(m2 / 9 - m1 * m1, 0));
+    float2 mv = mvs.rg;
+    float2 puv = uv - mv * float2(0.5, -0.5);
+    float d = tex2Dlod(sDepth, float4(uv, 0, 0)).r;
+    float qw = dot(cTmpD, float4(uv.x * 2 - 1, 1 - uv.y * 2, d, 1));
+    float frames = 1;
+    float v = c0.x;
+    [branch] if (cTmp.x > 0.5 && cls < 2.5 && max(abs(mv.x), abs(mv.y)) < 1000 && all(puv >= 0) && all(puv <= 1) && qw > 1e-6) {
+        float4 h = tex2Dlod(sHist, float4(puv, 0, 0));
+        if (h.a > 0 && abs(h.b - id) < 0.5 / 255 && abs(c0.y / (qw * h.g) - 1) < cTmp.y) {
+            frames = min(h.a + 1, cTmp.z);
+            v = lerp(clamp(h.r, m1 - cTmp.w * sigma, m1 + cTmp.w * sigma), c0.x, 1 / frames);
+        }
+    }
+    return float4(v, c0.y, id, frames);
 }
 
 // The Banding Fix's grain (ShaderPatches::AddDither) on x, of at most `amount`: the composite rounds to 8 bits again.
@@ -331,6 +392,9 @@ const ShaderCache::Id kLinearPsId = AddShader("AO LinearizePS", "LinearizePS", 0
 const ShaderCache::Id kDownPsId = AddShader("AO DownPS", "DownPS", 0);
 const ShaderCache::Id kBlurPsId = AddShader("AO BlurPS", "BlurPS", 0);
 const ShaderCache::Id kCompositePsId = AddShader("AO CompositePS", "CompositePS", 0);
+#ifndef APEX_NO_DEV_TOOLS // (the developer switch only: not compiled at start-up in the public build)
+const ShaderCache::Id kTemporalPsId = AddShader("AO TemporalPS (developer)", "TemporalPS", 1);
+#endif
 const ShaderCache::Id kDepthPsId = AddShader("AO DepthPS (Developer capture)", "DepthPS", 1);
 const ShaderCache::Id kGtaoPsId[kQualityCount] = {AddShader("AO GtaoPS (Low, SLICES 4)", "GtaoPS", 1, "4"), AddShader("AO GtaoPS (Medium, SLICES 6)", "GtaoPS", 1, "6"),
                                                   AddShader("AO GtaoPS (High, SLICES 8)", "GtaoPS", 0, "8"), AddShader("AO GtaoPS (Ultra, SLICES 12)", "GtaoPS", 1, "12"),
@@ -369,6 +433,17 @@ struct State {
     IDirect3DSurface9 *aoASurf = nullptr, *aoBSurf = nullptr, *colorSurf = nullptr;
     IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr;
     IDirect3DPixelShader9* psGtao[kQualityCount] = {};
+    // G-buffer consumers (developer switches, research 14 WP6 / WP7): the scene shaders' normals in the AO pass, and a
+    // temporal filter over the blurred shade with two history targets (A16B16G16R16F, made on first use)
+    bool gbNormals = false, temporal = false;
+    IDirect3DPixelShader9* psTemporal = nullptr;
+    bool temporalTried = false, historyFailed = false;
+    IDirect3DTexture9* hist[2] = {};
+    IDirect3DSurface9* histSurf[2] = {};
+    int histCur = 0;
+    unsigned long long presents = 0, histPresent = 0; // the history is valid when written before the last Present
+    unsigned gbNormalFrames = 0, temporalFrames = 0, temporalRestarts = 0;
+    unsigned long long gbLog = 0;
     // GPU cost (timestamp queries, read a few frames later)
     static constexpr int kQ = 4;
     IDirect3DQuery9 *qDisjoint[kQ] = {}, *qBegin[kQ] = {}, *qEnd[kQ] = {}, *qFreq[kQ] = {};
@@ -552,6 +627,7 @@ template <typename Draw> void RecordSimReceiver(IDirect3DDevice9* dev, Draw draw
         }
         auto* target = transparent ? simMask.hairSurface : simMask.surface;
         bool& cleared = transparent ? simMask.hairCleared : simMask.cleared;
+        SceneBinder::GBufferMaskOff(dev); // (developer builds) this replay must not write the G-buffer targets
         bool ok = SUCCEEDED(D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, target));
         if (!cleared && ok) {
             ok = SUCCEEDED(dev->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE)) &&
@@ -596,6 +672,12 @@ void ReleaseResources() {
     SceneCopy::Drop(&g.colorTex, &g.colorSurf);
     SafeRelease(g.aoA);
     SafeRelease(g.aoB);
+    for (int i = 0; i < 2; i++) {
+        SafeRelease(g.histSurf[i]);
+        SafeRelease(g.hist[i]);
+    }
+    g.historyFailed = false;
+    g.histPresent = 0;
     for (int i = 0; i < State::kQ; i++) {
         SafeRelease(g.qDisjoint[i]);
         SafeRelease(g.qBegin[i]);
@@ -611,6 +693,8 @@ void ReleaseShaders() {
     SafeRelease(g.psBlur);
     SafeRelease(g.psComposite);
     SafeRelease(g.psDepth);
+    SafeRelease(g.psTemporal);
+    g.temporalTried = false;
     for (int q = 0; q < kQualityCount; q++) {
         SafeRelease(g.psGtao[q]);
         g.gtaoTried[q] = false;
@@ -740,8 +824,8 @@ constexpr D3DSAMPLERSTATETYPE kSamplerStates[] = {D3DSAMP_MINFILTER, D3DSAMP_MAG
                                                   D3DSAMP_MAXMIPLEVEL, D3DSAMP_MIPMAPLODBIAS};
 constexpr int kRS = static_cast<int>(sizeof(kRenderStates) / sizeof(kRenderStates[0]));
 constexpr int kSS = static_cast<int>(sizeof(kSamplerStates) / sizeof(kSamplerStates[0]));
-constexpr DWORD kSamplers = 7; // s5 opaque Sims, s6 transparent hair
-constexpr UINT kPSConsts = 13; // c0..c12
+constexpr DWORD kSamplers = 11; // s5 opaque Sims, s6 transparent hair, s7..s10 G-buffer normal, history, motion, albedo + id
+constexpr UINT kPSConsts = 19; // c0..c18
 
 struct SavedState {
     IDirect3DSurface9 *rt0 = nullptr, *ds = nullptr;
@@ -978,10 +1062,43 @@ void CaptureFrame(IDirect3DDevice9* dev, IDirect3DTexture9* depth, float nearZ, 
     LOG_INFO("[AO] " + g.captureNote);
 }
 
+// The temporal pass and its two history targets, made on first use; false (logged once) when they cannot be made
+bool EnsureTemporal(IDirect3DDevice9* dev) {
+#ifdef APEX_NO_DEV_TOOLS
+    (void)dev;
+    return false;
+#else
+    if (!g.psTemporal && !g.temporalTried) {
+        g.temporalTried = true;
+        g.psTemporal = CreateShader(dev, kTemporalPsId, "TemporalPS");
+    }
+    if (!g.psTemporal || g.historyFailed) return false;
+    if (g.hist[0]) return true;
+    for (int i = 0; i < 2; i++)
+        if (FAILED(dev->CreateTexture(g.width, g.height, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &g.hist[i], nullptr)) || !g.hist[i] ||
+            FAILED(g.hist[i]->GetSurfaceLevel(0, &g.histSurf[i])) || !g.histSurf[i]) {
+            for (int k = 0; k < 2; k++) SafeRelease(g.histSurf[k]), SafeRelease(g.hist[k]);
+            g.historyFailed = true;
+            LOG_WARNING(std::format("[AO] Temporal filter off: could not create the {}x{} history targets", g.width, g.height));
+            return false;
+        }
+    g.histPresent = 0;
+    LOG_INFO(std::format("[AO] Temporal filter running: {}x{} history", g.width, g.height));
+    return true;
+#endif
+}
+
+// (developer builds) world frames in a row without a pass; once at 600 the gate that held the last one is logged
+uint32_t g_held = 0;
+void Held(const char* why) {
+    if (!kPublicBuild && ++g_held == 600) LOG_INFO(std::string("[AO] waiting 600 world frames without a pass: ") + why);
+}
+
 void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* bb, IDirect3DPixelShader9* psGtao) {
     SavedState saved;
-    if (!saved.Capture(dev)) return;
-    if (FAILED(dev->StretchRect(bb, nullptr, g.colorSurf, nullptr, D3DTEXF_NONE))) return;
+    if (!saved.Capture(dev)) return Held("state capture failed");
+    if (FAILED(dev->StretchRect(bb, nullptr, g.colorSurf, nullptr, D3DTEXF_NONE))) return Held("StretchRect of the scene into the colour copy failed");
+    g_held = 0;
     SetPassStates(dev);
 
     const float W = static_cast<float>(g.width), H = static_cast<float>(g.height);
@@ -1006,6 +1123,9 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
     const bool map = g.p.inMapView && MapView::IsOpen();
     const float distance = std::clamp(g.p.distance, 25.0f, 1000.0f);
     const float fadeStart = distance * (kFade0 / kFade1);
+    float jitter[2] = {}, jitterPx[2] = {}; // this frame's scene jitter (clip units) and its shift in pixels (y down)
+    const bool jittered = !kPublicBuild && GBuffer::Jitter(jitter);
+    jitterPx[0] = jitter[0] * W * 0.5f, jitterPx[1] = -jitter[1] * H * 0.5f;
     const float c[kPSConsts][4] = {
         {tanX, tanY, H / (2.0f * tanY), kMaxRadius * H},
         {W, H, static_cast<float>(g.padW), static_cast<float>(g.padH)},
@@ -1015,13 +1135,31 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {kNearZ, 1.0f / (kFarZ - kNearZ), kIsoK, kIsoT},
         {0, 0, 0, 0},
         {kDeadZone, 1.0f / (1.0f - kDeadZone), std::clamp(g.p.protect, 0.0f, 1.0f), g.showShade || CaptureBurst::ShadeAlone() ? 1.0f : 0.0f},
-        {2.0f * tanX / W, -2.0f * tanY / H, -tanX, tanY},
+        // (GB-05) a jittered scene (temporal AA): the depth at pixel p is the surface point of the unjittered pixel p - shift
+        {2.0f * tanX / W, -2.0f * tanY / H, -tanX - jitterPx[0] * (2.0f * tanX / W), tanY + jitterPx[1] * (2.0f * tanY / H)},
         {std::cos(kPi / slices), std::sin(kPi / slices), 0, 0},
         {A, 1.0f / (nearZ * A), SceneDither::On() ? SceneDither::Strength() / 255.0f : 0.0f, SceneDither::GrainPhase()},
         {std::clamp(g.p.simStrength, 0.0f, 1.0f), WantSimMask() && simMask.cleared && !simMask.failed ? 1.0f : 0.0f,
          std::clamp(g.p.hairStrength, 0.0f, 1.0f), std::clamp(g.p.simMaxShade, 0.0f, 1.0f)},
-        {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0}};
+        {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
+        {}, {}, {}, {}, {}};
     dev->SetPixelShaderConstantF(0, &c[0][0], kPSConsts);
+    // (GB-05) with the temporal filter on a jittered scene, the slice angles and step phases turn every frame: the history
+    // accumulates them (8 frames of 4x4 offsets); 0 otherwise, the shade bit for bit as before
+    if (jittered && g.temporal) {
+        const float phase[4] = {std::fmod(g.presents * 0.6180340f, 1.0f), std::fmod(g.presents * 0.7548777f, 1.0f), 0, 0};
+        dev->SetPixelShaderConstantF(18, phase, 1);
+    }
+    // G-buffer consumers (developer builds): this frame's targets, none when the G-buffer is off or was not written
+    IDirect3DTexture9* gb[2] = {};
+    const bool haveGb = (g.gbNormals || g.temporal) && !kPublicBuild && GBuffer::Targets(gb);
+    float rows[3][3];
+    if (g.gbNormals && haveGb && g.lastCamera && GBufferMotion::ViewRows(vp, rows)) {
+        const float r[3][4] = {{rows[0][0], rows[0][1], rows[0][2], 1.0f}, {rows[1][0], rows[1][1], rows[1][2], 0}, {rows[2][0], rows[2][1], rows[2][2], 0}};
+        dev->SetPixelShaderConstantF(13, &r[0][0], 3);
+        dev->SetTexture(7, gb[1]);
+        g.gbNormalFrames++;
+    }
 
     if (!kPublicBuild)
         if (g.captureRequested) CaptureFrame(dev, depth, nearZ, A, tanX, tanY);
@@ -1056,6 +1194,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
     dev->SetPixelShader(psGtao);
     DrawQuad(dev, g.width, g.height);
     dev->SetTexture(2, nullptr);
+    dev->SetTexture(7, nullptr);
 
     // 4. filter: box H, box V (cancels the 4x4 interleave), tent H, tent V; a -> b -> a -> b -> a
     dev->SetPixelShader(g.psBlur);
@@ -1067,9 +1206,44 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         DrawQuad(dev, g.width, g.height);
     }
 
+    // 4b. temporal filter (developer switch): aoA + the last history -> a new history, which the composite reads
+    IDirect3DTexture9* shade = g.aoA;
+    float dRow3[4] = {};
+    IDirect3DTexture9* motion = g.temporal && haveGb ? GBuffer::Motion(dRow3) : nullptr;
+    if (motion && EnsureTemporal(dev)) {
+        const bool valid = g.histPresent && g.histPresent == g.presents; // written in the last frame, same targets
+        const float t[2][4] = {{valid ? 1.0f : 0.0f, kTemporalDepthTolerance, kTemporalFrames, kTemporalClip}, {dRow3[0], dRow3[1], dRow3[2], dRow3[3]}};
+        dev->SetPixelShaderConstantF(16, &t[0][0], 2);
+        const int cur = g.histCur ^ 1;
+        dev->SetRenderTarget(0, g.histSurf[cur]);
+        dev->SetTexture(0, depth);
+        dev->SetTexture(3, g.aoA);
+        dev->SetTexture(7, gb[1]);
+        dev->SetTexture(8, g.hist[g.histCur]);
+        dev->SetTexture(9, motion);
+        dev->SetTexture(10, gb[0]);
+        dev->SetPixelShader(g.psTemporal);
+        DrawQuad(dev, g.width, g.height);
+        for (DWORD s = 7; s <= 10; s++) dev->SetTexture(s, nullptr);
+        g.histCur = cur;
+        g.histPresent = g.presents + 1; // the Present count the next frame runs at
+        shade = g.hist[cur];
+        g.temporalFrames++;
+        g.temporalRestarts += !valid;
+    }
+    if (!kPublicBuild && (g.gbNormals || g.temporal)) {
+        const unsigned long long now = GetTickCount64();
+        if (now - g.gbLog >= 10000) {
+            if (g.gbLog)
+                LOG_INFO(std::format("[AO] G-buffer: normals={} temporal={} restarts={}", g.gbNormalFrames, g.temporalFrames, g.temporalRestarts));
+            g.gbLog = now;
+            g.gbNormalFrames = g.temporalFrames = g.temporalRestarts = 0;
+        }
+    }
+
     // 5. composite over the scene copy
     dev->SetRenderTarget(0, bb);
-    dev->SetTexture(3, g.aoA);
+    dev->SetTexture(3, shade);
     dev->SetTexture(4, g.colorTex);
     dev->SetTexture(0, depth);
     dev->SetTexture(5, simMask.texture);
@@ -1087,17 +1261,17 @@ void AoEffect(IDirect3DDevice9* dev) {
     if (!g.ready || (g.p.strength <= 0.0f && !g.showShade && !CaptureBurst::ShadeAlone())) return;
     if (!WorldSession::InWorld()) return; // main menu, load screens: never shaded
     IDirect3DTexture9* depth = DepthShare::Texture();
-    if (!depth) return;
+    if (!depth) return Held("no shared scene depth");
     // the scene depth must be the one bound right now (not a reflection or UI pass)
     IDirect3DSurface9* ds = nullptr;
     ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
     const bool sceneDepth = ds && ds == DepthShare::Surface();
     if (ds) ds->Release();
-    if (!sceneDepth) return;
+    if (!sceneDepth) return Held("the bound depth-stencil is not the shared scene depth");
     IDirect3DPixelShader9* psGtao = GtaoShader(dev, g.p.quality);
-    if (!psGtao) return;
+    if (!psGtao) return Held("no GTAO shader");
     IDirect3DSurface9* bb = nullptr;
-    if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return;
+    if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return Held("no render target 0");
     D3DSURFACE_DESC bd{};
     bb->GetDesc(&bd);
     if (bd.Width != g.width || bd.Height != g.height) { // the back buffer changed without a Reset: rebuild next frame
@@ -1133,6 +1307,7 @@ void AoEffect(IDirect3DDevice9* dev) {
 
 void OnFrameBoundary(IDirect3DDevice9* dev) {
     if (!g.active) return;
+    g.presents++;
     simRenderThread.store(GetCurrentThreadId(), std::memory_order_relaxed);
     simMask.lastDraws = simMask.draws;
     simMask.draws = 0;
@@ -1237,6 +1412,10 @@ class AmbientOcclusionPatch : public ApexPatch {
         RegisterFloatSetting(&g.p.hairStrength, "hairStrength", SettingWidget::Slider, Params{}.hairStrength, 0.0f, 1.0f, "Shade on recognized hair; 0% removes it, 100% keeps the original");
         RegisterFloatSetting(&g.p.simMaxShade, "simMaxShade", SettingWidget::Slider, Params{}.simMaxShade, 0.0f, 1.0f, "Caps how dark Sims and hair can get");
         RegisterBoolSetting(&g.p.transparentHair, "transparentHair", true, "Also adjust supported transparent hair strands");
+#ifndef APEX_NO_DEV_TOOLS // G-buffer consumers, developer test switches (need [patches.GBuffer] on; no menu card)
+        RegisterBoolSetting(&g.gbNormals, "gbufferNormals", false, "Developer: use the G-buffer's shading normals where the scene wrote one");
+        RegisterBoolSetting(&g.temporal, "temporal", false, "Developer: temporal filter of the shade with the G-buffer's motion, material id and class");
+#endif
     }
 
     bool Install() override {

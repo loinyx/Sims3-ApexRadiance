@@ -245,6 +245,10 @@ Mutex::Lock and lot object building are attached only with their options; while 
 | 37 | Key list, ResourceSystem | 0x00736660 | thiscall(3), ret 0xC | vtable slot 0x00FFE270, same | Key list (counter) | any |
 | 38 | Texture create | CALL 0x0060E1DC -> 0x0060CEA0 | cdecl(9) | call site, all threads checked | Texture create (counter) | texture load finalize job |
 | 39 | Texture fill | CALL 0x0060E1FF -> 0x0060D290 | cdecl(4) | call site, all threads checked | Texture fill (counter) | texture load finalize job |
+| 40 | Room solve: rebuild | CALL 0x006A8BAD -> 0x006A7CF0 | thiscall(0) | call site, all threads checked | Room solve: rebuild (counter) | render |
+| 41 | Room solve: AO solver 1 | 0x00688920 | thiscall(2), ret 8 | vtable slot 0x00FF05A0 (solver vtable 0x00FF0594 +0xC) | Room solve: AO solver 1 (counter) | render |
+| 42 | Room solve: AO solver 2 | 0x00688920 | thiscall(2), ret 8 | vtable slot 0x00FF0720 (solver vtable 0x00FF0714 +0xC) | Room solve: AO solver 2 (counter) | render |
+| 43 | Room solve: room pass | CALL 0x006A8C0E -> 0x006A88B0 | thiscall(2), ret 8 | call site, all threads checked | Room solve: room pass (counter) | render |
 
 Full byte patterns are in `kTargets` and are the ground truth; the header comment of `frame_profiler.cpp` lists the first
 bytes, callers and the per-target reasoning. Every pattern was checked against `re\TS3W.exe`: unique in `.text`,
@@ -271,7 +275,7 @@ branch in `.text` landing inside them. The two service-loop patterns are the who
   BeginFrame + this frame's render + EndScene.
 - Per frame: `cpuMs = frame - Present (driver) - Frame limiter`; `modMs = D3D hooks (mod) + Present hooks (mod) + Lamp
   refresh (mod)`; `unattributedMs = frame - sum(render self)`.
-- 43 categories (`kCats`), of which the last 10 are counters.
+- 47 categories (`kCats`), of which the last 14 are counters.
 
 ### ServiceManager loop replacement
 
@@ -329,6 +333,7 @@ Conventions verified in `research\engine_map\full.asm`:
 | Key list | 0x004B1AE0 and 0x00736660 | thiscall(vector* out, filter*, bool unique), ret 0xC; returns the count | vtable slots 0x00FB2DC0 and 0x00FFE270, `SlotChain` sites KeyListBase / KeyListDerived, outer layer, the file list cache inside (the derived function calls the base directly: not counted twice) | keys (growth of `out`), packages from cache (`kXListCached`) |
 | Texture create | 0x0060CEA0 via CALL 0x0060E1DC | cdecl(9) | call site in the DDS texture loader (texture load finalize job 0x007297C0), all threads checked | level-0 pixels |
 | Texture fill | 0x0060D290 via CALL 0x0060E1FF | cdecl(4) | call site, all threads checked | none |
+| Room solve: rebuild, AO solver 1, AO solver 2, room pass | 0x006A7CF0 via CALL 0x006A8BAD; the solver driver 0x00688920 through slots 0x00FF05A0 (level+0x290) and 0x00FF0720 (level+0x2E8); 0x006A88B0 via CALL 0x006A8C0E | the four calls of the lot room solve 0x006A8BA0, in that order; x87 stack empty at each | two call sites and two vtable slots (the base vtable's slot 0x00FF0580 is left alone); counted only while a timed Lot room solve call is open on the thread, so they split that line exactly (the synchronous level solve 0x006A4180 also drives the solvers and is left out). What remains of Lot room solve is the sun check 0x006A4800 and the branches | none |
 
 - No branch in `.text` lands inside a replaced prologue or CALL (checked in `full.asm`). All entries are 8-byte aligned.
 - The hitch lines add "Scene pending nodes ..., nodes N[, deferred D]" and "Object lookup by ID ...[, from index H]"
@@ -370,6 +375,17 @@ none.
 - **State-call counts:** SetTexture, Set{Vertex,Pixel}Shader, Set{Vertex,Pixel}ShaderConstantF and SetRenderTarget are
   counted in the registry's detours with plain per-method counters (`D3D9Hooks::ReadStateCallCounts`, monotonic;
   `FrameBoundary` takes the difference). Calls Apex makes with `CallOriginal*` bypass the detours and are not counted.
+- **Shader constant registers** (developer mode, real-time GI S0-14,
+  [`framework/const_range_histogram.h`](../../framework/const_range_histogram.h)): the two Set*ShaderConstantF detours
+  also note `[start, start + count)` of each call with its return address, before any callback, without changing it.
+  A new calling site is classed once as the game's exe, Apex or another module. Kept: the registers each owner wrote
+  (a difference array), the highest register per owner over the session and per frame, and per site (256 at most) the
+  calls, lowest and highest register, writes into the reserved frame-block registers (pixel `c208`-`c223`, vertex
+  `c242`-`c251`, research 13) by any module other than Apex, and calls past the last register. Counted whether or not
+  the profiler runs. Log: `[ConstRange] Reserved register written: PS c210-c211 by <module>+0x... (other), 1 of its 1
+  calls` (warning, once a site) and `[ConstRange] PS: highest written game c24 Apex c223 other none, reserved c208-c223
+  written by others 0 times; VS: ...` after a new site or a new highest register, at most every 600 frames. Offline
+  check: `tools/const_range_check/run.ps1`; game check: the in-game runner's `const-range-smoke` job.
 - **Off-thread dispatches:** the draw and state chains run without a lock on the render thread; a call from another thread
   takes the registry lock and is counted (`D3D9Hooks::OffThreadDispatches()`; Advanced line "Draw / state hooks called
   from another thread than the render thread", report line "Draw / state hooks called off the render thread"). A
@@ -483,7 +499,8 @@ joinable `std::thread` would `std::terminate` at exit), appending in binary mode
    200 hitches, keyed session tables (services / jobs / waits: ms per hitch vs per other frame), sim-loop services, the
    sampling tables, "Counters since Clear", "Counters per hitch", "Apex shaders: ..." (the
    [shader precompile](../architecture.md#44-shader-precompile) status), "Registry hooks by name (last second; ...)", "Draw /
-   state hooks called off the render thread", the address-space snapshots, the performance features' status lines
+   state hooks called off the render thread", "Shader constant registers written" (per owner: the registers written and the
+   highest a frame; then one row per calling site), the address-space snapshots, the performance features' status lines
    ([Performance](performance/README.md)) and "Dominant cause of the last hitches" (per camera state and frame-time
    bucket < 16 / 16-25 / 25-50 / >= 50 ms, foreground only). With the profiler off the report is written by a detached
    one-shot thread.
@@ -600,7 +617,7 @@ Columns (render-thread values are self ms, as in the hitch blocks; empty = unkno
 | `sim_script_gc_ms` | Script GC on the simulation thread, booked in the frame in which it returned |
 | `other_jobs_ms` | *Jobs (self)* on threads other than the render and simulation threads, booked in the frame in which they returned |
 | `smp_ts3w`, `smp_gfx`, `smp_system`, `smp_apex`, `smp_other_asi`, `smp_other` | Render-thread samples in the frame per code class (TS3W, DXVK/driver including the bridge client d3d9.dll, system waits, this ASI, other ASI files, other modules); their sum is the frame's samples. Empty while the render-thread sampler is off |
-| one column per category | The 43 categories of `kCats`, by name, render thread self ms (Render frame (game), EndScene + overlays, Present hooks (mod), Present (driver), D3D hooks (mod), Scene::BeginFrame, Lot room solve, Texture create, Texture fill, Resource lookup, Scene pending nodes, Lot load stages, Lot renderer update, Terrain update, Services (self), Jobs (self), Wait for job, Lamp refresh (mod) and the rest) |
+| one column per category | The 47 categories of `kCats`, by name, render thread self ms (Render frame (game), EndScene + overlays, Present hooks (mod), Present (driver), D3D hooks (mod), Scene::BeginFrame, Lot room solve, Texture create, Texture fill, Resource lookup, Scene pending nodes, Lot load stages, Lot renderer update, Terrain update, Services (self), Jobs (self), Wait for job, Lamp refresh (mod) and the rest) |
 | `Unattributed` | Frame time not covered by any render-thread category (clamped to 0) |
 
 The turn indicator uses the eye and the lot LOD scoring point, which both exist in every frame in which the LOD scoring
@@ -696,7 +713,7 @@ The card *Frame times and stutters* (Developer > Performance) has the on switch 
 | File | Function / symbol | Role |
 |---|---|---|
 | `features/frame_profiler.h` | public API | `SetEnabled`, `IsEnabled`, `RenderUI`, `SaveToToml`, `LoadFromToml`, `Shutdown`, `RegistryHookTimingActive`, `PresentHookTimingActive`, `Ticks`, `AddRegistryHookTime`, `BeginModTime` / `EndModTime`, `ModTimeScope` |
-| `features/frame_profiler.cpp` | `kCats`, `kTargets`, `TargetId` | 43 categories with UI hints; 40 targets |
+| `features/frame_profiler.cpp` | `kCats`, `kTargets`, `TargetId` | 47 categories with UI hints; 44 targets |
 | | `InitClock`, `RefineClock`, `Now` | clock |
 | | `ThreadSlot`, `GetSlot`, `Push`, `Pop`, `Split`, `CleanStale`, `Scope` | attribution |
 | | `Hook_*`, `RunServices` | wrappers |
@@ -714,7 +731,7 @@ The card *Frame times and stutters* (Developer > Performance) has the on switch 
 | `framework/d3d9_extra_hooks.cpp` | `CountGetRenderTargetData`, `TakeGetRenderTargetData`, `NoteRtdCaller` | the timeline's `rtd_calls` and `rtd_ms`; the callers' log line |
 | `features/lot_lighting_motion.cpp` | `Hook_SolveElapsed`, `NoteUpdateStart`, `LogSlowStep` | the slow room step log line |
 | `features/room_light_queue.cpp` | `DrainMicros`, `EditBurstOn` | the timeline's `drain_ms` and `lamp_edit` |
-| `framework/game_addresses.*` | ids `ResFindProvider` .. `RemoteMethodVtable2`, `TexCreateCall`, `TexFillCall` | counter addresses |
+| `framework/game_addresses.*` | ids `ResFindProvider` .. `RemoteMethodVtable2`, `TexCreateCall`, `TexFillCall`, `RoomRebuildCall`, `RoomPassCall`, `LevelSolverSlot0..2` | counter addresses |
 | `apex_gui.cpp` | `DevProfilerTab` | the Developer card |
 | `apex_config.cpp` | settings load / save, profile capture | `[qol.frame_profiler]`, `[developer.frame_profiler]`; `enabled` forced off on load and import |
 | `apex_main.cpp` | `DLL_PROCESS_DETACH` | `FrameProfiler::Shutdown()` |
@@ -747,6 +764,8 @@ All addresses Steam 1.67.2 (`TS3W.exe`, image base 0x00400000, no ASLR). Pattern
 | 0x00C62D40 | object lookup by ID | `ObjectById` (Sig) |
 | 0x00ADB9AD -> 0x006A8BA0 | lot lighting update's CALL of the room solve | `RoomSolveCall` (Sig), `RoomSolve` |
 | 0x0060E1DC -> 0x0060CEA0, 0x0060E1FF -> 0x0060D290 | DDS texture loader's create and fill CALLs | `TexCreateCall`, `TexFillCall` |
+| 0x006A8BAD -> 0x006A7CF0, 0x006A8C0E -> 0x006A88B0 | the lot room solve's rebuild and room pass CALLs | `RoomRebuildCall`, `RoomRebuild`, `RoomPassCall`, `RoomPass` (Sig, Target) |
+| 0x00FF0580, 0x00FF05A0, 0x00FF0720 | the three slots holding the solver driver 0x00688920 (base, wall AO solver, second solver) | `LevelSolverSlot0..2` (SlotsOf(WallAoDriver), exactly 3) |
 
 Runtime verification: status strings in Advanced > Hooks and the "Timed functions:" block of each session in the output
 file ("Timed (pattern matches at the Steam 1.67.2 address[; hand-made hook, all threads checked])", "Timed at the CALL

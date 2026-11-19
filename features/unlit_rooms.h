@@ -16,6 +16,9 @@ void OnRoomChanged(uintptr_t room); // render thread: structure changed; address
 // Any thread (room_bounce): the part of a room's ambient (+0x110) its lamps gave, its base taken out; false: no lit room of ours (a lampless
 // room holds the colour alone, and bounces nothing)
 bool LampAmbient(const void* room, float out[3]);
+// Render thread (real-time GI S2-06): the colour C Rooms at Night adds under the lamps of the story of `room` (any room of the
+// same story manager whose ambient step it took); false: none recorded (Rooms at Night off, or no lit room on that story yet)
+bool BaseColour(const void* room, float out[3]);
 // Any thread: the weight of the ambient cube on furniture drawn by Apex's indoor-object shader (lot_light_bridge): the
 // Brightness (blended by the night level) while on, 1 while off (their lamp light comes from the room maps, not this)
 float FurnitureAmbient();

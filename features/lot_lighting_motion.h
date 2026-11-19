@@ -43,6 +43,12 @@ uint32_t FrameIndex();
 bool SampleCameraMoving();
 // The camera eye now (world); false while its location in the game's data is unknown. Any thread.
 bool CameraEye(float out[3]);
+// Diagnostics: the vec3 at the eye's offset + delta in the same camera object (false while unknown or unreadable). Any thread.
+bool CameraVecNearEye(int delta, float out[3]);
+// The game camera's matrices, read in one go around the eye (a bridge run's wait line: rows right, up, back at eye -0x30..-0x10,
+// the eye as the 4th row, the projection at eye +0x10..+0x40 with near 0.25 in row 3), both in row-vector form
+// (clip = (x, y, z, 1) . view . proj). false while unknown or unreadable. Any thread.
+bool CameraMatrices(float cameraToWorld[4][4], float proj[4][4]);
 // Samples the camera eye now and returns whether it has not moved since `tick` (GetTickCount64); false while the eye is
 // unknown. Render thread (the fence groups' sweep: with the camera still, every group on screen is drawn each frame).
 bool CameraStillSince(uint64_t tick);

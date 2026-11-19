@@ -1,0 +1,326 @@
+// Per-pixel delta shadows of lamps (docs/features/realtime-gi/research/16-salvage-per-pixel-rt.md 2, 4.1, 5): one
+// invocation a pixel of the quarter-resolution guide grid.
+//  1. Guide: the full-resolution pixel nearest the camera of the 4x4 block; its world position from the depth and the
+//     inverse view-projection; its normal from the depth of its neighbours.
+//  2. Lamps: the up to 4 strongest of the table at that point (colour x N.L / distance^2).
+//  3. Rays: none unless a ray toward one of those lamps can touch a delta caster's bounds. Then one ray a lamp and
+//     sample toward a point of the lamp's emitter ball. A ray stops on a static occluder (the lamp's light is absent
+//     from the picture already) and otherwise notes whether it met a delta caster (a detail mesh, a capsule).
+//  4. Output: per lamp, how many samples reached the lamp past the static occluders (u) and how many of those a delta
+//     caster blocked (d); the multiplier of 4.1 from them. u and d are counts, so frames add up exactly.
+// The sample set is fixed: 16 points a lamp; frame f takes point (f + a hash of the pixel) mod 16, so 16 frames hold
+// each point once. A pixel of motion class 3 takes point (hash of the pixel) mod 16 in every frame.
+#version 460
+#extension GL_EXT_ray_query : require
+// Variants for the timing run (pixel_check.cpp --bench; the default is the kernel): TRACE 0 = every candidate comes back
+// to the shader (the first version), 1 = any triangle ends the ray in the traversal and a ray a delta caster ended asks
+// the static occluders again.
+// STOP 1 / 2 / 3 = leave after the guide / the lamps / the reach test. LEAN = no counters, 16 bytes a pixel out.
+#ifndef TRACE
+#define TRACE 1
+#endif
+#ifndef STOP
+#define STOP 0
+#endif
+#ifndef GROUP
+#define GROUP 8
+#endif
+layout(local_size_x = GROUP, local_size_y = GROUP) in;
+
+struct Lamp {
+    vec4 pos; // w: the emitter ball's radius
+    vec4 col;
+};
+struct Capsule {
+    vec4 a; // w: radius
+    vec4 b;
+};
+struct Box {
+    vec4 lo, hi; // lo.w: not 0 when the caster moved this frame (its bounds then hold the old and the new place)
+};
+struct Pixel {
+    vec4 mul;  // rgb: the multiplier; a: the guide depth (the upsample's weight)
+    vec4 pos;  // the guide's world position; w: its full-resolution pixel index (the harness checks both)
+    vec4 nrm;
+    uvec4 cnt; // lamp ids (4 x 8 bits, 0xFF = none), u counts (4 x 8 bits), d counts (4 x 8 bits), rays traced
+    // The second target (XR-05): the multiplier's two sums, which add up over frames where the multiplier itself
+    // does not (a mean of ratios). Over n one-sample frames m = 1 - sum(num) / (A n + sum(den)), exactly
+    vec4 num;  // rgb: sum over the lamps of colour x geometry x d; a: 1 when a caster that moved is in reach
+    vec4 den;  // rgb: sum over the lamps of colour x geometry x u
+};
+#ifdef BRIDGE_PASS
+// The pass in the bridge server (native/remix-bridge/gi/gi_pixel_pass.h, XR-06), recorded in DXVK's command stream: the
+// depth and the motion class are the game's images, the block is the client's block of the frame, the outputs are four
+// quarter-resolution rgba16f images that are copied into the client's render targets.
+// Instances of the top level: first one a capsule (custom index 3, mask 2, the unit box scaled to the capsule's bounds),
+// then one a static box (custom index 1, mask 1, the unit cube under the box's transform), then one a mesh caster (custom
+// index 2, mask 2: delta triangles, MC-2) whose reach the server's mesh bounds give.
+layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+layout(set = 0, binding = 1) uniform sampler2D depthTex;
+layout(std430, set = 0, binding = 2) readonly buffer Block { // gi_pixel_block.h GiPixelBlock, without its boxes
+    mat4 invViewProj;
+    vec4 camA;
+    uint width, height;
+    uint lamps, casters;
+    uint frame, samples;
+    float bias, radiusScale;
+    vec4 viewZFar;            // xyz: the camera's forward; w: the far distance (the guide's linear depth is over it)
+    uint capsules, boxes;
+    uint flags, meshBounds;   // flags bit 0: classTex holds the motion class in r (class / 3); meshBounds: of meshCaster
+    Lamp lamp[16];
+    Capsule capsule[64];
+    Box caster[32];
+    Box meshCaster[32];       // the mesh casters' reach, grouped by the server (gi_pixel_pass.h groupBounds); never moved
+} pc;
+#define lamp pc.lamp
+#define capsule pc.capsule
+#define caster pc.caster
+layout(set = 0, binding = 3) uniform sampler2D classTex;
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D outRaw;   // r: this frame's delta visibility (1 = no caster), g: a caster that moved is in reach, b: rays were traced, a: the guide's depth
+layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D outGuide; // rgb: world normal, a: linear depth / far (1 = nothing drawn)
+layout(set = 0, binding = 6, rgba16f) uniform writeonly image2D outNum;   // rgb: num, a: as outRaw.g
+layout(set = 0, binding = 7, rgba16f) uniform writeonly image2D outDen;   // rgb: den, a: rays traced
+layout(std430, set = 0, binding = 8) buffer Stats { uint stat[]; }; // 0: rays traced, 1: pixels that traced
+#define CAPSULE_OF(q, committed) rayQueryGetIntersectionInstanceIdEXT(q, committed)
+float DepthAt(ivec2 p) { return texelFetch(depthTex, p, 0).r; }
+uint ClassAt(ivec2 p) {
+    if ((pc.flags & 1u) == 0u) return 0u;
+    return uint(texelFetch(classTex, p * textureSize(classTex, 0) / ivec2(pc.width, pc.height), 0).r * 3.0 + 0.5);
+}
+void Store(ivec2 g, uint index, Pixel o) {
+    const float nl = dot(o.num.rgb, vec3(1.0)), dn = dot(o.den.rgb, vec3(1.0));
+    imageStore(outRaw, g, vec4(dn > 0.0 ? 1.0 - nl / dn : 1.0, o.num.a, o.cnt.w != 0u ? 1.0 : 0.0, o.mul.a));
+    imageStore(outGuide, g, vec4(o.nrm.xyz, o.mul.a < 1.0 ? dot(o.pos.xyz - pc.camA.xyz, pc.viewZFar.xyz) / pc.viewZFar.w : 1.0));
+    imageStore(outNum, g, vec4(o.num.rgb, o.num.a));
+    imageStore(outDen, g, vec4(o.den.rgb, float(o.cnt.w)));
+}
+#else
+// Instances of the top level: custom index 0 walls, floors and roofs (no culling), 1 object boxes, 2 detail meshes,
+// 3 capsule boxes. Mask 1 = static (0, 1), mask 2 = delta casters (2, 3).
+layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+// shortcut: the depth is a buffer of floats; the pass in the game samples the depth image instead, upgrade with XR-06
+layout(std430, set = 0, binding = 1) readonly buffer Depth { float depth[]; };
+layout(std430, set = 0, binding = 2) readonly buffer Lamps { Lamp lamp[]; };
+layout(std430, set = 0, binding = 3) readonly buffer Capsules { Capsule capsule[]; };
+layout(std430, set = 0, binding = 4) readonly buffer Casters { Box caster[]; }; // the delta casters' bounds
+layout(std430, set = 0, binding = 5) writeonly buffer Out { Pixel px[]; };
+layout(std430, set = 0, binding = 6) buffer Stats { uint stat[]; }; // 0: rays traced, 1: pixels that traced
+// shortcut: the motion class (research 14) is a buffer of one uint a full-resolution pixel; the pass in the game samples
+// the class target of GB-02, upgrade with XR-06
+layout(std430, set = 0, binding = 7) readonly buffer Class { uint motionClass[]; };
+layout(push_constant) uniform PC {
+    mat4 invViewProj;
+    vec4 camA;                // xyz: the camera; w: A, the light no lamp ray accounts for
+    uint width, height;       // of the depth
+    uint lamps, casters;
+    uint frame, samples;      // samples 16: the whole set in one dispatch (the reference of an accumulation)
+    float bias, radiusScale;  // radiusScale 0: point emitters
+} pc;
+#define CAPSULE_OF(q, committed) rayQueryGetIntersectionPrimitiveIndexEXT(q, committed)
+float DepthAt(ivec2 p) { return depth[uint(p.y) * pc.width + uint(p.x)]; }
+uint ClassAt(ivec2 p) { return motionClass[uint(p.y) * pc.width + uint(p.x)]; }
+void Store(ivec2 g, uint index, Pixel o) { px[index] = o; }
+#endif
+
+const uint kNone = 0xFFu, kSet = 16u, kMaxLamps = 4u;
+
+vec3 World(ivec2 p, float d) {
+    const vec2 ndc = vec2((float(p.x) + 0.5) / float(pc.width) * 2.0 - 1.0, 1.0 - (float(p.y) + 0.5) / float(pc.height) * 2.0);
+    const vec4 h = pc.invViewProj * vec4(ndc, d, 1.0);
+    return h.xyz / h.w;
+}
+// The surface's tangent along one screen axis: toward the neighbour whose depth is nearer the pixel's own, so that a
+// pixel beside a depth edge takes the side that belongs to its own surface
+vec3 Tangent(ivec2 p, ivec2 s, int at, int last, float d, vec3 P) {
+    const float a = at > 0 ? DepthAt(p - s) : 4.0, b = at < last ? DepthAt(p + s) : 4.0;
+    return abs(a - d) < abs(b - d) ? P - World(p - s, a) : World(p + s, b) - P;
+}
+
+// The distance at which a ray enters a capsule, negative when it does not (rd is unit). An origin inside the capsule
+// has no entry in front of it: a surface inside its own capsule casts nothing on itself.
+float SphereEnter(vec3 oc, vec3 rd, float r) {
+    const float b = dot(rd, oc), h = b * b - (dot(oc, oc) - r * r);
+    return h > 0.0 ? -b - sqrt(h) : -1.0;
+}
+float CapsuleEnter(vec3 ro, vec3 rd, vec3 pa, vec3 pb, float r) {
+    const vec3 ba = pb - pa, oa = ro - pa;
+    const float baba = dot(ba, ba), bard = dot(ba, rd), baoa = dot(ba, oa);
+    const float a = baba - bard * bard;
+    if (a > 1e-6 * baba) {
+        const float b = baba * dot(rd, oa) - baoa * bard, c = baba * dot(oa, oa) - baoa * baoa - r * r * baba, h = b * b - a * c;
+        if (h < 0.0) return -1.0;
+        const float t = (-b - sqrt(h)) / a, y = baoa + t * bard;
+        if (y > 0.0 && y < baba) return t;
+        return SphereEnter(y <= 0.0 ? oa : ro - pb, rd, r);
+    }
+    // along the axis (or no axis): the end the ray meets first
+    return SphereEnter(bard > 0.0 ? oa : ro - pb, rd, r);
+}
+
+// Bit 0: a static occluder lies on the ray. Bit 1: a delta caster does (not looked for behind the mask, and not
+// complete once bit 0 is set: the traversal stops there).
+#if TRACE == 0
+uint Trace(vec3 o, vec3 d, float tMax, uint mask) {
+    uint hit = 0u;
+    rayQueryEXT q;
+    // No candidate is confirmed: every triangle and box on the ray is visited, none shortens it
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsNoOpaqueEXT | gl_RayFlagsCullBackFacingTrianglesEXT, mask, o, 0.0, d, tMax);
+    while (rayQueryProceedEXT(q)) {
+        const int inst = rayQueryGetIntersectionInstanceCustomIndexEXT(q, false);
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+            if (inst < 2) {
+                hit |= 1u;
+                rayQueryTerminateEXT(q);
+            } else hit |= 2u;
+        } else {
+            const Capsule c = capsule[CAPSULE_OF(q, false)];
+            const float t = CapsuleEnter(o, d, c.a.xyz, c.b.xyz, c.a.w);
+            if (t > 0.0 && t < tMax) hit |= 2u;
+        }
+    }
+    return hit;
+}
+#else
+// The triangles are opaque geometry (pixel_check.cpp): the traversal tests and confirms them without the shader
+uint Trace(vec3 o, vec3 d, float tMax, uint mask) {
+    rayQueryEXT q;
+    // Any occluder ends the ray. Only a ray a delta caster ended (few) asks again for the static occluders alone
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsCullBackFacingTrianglesEXT, mask, o, 0.0, d, tMax);
+    while (rayQueryProceedEXT(q)) { // capsule boxes only
+        const Capsule c = capsule[CAPSULE_OF(q, false)];
+        const float t = CapsuleEnter(o, d, c.a.xyz, c.b.xyz, c.a.w);
+        if (t > 0.0 && t < tMax) rayQueryGenerateIntersectionEXT(q, t);
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT) return 0u;
+    if (rayQueryGetIntersectionInstanceCustomIndexEXT(q, true) < 2) return 1u;
+    rayQueryEXT s;
+    rayQueryInitializeEXT(s, tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsCullBackFacingTrianglesEXT, 1u, o, 0.0, d, tMax);
+    rayQueryProceedEXT(s);
+    return rayQueryGetIntersectionTypeEXT(s, true) != gl_RayQueryCommittedIntersectionNoneEXT ? 1u : 2u;
+}
+#endif
+
+// The segment o -> e against a box (conservative for the rays toward a ball around e when the box is grown by its radius)
+bool SegBox(vec3 o, vec3 e, vec3 lo, vec3 hi) {
+    vec3 d = e - o;
+    d = mix(d, vec3(1e-9), lessThan(abs(d), vec3(1e-9)));
+    const vec3 t0 = (lo - o) / d, t1 = (hi - o) / d, tn = min(t0, t1), tf = max(t0, t1);
+    const float n = max(tn.x, max(tn.y, tn.z)), f = min(tf.x, min(tf.y, tf.z));
+    return n <= f && f >= 0.0 && n <= 1.0;
+}
+
+uint Pcg(uint v) {
+    uint s = v * 747796405u + 2891336453u;
+    uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+void main() {
+    const ivec2 g = ivec2(gl_GlobalInvocationID.xy), size = ivec2(pc.width, pc.height) / 4;
+    if (g.x >= size.x || g.y >= size.y) return;
+    const uint index = uint(g.y * size.x + g.x);
+    // 1. The guide: the first pixel of the block with the least depth
+    float d = 4.0;
+    ivec2 at = ivec2(0);
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++) {
+            const ivec2 p = g * 4 + ivec2(x, y);
+            const float v = DepthAt(p);
+            if (v < d) d = v, at = p;
+        }
+    Pixel o;
+    o.mul = vec4(1.0, 1.0, 1.0, d), o.pos = vec4(0.0), o.nrm = vec4(0.0), o.cnt = uvec4(0xFFFFFFFFu, 0u, 0u, 0u);
+    o.num = vec4(0.0), o.den = vec4(0.0);
+    if (d >= 1.0 || STOP == 1) { // nothing drawn
+        Store(g, index, o);
+        return;
+    }
+    const vec3 P = World(at, d);
+    vec3 N = normalize(cross(Tangent(at, ivec2(1, 0), at.x, int(pc.width) - 1, d, P), Tangent(at, ivec2(0, 1), at.y, int(pc.height) - 1, d, P)));
+    const vec3 toCam = pc.camA.xyz - P;
+    if (dot(N, toCam) < 0.0) N = -N;
+    o.pos = vec4(P, float(uint(at.y) * pc.width + uint(at.x))), o.nrm = vec4(N, 0.0);
+
+    // 2. The strongest lamps here. A lamp weaker than A / 128 cannot move the multiplier by a step of 8 bits
+    uint id[kMaxLamps] = uint[](kNone, kNone, kNone, kNone);
+    float strength[kMaxLamps] = float[](0.0, 0.0, 0.0, 0.0), geo[kMaxLamps] = float[](0.0, 0.0, 0.0, 0.0);
+    for (uint l = 0u; l < pc.lamps; l++) {
+        const vec3 L = lamp[l].pos.xyz - P;
+        const float d2 = dot(L, L), ge = max(dot(N, L), 0.0) * inversesqrt(d2) / d2;
+        const float s = ge * max(lamp[l].col.r, max(lamp[l].col.g, lamp[l].col.b));
+        if (s < pc.camA.w / 128.0) continue;
+        for (uint k = 0u; k < kMaxLamps; k++)
+            if (s > strength[k]) {
+                for (uint j = kMaxLamps - 1u; j > k; j--) id[j] = id[j - 1u], strength[j] = strength[j - 1u], geo[j] = geo[j - 1u];
+                id[k] = l, strength[k] = s, geo[k] = ge;
+                break;
+            }
+    }
+
+    // 3. Rays, only where a delta caster is within reach of a lamp's rays. The origin leaves the surface along the
+    // normal by a little more with the distance (the depth's precision)
+    const vec3 O = P + N * (pc.bias * (1.0 + 0.25 * length(toCam)));
+    uint reach = 0u;
+    for (uint k = 0u; k < kMaxLamps; k++) {
+        if (id[k] == kNone) continue;
+        const vec4 lp = lamp[id[k]].pos;
+        const float r = lp.w * pc.radiusScale;
+        for (uint c = 0u; c < pc.casters; c++)
+            if (SegBox(O, lp.xyz, caster[c].lo.xyz - r, caster[c].hi.xyz + r)) {
+                reach |= 1u << k;
+                if (caster[c].lo.w != 0.0) o.num.a = 1.0; // (XR-05 drops the pixel's settled history on it)
+            }
+#ifdef BRIDGE_PASS
+        // Mesh casters reach on their own bounds: a lot without a Sim still traces its furniture (XR-08)
+        for (uint c = 0u; c < pc.meshBounds && (reach >> k & 1u) == 0u; c++)
+            if (SegBox(O, lp.xyz, pc.meshCaster[c].lo.xyz - r, pc.meshCaster[c].hi.xyz + r)) reach |= 1u << k;
+#endif
+    }
+    uint u[kMaxLamps] = uint[](0u, 0u, 0u, 0u), dl[kMaxLamps] = uint[](0u, 0u, 0u, 0u), rays = 0u;
+#if STOP == 2
+    reach = 0u;
+#elif STOP == 3
+    o.mul.r = float(reach), reach = 0u;
+#endif
+    if (reach != 0u) {
+        // A class 3 pixel (a Sim, foliage) has no history to add frames up in (XR-05): it keeps one point of the set,
+        // so a still picture is the same each frame. The others walk the set
+        const uint walk = ClassAt(at) == 3u ? 0u : pc.frame;
+        const uint first = pc.samples >= kSet ? 0u : (walk + Pcg(index)) % kSet;
+        for (uint k = 0u; k < kMaxLamps; k++) {
+            if (id[k] == kNone) continue;
+            const vec4 lp = lamp[id[k]].pos;
+            for (uint s = 0u; s < pc.samples; s++) { // a Fibonacci sphere on the emitter ball (check.cpp EmitterPoint)
+                const uint n = (first + s) % kSet;
+                const float y = 1.0 - (2.0 * float(n) + 1.0) / float(kSet), rr = sqrt(1.0 - y * y), a = 2.39996323 * float(n);
+                const vec3 e = lp.xyz + lp.w * pc.radiusScale * vec3(rr * cos(a), y, rr * sin(a)) - O;
+                const float len = length(e);
+                // A lamp out of every caster's reach still needs its static ray: its light weighs the others' shadows
+                const uint hit = len > 2e-3 ? Trace(O, e / len, len - 1e-3, (reach >> k & 1u) != 0u ? 3u : 1u) : 0u;
+                rays++;
+                if ((hit & 1u) == 0u) u[k]++;
+                if (hit == 2u) dl[k]++;
+            }
+        }
+#ifndef LEAN
+        atomicAdd(stat[0], rays);
+        atomicAdd(stat[1], 1u);
+#endif
+    }
+
+    // 4. m = 1 - sum_i w_i (1 - v_i) / (A + sum_j w_j), with w = colour x geometry x u / samples, w (1 - v) = the d share
+    vec3 num = vec3(0.0), den = vec3(0.0);
+    for (uint k = 0u; k < kMaxLamps; k++) {
+        if (id[k] == kNone) continue;
+        const vec3 c = lamp[id[k]].col.rgb * geo[k];
+        num += c * float(dl[k]), den += c * float(u[k]);
+    }
+    o.mul.rgb = 1.0 - num / (pc.camA.w * float(pc.samples) + den);
+    o.num.rgb = num, o.den.rgb = den;
+#ifdef LEAN
+    px[index].mul = o.mul;
+    return;
+#endif
+    o.cnt = uvec4(id[0] | id[1] << 8 | id[2] << 16 | id[3] << 24, u[0] | u[1] << 8 | u[2] << 16 | u[3] << 24, dl[0] | dl[1] << 8 | dl[2] << 16 | dl[3] << 24, rays);
+    Store(g, index, o);
+}

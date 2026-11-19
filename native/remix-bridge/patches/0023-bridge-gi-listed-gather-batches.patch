@@ -1,0 +1,128 @@
+0023: gather batches of region-listed layers (real-time GI work package R-G1). Listed dispatches (patch 0021) adapt their slice sizes apart from full layers: runSliced keeps m_listUnits for them, and the batched gathers of a listed layer count whole gathers (GiListBatch in gi_list_batch.h, which native/remix-bridge/build.cmd copies in from native/remix-bridge/server): kept for a shorter list, cut in proportion for a longer one, dropped at once to what fits after an overrun and grown back by a quarter a submission. Full layers keep their rule. A debug line a listed layer ([Gi] Lamp N gathers: ...) gives the list length, submissions, largest batch and longest submission. test_gi_device mode lots logs at debug level and prints the longest slice a layer (median, p90, layers over 4000 us). Layers are byte-equal to 0021's.
+Applies after 0022.
+diff --git a/bridge/src/server/gi_worker.cpp b/bridge/src/server/gi_worker.cpp
+index 93806a4ec..7e5d6b175 100644
+--- a/bridge/src/server/gi_worker.cpp
++++ b/bridge/src/server/gi_worker.cpp
+@@ -44,6 +44,7 @@
+ #include "gi_query_sw_spv.h"
+ #include "util_common.h"
+ #include "util_gi.h"
++#include "gi_list_batch.h"
+ #include "gi_objects.h"
+ #include "config/config.h"
+ #include "log/log.h"
+@@ -153,6 +154,10 @@ namespace gi {
+       uint32_t m_sliceIdleUs = 0;
+       bool m_listDispatch = true;
+       uint32_t m_sliceUnits[kPassCount] = { 16, 16, 16, 16 };  // columns x rays a slice, adapted to the GPU budget
++
++      // Region-listed dispatches adapt apart from full ones: a short list's cost a column is far above a full layer's.
++      uint32_t m_listUnits[kPassCount] = { 16, 16, 16, 16 };
++      GiListBatch m_listBatch;
+       VkQueryPool m_queryPool = VK_NULL_HANDLE;
+       VkDescriptorSetLayout m_solveSetLayout = VK_NULL_HANDLE;
+       VkPipelineLayout m_solveLayout = VK_NULL_HANDLE;
+@@ -883,7 +888,7 @@ namespace gi {
+     // The slice size follows the measured GPU time. Returns VK_NOT_READY when the job was cancelled between slices.
+     VkResult Device::runSliced(uint32_t pass, uint32_t rowsY, Job& job) {
+       const uint32_t groupsX = ((m_push.listed ? m_push.listed : m_push.texels) + 63) / 64;
+-      uint32_t& units = m_sliceUnits[pass];
++      uint32_t& units = (m_push.listed ? m_listUnits : m_sliceUnits)[pass];
+       for (uint32_t x = 0, y = 0; x < groupsX;) {
+         if (job.cancelled.load(std::memory_order_acquire)) {
+           return VK_NOT_READY;
+@@ -1187,11 +1192,24 @@ namespace gi {
+         result = end(nullptr);
+         m_push.src = 0;
+         const uint32_t groupsX = ((m_push.listed ? m_push.listed : m_push.texels) + 63) / 64;
++        uint32_t listSubmits = 0;
++        uint32_t listBatchMax = 0;
++        uint32_t listUsMax = 0;
++        const auto learnList = [&](uint32_t gathers, uint32_t us) {
++          m_listBatch.learn(groupsX, gathers, us, m_sliceUs);
++          listSubmits += 1;
++          listBatchMax = std::max(listBatchMax, gathers);
++          listUsMax = std::max(listUsMax, us);
++        };
+         for (uint32_t bounce = 0; bounce < m_bounces && result == VK_SUCCESS && !empty;) {
+           uint32_t& units = m_sliceUnits[kPassBounce];
+-          const uint32_t batch = std::min(units / groupsX, m_bounces - bounce);
++          const uint32_t batch = m_push.listed ? m_listBatch.next(groupsX, m_bounces - bounce) : std::min(units / groupsX, m_bounces - bounce);
+           if (batch < 2) {
++            const uint32_t before = job.gpuUs;
+             result = runSliced(kPassBounce, 1, job);
++            if (m_push.listed && result == VK_SUCCESS) {
++              learnList(1, job.gpuUs - before);
++            }
+             m_push.src ^= 1;
+             ++bounce;
+             continue;
+@@ -1220,8 +1238,12 @@ namespace gi {
+           job.gpuUs += us;
+           job.slices += 1;
+           job.sliceUsMax = std::max(job.sliceUsMax, us);
+-          const uint64_t wanted = uint64_t(groupsX) * batch * m_sliceUs / std::max<uint32_t>(us, 1);
+-          units = uint32_t(std::clamp<uint64_t>(wanted, std::max<uint32_t>(units / 2, 1), std::min<uint64_t>(uint64_t(units) * 2, 1u << 24)));
++          if (m_push.listed) {
++            learnList(batch, us);
++          } else {
++            const uint64_t wanted = uint64_t(groupsX) * batch * m_sliceUs / std::max<uint32_t>(us, 1);
++            units = uint32_t(std::clamp<uint64_t>(wanted, std::max<uint32_t>(units / 2, 1), std::min<uint64_t>(uint64_t(units) * 2, 1u << 24)));
++          }
+           if (m_sliceIdleUs) {
+             std::this_thread::sleep_for(std::chrono::microseconds(m_sliceIdleUs));
+           }
+@@ -1229,6 +1251,10 @@ namespace gi {
+         if (result == VK_SUCCESS) {
+           m_indirectHalf[lamp] = int8_t(m_push.src);
+         }
++        if (listSubmits) {
++          Logger::debug(format_string("[Gi] Lamp %u gathers: %u listed texels, %u columns, %u submissions, up to %u gathers and %u us each.",
++                                      lamp, m_push.listed, groupsX, listSubmits, listBatchMax, listUsMax));
++        }
+       }
+       m_push.listed = 0;
+       if (result != VK_SUCCESS) {
+diff --git a/bridge/test/rtx/unit/test_gi_device.cpp b/bridge/test/rtx/unit/test_gi_device.cpp
+index 9b87550e0..8b165e814 100644
+--- a/bridge/test/rtx/unit/test_gi_device.cpp
++++ b/bridge/test/rtx/unit/test_gi_device.cpp
+@@ -676,6 +676,7 @@ namespace {
+       std::vector<double> touched;
+       std::vector<double> offline;
+       uint32_t sliceMax = 0;
++      std::vector<double> layerSlices;
+       size_t off = 0;
+       size_t inside = 0;
+       size_t leaks = 0;
+@@ -687,6 +688,7 @@ namespace {
+         values = counters();
+         gpuUs.push_back(values[kGpuUsLast]);
+         sliceMax = std::max(sliceMax, values[kSliceUsMax]);
++        layerSlices.push_back(values[kSliceUsMax]);
+         const std::vector<float> sum = readLayer(pDevice, target, file.texels);
+         for (float value : sum) {
+           uint32_t bits;
+@@ -724,6 +726,10 @@ namespace {
+       }
+       std::printf("    a layer (direct + 16 gathers): GPU %.0f us median, %.0f us p90, %.0f us max, all %u layers %.1f ms; longest slice %u us.\n",
+                   pct(gpuUs, 0.5), pct(gpuUs, 0.9), pct(gpuUs, 1.0), file.lamps, total / 1000.0, sliceMax);
++      // The budget is server.giSliceUs (2000 us). One slice a layer may run long while the slice size adapts.
++      const size_t over = size_t(std::count_if(layerSlices.begin(), layerSlices.end(), [](double us) { return us > 4000.0; }));
++      std::printf("    longest slice a layer: %.0f us median, %.0f us p90; %zu of %u layers over 4000 us.\n",
++                  pct(layerSlices, 0.5), pct(layerSlices, 0.9), over, file.lamps);
+       std::printf("    touch box: median %.0f texels, max %.0f; the offline unscoped layer lights median %.0f, max %.0f.\n", pct(touched, 0.5), pct(touched, 1.0),
+                   pct(offline, 0.5), pct(offline, 1.0));
+       std::printf("    inside the boxes %.3f %% of %zu texel values within 1/255 of the offline solve; %zu lit texels outside a box; layers hash %016llx.\n",
+@@ -1040,6 +1046,10 @@ int main() {
+            << "server.giMaxLevel = " << (testCase == "compute" ? 1 : 2) << "\n"
+            << "server.giListDispatch = " << (testCase == "lots-full" ? "False" : "True") << "\n"
+            << "sendCreateFunctionServerResponses = True\n";
++    if (testCase == "lots") {
++      // The worker logs each listed layer's gather submissions at debug level (bridge64.log).
++      config << "logLevel = Debug\n";
++    }
+     if (dxvk[0] != 0) {
+       if (!CopyFileA(dxvk, ".trex\\d3d9vk_x64.dll", FALSE)) {
+         throw std::runtime_error("Could not copy REMIX_GI_TEST_DXVK");

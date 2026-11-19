@@ -1,0 +1,169 @@
+// The server tier's texel solve (docs/features/realtime-gi/design.md 3.4, 3.5, 3.9), one source for both back ends:
+// RAYQUERY = hardware ray queries against the proxy's acceleration structure; without it the same kernel walks the proxy's
+// 1 m grid (RtLampProxy::BuildGrid) in software. PASS 0: the links (per texel and ray, the texel a cosine-weighted ray
+// hits; lamp independent, traced once a build change). PASS 1: one lamp's direct light (shadow rays to points on its
+// emitter ball). PASS 2: one bounce of one lamp's layer, a gather over the links with no ray (feedback: run until it settles).
+#version 460
+#ifdef RAYQUERY
+#extension GL_EXT_ray_query : require
+layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+#endif
+layout(local_size_x = 64) in;
+
+struct Texel {
+    vec4 pos; // w: room
+    vec4 nrm;
+    vec4 alb;
+};
+layout(std430, set = 0, binding = 1) readonly buffer Tris { vec4 tris[]; };          // 3 a triangle; the first one's w = kind
+layout(std430, set = 0, binding = 2) readonly buffer CellStart { uint cellStart[]; };
+layout(std430, set = 0, binding = 3) readonly buffer CellTris { uint cellTris[]; };
+layout(std430, set = 0, binding = 4) readonly buffer Texels { Texel texel[]; };
+layout(std430, set = 0, binding = 5) readonly buffer Map { int map[]; };             // world cell -> texel, -1 = none
+layout(std430, set = 0, binding = 6) buffer Links { uint link[]; };                  // texels x rays
+layout(std430, set = 0, binding = 7) buffer Direct { vec4 direct[]; };               // lamps x texels
+layout(std430, set = 0, binding = 8) buffer Ind { vec4 ind[]; };                     // 2 (feedback halves) x lamps x texels
+layout(push_constant) uniform PC {
+    vec4 lampPos; // w: the emitter ball's radius
+    vec4 lampCol;
+    uint texels, rays, lamp, src;
+    uint shadowRays, stories, lotSize, density;
+    uint lamps;
+    int gx0, gz0, gw, gh;
+} pc;
+
+const float kStory = 3.0; // m a story (check.cpp kStory)
+const uint kNone = 0xFFFFFFFFu;
+
+#ifdef RAYQUERY
+bool Trace(vec3 o, vec3 d, float tMin, float tMax, out float t, out uint prim) {
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT, 0xFF, o, tMin, d, tMax);
+    while (rayQueryProceedEXT(q)) {}
+    if (rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT) return false;
+    t = rayQueryGetIntersectionTEXT(q, true);
+    prim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
+    return true;
+}
+#else
+// Moller-Trumbore, both sides; the edges are taken a little wide so that a ray along a shared edge is blocked, never passed
+bool TriHit(uint i, vec3 o, vec3 d, float tMin, float tMax, out float t) {
+    const vec3 a = tris[3 * i].xyz, e1 = tris[3 * i + 1].xyz - a, e2 = tris[3 * i + 2].xyz - a;
+    const vec3 p = cross(d, e2);
+    const float det = dot(e1, p);
+    if (abs(det) < 1e-12) return false;
+    const float inv = 1.0 / det, kEdge = 1e-5;
+    const vec3 s = o - a;
+    const float u = dot(s, p) * inv;
+    if (u < -kEdge || u > 1.0 + kEdge) return false;
+    const vec3 q = cross(s, e1);
+    const float v = dot(d, q) * inv;
+    if (v < -kEdge || u + v > 1.0 + kEdge) return false;
+    t = dot(e2, q) * inv;
+    return t > tMin && t < tMax;
+}
+// The nearest hit: a 2D walk over the grid's 1 m cells the ray's xz crosses (as RtLampProxy::Clear)
+bool Trace(vec3 o, vec3 d, float tMin, float tMax, out float t, out uint prim) {
+    bool hit = false;
+    t = tMax;
+    const vec2 p = o.xz - vec2(pc.gx0, pc.gz0);
+    ivec2 c = ivec2(floor(p));
+    const ivec2 st = ivec2(d.x > 0.0 ? 1 : -1, d.z > 0.0 ? 1 : -1);
+    const vec2 td = vec2(abs(d.x) > 1e-9 ? 1.0 / abs(d.x) : 1e30, abs(d.z) > 1e-9 ? 1.0 / abs(d.z) : 1e30);
+    vec2 tn = vec2(td.x < 1e29 ? (st.x > 0 ? float(c.x + 1) - p.x : p.x - float(c.x)) * td.x : 1e30,
+                   td.y < 1e29 ? (st.y > 0 ? float(c.y + 1) - p.y : p.y - float(c.y)) * td.y : 1e30);
+    for (int n = 0; n < pc.gw + pc.gh + 2; n++) {
+        if (c.x >= 0 && c.y >= 0 && c.x < pc.gw && c.y < pc.gh) {
+            const uint ci = uint(c.y * pc.gw + c.x);
+            for (uint k = cellStart[ci]; k < cellStart[ci + 1]; k++) {
+                float tt;
+                const uint ti = cellTris[k];
+                if (TriHit(ti, o, d, tMin, t, tt)) t = tt, prim = ti, hit = true;
+            }
+        }
+        const float tExit = min(tn.x, tn.y);
+        if (t <= tExit || tExit >= tMax) break;
+        if (tn.x < tn.y) c.x += st.x, tn.x += td.x;
+        else c.y += st.y, tn.y += td.y;
+        if ((c.x < 0 && st.x < 0) || (c.x >= pc.gw && st.x > 0) || (c.y < 0 && st.y < 0) || (c.y >= pc.gh && st.y > 0)) break;
+    }
+    return hit;
+}
+#endif
+
+// The texel under a hit: the light buffer is read at the hit, so the server needs no material (a surface cache read).
+// n faces the ray's origin. Object shapes (kind 3) hold no texel: they block bounce light and return none.
+int TexelAt(vec3 P, vec3 n, uint prim) {
+    if (tris[3 * prim].w == 3.0) return -1;
+    const float df = float(pc.density);
+    const int S = int(pc.stories), G = int(pc.lotSize), D = int(pc.density), GD = G * D;
+    if (abs(n.y) > 0.5) {
+        const int cls = n.y > 0.0 ? 0 : 1; // a floor, a ceiling
+        const int s = int(floor(P.y / kStory + (cls == 0 ? 0.5 : -0.5)));
+        const ivec2 c = ivec2(floor(P.xz * df));
+        if (s < 0 || s >= S || c.x < 0 || c.y < 0 || c.x >= GD || c.y >= GD) return -1;
+        return map[((cls * S + s) * GD + c.y) * GD + c.x];
+    }
+    const int axis = abs(n.x) > abs(n.z) ? 0 : 1; // the wall's normal: x, z
+    const int side = (axis == 0 ? n.x : n.z) > 0.0 ? 1 : 0;
+    const int line = int(floor((axis == 0 ? P.x : P.z) + 0.5)), along = int(floor((axis == 0 ? P.z : P.x) * df));
+    const int s = clamp(int(floor(P.y / kStory)), 0, S - 1), h = clamp(int(floor((P.y - kStory * float(s)) * df)), 0, 3 * D - 1);
+    if (line < 0 || line > G || along < 0 || along >= GD) return -1;
+    return map[2 * S * GD * GD + ((((axis * 2 + side) * S + s) * (G + 1) + line) * GD + along) * (3 * D) + h];
+}
+
+uint Pcg(uint v) {
+    uint s = v * 747796405u + 2891336453u;
+    uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+void main() {
+    const uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.texels) return;
+    const vec3 P = texel[i].pos.xyz, N = texel[i].nrm.xyz;
+#if PASS == 0
+    // Ray r of texel i is the same every solve: the result is a fixed linear system, so a settled layer holds no noise in time
+    const uint r = gl_GlobalInvocationID.y;
+    const uint h1 = Pcg(i * pc.rays + r), h2 = Pcg(h1);
+    const float u1 = (float(h1 >> 8) + 0.5) / 16777216.0, phi = 6.2831853 * (float(h2 >> 8) + 0.5) / 16777216.0;
+    const vec3 T = normalize(cross(abs(N.y) < 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0), N)), B = cross(N, T);
+    const float rad = sqrt(u1);
+    const vec3 d = normalize(T * (rad * cos(phi)) + B * (rad * sin(phi)) + N * sqrt(1.0 - u1));
+    float t;
+    uint prim;
+    uint to = kNone;
+    if (Trace(P, d, 1e-3, 1e4, t, prim)) {
+        vec3 n = normalize(cross(tris[3 * prim + 1].xyz - tris[3 * prim].xyz, tris[3 * prim + 2].xyz - tris[3 * prim].xyz));
+        if (dot(n, d) > 0.0) n = -n;
+        const int j = TexelAt(P + d * t, n, prim);
+        if (j >= 0) to = uint(j);
+    }
+    link[i * pc.rays + r] = to;
+#elif PASS == 1
+    const vec3 L = pc.lampPos.xyz - P;
+    const float d2 = dot(L, L), c = dot(N, L) * inversesqrt(d2);
+    float share = 0.0;
+    if (c > 0.0) {
+        for (uint k = 0u; k < pc.shadowRays; k++) { // a Fibonacci sphere on the emitter ball (check.cpp EmitterPoint)
+            const float y = 1.0 - (2.0 * float(k) + 1.0) / float(pc.shadowRays), rr = sqrt(1.0 - y * y), a = 2.39996323 * float(k);
+            const vec3 e = pc.lampPos.xyz + pc.lampPos.w * vec3(rr * cos(a), y, rr * sin(a)) - P;
+            const float len = length(e);
+            float t;
+            uint prim;
+            if (!Trace(P, e / len, 1e-3, len - 1e-3, t, prim)) share += 1.0;
+        }
+        share /= float(pc.shadowRays);
+    }
+    direct[pc.lamp * pc.texels + i] = vec4(pc.lampCol.rgb * (max(c, 0.0) / d2 * share), share);
+#else
+    // Cosine-weighted rays: irradiance = the mean of the hit texels' albedo x (direct + the previous indirect)
+    const uint from = (pc.src * pc.lamps + pc.lamp) * pc.texels, to = ((1u - pc.src) * pc.lamps + pc.lamp) * pc.texels;
+    vec3 sum = vec3(0.0);
+    for (uint r = 0u; r < pc.rays; r++) {
+        const uint j = link[i * pc.rays + r];
+        if (j != kNone) sum += texel[j].alb.rgb * (direct[pc.lamp * pc.texels + j].rgb + ind[from + j].rgb);
+    }
+    ind[to + i] = vec4(sum / float(pc.rays), 0.0);
+#endif
+}

@@ -16,7 +16,11 @@
 //  4. Physical indoor lamps (PhysKeptCheck): the game's 3D test on the GPU (T3dPS) against RoomLightTests::occlude, the kept
 //     shadow tiles against the reference, and RelightKeptPhys against the CPU's law x share x T3D, KeptTexel, pack and blur;
 //     room 0's lot lamps from their laws (Room0PhysCheck: AccumulatePhys, the floor mask and exit alpha) against the CPU.
-// Read-only: prints to stdout, writes no file. A missing D3D9 device or capture is a failure.
+//  5. Real-time GI's wall-plan visibility field (features/plan_field.h; plan_field_check.h), CPU only.
+//  6. --pathref (path_trace.h, real-time GI S0-02): the offline path-traced reference of the proxy, furniture boxes and lamp table;
+//     writes its maps only with --out.
+//  7. --cascades (cascades_check.h, real-time GI X-05): 2D radiance cascades over the plan field against the reference of 6.
+// Read-only: prints to stdout, writes no file (but --pathref --out). A missing D3D9 device or capture is a failure.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -38,6 +42,8 @@
 #include <vector>
 #include "features/rt_lamp_proxy.h"
 #include "features/stair_set.h"
+#include "features/mesh_caster_set.h"
+#include "features/object_legs.h"
 #include "features/rt_lamp_model.h"
 #include "features/rt_lamp_gpu.h"
 #include "features/phys_lamp_pick.h"
@@ -45,9 +51,17 @@
 #include "features/room_lamp_move.h"
 #include "features/rt_outdoor_lamps.h"
 #include "features/lamp_reach.h"
+#include "gi_reference.h"
+
+// The harness has no game hooks: rt_lamp_gpu's vertex-input mark around its draws is a no-op here
+namespace ExtraHooks {
+VertexInputMark MarkVertexInput() { return {}; }
+void RestoreVertexInput(VertexInputMark) {}
+} // namespace ExtraHooks
 #include "features/phys_tiles.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
+
 namespace RoomMapDither {
 inline float Offset(unsigned x, unsigned y) {
     const double f = std::fmod(0.06711056 * static_cast<double>(x) + 0.00583715 * static_cast<double>(y), 1.0);
@@ -55,11 +69,6 @@ inline float Offset(unsigned x, unsigned y) {
     return static_cast<float>(g - 0.5);
 }
 } // namespace RoomMapDither
-// the engine keeps the game's vertex input around its draws (d3d9_extra_hooks.cpp); here nothing is hooked
-namespace ExtraHooks {
-VertexInputMark MarkVertexInput() { return {}; }
-void RestoreVertexInput(VertexInputMark) {}
-} // namespace ExtraHooks
 #include "shaders/rt_lamps_hlsl.h"
 
 #ifdef RT_OBJECT_SHAPES
@@ -717,6 +726,122 @@ RtLampModel::Lamp ToLamp(const LampDef& d, float mult = 1.0f) {
     L.law.r0sq = r0 * r0, L.law.invR2 = 1.0f / (R * R);
     L.mult = mult;
     return L;
+}
+
+// ---------------------------------------------------------------- real-time GI, S0-01: lamp layers, compose, leak test
+// (gi_reference.h) One indirect layer a lamp at 1 texel a tile and story; compose = sum(on x colour x layer) against a full solve
+// of the same lamps; a toggle re-composes without a solve; a closed room gets exactly 0 from a lamp outside it.
+double MaxDiff(const std::vector<GiRef::Rgb>& a, const std::vector<GiRef::Rgb>& b) {
+    double m = a.size() == b.size() ? 0.0 : 1e30;
+    for (size_t t = 0; t < a.size() && t < b.size(); t++)
+        for (int c = 0; c < 3; c++) m = std::max(m, static_cast<double>(std::fabs(a[t][c] - b[t][c])));
+    return m;
+}
+// Compose against the full solve, all lamps on, then a toggle and a recolour with the layers kept. Returns false when skipped
+bool GiComposeCheck(const Scene& sc, const RtLampProxy::Mesh& mesh, const GiRef::Model& m, std::vector<std::vector<GiRef::Rgb>>& layers) {
+    std::vector<RtLampModel::Lamp> lamps;
+    std::vector<GiRef::Rgb> colour;
+    for (const LampDef& d : sc.lamps) lamps.push_back(ToLamp(d)), colour.push_back({d.colour[0], d.colour[1], d.colour[2]});
+    if (lamps.size() < 2 || m.texels.empty()) return false;
+    int solves = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    layers.assign(lamps.size(), {});
+    for (size_t l = 0; l < lamps.size(); l++) GiRef::Layer(m, mesh, lamps[l], layers[l]), solves++;
+    const double layerMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / lamps.size();
+    std::vector<bool> on(lamps.size(), true);
+    std::vector<GiRef::Rgb> comp, full;
+    GiRef::Compose(layers, on, colour, comp);
+    GiRef::FullSolve(m, mesh, lamps, on, colour, full);
+    const double dAll = MaxDiff(comp, full);
+    double peak = 0.0;
+    for (const GiRef::Rgb& v : full) peak = std::max(peak, static_cast<double>(std::max({v[0], v[1], v[2]})));
+    // the toggle: lamp 0 off, lamp 1 dimmed and turned blue; the layers are kept
+    const int before = solves;
+    on[0] = false, colour[1] = {0.1f, 0.2f, 0.9f};
+    const auto t1 = std::chrono::steady_clock::now();
+    GiRef::Compose(layers, on, colour, comp);
+    const double composeMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
+    GiRef::FullSolve(m, mesh, lamps, on, colour, full);
+    const double dToggle = MaxDiff(comp, full);
+    std::printf("   %zu lamps, %zu texels, %zu patches, %zu links: layer %.1f ms a lamp, compose %.3f ms; peak indirect %.4f; compose - full: all on %.2e, "
+                "after the toggle %.2e\n",
+                lamps.size(), m.texels.size(), m.patches.size(), m.links.size(), layerMs, composeMs, peak, dAll, dToggle);
+    Check(peak > 0.0, "GI " + sc.name + ": no indirect light at all");
+    Check(dAll < 1.0 / 255.0, "GI " + sc.name + ": the compose of the layers differs from the full solve by 1/255 or more");
+    Check(dToggle < 1.0 / 255.0, "GI " + sc.name + ": after a toggle the compose differs from the full solve by 1/255 or more");
+    Check(solves == before, "GI " + sc.name + ": a toggle solved again");
+    return true;
+}
+// IndoorRooms with the partition's door closed or open
+Scene GiRooms(bool door) {
+    Scene sc = IndoorRooms();
+    sc.name = door ? "GI rooms, door open" : "GI rooms, door closed";
+    if (!door)
+        for (RtLampProxy::Story& s : sc.lot.stories)
+            for (RtLampProxy::Edge& e : s.edges) e.open = false;
+    return sc;
+}
+void GiLayersCheck(const std::vector<std::string>& worlds, int maxLamps) {
+    std::printf("\n[real-time GI] lamp layers, compose, leak test (CPU reference)\n");
+    std::vector<Scene> scenes;
+    scenes.push_back(GiRooms(false));
+    scenes.push_back(GiRooms(true));
+    scenes.push_back(Synthetic());
+    for (const std::string& w : worlds)
+        if (!LoadWorld(w, scenes, maxLamps)) Check(false, "capture not readable: " + w);
+    for (size_t si = 0; si < scenes.size(); si++) {
+        const Scene& sc = scenes[si];
+        RtLampProxy::Mesh mesh;
+        RtLampProxy::Build(sc.lot, mesh, sc.ceilingsOpen);
+        GiRef::Model m;
+        const auto t0 = std::chrono::steady_clock::now();
+        GiRef::Build(sc.lot, mesh, m);
+        std::printf(" %s: links built in %.0f ms\n", sc.name.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        std::vector<std::vector<GiRef::Rgb>> layers;
+        if (!GiComposeCheck(sc, mesh, m, layers)) {
+            std::printf("   skipped: fewer than two lamps or no floor texel\n");
+            continue;
+        }
+        if (si > 1) continue;
+        // the rooms: x 4..9 left, 9..14 right, story 0 below y 3, story 1 above. A lamp lights its own room and story only when the
+        // door is closed: every other texel, and every upsampled floor point there, is exactly 0 at every bounce
+        const bool door = si == 1;
+        const auto region = [](float x, int story) { return story * 2 + (x < 9.0f ? 0 : 1); };
+        for (size_t l = 0; l < sc.lamps.size(); l++) {
+            const LampDef& d = sc.lamps[l];
+            const int own = region(d.pos[0], d.pos[1] >= 3.0f ? 1 : 0);
+            long other = 0, leak = 0, upLeak = 0;
+            double nextDoor = 0.0;
+            for (size_t t = 0; t < m.texels.size(); t++) {
+                const GiRef::Patch& P = m.patches[m.texels[t]];
+                const int r = region(P.p[0], P.story);
+                if (r == own) continue;
+                const float v = std::max({layers[l][t][0], layers[l][t][1], layers[l][t][2]});
+                if (door && P.story == own / 2) nextDoor = std::max(nextDoor, static_cast<double>(v));
+                if (door) continue;
+                other++;
+                leak += v != 0.0f;
+            }
+            if (!door)
+                for (int story = 0; story <= 1; story++)
+                    for (float z = 4.125f; z < 12.0f; z += 0.25f)
+                        for (float x = 4.125f; x < 14.0f; x += 0.25f) {
+                            if (region(x, story) == own) continue;
+                            const GiRef::Rgb v = GiRef::Upsample(m, mesh, layers[l], story, x, 3.0f * story, z);
+                            upLeak += v[0] != 0.0f || v[1] != 0.0f || v[2] != 0.0f;
+                        }
+            if (door) {
+                {
+                    std::printf("   %s: brightest texel next door %.5f (doorway spill)\n", d.name.c_str(), nextDoor);
+                    Check(nextDoor > 0.0, "GI door open: no light through the doorway from " + d.name);
+                }
+                continue;
+            }
+            std::printf("   %s: %ld texels of the closed rooms, %ld not 0; upsampled points not 0: %ld\n", d.name.c_str(), other, leak, upLeak);
+            Check(other > 0 && leak == 0, "GI leak: " + d.name + " lights a closed room's texels");
+            Check(upLeak == 0, "GI leak: the upsample blends " + d.name + "'s light across a wall");
+        }
+    }
 }
 
 // ---------------------------------------------------------------- 1. shadows: GPU against the reference
@@ -4655,6 +4780,247 @@ static void FloorGridTwinChecks() {
     }
     Check(placed, "floor twins: each copy stands where the outdoor floor's uv reads it");
 }
+#include "plan_field_check.h"
+// Mesh casters for the shadow tiles (wp/MC-3.md): the cache's budget and LRU, the lamp's own object left out, and a read-back
+// mesh in lot space that stops a lamp's light the way the tiles draw it (RtLampProxy::Clear over the same triangles)
+static void MeshCasterSetChecks() {
+    // a 1 m slab at 0.7-0.8 m, as two quads (a table top), model space centred on the origin
+    MeshCasterSet::Model top;
+    top.pos = {-0.5f, 0.8f, -0.5f, 0.5f, 0.8f, -0.5f, 0.5f, 0.8f, 0.5f, -0.5f, 0.8f, 0.5f, -0.5f, 0.7f, -0.5f, 0.5f, 0.7f, -0.5f, 0.5f, 0.7f, 0.5f, -0.5f, 0.7f, 0.5f};
+    top.tri = {0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7};
+    const auto at = [](uint64_t id, uint64_t lite, float x, float z) {
+        MeshCasterSet::Object o{id, lite};
+        const float m[12] = {1, 0, 0, x, 0, 1, 0, 0, 0, 0, 1, z};
+        std::memcpy(o.m, m, sizeof m);
+        return o;
+    };
+    MeshCasterSet::Set set(2 * top.Bytes());
+    uint64_t lite = 0;
+    Check(!set.NextFetch(lite), "mesh casters: nothing placed, nothing to fetch");
+    set.Apply(at(1, 0xA, 110.0f, 12.0f));
+    set.Apply(at(2, 0xA, 112.0f, 12.0f));
+    Check(set.NextFetch(lite) && lite == 0xA, "mesh casters: a placed object's LITE is fetched");
+    MeshCasterSet::Model copy = top;
+    set.Fetched(0xA, std::move(copy));
+    Check(!set.NextFetch(lite), "mesh casters: two objects of one model fetch it once");
+    set.Apply(at(3, 0xB, 200.0f, 12.0f));
+    Check(set.NextFetch(lite) && lite == 0xB, "mesh casters: a second model is fetched");
+    set.Missing(0xB);
+    Check(!set.NextFetch(lite), "mesh casters: a LITE the server has no mesh for is not asked again");
+    // the budget holds two models: a third placed one is refused while all are in use, and kept once an object leaves
+    set.Apply(at(4, 0xC, 114.0f, 12.0f));
+    copy = top;
+    set.Fetched(0xC, std::move(copy));
+    set.Apply(at(5, 0xD, 116.0f, 12.0f));
+    copy = top;
+    set.Fetched(0xD, std::move(copy));
+    MeshCasterSet::Stats st = set.GetStats();
+    Check(st.models == 2 && st.overBudget == 1 && st.evicted == 0 && !set.NextFetch(lite), "mesh casters: the budget never drops a model in use");
+    set.Apply({4, 0xC, {}, true});
+    Check(set.NextFetch(lite) && lite == 0xD, "mesh casters: an object leaving frees the refused fetch");
+    copy = top;
+    set.Fetched(0xD, std::move(copy));
+    st = set.GetStats();
+    Check(st.models == 2 && st.evicted == 1 && st.bytes == 2 * top.Bytes(), "mesh casters: the least recently used unused model is dropped");
+    MeshCasterSet::Model big;
+    big.pos = top.pos, big.tri.assign((MeshCasterSet::kMaxModelTris + 1) * 3, 0);
+    set.Apply(at(6, 0xE, 118.0f, 12.0f));
+    set.Fetched(0xE, std::move(big));
+    Check(set.GetStats().tooBig == 1 && !set.NextFetch(lite), "mesh casters: a model over the triangle cap is left out");
+    // in lot space (lot x = world x - 100): objects 1 and 2 (0xA) and 5 (0xD) over the lot; the lamp at 1.5 m over object 1
+    RtLampProxy::Lot lot;
+    lot.stories.resize(1);
+    lot.stories[0].w = lot.stories[0].h = 32;
+    lot.worldToLot[3][0] = -100.0f;
+    RtLampProxy::Mesh m;
+    RtLampProxy::Build(lot, m, true);
+    const size_t built = m.tris.size();
+    const float lamp[3] = {10.0f, 1.5f, 12.0f}, under[3] = {10.0f, 0.01f, 12.0f}, beside[3] = {11.2f, 0.01f, 12.0f};
+    Check(RtLampProxy::Clear(m, lamp, under), "mesh casters: the lamp reaches the floor with no caster");
+    const size_t n = set.AppendTo(m, lot.worldToLot, 32.0f, 32.0f);
+    RtLampProxy::BuildGrid(m);
+    Check(n == 12 && m.tris.size() == built + 12 && m.kind.back() == RtLampProxy::Mesh::kShape, "mesh casters: three objects' triangles join the mesh as shapes");
+    Check(!RtLampProxy::Clear(m, lamp, under) && RtLampProxy::Clear(m, lamp, beside), "mesh casters: the table top shadows the floor under it, not beside it");
+    // the lamp's own object: a lamp head inside object 1's bounds leaves that object out
+    set.SetLamps({{110.0f, 0.75f, 12.0f}});
+    RtLampProxy::Mesh m2;
+    Check(set.AppendTo(m2, lot.worldToLot, 32.0f, 32.0f) == 8 && set.GetStats().lampSkips == 1, "mesh casters: the object holding a lamp casts nothing");
+    RtLampProxy::Mesh m3;
+    Check(set.AppendTo(m3, lot.worldToLot, 32.0f, 32.0f, 4) == 4, "mesh casters: the triangle cap holds");
+    set.Clear();
+    Check(set.GetStats().models == 0 && !set.NextFetch(lite), "mesh casters: cleared");
+}
+// (MC-4) the object feed: seeded objects reach the set without moving, and an object whose mesh is in the tiles leaves the 3D test
+// (MC-4b) A feature turned on inside a world, and kept rooms marked again as the tiles change without their solve
+static void MeshMarkChecks() {
+    float m16[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 110.0f, 0, 12.0f, 1};
+    std::vector<ObjectLegs::Placed> out;
+    { // the hooks learn objects with the output off (the sink not open yet); opening it sends them all, once
+        ObjectLegs::Feed feed(false);
+        feed.Attach(1, 0xA), feed.Move(1, m16);
+        feed.Move(2, m16), feed.Attach(2, 0xB);
+        feed.Attach(3, 0xC); // (no matrix yet)
+        feed.Attach(4, 0xD), feed.Move(4, m16), feed.Remove(4);
+        feed.Shape(1, 0x1000);
+        feed.Take(out);
+        Check(out.empty() && feed.Seed() == 0 && feed.KnownCount() == 3, "mesh mark: with the output off the objects are learnt, nothing goes out, a seed sends nothing");
+        const size_t sent = feed.SetOn(true);
+        feed.Take(out);
+        Check(sent == 2 && out.size() == 2 && std::none_of(out.begin(), out.end(), [](const ObjectLegs::Placed& p) { return p.flags || p.id == 4; }) && feed.Seeded() == 2,
+              "mesh mark: opening the output sends the objects attached before it (LITE and matrix known), not a removed one");
+        Check(feed.ObjectOf(0x1000) == 1 && feed.SetOn(true) == 0, "mesh mark: shapes learnt with the output off name their object; opening again sends nothing more");
+        feed.Move(3, m16);
+        feed.Take(out);
+        Check(out.size() == 1 && out[0].id == 3, "mesh mark: an object completed after the opening goes out as before");
+        feed.SetOn(false);
+        feed.Remove(1), feed.Move(2, m16);
+        feed.Take(out);
+        Check(out.empty() && feed.KnownCount() == 2, "mesh mark: closed again, moves and removals are learnt and nothing goes out");
+    }
+    { // the mark generation: an object into or out of the tiles, a mesh resolved, an object added or removed; not a move inside the tiles
+        MeshCasterSet::Set set;
+        RtLampProxy::Lot lot;
+        lot.stories.resize(1);
+        lot.stories[0].w = lot.stories[0].h = 32;
+        lot.worldToLot[3][0] = -100.0f;
+        const auto append = [&] {
+            RtLampProxy::Mesh mesh;
+            set.AppendTo(mesh, lot.worldToLot, 32.0f, 32.0f);
+        };
+        MeshCasterSet::Object o{1, 0xA};
+        o.m[0] = o.m[5] = o.m[10] = 1.0f, o.m[3] = 110.0f, o.m[11] = 12.0f;
+        uint32_t g = set.MarkGen();
+        set.Apply(o);
+        Check(set.MarkGen() != g, "mesh mark: a new object moves the mark generation"), g = set.MarkGen();
+        MeshCasterSet::Model top;
+        top.pos = {-0.5f, 0.8f, -0.5f, 0.5f, 0.8f, -0.5f, 0.5f, 0.8f, 0.5f};
+        top.tri = {0, 1, 2};
+        set.Fetched(0xA, std::move(top));
+        Check(set.MarkGen() != g, "mesh mark: a mesh resolved moves it"), g = set.MarkGen();
+        append();
+        Check(set.InTiles(1) && set.MarkGen() != g, "mesh mark: the object into the tiles moves it"), g = set.MarkGen();
+        o.m[3] = 111.0f, set.Apply(o), append();
+        Check(set.InTiles(1) && set.MarkGen() == g, "mesh mark: a move inside the tiles leaves it (the same records marked)");
+        o.m[3] = 300.0f, set.Apply(o), append();
+        Check(!set.InTiles(1) && set.MarkGen() != g, "mesh mark: a move out of the lot (out of the tiles) moves it"), g = set.MarkGen();
+        o.m[3] = 110.0f, set.Apply(o), append();
+        Check(set.InTiles(1) && set.MarkGen() != g, "mesh mark: moved back in, it moves again"), g = set.MarkGen();
+        set.Apply({1, 0xA, {}, true});
+        Check(set.MarkGen() != g, "mesh mark: a removal moves it"), g = set.MarkGen();
+        append();
+        Check(!set.InTiles(1) && set.MarkGen() != g, "mesh mark: the removed object leaves the tiles at their next upload");
+    }
+    { // a kept room's records marked again (what KeptRooms does without a solve): the marks' key tells a changed table
+        ObjectLegs::Feed feed;
+        feed.Attach(1, 0xA), feed.Move(1, m16), feed.Attach(3, 0xC), feed.Move(3, m16);
+        feed.Shape(1, 0x1000), feed.Shape(3, 0x2000);
+        std::vector<RoomLightTests::Record> solved(2);
+        solved[0].shape = 0x1000, solved[1].shape = 0x2000;
+        ObjectLegs::MarkMeshed(solved, feed, [](uint64_t) { return false; }); // (at its solve nothing was in the tiles)
+        std::vector<RoomLightTests::Record> now = solved;
+        ObjectLegs::MarkMeshed(now, feed, [](uint64_t id) { return id == 3; }); // (object 3's mesh reached the tiles later)
+        Check(ObjectLegs::MeshedKey(now) != ObjectLegs::MeshedKey(solved) && now[1].meshed && !now[0].meshed, "mesh mark: a mesh reaching the tiles after the solve marks its record now");
+        std::vector<RoomLightTests::Record> back = now;
+        ObjectLegs::MarkMeshed(back, feed, [](uint64_t) { return false; });
+        Check(ObjectLegs::MeshedKey(back) == ObjectLegs::MeshedKey(solved), "mesh mark: the object out of the tiles again: the solve's table is drawn again (same key)");
+        std::vector<RoomLightTests::Record> other = solved;
+        ObjectLegs::MarkMeshed(other, feed, [](uint64_t id) { return id == 1; });
+        Check(ObjectLegs::MeshedKey(other) != ObjectLegs::MeshedKey(now), "mesh mark: another record marked gives another key");
+    }
+}
+static void MeshFeedChecks() {
+    float m16[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 110.0f, 0, 12.0f, 1}; // (the hook's float4x4: translation in 12..14)
+    ObjectLegs::Feed feed;
+    std::vector<ObjectLegs::Placed> out;
+    feed.Move(1, m16); // a load's move ahead of its attach
+    feed.Take(out);
+    Check(out.empty(), "mesh feed: a matrix alone sends nothing");
+    feed.Attach(1, 0xA);
+    m16[12] = 200.0f;
+    feed.Attach(3, 0xC), feed.Move(3, m16);
+    feed.Move(9, m16); // an object with no LITE
+    feed.Take(out);
+    Check(out.size() == 2 && std::all_of(out.begin(), out.end(), [](const ObjectLegs::Placed& p) { return p.lite && !p.flags; }),
+          "mesh feed: an object goes out once its LITE and a matrix are known, in either order");
+    const auto one = std::find_if(out.begin(), out.end(), [](const ObjectLegs::Placed& p) { return p.id == 1; });
+    Check(one != out.end() && one->lite == 0xA && one->m[3] == 110.0f && one->m[11] == 12.0f, "mesh feed: the matrix's translation in the record's rows");
+    feed.Take(out);
+    Check(out.empty(), "mesh feed: still objects send nothing more");
+    // a synthetic load: the tiles' set starts empty (world entry), no object moves; the seed sends every known object again
+    MeshCasterSet::Set set;
+    const size_t seeded = feed.Seed();
+    feed.Take(out);
+    Check(seeded == 2 && out.size() == 2 && feed.Seeded() == 2, "mesh feed: the seed sends every object with a LITE and a matrix");
+    for (const ObjectLegs::Placed& p : out) {
+        MeshCasterSet::Object o{p.id, p.lite};
+        std::memcpy(o.m, p.m, sizeof o.m);
+        set.Apply(o);
+    }
+    uint64_t lite = 0;
+    Check(set.GetStats().objects == 2 && set.NextFetch(lite), "mesh feed: seeded objects reach the set without moving");
+    // object 1 (0xA) resolved, object 3 (0xC) missing: only object 1 is in the tiles
+    MeshCasterSet::Model top;
+    top.pos = {-0.5f, 0.8f, -0.5f, 0.5f, 0.8f, -0.5f, 0.5f, 0.8f, 0.5f, -0.5f, 0.8f, 0.5f};
+    top.tri = {0, 1, 2, 0, 2, 3};
+    set.Fetched(0xA, std::move(top));
+    set.Missing(0xC);
+    RtLampProxy::Lot lot;
+    lot.stories.resize(1);
+    lot.stories[0].w = lot.stories[0].h = 32;
+    lot.worldToLot[3][0] = -100.0f;
+    RtLampProxy::Mesh mesh;
+    Check(set.AppendTo(mesh, lot.worldToLot, 32.0f, 32.0f) == 2 && set.InTiles(1) && !set.InTiles(3), "mesh feed: the resolved object is in the tiles, the missing one not");
+    // a room's 3D records: object 1's, object 3's and one of no known object, each a rectangle; object 1's with a leg
+    feed.Shape(1, 0x1000), feed.Shape(3, 0x2000), feed.Shape(7, 0x3000);
+    RoomLightTests::Room room;
+    room.rec.resize(3);
+    const uintptr_t shapes[3] = {0x1000, 0x2000, 0x3000};
+    for (int i = 0; i < 3; i++) {
+        RoomLightTests::Blocker b{};
+        b.vt = RoomLightTests::kQuadVt;
+        room.rec[i].b.push_back(b), room.rec[i].shape = shapes[i], room.rec[i].c = {10.0f + i, 0.75f, 12.0f}, room.rec[i].r2 = 0.5f;
+    }
+    room.rec[0].posts.push_back({{10.0f, 0.0f, 12.0f}, {10.0f, 0.7f, 12.0f}, 0.03f});
+    const size_t marked = ObjectLegs::MarkMeshed(room.rec, feed, [&set](uint64_t id) { return set.InTiles(id); });
+    Check(marked == 1 && room.rec[0].meshed && !room.rec[1].meshed && !room.rec[2].meshed && room.rec[0].posts.empty(),
+          "mesh feed: only the record of the object in the tiles leaves the 3D test");
+    RtLampGpu::BlockerTable table;
+    const int header = table.Append(room);
+    const int firstRec = static_cast<int>(table.rows[header].v[0]);
+    const auto blockers = [&](int r) { return static_cast<int>(table.rows[firstRec + 2 * r + 1].v[1]); };
+    Check(blockers(0) == 0 && blockers(1) == 1 && blockers(2) == 1, "mesh feed: each object darkened once: the tiled one by its mesh alone, the others by the game's blockers");
+    { // (XR-10) the per-pixel pass casting the server's meshes (ObjectLegs::Fill's gate with pixelCasts): an object the server
+      // resolved leaves the 3D test even when its model is too big for the tiles; a missing one keeps the game's blockers
+        MeshCasterSet::Set px;
+        px.Apply({1, 0xA}), px.Apply({3, 0xC});
+        MeshCasterSet::Model big;
+        big.pos = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+        big.tri.assign(3 * (MeshCasterSet::kMaxModelTris + 1), 0);
+        px.Fetched(0xA, std::move(big));
+        px.Missing(0xC);
+        RtLampProxy::Mesh none;
+        px.AppendTo(none, lot.worldToLot, 32.0f, 32.0f);
+        RoomLightTests::Room pr = room;
+        const size_t n = ObjectLegs::MarkMeshed(pr.rec, feed, [&px](uint64_t id) { return px.InTiles(id) || px.ServerCasts(id); });
+        Check(n == 1 && pr.rec[0].meshed && !pr.rec[1].meshed && !pr.rec[2].meshed && !px.InTiles(1) && px.ServerCasts(1) && !px.ServerCasts(3) && !px.ServerCasts(7),
+              "mesh feed: with the per-pixel pass casting, the record of an object the server resolved (too big for the tiles) leaves the 3D test; missing and unknown ones stay");
+        RtLampGpu::BlockerTable pt;
+        const int ph = pt.Append(pr);
+        const int pf = static_cast<int>(pt.rows[ph].v[0]);
+        Check(static_cast<int>(pt.rows[pf + 1].v[1]) == 0 && static_cast<int>(pt.rows[pf + 3].v[1]) == 1 && static_cast<int>(pt.rows[pf + 5].v[1]) == 1,
+              "mesh feed: each object darkened once with the per-pixel pass: its mesh there, the game's blockers for the rest");
+    }
+    // its object leaves: the tiles hold it until their next upload, then its record is no longer marked
+    feed.Remove(1);
+    feed.Take(out);
+    Check(out.size() == 1 && out[0].flags == 1, "mesh feed: a removed object goes out removed");
+    set.Apply({1, 0xA, {}, true});
+    RtLampProxy::Mesh mesh2;
+    set.AppendTo(mesh2, lot.worldToLot, 32.0f, 32.0f);
+    ObjectLegs::MarkMeshed(room.rec, feed, [&set](uint64_t id) { return set.InTiles(id); });
+    Check(!room.rec[0].meshed && !set.InTiles(1), "mesh feed: once the tiles drop the object, its record (if read again) keeps the game's blockers");
+    MeshMarkChecks();
+}
 static void StairSetChecks() {
     using MeshOcclusion::Triangle;
     RtLampProxy::Lot lot;
@@ -5036,7 +5402,14 @@ void FloorLineSweep() {
     Check(ok && n > 0 && leaks == 0 && worst < 0.05, "floor line: the GPU's walk at the moved point leaks light through the slab or leaves the reference");
 }
 
+#include "path_trace.h"
+#include "cascades_check.h"
+
 int main(int argc, char** argv) {
+    for (int i = 1; i < argc; i++)
+        if (std::string(argv[i]) == "--pathref") return PathRef::Main(argc, argv); // (real-time GI S0-02: CPU only, no device)
+    for (int i = 1; i < argc; i++)
+        if (std::string(argv[i]) == "--cascades") return CascadesRef::Main(argc, argv); // (real-time GI X-05: CPU only, no device)
     TileDragBench();
     {
         std::printf("\n[kept shadow atlas] 120 and 130 lamps\n");
@@ -5067,9 +5440,13 @@ int main(int argc, char** argv) {
         Check(all && a == b, "the occluders' lot: equality misses a field (a lot read again would keep a stale generation)");
     }
     StairSetChecks();
+    MeshCasterSetChecks();
+    MeshFeedChecks();
     FloorGridTwinChecks();
+    PlanFieldChecks();
     std::vector<std::string> worlds;
     int maxLamps = 12;
+    bool giOnly = false;
     char* dbg = nullptr;
     size_t dbgLen = 0;
     g_debug = _dupenv_s(&dbg, &dbgLen, "RT_DEBUG") == 0 && dbg;
@@ -5078,7 +5455,13 @@ int main(int argc, char** argv) {
         const std::string a = argv[i];
         if (a == "--lamps" && i + 1 < argc) maxLamps = std::atoi(argv[++i]);
         else if (a == "--probe") g_allLamps = true;
+        else if (a == "--gi") giOnly = true;
         else worlds.push_back(a);
+    }
+    if (giOnly) { // (real-time GI's CPU reference only: no device)
+        GiLayersCheck(worlds, maxLamps);
+        std::printf("\n%d checks, %d failures\n", checks, failures);
+        return failures ? 1 : 0;
     }
     if (g_allLamps) { // (the probe only: where the lamp heads sit against the occluders, no device)
         std::vector<Scene> scenes;
@@ -5120,6 +5503,7 @@ int main(int argc, char** argv) {
 #endif
     UnderDeltaCheck();
     BakeStamp4Check();
+    GiLayersCheck(worlds, maxLamps);
     std::vector<Scene> scenes;
     scenes.push_back(Synthetic());
     scenes.push_back(IndoorRooms());

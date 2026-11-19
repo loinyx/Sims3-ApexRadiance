@@ -1,0 +1,5 @@
+/src/
+/out/
+/tools/
+*.log
+/test/fill_spv.h

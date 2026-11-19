@@ -35,6 +35,10 @@ HRESULT RawGetDepthStencilSurface(IDirect3DDevice9* d, IDirect3DSurface9** s) { 
 #include "game_addresses.h"
 namespace GameAddr { uintptr_t Get(Id) { return 0; } }
 namespace ShaderCache { bool PrecompileComplete() { return true; } }
+bool eyeKnown = false;
+float eyeAt[3] = {};
+namespace LotLightingMotion { bool CameraEye(float out[3]) { if (eyeKnown) std::memcpy(out, eyeAt, sizeof eyeAt); return eyeKnown; } }
+#include <cstring>
 #include "features/post_scene.cpp"
 std::vector<int> applied;
 void Ao(IDirect3DDevice9*) { applied.push_back(10); }
@@ -128,6 +132,50 @@ int main() {
     g_plainWanted=0;VoteCamera(dev);Check(!g_plainVpValid,"no plain vote winner unless a recording tool wants it");
     g_plainWanted=1;VoteCamera(dev);Check(g_plainVpValid&&std::memcmp(g_plainVp,projection,sizeof got)==0,"plain vote winner taken directly");
     g_cameraWanted=0;g_plainWanted=0;
+    // Bridge runs: c40 holds no camera (a skinned draw's bones there, or the pick pass's off-centre projection), the
+    // view-projection sits at c84, and a lot's object-to-clip block (same projection shape and near) at c0 and c180
+    {
+        const double e[3]={927.0,70.9,1200.0}, yaw=0.6, pitch=-0.5, A=1.00008, nz=0.25/1.00008, tx=0.9, ty=1.2;
+        const double f[3]={std::cos(pitch)*std::sin(yaw),std::sin(pitch),std::cos(pitch)*std::cos(yaw)}, r[3]={std::cos(yaw),0,-std::sin(yaw)};
+        const double u[3]={f[1]*r[2]-f[2]*r[1],f[2]*r[0]-f[0]*r[2],f[0]*r[1]-f[1]*r[0]};
+        const auto dot=[](const double a[3],const double b[3]){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
+        const double V[4][4]={{r[0],r[1],r[2],-dot(r,e)},{u[0],u[1],u[2],-dot(u,e)},{f[0],f[1],f[2],-dot(f,e)},{0,0,0,1}};
+        const double P[4][4]={{tx,0,0,0},{0,ty,0,0},{0,0,A,-A*nz},{0,0,1,0}};
+        const double L[4][4]={{std::cos(1.1),0,std::sin(1.1),640},{0,1,0,62},{-std::sin(1.1),0,std::cos(1.1),1180},{0,0,0,1}}; // a lot's placement
+        double vp[4][4]={},oc[4][4]={};
+        for(int i=0;i<4;i++)for(int j=0;j<4;j++)for(int k=0;k<4;k++)vp[i][j]+=P[i][k]*V[k][j];
+        for(int i=0;i<4;i++)for(int j=0;j<4;j++)for(int k=0;k<4;k++)oc[i][j]+=vp[i][k]*L[k][j];
+        float VPf[4][4],OCf[4][4],MIRf[4][4],bones[4][4]={{1,0,0,3},{0,1,0,4},{0,0,1,5},{0,0,0,0}},n=0;
+        for(int i=0;i<4;i++)for(int j=0;j<4;j++)VPf[i][j]=float(vp[i][j]),OCf[i][j]=float(oc[i][j]);
+        // the water reflection's copy: the camera mirrored in the plane y = 62
+        double M[4][4]={{1,0,0,0},{0,-1,0,124},{0,0,1,0},{0,0,0,1}},mv[4][4]={};
+        for(int i=0;i<4;i++)for(int j=0;j<4;j++)for(int k=0;k<4;k++)mv[i][j]+=vp[i][k]*M[k][j];
+        for(int i=0;i<4;i++)for(int j=0;j<4;j++)MIRf[i][j]=float(mv[i][j]);
+        Check(NearFromBlock(VPf,n)&&std::fabs(n-0.25f)<1e-4f&&NearFromBlock(OCf,n)&&std::fabs(n-0.25f)<1e-4f,"fixture: both blocks have a projection's shape and near 0.25");
+        float p[3];
+        Check(CameraOfBlock(VPf,p)&&std::fabs(p[0]-927.0f)<0.05f&&std::fabs(p[1]-70.9f)<0.05f&&std::fabs(p[2]-1200.0f)<0.05f,"camera position of the view-projection");
+        auto bridgeFrame=[&](const float (*cam)[4],UINT camReg,int draws) {
+            g_cameraWanted=1;frame(0);
+            dev->SetVertexShaderConstantF(40,&bones[0][0],4);
+            for(int i=0;i<draws;++i) { dev->SetVertexShaderConstantF(0,&OCf[0][0],4);dev->SetVertexShaderConstantF(180,&OCf[0][0],4);if(i%2==0)dev->SetVertexShaderConstantF(camReg,&cam[0][0],4);draw(); }
+        };
+        float got[4][4]={};
+        eyeKnown=false;bridgeFrame(VPf,84,kNearDraws);
+        Check(!PostScene::CameraViewProj(got),"eye unknown: no camera from other registers (c40 rule as before)");
+        eyeKnown=true;eyeAt[0]=927.0f+1.5f;eyeAt[1]=70.9f;eyeAt[2]=1200.0f-1.0f; // the eye read trails the camera a little
+        bridgeFrame(VPf,84,kNearDraws);
+        Check(PostScene::CameraViewProj(got)&&std::memcmp(got,VPf,sizeof got)==0,"view-projection found at c84 over the eye, the lot's block left out");
+        Check(std::fabs(PostScene::CameraNear()-0.25f)<1e-4f&&g_nearDraws==kNearDraws,"near of the found camera; no extra votes once found");
+        Check(PostScene::DiagText().find("nearest scanned camera")!=std::string::npos,"diagnostics name the eye check");
+        g_cameraWanted=1;frame(0);dev->SetVertexShaderConstantF(40,&bones[0][0],4);dev->SetVertexShaderConstantF(84,&bones[0][0],4);
+        for(int i=0;i<kNearDraws+8;++i) { dev->SetVertexShaderConstantF(0,&OCf[0][0],4);if(i==kNearDraws+4)dev->SetVertexShaderConstantF(12,&VPf[0][0],4);draw(); }
+        Check(PostScene::CameraViewProj(got)&&std::memcmp(got,VPf,sizeof got)==0&&g_nearDraws==kNearDraws+5,"votes go on past 24 draws until the camera shows up");
+        bridgeFrame(MIRf,4,kNearDraws);
+        Check(PostScene::CameraViewProj(got)&&std::memcmp(got,MIRf,sizeof got)==0,"mirrored reflection camera accepted (same place over the water)");
+        eyeAt[0]=640.0f;eyeAt[2]=1180.0f;bridgeFrame(VPf,84,kNearDraws);
+        Check(!PostScene::CameraViewProj(got),"an eye far from the camera trusts nothing");
+        eyeKnown=false;g_cameraWanted=0;
+    }
     snapshot->Release();bb->Release();
     other->Release();expectedDepth->Release();expectedDepth=nullptr;dev->Release();d3d->Release();DestroyWindow(window);
     std::printf("PASS: %d native post-scene checks\n",checks);

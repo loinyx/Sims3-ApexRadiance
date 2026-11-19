@@ -1,0 +1,20 @@
+From: Apex Radiance
+Subject: [PATCH 0006] dxvk: vulkanMemoryModelDeviceScope is enabled when the driver has it
+
+DXVK enables vulkanMemoryModel but not vulkanMemoryModelDeviceScope. glslang compiles a plain atomicAdd with Device
+scope, which is invalid SPIR-V on such a device (VUID-RuntimeSpirv-vulkanMemoryModel-06265): the per-pixel pass
+kernel recorded through patch 0004 counts its rays that way. Optional, so a device without it is created as before.
+---
+diff --git a/src/dxvk/dxvk_device_info.cpp b/src/dxvk/dxvk_device_info.cpp
+index 8af11ae..153b279 100644
+--- a/src/dxvk/dxvk_device_info.cpp
++++ b/src/dxvk/dxvk_device_info.cpp
+@@ -905,6 +905,8 @@ namespace dxvk {
+       ENABLE_FEATURE(vk12, timelineSemaphore, true),
+       ENABLE_FEATURE(vk12, uniformBufferStandardLayout, true),
+       ENABLE_FEATURE(vk12, vulkanMemoryModel, true),
++      /* Optional: SPIR-V from glslang uses Device scope for plain atomics (external passes) */
++      ENABLE_FEATURE(vk12, vulkanMemoryModelDeviceScope, false),
+ 
+       ENABLE_FEATURE(vk13, inlineUniformBlock, true),
+       ENABLE_FEATURE(vk13, computeFullSubgroups, true),

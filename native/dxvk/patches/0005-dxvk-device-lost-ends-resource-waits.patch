@@ -1,0 +1,112 @@
+From: Apex Radiance
+Subject: [PATCH 0005] dxvk: resource and fence waits stop on device loss, locks return D3DERR_DEVICELOST
+
+After device loss the submission thread drops every command list without releasing its resources, so
+DxvkDevice::waitForResource waited forever and a Direct3D 9 lock that needed the GPU (LockRect, Lock) hung its
+thread. The wait now also ends when the submission queue reports VK_ERROR_DEVICE_LOST, the submission thread wakes the
+waiters when a submission fails, and LockImage and LockBuffer return D3DERR_DEVICELOST after such a wait. A lost device
+never signals a fence either: DxvkDevice::waitForFence waits in 100 ms steps and returns on device loss (sync::Fence
+gets a timed wait), and the staging throttle of D3D9 (ThrottleAllocation) no longer waits once the device is lost.
+---
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+index eb09412..8cc73ae 100644
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -4858,7 +4858,8 @@ namespace dxvk {
+     }
+ 
+     // Wait for staging memory to get recycled.
+-    if (stagingBufferAllocated > MaxMemoryInFlight)
++    if (stagingBufferAllocated > MaxMemoryInFlight
++     && m_dxvkDevice->getDeviceStatus() != VK_ERROR_DEVICE_LOST)
+       m_dxvkDevice->waitForFence(*m_stagingBufferFence, stagingBufferAllocated - MaxMemoryInFlight);
+   }
+ 
+@@ -5141,6 +5142,9 @@ namespace dxvk {
+       // Wait until the buffer is idle which may include the copy (and resolve) we just issued.
+       if (!WaitForResource(*mappedBuffer, pResource->GetMappingBufferSequenceNumber(Subresource), Flags))
+         return D3DERR_WASSTILLDRAWING;
++
++      if (m_dxvkDevice->getDeviceStatus() == VK_ERROR_DEVICE_LOST)
++        return D3DERR_DEVICELOST;
+     }
+ 
+     const bool atiHack = desc.Format == D3D9Format::ATI1 || desc.Format == D3D9Format::ATI2;
+@@ -5573,6 +5577,9 @@ namespace dxvk {
+         if (!WaitForResource(*mappingBuffer, pResource->GetMappingBufferSequenceNumber(), Flags))
+           return D3DERR_WASSTILLDRAWING;
+ 
++        if (m_dxvkDevice->getDeviceStatus() == VK_ERROR_DEVICE_LOST)
++          return D3DERR_DEVICELOST;
++
+         pResource->SetNeedsReadback(false);
+       }
+     }
+diff --git a/src/dxvk/dxvk_device.cpp b/src/dxvk/dxvk_device.cpp
+index 0221825..688c5e6 100644
+--- a/src/dxvk/dxvk_device.cpp
++++ b/src/dxvk/dxvk_device.cpp
+@@ -663,7 +663,11 @@ namespace dxvk {
+ 
+     auto t0 = dxvk::high_resolution_clock::now();
+ 
+-    fence.wait(value);
++    // A lost device never signals the fence again
++    while (!fence.wait(value, std::chrono::milliseconds(100))) {
++      if (m_submissionQueue.getLastError() == VK_ERROR_DEVICE_LOST)
++        break;
++    }
+ 
+     auto t1 = dxvk::high_resolution_clock::now();
+     auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+@@ -677,8 +681,11 @@ namespace dxvk {
+     if (resource.isInUse(access)) {
+       auto t0 = dxvk::high_resolution_clock::now();
+ 
+-      m_submissionQueue.synchronizeUntil([&resource, access] {
+-        return !resource.isInUse(access);
++      // After device loss the submissions holding the resource never
++      // complete, so stop waiting instead of hanging the caller forever
++      m_submissionQueue.synchronizeUntil([this, &resource, access] {
++        return !resource.isInUse(access)
++          || m_submissionQueue.getLastError() == VK_ERROR_DEVICE_LOST;
+       });
+ 
+       auto t1 = dxvk::high_resolution_clock::now();
+diff --git a/src/dxvk/dxvk_queue.cpp b/src/dxvk/dxvk_queue.cpp
+index e705ed9..ebed1a4 100644
+--- a/src/dxvk/dxvk_queue.cpp
++++ b/src/dxvk/dxvk_queue.cpp
+@@ -212,6 +212,9 @@ namespace dxvk {
+ 
+           if (m_lastError != VK_ERROR_DEVICE_LOST)
+             m_device->waitForIdle();
++
++          // Wake up threads waiting for resources so they can see the error
++          m_finishCond.notify_all();
+         }
+ 
+         m_submitQueue.pop();
+diff --git a/src/util/sync/sync_signal.h b/src/util/sync/sync_signal.h
+index e463610..49eb67c 100644
+--- a/src/util/sync/sync_signal.h
++++ b/src/util/sync/sync_signal.h
+@@ -116,6 +116,18 @@ namespace dxvk::sync {
+       });
+     }
+ 
++    // Returns false when the timeout passes before the fence reaches the value
++    template<typename Rep, typename Period>
++    bool wait(uint64_t value, const std::chrono::duration<Rep, Period>& timeout) {
++      if (value <= m_value.load(std::memory_order_acquire))
++        return true;
++
++      std::unique_lock<dxvk::mutex> lock(m_mutex);
++      return m_cond.wait_for(lock, timeout, [this, value] {
++        return value <= m_value.load(std::memory_order_acquire);
++      });
++    }
++
+   private:
+ 
+     std::atomic<uint64_t>    m_value;

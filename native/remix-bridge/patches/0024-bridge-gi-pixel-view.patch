@@ -1,0 +1,256 @@
+0024: the server's view of a client texture (real-time GI work package WP11). Client export RemixBridge_GiPixelView(src, dst) sends Bridge_GiPixelView with two texture ids; the server's GiPixelPass::view (native/remix-bridge/gi/gi_pixel_pass.h) blits the renderer's image of src into dst through DXVK's ID3D9VkExternalPass, in stream order (nearest at the same size, linear otherwise), so the G-buffer's albedo + id target reaches the server's Vulkan device. Views and refused views are two words of the GiPixel shared block (views, viewFaults) and a [GiPixel] views= log line. Runs only when the per-pixel pass is on. Test: test_gi_pixel_device (test-gi-pixel.cmd) checks a same-size and a quarter-size view of a two-colour A8R8G8B8 target and a refused depth source.
+Applies after 0023.
+diff --git a/bridge/src/client/d3d9_gi_pixel.cpp b/bridge/src/client/d3d9_gi_pixel.cpp
+index a560e52a..877d7075 100644
+--- a/bridge/src/client/d3d9_gi_pixel.cpp
++++ b/bridge/src/client/d3d9_gi_pixel.cpp
+@@ -37,6 +37,10 @@
+ //   of them null.
+ //   S_OK when sent. E_NOTIMPL unless the state is on. D3DERR_INVALIDCALL for a wrong size or no depth.
+ //   A pass the server refuses shows in the fault counter, not here.
++// RemixBridge_GiPixelView(src, dst) sends the server's view of a client texture (a G-buffer target, work package WP11):
++//   the server blits src into dst on its renderer in stream order (nearest at the same size, linear otherwise). Both
++//   colour textures; dst a render target texture. S_OK when sent, E_NOTIMPL unless the state is on, D3DERR_INVALIDCALL
++//   for a null texture. A view the server refuses counts in the viewFaults word.
+ // RemixBridge_GiPixelReadCounters(out, count) copies the server's words (util_gi_pixel.h GiPixelShared), state first.
+ // The server drops its pass objects at device reset; the next pass builds them again.
+ 
+@@ -96,6 +100,22 @@ extern "C" {
+     return S_OK;
+   }
+ 
++  HRESULT __stdcall RemixBridge_GiPixelView(IDirect3DTexture9* pSrc, IDirect3DTexture9* pDst) {
++    if (pSrc == nullptr || pDst == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    bridge_util::GiPixelShared* const pShared = s_openSent ? answered() : nullptr;
++    if (pShared == nullptr || pShared->state.load(std::memory_order_acquire) != bridge_util::GiPixelOn) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    ClientMessage c(Commands::Bridge_GiPixelView, bridge_cast<Direct3DTexture9_LSS*>(pSrc)->getId(), Commands::FlagBits::AsyncResult);
++    c.send_data(bridge_cast<Direct3DTexture9_LSS*>(pDst)->getId());
++    return S_OK;
++  }
++
+   HRESULT __stdcall RemixBridge_GiPixelReadCounters(uint32_t* pCounters, uint32_t count) {
+     if (pCounters == nullptr) {
+       return D3DERR_INVALIDCALL;
+diff --git a/bridge/src/client/d3d9_lss.def b/bridge/src/client/d3d9_lss.def
+index 05bb53e6..8a8ba0b9 100644
+--- a/bridge/src/client/d3d9_lss.def
++++ b/bridge/src/client/d3d9_lss.def
+@@ -35,6 +35,7 @@ EXPORTS
+   RemixBridge_GiPixelOpen
+   RemixBridge_GiPixelPass
+   RemixBridge_GiPixelReadCounters
++  RemixBridge_GiPixelView
+ 
+   RemixBridge_GiObjects
+   RemixBridge_GiQueryPoints
+diff --git a/bridge/src/server/gi_pixel_server.h b/bridge/src/server/gi_pixel_server.h
+index 32294c0c..328d8217 100644
+--- a/bridge/src/server/gi_pixel_server.h
++++ b/bridge/src/server/gi_pixel_server.h
+@@ -56,6 +56,8 @@ namespace gi_pixel {
+     pShared->height = c.height;
+     pShared->meshes = c.meshes;
+     pShared->models = c.models;
++    pShared->views = g_pass.views();
++    pShared->viewFaults = g_pass.viewFaults();
+     if (log && c.passes != g_loggedAt) {
+       g_loggedAt = c.passes;
+       char line[256];
+@@ -135,6 +137,23 @@ namespace gi_pixel {
+     publish(FAILED(hr) ? c.faults == 1 : c.passes == 60 || c.passes % 3600 == 0);
+   }
+ 
++  // Bridge_GiPixelView (WP11): the server's view of a client texture. Counted; a refused view logs its first fault.
++  inline void view(const ResourceMap& resources, uint32_t srcId, uint32_t dstId) {
++    if (!g_pass.ready()) {
++      return;
++    }
++    const uint32_t faults = g_pass.viewFaults();
++    g_pass.view(find(resources, srcId), find(resources, dstId));
++    if (g_pass.viewFaults() == 1 && faults == 0) {
++      bridge_util::Logger::info(bridge_util::format_string("[GiPixel] view refused: %s", g_pass.lastFault()));
++    }
++    publish(false);
++    const uint32_t views = g_pass.views();
++    if (views == 60 || (views != 0 && views % 3600 == 0)) {
++      bridge_util::Logger::info(bridge_util::format_string("[GiPixel] views=%u viewFaults=%u", views, g_pass.viewFaults()));
++    }
++  }
++
+   // A texture is about to go: the pass must not keep a view of it.
+   inline void forget(const ResourceMap& resources, uint32_t id) {
+     const auto it = resources.find(id);
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index 6d72bfcc..f32e0bb2 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -3062,6 +3062,13 @@ void ProcessDeviceCommandQueue() {
+         gi_pixel::pass(gpD3DResources, depthHandle, classHandle, outputHandles, pBlock, blockSize);
+         break;
+       }
++      case Bridge_GiPixelView:
++      {
++        GET_HND(srcHandle);
++        PULL_U(dstHandle);
++        gi_pixel::view(gpD3DResources, srcHandle, dstHandle);
++        break;
++      }
+       /*
+        * BridgeApi commands
+        */
+diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
+index 98bce8fb..b26b2332 100644
+--- a/bridge/src/util/util_commands.h
++++ b/bridge/src/util/util_commands.h
+@@ -71,6 +71,7 @@ namespace Commands {
+     // Per-pixel shadow pass exports (client/d3d9_gi_pixel.cpp), sent with FlagBits::AsyncResult.
+     Bridge_GiPixelOpen,
+     Bridge_GiPixelPass,
++    Bridge_GiPixelView,
+     // Mesh casters (client/d3d9_gi.cpp RemixBridge_GiObjects), sent with FlagBits::AsyncResult.
+     Bridge_GiObjects,
+     Bridge_GiQuery,
+@@ -515,6 +516,7 @@ namespace Commands {
+     case Bridge_GiCancel: return "Bridge_GiCancel";
+     case Bridge_GiPixelOpen: return "Bridge_GiPixelOpen";
+     case Bridge_GiPixelPass: return "Bridge_GiPixelPass";
++    case Bridge_GiPixelView: return "Bridge_GiPixelView";
+     case Bridge_GiObjects: return "Bridge_GiObjects";
+     case Bridge_GiQuery: return "Bridge_GiQuery";
+     case Bridge_GiMeshFetch: return "Bridge_GiMeshFetch";
+diff --git a/bridge/src/util/util_gi_pixel.h b/bridge/src/util/util_gi_pixel.h
+index f999238b..b3550c21 100644
+--- a/bridge/src/util/util_gi_pixel.h
++++ b/bridge/src/util/util_gi_pixel.h
+@@ -50,7 +50,9 @@ namespace bridge_util {
+     uint32_t height;
+     uint32_t meshes;              // mesh caster instances of the last pass
+     uint32_t models;              // models with a bottom level on the renderer's device
+-    uint32_t reserved[5];
++    uint32_t views;               // RemixBridge_GiPixelView blits done (WP11)
++    uint32_t viewFaults;          // views refused
++    uint32_t reserved[3];
+   };
+   static_assert(sizeof(GiPixelShared) == GiPixelShared::kWords * 4, "GiPixelShared must have the same layout in both processes");
+ 
+diff --git a/bridge/test/rtx/unit/test_gi_pixel_device.cpp b/bridge/test/rtx/unit/test_gi_pixel_device.cpp
+index 19aa4757..fd380703 100644
+--- a/bridge/test/rtx/unit/test_gi_pixel_device.cpp
++++ b/bridge/test/rtx/unit/test_gi_pixel_device.cpp
+@@ -27,6 +27,8 @@
+ // REMIX_GI_TEST_DXVK: a d3d9vk_x64.dll for the server. With a library that records external passes and has ray queries
+ // the state must be on. Without the variable, or with a stock library, the state must be off (stock renderer) and the
+ // pass export must refuse.
++// The view export (WP11): an A8R8G8B8 render target with two colours, blitted by the server into A16B16G16R16F targets
++// of the same and of a quarter size, read back; a depth source is refused and counted.
+ 
+ #include <cmath>
+ #include <cstdio>
+@@ -49,9 +51,10 @@ namespace {
+   using PFN_GiPixelOpen = HRESULT (__stdcall*)(uint32_t*);
+   using PFN_GiPixelPass = HRESULT (__stdcall*)(const void*, uint32_t, IDirect3DTexture9*, IDirect3DTexture9*, IDirect3DTexture9* const*);
+   using PFN_GiPixelReadCounters = HRESULT (__stdcall*)(uint32_t*, uint32_t);
++  using PFN_GiPixelView = HRESULT (__stdcall*)(IDirect3DTexture9*, IDirect3DTexture9*);
+ 
+   // Word indices of RemixBridge_GiPixelReadCounters (util_gi_pixel.h).
+-  enum Counter { kState, kPasses, kFaults, kRaysLow, kRaysHigh, kRaysLast, kGpuUs, kWidth, kHeight, kCounterCount };
++  enum Counter { kState, kPasses, kFaults, kRaysLow, kRaysHigh, kRaysLast, kGpuUs, kWidth, kHeight, kMeshes, kModels, kViews, kViewFaults, kCounterCount };
+ 
+   constexpr UINT kWidthFull = 640;
+   constexpr UINT kHeightFull = 360;
+@@ -61,6 +64,7 @@ namespace {
+   PFN_GiPixelOpen g_open = nullptr;
+   PFN_GiPixelPass g_pass = nullptr;
+   PFN_GiPixelReadCounters g_readCounters = nullptr;
++  PFN_GiPixelView g_view = nullptr;
+ 
+   void check(HRESULT result, const char* pCall) {
+     if (FAILED(result)) {
+@@ -217,7 +221,62 @@ namespace {
+     throw std::runtime_error("The server did not answer RemixBridge_GiPixelOpen");
+   }
+ 
++  // The server's view of a client texture: left half one colour, right half another (alpha = a material id byte).
++  void checkView(IDirect3DDevice9* pDevice) {
++    ComPtr<IDirect3DTexture9> pSrc;
++    ComPtr<IDirect3DSurface9> pSrcSurface;
++    check(pDevice->CreateTexture(kWidthFull, kHeightFull, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &pSrc, nullptr), "CreateTexture (view source)");
++    check(pSrc->GetSurfaceLevel(0, &pSrcSurface), "GetSurfaceLevel (view source)");
++    const RECT left = { 0, 0, LONG(kWidthFull / 2), LONG(kHeightFull) };
++    const RECT right = { LONG(kWidthFull / 2), 0, LONG(kWidthFull), LONG(kHeightFull) };
++    const D3DCOLOR colours[2] = { D3DCOLOR_ARGB(0x07, 0x40, 0x80, 0xC0), D3DCOLOR_ARGB(0xFE, 0xFF, 0x20, 0x00) };
++    check(pDevice->ColorFill(pSrcSurface.Get(), &left, colours[0]), "ColorFill (left)");
++    check(pDevice->ColorFill(pSrcSurface.Get(), &right, colours[1]), "ColorFill (right)");
++    const UINT sizes[2][2] = { { kWidthFull, kHeightFull }, { kWidthQuarter, kHeightQuarter } };
++    for (const auto& size : sizes) {
++      ComPtr<IDirect3DTexture9> pDst;
++      ComPtr<IDirect3DSurface9> pDstSurface;
++      ComPtr<IDirect3DSurface9> pReadback;
++      check(pDevice->CreateTexture(size[0], size[1], 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &pDst, nullptr), "CreateTexture (view target)");
++      check(pDst->GetSurfaceLevel(0, &pDstSurface), "GetSurfaceLevel (view target)");
++      check(pDevice->CreateOffscreenPlainSurface(size[0], size[1], D3DFMT_A16B16G16R16F, D3DPOOL_SYSTEMMEM, &pReadback, nullptr), "CreateOffscreenPlainSurface (view)");
++      check(g_view(pSrc.Get(), pDst.Get()), "RemixBridge_GiPixelView");
++      check(pDevice->GetRenderTargetData(pDstSurface.Get(), pReadback.Get()), "GetRenderTargetData (view)");
++      D3DLOCKED_RECT locked;
++      check(pReadback->LockRect(&locked, nullptr, D3DLOCK_READONLY), "LockRect (view)");
++      // A pixel well inside each half; the half-float target keeps an 8-bit value within 1/1024
++      const UINT xs[2] = { size[0] / 4, size[0] * 3 / 4 };
++      float worst = 0;
++      for (int half = 0; half < 2; ++half) {
++        const uint16_t* const pHalf = reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(locked.pBits) + (size[1] / 2) * locked.Pitch) + xs[half] * 4;
++        const D3DCOLOR c = colours[half];
++        const float want[4] = { ((c >> 16) & 255) / 255.0f, ((c >> 8) & 255) / 255.0f, (c & 255) / 255.0f, (c >> 24) / 255.0f };
++        for (int channel = 0; channel < 4; ++channel) {
++          worst = std::fmax(worst, std::fabs(halfToFloat(pHalf[channel]) - want[channel]));
++        }
++      }
++      pReadback->UnlockRect();
++      std::printf("View %ux%u: worst channel error %.5f.\n", size[0], size[1], worst);
++      require(worst < 1.0f / 1024, "The server's view equals the client's texture");
++    }
++    ComPtr<IDirect3DTexture9> pDepth;
++    ComPtr<IDirect3DTexture9> pDst;
++    check(pDevice->CreateTexture(64, 64, 1, D3DUSAGE_DEPTHSTENCIL, static_cast<D3DFORMAT>(MAKEFOURCC('I', 'N', 'T', 'Z')), D3DPOOL_DEFAULT, &pDepth, nullptr), "CreateTexture (INTZ, view)");
++    check(pDevice->CreateTexture(64, 64, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &pDst, nullptr), "CreateTexture (view target)");
++    check(g_view(pDepth.Get(), pDst.Get()), "RemixBridge_GiPixelView (depth)");
++    pDevice->Present(nullptr, nullptr, nullptr, nullptr);
++    uint32_t counters[kCounterCount] = {};
++    for (int frame = 0; frame < 100 && counters[kViews] + counters[kViewFaults] < 3; ++frame) {
++      check(g_readCounters(counters, kCounterCount), "RemixBridge_GiPixelReadCounters");
++      pDevice->Present(nullptr, nullptr, nullptr, nullptr);
++      Sleep(5);
++    }
++    std::printf("[GiPixel] views=%u viewFaults=%u\n", counters[kViews], counters[kViewFaults]);
++    require(counters[kViews] == 2 && counters[kViewFaults] == 1, "Two views done, the depth source refused");
++  }
++
+   void runOn(IDirect3DDevice9* pDevice) {
++    checkView(pDevice);
+     Scene scene;
+     ComPtr<IDirect3DSurface9> pReadback;
+     check(pDevice->CreateOffscreenPlainSurface(kWidthQuarter, kHeightQuarter, D3DFMT_A16B16G16R16F, D3DPOOL_SYSTEMMEM, &pReadback, nullptr),
+@@ -283,7 +342,8 @@ int main() {
+     g_open = reinterpret_cast<PFN_GiPixelOpen>(GetProcAddress(hClient, "RemixBridge_GiPixelOpen"));
+     g_pass = reinterpret_cast<PFN_GiPixelPass>(GetProcAddress(hClient, "RemixBridge_GiPixelPass"));
+     g_readCounters = reinterpret_cast<PFN_GiPixelReadCounters>(GetProcAddress(hClient, "RemixBridge_GiPixelReadCounters"));
+-    if (g_open == nullptr || g_pass == nullptr || g_readCounters == nullptr) {
++    g_view = reinterpret_cast<PFN_GiPixelView>(GetProcAddress(hClient, "RemixBridge_GiPixelView"));
++    if (g_open == nullptr || g_pass == nullptr || g_readCounters == nullptr || g_view == nullptr) {
+       throw std::runtime_error("The client does not export the per-pixel pass functions");
+     }
+     const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));
+@@ -314,6 +374,7 @@ int main() {
+       ComPtr<IDirect3DTexture9> pDepth;
+       check(pDevice->CreateTexture(64, 64, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &pDepth, nullptr), "CreateTexture");
+       require(g_pass(&block, sizeof(block), pDepth.Get(), nullptr, nullptr) == E_NOTIMPL, "The pass export refuses while the state is off");
++      require(g_view(pDepth.Get(), pDepth.Get()) == E_NOTIMPL, "The view export refuses while the state is off");
+     }
+     passed = true;
+   } catch (const std::exception& error) {

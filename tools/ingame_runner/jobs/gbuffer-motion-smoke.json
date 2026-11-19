@@ -1,0 +1,218 @@
+{
+  "id": "gbuffer-motion-smoke",
+  "description": "G-buffer smoke (developer build: -Asi Release\\ApexRadiance.asi), GB-01 to GB-05: the capability line, camera motion vectors, the scene's extra render targets written by the ps_3_0 and ps_2_x copies, the colour-coded views and Ambient Occlusion's two G-buffer consumers. Each variant is one load: one F8 picture with a still camera, then one minute of camera pan. -AB runs every variant in the order list; without it the motion view runs. Pass: no crash, the [GBuffer] and [AO] lines of the variant, a Scene line with patched draws and no failed bind, no shader, target or history error. Read after the run: the pictures (albedo: objects in their texture colour, and since GB-04 Sims' skin and clothes and the painted ground too instead of mid grey; normal: colours follow the surface; material and class: flat colours per object; unwritten: red where no copy wrote), the UI absent from every view, no trails behind glass or particles. ao-normals: Ambient Occlusion with the scene's shading normals, compared with the on load's picture: no dashed shade along counter tops and seams, no new dark rims. ao-temporal: the same with the temporal filter: during the pan no trails on walls, Sims and trees keep their shade without smearing (motion class 3 starts a new history), the restarts count small next to temporal. movers (GB-05): the motion view with the movers' vectors: walking Sims and turning objects show their own colour (blue full) instead of the camera's, no blue halo where a Sim left (disocclusion). taa (GB-05): temporal AA with movers and Ambient Occlusion's temporal filter: still picture without stair-stepped edges or jitter shimmer, the menu and UI sharp and unmoved, during the pan no trails behind Sims, AO shade without the 4x4 pattern. bridge (WP11, Apex + bridge only): view 7 draws the albedo target after the bridge server blitted it on its renderer (RemixBridge_GiPixelView, bridge patch 0024): the picture must equal the albedo variant's (same colours, no black or stale frame), the Bridge view line counts views with no fault.",
+  "save": "ApexTest-Town",
+  "toml": {
+    "ui": {
+      "developer_mode": true,
+      "screenshot_key": "F8"
+    },
+    "patches.GBuffer": {
+      "enabled": true,
+      "view": 1
+    }
+  },
+  "variants": {
+    "albedo": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 2
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=albedo$",
+        "\\[GBuffer\\] Scene: frames=[1-9]\\d* patched=[1-9]\\d* .* bindFailed=0 maskToggles=\\d+ view=albedo$"
+      ]
+    },
+    "normal": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 3
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=normal$",
+        "\\[GBuffer\\] Scene: frames=[1-9]\\d* patched=[1-9]\\d* .* bindFailed=0 maskToggles=\\d+ view=normal$"
+      ]
+    },
+    "material": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 4
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=material$",
+        "\\[GBuffer\\] Scene: frames=[1-9]\\d* patched=[1-9]\\d* .* bindFailed=0 maskToggles=\\d+ view=material$"
+      ]
+    },
+    "class": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 5
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=class$",
+        "\\[GBuffer\\] Scene: frames=[1-9]\\d* patched=[1-9]\\d* .* bindFailed=0 maskToggles=\\d+ view=class$"
+      ]
+    },
+    "unwritten": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 6
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=unwritten$",
+        "\\[GBuffer\\] Scene: frames=[1-9]\\d* patched=[1-9]\\d* .* bindFailed=0 maskToggles=\\d+ view=unwritten$"
+      ]
+    },
+    "on": {
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=motion$",
+        "\\[GBuffer\\] Motion pass running: \\d+x\\d+ A16B16G16R16F, view=motion",
+        "\\[GBuffer\\] Scene: frames=[1-9]\\d* patched=[1-9]\\d* .* bindFailed=0 maskToggles=\\d+ view=motion$"
+      ]
+    },
+    "ao-normals": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 0
+        },
+        "patches.AmbientOcclusion": {
+          "enabled": true,
+          "gbufferNormals": true,
+          "temporal": false
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=off$",
+        "\\[AO\\] G-buffer: normals=[1-9]\\d* temporal=0 restarts=0$"
+      ]
+    },
+    "ao-temporal": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 0
+        },
+        "patches.AmbientOcclusion": {
+          "enabled": true,
+          "gbufferNormals": true,
+          "temporal": true
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=off$",
+        "\\[AO\\] Temporal filter running: \\d+x\\d+ history$",
+        "\\[AO\\] G-buffer: normals=[1-9]\\d* temporal=[1-9]\\d* restarts=\\d+$"
+      ],
+      "fail": [
+        "\\[AO\\] Temporal filter off"
+      ]
+    },
+    "movers": {
+      "toml": {
+        "patches.GBuffer": {
+          "movers": true
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera\\+movers view=motion$",
+        "\\[GBuffer\\] Movers: draws=[1-9]\\d* noSlice=\\d+ firstSeen=\\d+ still=\\d+ replayed=[1-9]\\d* noRoom=\\d+ capped=\\d+ frames=[1-9]\\d*$"
+      ]
+    },
+    "taa": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 0,
+          "movers": true,
+          "taa": true
+        },
+        "patches.AmbientOcclusion": {
+          "enabled": true,
+          "gbufferNormals": true,
+          "temporal": true
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera\\+movers view=off taa=on$",
+        "\\[GBuffer\\] TAA running: \\d+x\\d+, 16 jitter phases, sharpen 0\\.25$",
+        "\\[GBuffer\\] TAA: resolved=[1-9]\\d* noInput=\\d+ phases=16 sharpen=0\\.25$",
+        "\\[AO\\] G-buffer: normals=[1-9]\\d* temporal=[1-9]\\d* restarts=\\d+$"
+      ],
+      "fail": [
+        "\\[GBuffer\\] (TAA shaders unavailable|Could not create the \\d+x\\d+ TAA targets)",
+        "\\[AO\\] Temporal filter off"
+      ]
+    },
+    "bridge": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 7
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=bridge$",
+        "\\[GBuffer\\] Bridge view on$",
+        "\\[GBuffer\\] Bridge view: views=[1-9]\\d* viewFaults=0$"
+      ]
+    }
+  },
+  "order": [
+    "on",
+    "albedo",
+    "normal",
+    "material",
+    "class",
+    "unwritten",
+    "ao-normals",
+    "ao-temporal",
+    "movers",
+    "taa",
+    "bridge"
+  ],
+  "expect": [
+    "\\[GBuffer\\] Caps: adapter=\".*\" mrt=\\d+ independentWriteMasks=(yes|no) ",
+    "\\[GBuffer\\] Targets: \\d+x\\d+ A8R8G8B8 albedo \\+ id, A2B10G10R10 normal \\+ roughness \\+ class",
+    "\\[GBuffer\\] Motion: frames=[1-9]\\d* "
+  ],
+  "fail": [
+    "\\[GBuffer\\] (Could not create|Shaders unavailable|Caps: GetDeviceCaps failed|Targets off)",
+    "\\[GBuffer\\] Scene: .* bindFailed=[1-9]",
+    "\\[GBuffer\\] Bridge view off"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 1
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_pan",
+      "lots": 4,
+      "height": 40,
+      "seconds": 60,
+      "passes": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 1.2
+    }
+  ]
+}
