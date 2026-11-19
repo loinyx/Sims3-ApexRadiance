@@ -62,6 +62,19 @@ function Click($name) { $e = Wait-Pressable $name; if (-not $e) { throw "not fou
   elseif ($pats -match 'SelectionItemPattern') { $e.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
   else { $e.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle() }
   Start-Sleep -Milliseconds 900 }
+# a dialog's own button by its template part (PrimaryButton, CloseButton), never the window's caption Close
+function Dialog($part, $secs = 10) {
+  $cond = New-Object System.Windows.Automation.PropertyCondition($A::AutomationIdProperty, $part)
+  $t = [DateTime]::Now.AddSeconds($secs)
+  do {
+    foreach ($scope in @($root, $A::RootElement)) {
+      foreach ($e in $scope.FindAll($TS::Descendants, $cond)) {
+        if ($e.Current.IsEnabled -and -not $e.Current.IsOffscreen) { $e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep -Milliseconds 900; return }
+      }
+    }
+    Start-Sleep -Milliseconds 300
+  } while ([DateTime]::Now -lt $t)
+  throw "no dialog button $part" }
 function Pick($name, [switch]$Add) { $e = Wait-Find $name; if (-not $e) { throw "not found: $name" }
   $sp = $e.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern); if ($Add) { $sp.AddToSelection() } else { $sp.Select() }; Start-Sleep -Milliseconds 900 }
 function Type-Into($name, $text) { $e = Wait-Find $name; if (-not $e) { throw "not found: $name" }
@@ -80,21 +93,28 @@ $first = $names[0]; $second = $names[1]; $third = $names[2]
 Step "open Mods and the Set folder" { Click 'Mods'; Start-Sleep 3; Pick "Set $($src.Count)" } { (Find $first) -ne $null }
 Step "turn a mod off from its details" { Pick $first; Click 'Turn off' } { (Test-Path (Join-Path $off "$first.package")) -and -not (Test-Path (Join-Path $set "$first.package")) }
 Step "turn it back on" { Pick $first; Click 'Turn on' } { (Test-Path (Join-Path $set "$first.package")) -and -not (Test-Path (Join-Path $off "$first.package")) }
-Step "make a tag and give it to a mod" { Pick $second; Click 'Add tag'; Click 'New tag…'; Type-Into 'Tag name' 'Harness'; Click 'Create' } { (Get-Content (Join-Path $data 'Apex Launcher\mod-notes.json') -Raw) -match '"Harness"' }
+Step "make a tag and give it to a mod" { Pick $second; Click 'Add tag'; Click 'New tag…'; Type-Into 'Tag name' 'Harness'; Dialog 'PrimaryButton' } { (Get-Content (Join-Path $data 'Apex Launcher\mod-notes.json') -Raw) -match '"Harness"' }
 Step "notes are kept" { Pick $second; Type-Into 'Notes' 'from the harness'; Pick $third; Pick $second } { (Get-Content (Join-Path $data 'Apex Launcher\mod-notes.json') -Raw) -match 'from the harness' }
 Step "rename a mod in place" { Pick $third; Click 'Rename'; Type-Into 'New name' 'Renamed by harness'; [System.Windows.Forms.SendKeys]::SendWait('{ENTER}') } { (Get-ChildItem $set -Filter '*Renamed by harness.package').Count -eq 1 }
 Step "undo the rename" { Click 'Undo' } { Test-Path (Join-Path $set "$third.package") }
 Step "merge three mods, verified, with a log" {
   Pick $names[3]; Pick $names[4] -Add; Pick $names[5] -Add
-  Click 'Merge into one package…'; Start-Sleep 2; Click 'Merge'; Start-Sleep 6; Click 'Close' } {
+  Click 'Merge into one package…'; Start-Sleep 2; Dialog 'PrimaryButton'; Start-Sleep 6; Dialog 'CloseButton' } {
   (Get-ChildItem $set -Filter '*merged*.package').Count -eq 1 -and (Get-ChildItem (Join-Path $docs 'Mods\Merged (Apex Launcher)') -Recurse -Filter merge.json).Count -eq 1 }
 Step "split the merge back" {
-  $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split…'; Click 'Split'; Start-Sleep 4 } {
+  $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split…'; Dialog 'PrimaryButton'; Start-Sleep 4 } {
   (Get-ChildItem $set -Filter '*merged*.package').Count -eq 0 -and (Test-Path (Join-Path $set "$($names[4]).package")) }
-Step "start a problem-mod hunt" { Click 'Find a problem mod'; Click 'Start'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -ge 2 }
+Step "start a problem-mod hunt" { Click 'Find a problem mod'; Dialog 'PrimaryButton'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -ge 2 }
 Step "stop it: every mod back" { Click 'Stop and put every mod back'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -eq 0 -and (Get-ChildItem $set -Filter *.package).Count -eq $src.Count }
-Step "make a folder" { Click 'New folder'; Type-Into 'New folder' 'Harness folder'; Click 'Create' } { Test-Path (Join-Path $pk 'Set\Harness folder') }
-Step "remove a mod to the Recycle Bin, confirmed" { Pick ("Set {0}" -f (Get-ChildItem $set -Filter *.package).Count); Pick $second; Click 'Remove to the Recycle Bin'; Click 'Remove'; Start-Sleep 2 } { -not (Test-Path (Join-Path $set "$second.package")) }
+Step "make a folder" { Click 'New folder'; Type-Into 'New folder' 'Harness folder'; Dialog 'PrimaryButton' } { Test-Path (Join-Path $pk 'Set\Harness folder') }
+$drop = Join-Path $Out 'drop'; New-Item -ItemType Directory -Force $drop | Out-Null
+Copy-Item (Get-ChildItem $Packages -Filter *.package | Sort-Object Length | Select-Object -Skip 6 -First 1).FullName (Join-Path $drop 'Opened with.package') # (a mod not installed yet)
+Set-Content (Join-Path $drop 'fake.package') 'not a package at all, only text in a file named like one, long enough for a header ........................' -Encoding ascii
+Step "Open with: a second launcher hands two files over, only the real one is installed" {
+  Start-Process $Exe -ArgumentList "`"$(Join-Path $drop 'Opened with.package')`" `"$(Join-Path $drop 'fake.package')`""; Start-Sleep 6
+  Dialog 'PrimaryButton'; Start-Sleep 4; Dialog 'CloseButton' } {
+  (Get-ChildItem $docs -Recurse -Filter 'Opened with.package').Count -eq 1 -and (Get-ChildItem $docs -Recurse -Filter 'fake.package').Count -eq 0 }
+Step "remove a mod to the Recycle Bin, confirmed" { Pick ("Set {0}" -f (Get-ChildItem $set -Recurse -Filter *.package).Count); Pick $second; Click 'Remove to the Recycle Bin'; Dialog 'PrimaryButton'; Start-Sleep 2 } { -not (Test-Path (Join-Path $set "$second.package")) }
 
 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 Write-Output ("steps: {0}, failures: {1}, captures: {2}" -f $step, $fails, $shots)

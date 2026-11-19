@@ -44,7 +44,14 @@ public sealed partial class MainWindow
         await InstallFilesAsync(files);
     }
 
+    // (every way in goes through here: a failure is logged and said, never lost in a task nobody awaits)
     async Task InstallFilesAsync(List<string> paths)
+    {
+        try { await InstallFilesCoreAsync(paths); }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The files were not added"), ErrorText(e)); }
+    }
+
+    async Task InstallFilesCoreAsync(List<string> paths)
     {
         if (_game is null || paths.Count == 0) return;
         if (_step != ModsScreen) Show(ModsScreen);
