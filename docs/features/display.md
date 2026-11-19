@@ -116,6 +116,10 @@ Apex rewrote, the window it applied and the Sims3SettingsSetter overrides.
   by Apex: use one limiter.
 - **V-Sync / variable refresh.** Apex does not change the presentation interval. With G-SYNC or FreeSync, the menu's
   "monitor rate minus 3" entry keeps the frame rate inside the variable-refresh range.
+- **Mods that make a device of their own.** Display follows the game's device only: a device created after Apex has
+  hooked the game's (Turbo Simulation Engine, for example, or a 120x61 one seen in a player's log) keeps its own
+  parameters, and Display keeps the game's `IDirect3D9` and window. Before 4.0.10 such a device replaced them, and
+  opening System > Display after it was released crashed the game.
 - **Apex's effects.** They release and recreate their screen resources on every Reset as before.
 - A borderless window with a resolution below the monitor's is stretched by the swap chain; the game's mouse
   coordinates follow the window (unverified in game for every resolution). Until the game has switched to the chosen
