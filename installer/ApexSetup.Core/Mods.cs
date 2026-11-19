@@ -117,14 +117,16 @@ public static class Mods
         return n;
     }
 
-    // a file of the same name already there (the player put a copy back by hand): " (2)" before the extension
-    public static string Free(string path)
+    // a file of the same name already there (the player put a copy back by hand): " (2)" before the extension. otherSide: the
+    // same folder on the other side, on or off, whose names are taken too (an on and an off mod there would share one Rel)
+    public static string Free(string path, string? otherSide = null)
     {
-        if (!File.Exists(path)) return path;
+        bool Taken(string p) => File.Exists(p) || otherSide is not null && File.Exists(Path.Combine(otherSide, Path.GetFileName(p)));
+        if (!Taken(path)) return path;
         var dir = Path.GetDirectoryName(path)!;
         var name = Path.GetFileNameWithoutExtension(path);
         var ext = Path.GetExtension(path);
         for (int i = 2; ; i++)
-            if (Path.Combine(dir, $"{name} ({i}){ext}") is var p && !File.Exists(p)) return p;
+            if (Path.Combine(dir, $"{name} ({i}){ext}") is var p && !Taken(p)) return p;
     }
 }

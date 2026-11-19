@@ -47,11 +47,13 @@ public static class ModHunt
     {
         Engine.CheckWritable();
         if (Current() is not null) throw new SetupException("A hunt is already going.");
-        var suspects = mods.Where(m => m.FileType == "package" && !m.Locked && m.Enabled).Select(m => m.Rel).ToList();
+        // (an on and an off mod at the same place share one Rel: the hunt can't tell them apart and leaves both alone)
+        var mine = mods.Where(m => m.FileType == "package" && !m.Locked).GroupBy(m => m.Rel, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() == 1).Select(g => g.First()).ToList();
+        var suspects = mine.Where(m => m.Enabled).Select(m => m.Rel).ToList();
         if (suspects.Count < 2) throw new SetupException("There are fewer than two mods to look through.");
         // (mods named by a finding go first, so they are tested in the first halves)
         if (first is not null) { var f = first.ToHashSet(StringComparer.OrdinalIgnoreCase); suspects = [.. suspects.Where(f.Contains), .. suspects.Where(x => !f.Contains(x))]; }
-        var st = new State(1, suspects, [], mods.Where(m => m.FileType == "package" && !m.Locked).ToDictionary(m => m.Rel, m => m.Enabled, StringComparer.OrdinalIgnoreCase));
+        var st = new State(1, suspects, [], mine.ToDictionary(m => m.Rel, m => m.Enabled, StringComparer.OrdinalIgnoreCase));
         return Apply(st, mods, docs);
     }
 

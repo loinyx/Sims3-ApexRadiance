@@ -295,7 +295,8 @@ public static partial class ModLibrary
         var rel = Path.Combine("Mods", folderRel, m.Name);
         if (rel.Equals(m.Rel, StringComparison.OrdinalIgnoreCase)) return m;
         Under(docs, folderRel);
-        var target = Mods.Free(m.Enabled ? Path.Combine(docs, rel) : Path.Combine(Mods.Disabled(docs), folderRel, m.Name));
+        string onDir = Path.Combine(docs, "Mods", folderRel), offDir = Path.Combine(Mods.Disabled(docs), folderRel);
+        var target = m.Enabled ? Mods.Free(Path.Combine(onDir, m.Name), offDir) : Mods.Free(Path.Combine(offDir, m.Name), onDir);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         File.Move(m.Path, target);
         var moved = m with { Path = target, Rel = Path.Combine("Mods", folderRel, Path.GetFileName(target)) };
@@ -313,11 +314,16 @@ public static partial class ModLibrary
         if (!name.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) name += ext;
         if (name.Equals(m.Name, StringComparison.Ordinal)) return m;
         var target = Path.Combine(Path.GetDirectoryName(m.Path)!, name);
-        if (File.Exists(target) && !name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) throw new SetupException("A file with that name is already there.");
+        var rel = Path.Combine(Path.GetDirectoryName(m.Rel) ?? "", name);
+        // (the name is taken on the other side, on or off, too: the two would share one Rel)
+        var docs = ModMerge.DocsOf(m);
+        var other = docs is null ? null : m.Enabled ? Path.Combine(Mods.Disabled(docs), Path.GetRelativePath("Mods", rel)) : Path.Combine(docs, rel);
+        if ((File.Exists(target) || other is not null && File.Exists(other)) && !name.Equals(m.Name, StringComparison.OrdinalIgnoreCase))
+            throw new SetupException("A file with that name is already there.");
         File.Move(m.Path, target);
-        var moved = m with { Path = target, Rel = Path.Combine(Path.GetDirectoryName(m.Rel) ?? "", name) };
+        var moved = m with { Path = target, Rel = rel };
         ModNotes.Move(m.Rel, moved.Rel);
-        if (ModMerge.DocsOf(m) is { } docs) ModMerge.Moved(docs, m.Rel, moved.Rel);
+        if (docs is not null) ModMerge.Moved(docs, m.Rel, moved.Rel);
         return moved;
     }
 

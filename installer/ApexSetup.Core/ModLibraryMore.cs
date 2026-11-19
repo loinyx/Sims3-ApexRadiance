@@ -50,7 +50,7 @@ public static partial class ModLibrary
             if (item.SameAs is { } same && !duplicates) { skipped.Add($"{item.Name}: already installed as {same}"); continue; }
             if (!SafeFileName(item.Name)) { skipped.Add($"{item.Name}: the name can't be used for a file"); continue; }
             var into = dir;
-            var target = Mods.Free(Path.Combine(into, item.Name));
+            var target = Mods.Free(Path.Combine(into, item.Name), Path.Combine(Mods.Disabled(docs), folderRel));
             // (the game, a 32-bit program, does not read files past the old 260-character path limit)
             if (target.Length >= MaxGamePath) { skipped.Add($"{item.Name}: the folder and name are too long for the game to read"); continue; }
             Directory.CreateDirectory(into);

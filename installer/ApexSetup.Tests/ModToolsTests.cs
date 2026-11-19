@@ -57,6 +57,36 @@ static class ModToolsTests
             check(end is not null && list().All(m => before[m.Name] == m.Enabled), "hunt: always gone ends on one of the first halves, mods back");
             ModHunt.Forget();
 
+            // an on and an off mod never get one place (one Rel, so one set of notes): a move or an add onto a name the other
+            // side has gets " (2)", a rename onto it is refused; a pair copied there by hand is left alone by the hunt
+            var offRoot = Mods.Disabled(docs);
+            Write(Path.Combine(mods, "Packages", "C", "same.package"), "on one");
+            Write(Path.Combine(offRoot, "Packages", "D", "same.package"), "off one");
+            var onRel = Path.Combine("Mods", "Packages", "C", "same.package");
+            ModNotes.SetNotes(onRel, "on note");
+            var movedOff = ModLibrary.Move(list().Single(m => m.Name == "same.package" && !m.Enabled), docs, Path.Combine("Packages", "C"));
+            var onOne = list().Single(m => m.Rel == onRel);
+            var dropSame = Path.Combine(root, "drop-same", "same.package");
+            Directory.CreateDirectory(Path.GetDirectoryName(dropSame)!);
+            File.WriteAllBytes(dropSame, Dbpf20(9));
+            var addedSame = ModLibrary.AddAny(docs, Path.Combine("Packages", "C"), [dropSame], list());
+            check(movedOff is { Name: "same (2).package", Enabled: false } && File.Exists(Path.Combine(offRoot, "Packages", "C", "same (2).package"))
+                && ModNotes.Get(onRel)?.Notes == "on note" && Refused(() => ModLibrary.Rename(onOne, "same (2)")) && File.Exists(onOne.Path)
+                && addedSame.Added.Single().EndsWith("same (3).package"),
+                "names: a move or an add onto a turned-off mod's name gets \" (2)\" and a rename onto it is refused, the notes stay with their mod");
+            Write(Path.Combine(mods, "Packages", "twin.package"), "twin on");
+            Write(Path.Combine(offRoot, "Packages", "twin.package"), "twin off");
+            var twinRel = Path.Combine("Mods", "Packages", "twin.package");
+            var twinHunt = ModHunt.Start(list(), docs);
+            ModHunt.Stop(list(), docs);
+            check(!twinHunt.Before.ContainsKey(twinRel) && !twinHunt.Suspects.Contains(twinRel) && File.Exists(Path.Combine(mods, "Packages", "twin.package"))
+                && File.Exists(Path.Combine(offRoot, "Packages", "twin.package")) && list().Where(m => before.ContainsKey(m.Name)).All(m => before[m.Name] == m.Enabled),
+                "hunt: an on and an off mod at one place are left alone, the hunt still runs");
+            foreach (var d in new[] { Path.Combine(mods, "Packages", "C"), Path.Combine(offRoot, "Packages", "C"), Path.Combine(offRoot, "Packages", "D") }) Directory.Delete(d, true);
+            File.Delete(Path.Combine(mods, "Packages", "twin.package"));
+            File.Delete(Path.Combine(offRoot, "Packages", "twin.package"));
+            ModNotes.Forget(onRel);
+
             // folders moved into folders, with notes following and nesting refused
             ModLibrary.CreateFolder(docs, "Packages", "A");
             ModLibrary.CreateFolder(docs, "Packages", "B");
