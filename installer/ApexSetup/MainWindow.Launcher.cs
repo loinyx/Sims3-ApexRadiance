@@ -776,14 +776,14 @@ public sealed partial class MainWindow
         host.Children.Add(Row(T("Apex Launcher {0}", App.Version), T("Updates itself from each Apex Radiance release."), null));
         host.Children.Add(Section(T("General")));
         host.Children.Add(Row(T("Language"), Languages.First(l => l.Code == Lang).Name, Button(T("Change"), () => OnLanguage(LangButton, new RoutedEventArgs()))));
-        host.Children.Add(Row(T("Game folder"), _game?.Root ?? T("No game chosen"), Button(T("Change"), () => Show(GameStep))));
+        host.Children.Add(Row(T("Game folder"), _game?.Root ?? T("No game chosen"), Id(Button(T("Change"), () => Show(GameStep)), "SettingsGame")));
         host.Children.Add(Row(T("Logs"), T("What to attach when you ask for help."), Button(T("Open logs folder"), () => OpenFolder(App.LogDir))));
-        host.Children.Add(Row(T("Repair or remove"), T("Repair the files, remove a component, or go back to a restore point."), Button(T("Open"), () => Show(Manage))));
+        host.Children.Add(Row(T("Repair or remove"), T("Repair the files, remove a component, or go back to a restore point."), Id(Button(T("Open"), () => Show(Manage)), "SettingsManage")));
         host.Children.Add(Section(T("Uninstall")));
         host.Children.Add(Row(T("Uninstall Apex Launcher"), T("Removes Apex Radiance and everything the launcher installed, puts back every file it replaced, then the launcher itself. Your saves and your own mods stay."),
-            Button(T("Uninstall…"), async () => await UninstallAsync(), danger: true)));
+            Id(Button(T("Uninstall…"), async () => await UninstallAsync(), danger: true), "SettingsUninstall")));
         host.Children.Add(Section(T("About and licences")));
-        host.Children.Add(Row(T("Credits and licences"), T("Apex Radiance by loinyx, and the authors of every component the launcher installs."), Button(T("Open"), () => Show(About))));
+        host.Children.Add(Row(T("Credits and licences"), T("Apex Radiance by loinyx, and the authors of every component the launcher installs."), Id(Button(T("Open"), () => Show(About)), "SettingsAbout")));
     }
 
     // ---------- uninstall ----------
@@ -876,6 +876,9 @@ public sealed partial class MainWindow
         b.Click += async (_, _) => await click();
         return b;
     }
+
+    // an automation id for UI tests (ui-smoke finds Settings' row buttons by it)
+    static Button Id(Button b, string id) { Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(b, id); return b; }
 
     static HyperlinkButton Link(string text, Action click)
     {
