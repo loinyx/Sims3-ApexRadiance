@@ -21,7 +21,7 @@ public static partial class ScriptErrors
         public int Total => Errors.Count;
         // the plain-English line for Health; args: count, since, the mod with most errors (empty when none)
         public (string Text, string[] Args) Summary => Total == 0 ? ("No script errors since {0}.", [Since.ToString("g")])
-            : ByMod[0].Mod is { } m ? ("{0} script errors since {1}; most went through {2}.", [Total.ToString(), Since.ToString("g"), m])
+            : ByMod.MaxBy(m => m.Count)!.Mod is { } m ? ("{0} script errors since {1}; most went through {2}.", [Total.ToString(), Since.ToString("g"), m])
             : ("{0} script errors since {1}, in the game's own code.", [Total.ToString(), Since.ToString("g")]);
     }
 
