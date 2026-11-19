@@ -1218,6 +1218,8 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         && pBack.Entries[1].Dir && pBack.FileCount == 1, "restore points written by older Setups read back");
 }
 
+ModConflictsTests.Run(Check);
+
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
 
