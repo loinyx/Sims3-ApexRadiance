@@ -1531,10 +1531,10 @@ void PrepareJob(Job& j) {
                 q.x = tv.x, q.y = tv.y, q.w = 1.0f;
                 for (int k = 0; k < 3; k++) q.p[k] = tv.p[k], q.n[k] = tv.n[k], q.base[k] = t.pos[k];
                 q.p[3] = static_cast<float>(t.bits & 15);
-                // a room-0 texel under a roofed room of its story (the ground beneath the house) takes no lamp of the GPU: its place keeps
+                // a room-0 ground texel under a roofed room of its story (the ground beneath the house) takes no lamp of the GPU: its place keeps
                 // the base. The lamps of that room lit it with no wall between, and the terrain beside the room's walls reads those texels,
                 // a band of the room's light on the ground outside (an indoor lamp shining through the room's window is in room 0's list)
-                if (!(j.walls && RtLampProxy::RoofedRoomAt(j.walls->lot, j.story, q.p) > 0)) p.pv.push_back(q);
+                if (!(j.walls && RtLampProxy::GroundUnderRoof(j.walls->lot, j.story, q.p, q.n))) p.pv.push_back(q);
                 for (int k = 0; k < 3; k++) p.pBox[k] = std::min(p.pBox[k], t.pos[k]), p.pBox[3 + k] = std::max(p.pBox[3 + k], t.pos[k]);
                 if (hi && !(t.bits & 1) && tv.n[1] > 0.9f) {
                     HiSrc h{tv, q, {tv.p[0], tv.p[1], tv.p[2], 0, tv.n[0], tv.n[1], tv.n[2], 0}, {}};
@@ -1587,7 +1587,7 @@ void PrepareJob(Job& j) {
                     if (c.base[3] != 0.0f) c.base[3] = RoomMapDither::Offset(static_cast<unsigned>(sx), static_cast<unsigned>(sy)) / 255.0f; // (each sub-texel its own: OutdoorDelta's `sub`; a 16-bit target takes none, Packed)
                     std::memcpy(c.p, lot[q], sizeof lot[q]), std::memcpy(ph.p, lot[q], sizeof lot[q]), std::memcpy(ph.base, world[q], sizeof world[q]);
                     ph.mask[3] = foot;
-                    const bool under = j.walls && RtLampProxy::RoofedRoomAt(j.walls->lot, j.story, ph.p) > 0; // (as p.pv: under a roofed room, no lamp)
+                    const bool under = j.walls && RtLampProxy::GroundUnderRoof(j.walls->lot, j.story, ph.p, ph.n); // (as p.pv: under a roofed room, no lamp)
                     if (j.walls) RtLampProxy::OffWallLine(j.walls->lot, j.story, ph.p, ph.n); // (as a kept room's: its shadow off the wall's line; room 0 reads no separate lookup point, so the law moves the same few cm)
                     pl.mask[0] = sx, pl.mask[1] = sy;
                     if (under) ph.x = ph.y = -16.0f; // (off the target: its sum stays clear; the list keeps vHi's count, the draw takes it)

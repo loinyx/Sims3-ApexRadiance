@@ -125,6 +125,9 @@ inline int RoofedRoomAt(const Lot& lot, int story, const float P[3]) {
     }
     return 0;
 }
+// A room-0 ground texel (facing up, N.y > 0.5) under a roofed room of its story: the ground beneath the house. A wall's texel
+// stays out: an outside wall's lies on the wall line, where its quadrant is often the room behind it
+inline bool GroundUnderRoof(const Lot& lot, int story, const float P[3], const float N[3]) { return N[1] > 0.5f && RoofedRoomAt(lot, story, P) > 0; }
 // A room's texel the game samples just past its own diagonal wall (a half tile's texel, its centre over the wall line; the game's
 // tests light it, the shadow mesh's wall shaded it: a dark band along the room's diagonal walls, 1:8 of a captured scene) is
 // taken for the shadow test kInset inside the nearest quadrant of its room in the same tile (lot space, P's height kept). False:
