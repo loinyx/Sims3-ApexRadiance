@@ -119,7 +119,7 @@
             </Button>
         </Grid>
 
-        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Left" IsPaneToggleButtonVisible="False"
+        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Auto" CompactModeThresholdWidth="0" ExpandedModeThresholdWidth="1280" IsPaneToggleButtonVisible="False"
                         IsBackButtonVisible="Collapsed" IsSettingsVisible="False" OpenPaneLength="232"
                         IsTitleBarAutoPaddingEnabled="False" SelectionChanged="OnNavSelection" ItemInvoked="OnNavInvoked">
             <NavigationView.Resources>

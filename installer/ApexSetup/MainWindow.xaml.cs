@@ -47,20 +47,28 @@ public sealed partial class MainWindow : Window
         // the log's context line: the game, its edition and version, the renderer and the loaders Setup found
         App.Context = () => _game is not { } cg ? "no game chosen"
             : $"game {cg.Root} ({cg.Label} {cg.Version}, {cg.Exe}); renderer {_state?.Layer.ToString() ?? "?"}; loaders {(Scan.Loaders(cg.Bin) is { Count: > 0 } ls ? string.Join(", ", ls) : "none")}";
+        Root.SizeChanged += (_, _) => QueueAudit();
+        // (the version under the sidebar only fits it expanded)
+        Nav.DisplayModeChanged += (_, e) => SetupVersion.Visibility = e.DisplayMode == NavigationViewDisplayMode.Expanded ? Visibility.Visible : Visibility.Collapsed;
         _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer,
             ScreenHome, ScreenMods, ScreenWorlds, ScreenSaves, ScreenHealth, ScreenNews, ScreenSettings };
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
-        void Size(double scale) => AppWindow.Resize(new SizeInt32((int)(980 * scale), (int)(680 * scale)));
+        // 1180 x 760 at the monitor's scale, never past its work area (a small laptop screen)
+        void Size(double scale)
+        {
+            var area = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+            AppWindow.Resize(new SizeInt32(Math.Min((int)(1180 * scale), area.Width), Math.Min((int)(760 * scale), area.Height)));
+        }
         Size(GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0);
         ((FrameworkElement)Content).Loaded += (_, _) => Size(Content.XamlRoot.RasterizationScale); // the monitor's real scale
-        if (AppWindow.Presenter is OverlappedPresenter p) { p.PreferredMinimumWidth = 900; p.PreferredMinimumHeight = 620; }
+        if (AppWindow.Presenter is OverlappedPresenter p) { p.PreferredMinimumWidth = 760; p.PreferredMinimumHeight = 560; }
         var ico = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "apex.ico");
         if (File.Exists(ico)) AppWindow.SetIcon(ico);
         SetupVersion.Text = "Apex Launcher " + Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
 
         // the player's choice (the title bar's language button), else Windows' display language, as the mod's menu
-        Lang = SavedChoice() ?? SystemLanguage(System.Globalization.CultureInfo.CurrentUICulture);
+        Lang = Environment.GetEnvironmentVariable("APEX_LAUNCHER_LANG") ?? SavedChoice() ?? SystemLanguage(System.Globalization.CultureInfo.CurrentUICulture); // (the variable: UI tests in one language)
         Root.Language = Bcp47(Lang);
         // every screen's buttons follow the game starting or closing (the status and Manage rows are built with that state)
         _timer.Tick += (_, _) => { var r = Games.IsRunning(); if (r != _running) { _running = r; RefreshAll(); } };
@@ -109,6 +117,7 @@ public sealed partial class MainWindow : Window
         Show(Maintenance ? MaintenanceScreen(Elevation.Parse(Environment.GetCommandLineArgs()).Screen) : FirstInstall ? Welcome : Home);
         _ = DetectVulkanAsync();
         await LoadReleasesAsync();
+        if (AuditFile is not null && Environment.GetEnvironmentVariable("APEX_LAUNCHER_AUDIT_TOUR") == "1") _ = AuditTourAsync();
         // (the launcher's choices, applied as if Apply was clicked: the player already did, before Windows asked)
         if (Maintenance && TakeChoices()) OnNext(NextButton, new RoutedEventArgs());
         await CheckSetupUpdateAsync();
@@ -262,6 +271,7 @@ public sealed partial class MainWindow : Window
         _step = step;
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
         Scroller.Visibility = step == ModsScreen ? Visibility.Collapsed : Visibility.Visible; // (Mods scrolls in its own panes)
+        QueueAudit();
         Animate(_screens[step]);
         Scroller.ChangeView(null, 0, null, true);
         SyncNav();
