@@ -56,6 +56,7 @@ public static class Sims3Pack
         foreach (var p in info.Files.Where(x => x.Name.EndsWith(".package", StringComparison.OrdinalIgnoreCase)))
         {
             var target = Mods.Free(Path.Combine(dir, p.Name));
+            if (target.Length >= ModLibrary.MaxGamePath) { refused.Add($"{p.Name}: the folder and name are too long for the game to read"); continue; }
             using (var o = File.Create(target))
             {
                 f.Position = info.DataStart + p.Offset;

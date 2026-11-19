@@ -39,6 +39,8 @@ public partial class App : Application
             (_window as MainWindow)?.ShowUnexpected(e.Exception, log: false);
         };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log(e.ExceptionObject as Exception);
+        // (a background task nobody awaited: logged and kept from ending the process)
+        TaskScheduler.UnobservedTaskException += (_, e) => { Log(e.Exception); e.SetObserved(); };
     }
 
     static readonly Queue<string> Recent = new();

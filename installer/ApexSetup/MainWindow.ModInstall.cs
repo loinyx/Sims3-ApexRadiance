@@ -34,7 +34,18 @@ public sealed partial class MainWindow
                 }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
-        if (files.Count > 0) _ = InstallFilesAsync(files);
+        if (files.Count > 0) Safe(InstallFilesAsync(files));
+    }
+
+    // a task started from a click or a menu: awaited here, so a failure is logged and said on the Mods bar
+    async void Safe(Task t)
+    {
+        try { await t; }
+        catch (Exception e)
+        {
+            App.Log(e);
+            try { SetInfo(ModsInfo, InfoBarSeverity.Error, T("Something went wrong"), ErrorText(e)); } catch (Exception e2) { App.Log(e2); }
+        }
     }
 
     async Task OpenPendingAsync()

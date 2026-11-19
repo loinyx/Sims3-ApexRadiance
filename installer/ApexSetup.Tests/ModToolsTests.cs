@@ -126,6 +126,12 @@ static class ModToolsTests
                 && File.Exists(Path.Combine(docs, "Downloads", "lot.sims3pack")) && s3.Skipped.Any(x => x.Contains("b.package")),
                 "sims3pack: an object set taken out into its own folder, a broken package in it refused, a lot left for the game's launcher");
 
+            // a folder so deep that the file would pass the game's 260-character path: not installed, said why
+            var deep = Path.Combine("Packages", new string('d', 120), new string('e', 120));
+            Directory.CreateDirectory(Path.Combine(mods, deep));
+            var far = ModLibrary.AddAny(docs, deep, [Path.Combine(drop, "new.package")], [], duplicates: true);
+            check(far.Added.Count == 0 && far.Skipped.Single().Contains("too long"), "install: a path too long for the game is refused");
+
             // duplicates by content, whatever the name or folder
             Write(Path.Combine(mods, "Packages", "B", "copy-of-mod3.package"), "content 3");
             var dups = ModLibrary.Duplicates(list());

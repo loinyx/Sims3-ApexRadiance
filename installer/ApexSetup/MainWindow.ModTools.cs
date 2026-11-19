@@ -200,7 +200,7 @@ public sealed partial class MainWindow
 
     // ---------- find a problem mod ----------
 
-    void OnModsHunt(object sender, RoutedEventArgs e) => _ = HuntAsync();
+    void OnModsHunt(object sender, RoutedEventArgs e) => Safe(HuntAsync());
 
     async Task HuntAsync()
     {
@@ -208,7 +208,8 @@ public sealed partial class MainWindow
         var suspects = _mods.Count(m => m.FileType == "package" && !m.Locked && m.Enabled);
         var rounds = (int)Math.Ceiling(Math.Log2(Math.Max(2, suspects)));
         if (!await Confirm(T("Find a problem mod"),
-                T("Each round the launcher switches off half of your {0} mods that are on. You play, then say whether the problem is still there. About {1} rounds find the one behind it. Stop puts every mod back exactly as it was, at any time.", suspects, rounds),
+                T("Each round the launcher switches off half of your {0} mods that are on. You play, then say whether the problem is still there. About {1} rounds find the one behind it. Stop puts every mod back exactly as it was, at any time.", suspects, rounds)
+                + "\n\n" + T("While you hunt, do not save over your game: objects and outfits of the mods that are off would be taken out of it. Use Save As, or quit without saving."),
                 T("Start"))) return;
         try { ModHunt.Start(Mods.List(_game!, Docs, kinds: false), Docs, _modLooks.Select(p => _mods.FirstOrDefault(m => m.Path == p)?.Rel).OfType<string>()); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The hunt did not start"), ErrorText(e)); return; }
@@ -267,6 +268,7 @@ public sealed partial class MainWindow
         var left = ModHunt.RoundsLeft(st);
         host.Children.Add(new ProgressBar { Maximum = st.Round + left - 1, Value = st.Round - 1 });
         host.Children.Add(Body(T("{0} of the {1} mods still suspected are off for this round. Play until the problem would show, then come back.", st.Off.Count, st.Suspects.Count)));
+        host.Children.Add(Warn(T("Do not save over your game while hunting"), T("Objects and outfits of the mods that are off would be taken out of it. Use Save As, or quit without saving.")));
         var a = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         a.Children.Add(Button(T("The problem is still there"), () => _ = HuntAnswer(true), accent: true));
         a.Children.Add(Button(T("It is gone"), () => _ = HuntAnswer(false)));

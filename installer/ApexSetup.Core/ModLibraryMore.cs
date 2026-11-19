@@ -30,6 +30,8 @@ public static partial class ModLibrary
         return to;
     }
 
+    public const int MaxGamePath = 259;
+
     public sealed record AddResult(List<string> Added, List<string> Skipped);
 
     // files the player dropped or picked: packages into the folder, Sims3Packs into Downloads (the game's launcher installs
@@ -79,8 +81,10 @@ public static partial class ModLibrary
                 continue;
             }
             var into = dir;
-            Directory.CreateDirectory(into);
             var target = Mods.Free(Path.Combine(into, item.Name));
+            // (the game, a 32-bit program, does not read files past the old 260-character path limit)
+            if (target.Length >= MaxGamePath) { skipped.Add($"{item.Name}: the folder and name are too long for the game to read"); continue; }
+            Directory.CreateDirectory(into);
             if (item.ZipEntry is { } entry)
             {
                 using var zip = ZipFile.OpenRead(item.Source);

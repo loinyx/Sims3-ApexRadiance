@@ -78,8 +78,8 @@ public sealed partial class MainWindow
                     : [m.FileType switch { "asi" => "Asi", "sims3pack" => "Sims3Pack", _ => m.Kind.ToString() }],
             }).ToList();
             _modsLoaded = true;
-            _ = LoadModPicturesAsync(_modRows);
-            _ = LoadDefaultsAsync(g, _modRows);
+            Safe(LoadModPicturesAsync(_modRows));
+            Safe(LoadDefaultsAsync(g, _modRows));
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not read your mods"), ErrorText(e)); }
         finally { _modsLoading = false; }
@@ -142,7 +142,7 @@ public sealed partial class MainWindow
     void FillMods()
     {
         if (_game is null) { ModsSummary.Text = T("Choose the game first."); return; }
-        if (!_modsLoaded) { _ = LoadModsAsync(); return; }
+        if (!_modsLoaded) { Safe(LoadModsAsync()); return; }
         _fillingMods = true;
         try
         {
@@ -272,6 +272,8 @@ public sealed partial class MainWindow
 
     List<ModRow> Picked() => (_modsGrid ? ModGrid.SelectedItems : ModList.SelectedItems).OfType<ModRow>().ToList();
     static bool Mine(ModRow r) => !r.File.Locked && r.File.FileType == "package";
+    // (objects, build items or Create a Sim parts: a save that uses them loses them when it is saved without the mod)
+    static bool HasItems(ModRow r) => r.Kinds.Any(k => k.StartsWith("Buy") || k.StartsWith("Build") || KindGroup(k) is 1 or 2 or 3);
 
     // ---------- the side pane ----------
 
@@ -332,7 +334,7 @@ public sealed partial class MainWindow
             var plus = IconButton("plus", tip);
             plus.Width = plus.Height = 26;
             plus.HorizontalAlignment = HorizontalAlignment.Right;
-            plus.Click += (_, _) => { if (add == "tag") _ = NewTagAsync(null); else _ = NewFolderAsync(NewFolderParent()); };
+            plus.Click += (_, _) => { if (add == "tag") Safe(NewTagAsync(null)); else Safe(NewFolderAsync(NewFolderParent())); };
             g.Children.Add(plus);
         }
         return g;
@@ -364,7 +366,7 @@ public sealed partial class MainWindow
             var dir = p.Key;
             DropTarget(g, () => _dragFolder is { } f ? CanNest(f, dir) : _dragRows is not null,
                 () => _dragFolder is { } f ? T("Move {0} into {1}", Path.GetFileName(f), p.Label) : T("Move to {0}", p.Label),
-                () => { if (_dragFolder is { } f) _ = MoveFolderAsync(f, dir); else if (_dragRows is { } rows) MoveMods(rows, dir); });
+                () => { if (_dragFolder is { } f) Safe(MoveFolderAsync(f, dir)); else if (_dragRows is { } rows) MoveMods(rows, dir); });
             // a folder can be dragged into another
             g.CanDrag = true;
             g.DragStarting += (_, e) => { _dragFolder = dir; _dragRows = null; e.Data.SetText(dir); e.Data.RequestedOperation = DataPackageOperation.Move; };
@@ -373,13 +375,13 @@ public sealed partial class MainWindow
             g.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.F2) { e.Handled = true; BeginRename(g, name, dir); } };
             var menu = new MenuFlyout();
             menu.Items.Add(MenuItem(T("Rename"), () => BeginRename(g, name, dir), "pencil", Windows.System.VirtualKey.F2));
-            menu.Items.Add(MenuItem(T("New folder inside"), () => _ = NewFolderAsync(dir), "folder-plus"));
+            menu.Items.Add(MenuItem(T("New folder inside"), () => Safe(NewFolderAsync(dir)), "folder-plus"));
             menu.Items.Add(MenuItem(T("Turn every mod in it on"), () => SetMods(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), true), "power"));
             menu.Items.Add(MenuItem(T("Turn every mod in it off"), () => SetMods(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), false), "power-off"));
-            menu.Items.Add(MenuItem(T("Merge this folder…"), () => _ = MergeAsync(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), Path.GetFileName(dir), dir), "merge"));
+            menu.Items.Add(MenuItem(T("Merge this folder…"), () => Safe(MergeAsync(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), Path.GetFileName(dir), dir)), "merge"));
             menu.Items.Add(MenuItem(T("Open in Explorer"), () => OpenFolder(Path.Combine(Docs, "Mods", dir)), "folder-search"));
             menu.Items.Add(new MenuFlyoutSeparator());
-            menu.Items.Add(MenuItem(T("Delete folder"), () => _ = DeleteFolderAsync(dir), "trash-2"));
+            menu.Items.Add(MenuItem(T("Delete folder"), () => Safe(DeleteFolderAsync(dir)), "trash-2"));
             g.ContextFlyout = menu;
         }
         else if (p.Key.StartsWith('#'))
@@ -387,8 +389,8 @@ public sealed partial class MainWindow
             var tag = p.Label;
             DropTarget(g, () => _dragRows is not null, () => T("Tag as {0}", tag), () => { if (_dragRows is { } rows) TagMods(rows, tag, true); });
             var menu = new MenuFlyout();
-            menu.Items.Add(MenuItem(T("Edit tag"), () => _ = EditTagAsync(tag), "pencil"));
-            menu.Items.Add(MenuItem(T("Delete tag"), () => _ = DeleteTagAsync(tag), "trash-2"));
+            menu.Items.Add(MenuItem(T("Edit tag"), () => Safe(EditTagAsync(tag)), "pencil"));
+            menu.Items.Add(MenuItem(T("Delete tag"), () => Safe(DeleteTagAsync(tag)), "trash-2"));
             g.ContextFlyout = menu;
         }
         else if (p.Key == OffMods) DropTarget(g, () => _dragRows is not null, () => T("Turn off"), () => { if (_dragRows is { } rows) SetMods(rows, false); });
@@ -454,7 +456,7 @@ public sealed partial class MainWindow
     {
         if (_fillingMods) return;
         if (ModFolders.SelectedItem is not FrameworkElement { Tag: string key } || key == "-") { DispatcherQueue.TryEnqueue(SelectPlace); return; }
-        if (key == NewTag) { DispatcherQueue.TryEnqueue(() => { SelectPlace(); _ = NewTagAsync(null); }); return; }
+        if (key == NewTag) { DispatcherQueue.TryEnqueue(() => { SelectPlace(); Safe(NewTagAsync(null)); }); return; }
         if (key == _modPlace) return;
         _modPlace = key;
         ModList.SelectedItems.Clear();
@@ -503,7 +505,7 @@ public sealed partial class MainWindow
             done = true;
             row.Children.Remove(box);
             label.Visibility = Visibility.Visible;
-            if (save && box.Text.Trim() is { Length: > 0 } name && name != Path.GetFileName(dir)) _ = RenameFolderAsync(dir, name);
+            if (save && box.Text.Trim() is { Length: > 0 } name && name != Path.GetFileName(dir)) Safe(RenameFolderAsync(dir, name));
         }
         box.KeyDown += (_, e) =>
         {
@@ -540,7 +542,7 @@ public sealed partial class MainWindow
             to = ModLibrary.RenameFolder(Docs, dir, name);
             if (_modPlace.Equals(dir, StringComparison.OrdinalIgnoreCase) || _modPlace.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 _modPlace = to + _modPlace[dir.Length..];
-        }, T("Folder renamed"), () => { if (to is not null) _ = RenameFolderAsync(to, Path.GetFileName(dir)); });
+        }, T("Folder renamed"), () => { if (to is not null) Safe(RenameFolderAsync(to, Path.GetFileName(dir))); });
     }
 
     async Task MoveFolderAsync(string dir, string into)
@@ -551,7 +553,7 @@ public sealed partial class MainWindow
         {
             to = ModLibrary.MoveFolder(Docs, dir, into);
             if (_modPlace.Equals(dir, StringComparison.OrdinalIgnoreCase)) _modPlace = to;
-        }, T("{0} moved into {1}", Path.GetFileName(dir), Path.GetFileName(into)), () => { if (to is not null) _ = MoveFolderAsync(to, from); });
+        }, T("{0} moved into {1}", Path.GetFileName(dir), Path.GetFileName(into)), () => { if (to is not null) Safe(MoveFolderAsync(to, from)); });
     }
 
     async Task DeleteFolderAsync(string dir)
@@ -981,7 +983,7 @@ public sealed partial class MainWindow
         mv.Click += (_, _) => MoveMenu(mine).ShowAt(mv);
         var tg = Act("tag", T("Tag"), null);
         tg.Click += (_, _) => TagMenu(picked).ShowAt(tg);
-        Act("merge", T("Merge into one package…"), () => _ = MergeAsync(mine, null, null), mine.Count > 1);
+        Act("merge", T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null)), mine.Count > 1);
         Act("trash-2", T("Remove to the Recycle Bin"), () => RemoveMods(mine), mine.Count > 0, "ApexErrorBrush");
         a.Children.Add(new Border { Width = 1, Height = 20, Background = Res("ApexCardBorderBrush"), Margin = new Thickness(4, 0, 4, 0) });
         Act("x", T("Clear the selection"), CloseModDetails);
@@ -1000,7 +1002,7 @@ public sealed partial class MainWindow
             var on = mine.All(r => r.File.Enabled);
             menu.Items.Add(MenuItem(on ? T("Turn off") : T("Turn on"), () => SetMods(mine, !on), on ? "power-off" : "power", Windows.System.VirtualKey.Space));
         }
-        if (picked.Count == 1 && mine.Count == 1) menu.Items.Add(MenuItem(T("Rename"), () => _ = RenameModAsync(mine[0]), "pencil", Windows.System.VirtualKey.F2));
+        if (picked.Count == 1 && mine.Count == 1) menu.Items.Add(MenuItem(T("Rename"), () => Safe(RenameModAsync(mine[0])), "pencil", Windows.System.VirtualKey.F2));
         if (mine.Count > 0)
         {
             var move = new MenuFlyoutSubItem { Text = T("Move to"), Icon = MenuIcon("folder-input") };
@@ -1010,8 +1012,8 @@ public sealed partial class MainWindow
         var tag = new MenuFlyoutSubItem { Text = T("Tag"), Icon = MenuIcon("tag") };
         foreach (var i in TagMenu(picked).Items.ToList()) tag.Items.Add(i);
         menu.Items.Add(tag);
-        if (mine.Count > 1) menu.Items.Add(MenuItem(T("Merge into one package…"), () => _ = MergeAsync(mine, null, null), "merge"));
-        if (picked.Count == 1 && ModMerge.IsMerged(picked[0].File)) menu.Items.Add(MenuItem(T("Split back into its mods…"), () => _ = SplitAsync(picked[0]), "merge"));
+        if (mine.Count > 1) menu.Items.Add(MenuItem(T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null)), "merge"));
+        if (picked.Count == 1 && ModMerge.IsMerged(picked[0].File)) menu.Items.Add(MenuItem(T("Split back into its mods…"), () => Safe(SplitAsync(picked[0])), "merge"));
         if (picked.Count == 1) menu.Items.Add(MenuItem(T("Show in Explorer"), () => ShowFile(picked[0].File.Path), "folder-search"));
         menu.Items.Add(MenuItem(picked.Count == 1 ? T("Copy name") : T("Copy names"), () => CopyText(string.Join(Environment.NewLine, picked.Select(r => r.File.Name))), "copy"));
         if (mine.Count > 0)
@@ -1038,7 +1040,7 @@ public sealed partial class MainWindow
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Space when mine.Count > 0: SetMods(mine, !mine.All(r => r.File.Enabled)); break;
-            case Windows.System.VirtualKey.F2 when mine.Count == 1 && picked.Count == 1: _ = RenameModAsync(mine[0]); break;
+            case Windows.System.VirtualKey.F2 when mine.Count == 1 && picked.Count == 1: Safe(RenameModAsync(mine[0])); break;
             case Windows.System.VirtualKey.Delete when mine.Count > 0: RemoveMods(mine); break;
             case Windows.System.VirtualKey.Escape: CloseModDetails(); break;
             default: return;
@@ -1053,7 +1055,7 @@ public sealed partial class MainWindow
         foreach (var d in _modDirs)
             menu.Items.Add(MenuItem(new string(' ', 4 * d.Count(c => c == Path.DirectorySeparatorChar)) + Path.GetFileName(d), () => MoveMods(rows, d), "folder"));
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(MenuItem(T("New folder…"), () => _ = MoveToNewFolderAsync(rows), "folder-plus"));
+        menu.Items.Add(MenuItem(T("New folder…"), () => Safe(MoveToNewFolderAsync(rows)), "folder-plus"));
         return menu;
     }
 
@@ -1257,13 +1259,13 @@ public sealed partial class MainWindow
         else Fact(T("Where"), Val(ModRow.Place(m)));
         Fact(T("Size"), Val(r.Size));
         Fact(T("Added"), Val(Added(m).ToString("d")));
-        Fact(T("State"), Val(m.Locked ? ModRow.LockText(m) : m.Enabled ? T("On") : T("Off: the game does not load it")));
+        Fact(T("State"), Val(m.Locked ? ModRow.LockText(m) : m.Enabled ? T("On") : HasItems(r) ? T("Off: the game does not load it; a game saved now loses its items") : T("Off: the game does not load it")));
         if (ModMerge.IsMerged(m) && ModMerge.Info(m) is { } merged)
         {
             var made = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             made.Children.Add(Val(T("{0} mods", merged.Originals.Count)));
             var split = new HyperlinkButton { Content = T("Split…"), Padding = new Thickness(0), FontSize = 12 };
-            split.Click += (_, _) => _ = SplitAsync(r);
+            split.Click += (_, _) => Safe(SplitAsync(r));
             made.Children.Add(split);
             Fact(T("Merged from"), made);
         }
@@ -1334,7 +1336,7 @@ public sealed partial class MainWindow
         var move = WideButton("folder-input", T("Move to…"), () => { });
         move.Click += (_, _) => MoveMenu(mine).ShowAt(move);
         acts.Children.Add(move);
-        if (mine.Count > 1) acts.Children.Add(WideButton("merge", T("Merge into one package…"), () => _ = MergeAsync(mine, null, null)));
+        if (mine.Count > 1) acts.Children.Add(WideButton("merge", T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null))));
         var remove = WideButton("trash-2", T("Remove to the Recycle Bin"), () => RemoveMods(mine));
         remove.Foreground = Res("ApexErrorBrush");
         acts.Children.Add(remove);
@@ -1398,7 +1400,7 @@ public sealed partial class MainWindow
         {
             ModNotes.SetPicture(r.File.Rel, file);
             r.Image = null;
-            _ = LoadModPicturesAsync([r]).ContinueWith(_ => DispatcherQueue.TryEnqueue(FillModDetails));
+            Safe(LoadModPicturesAsync([r]).ContinueWith(_ => DispatcherQueue.TryEnqueue(FillModDetails)));
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The picture was not saved"), ErrorText(e)); }
     }
@@ -1427,7 +1429,8 @@ public sealed partial class MainWindow
         var merged = rows.Count(r => ModMerge.IsMerged(r.File));
         var text = (rows.Count == 1 ? T("{0} goes to the Recycle Bin. You can restore it from there.", rows[0].Name)
             : T("{0} mods go to the Recycle Bin. You can restore them from there.", rows.Count))
-            + (merged > 0 ? "\n\n" + T("A merged mod's originals stay kept in Mods\\{0}; use Split instead to get them back.", ModMerge.FolderName) : "");
+            + (merged > 0 ? "\n\n" + T("A merged mod's originals stay kept in Mods\\{0}; use Split instead to get them back.", ModMerge.FolderName) : "")
+            + (rows.Any(HasItems) ? "\n\n" + T("Lots and Sims that use its objects or outfits lose them the next time a game is saved without it.") : "");
         if (!await Confirm(rows.Count == 1 ? T("Remove this mod?") : T("Remove these mods?"), text, T("Remove"))) return;
         await ModsChange(() => { foreach (var r in rows) ModLibrary.Remove(r.File); }, rows.Count == 1 ? T("Mod moved to the Recycle Bin") : T("{0} mods moved to the Recycle Bin", rows.Count));
     }
@@ -1504,12 +1507,12 @@ public sealed partial class MainWindow
             var take = IconButton("folder-input", T("Take {0} out of the merge", Path.GetFileNameWithoutExtension(o.Rel)));
             take.Width = take.Height = 28;
             var rel = o.Rel;
-            take.Click += (_, _) => _ = TakeOutAsync(r, [rel]);
+            take.Click += (_, _) => Safe(TakeOutAsync(r, [rel]));
             Grid.SetColumn(take, 2);
             g.Children.Add(take);
             panel.Children.Add(g);
         }
-        var split = WideButton("merge", T("Split it back into its {0} mods", info.Originals.Count), () => _ = SplitAsync(r));
+        var split = WideButton("merge", T("Split it back into its {0} mods", info.Originals.Count), () => Safe(SplitAsync(r)));
         split.Margin = new Thickness(0, 4, 0, 0);
         panel.Children.Add(split);
         return panel;
@@ -1627,7 +1630,7 @@ public sealed partial class MainWindow
             menu.Items.Add(item);
         }
         if (ModNotes.Tags.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(MenuItem(T("New tag…"), () => _ = NewTagAsync(rows), "plus"));
+        menu.Items.Add(MenuItem(T("New tag…"), () => Safe(NewTagAsync(rows)), "plus"));
         return menu;
     }
 
