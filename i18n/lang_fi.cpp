@@ -167,6 +167,7 @@ const I18n::Pair kPairs[] = {
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "Varjostimet: ReShade- ja GShade-lookit Apexissa ilman kumpaakaan asennettuna"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "Varjostimet: viisi valmista lookia alkuun ja omat .fx-tiedostosi"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "Varjostimet: lataa ReShaden varjostinpaketit valikosta ja valitse mitkä"},
+    {"Capture: screenshots and videos work when another mod sets a 10-bit screen", "Tallennus: kuvakaappaukset ja videot toimivat, kun toinen modi asettaa näytön 10-bittiseksi"},
     {"Capture: screenshots and videos with your effects, on a page of their own", "Tallennus: kuvakaappaukset ja videot efekteilläsi omalla sivullaan"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "Esiasetukset: osat Tallennus ja Varjostimet, ja jaetut esiasetukset hakevat tarvitsemansa paketit"},
     {"Shaders: every setting of a ReShade shader gets its own control", "Varjostimet: jokainen ReShade-varjostimen asetus saa oman säätimensä"},

@@ -167,6 +167,7 @@ const I18n::Pair kPairs[] = {
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "着色器：在 Apex 中使用 ReShade 和 GShade 外观，无需安装它们"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "着色器：五个内置外观可直接使用，也能用你自己的 .fx 文件"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "着色器：在菜单中下载 ReShade 的着色器包，自选需要的"},
+    {"Capture: screenshots and videos work when another mod sets a 10-bit screen", "捕获：其他模组将屏幕设为 10 位时，截图和视频也能使用"},
     {"Capture: screenshots and videos with your effects, on a page of their own", "捕获：带有你的效果的截图和视频，有单独的页面"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "预设：新增捕获和着色器部分，分享的预设会下载所需的包"},
     {"Shaders: every setting of a ReShade shader gets its own control", "着色器：ReShade 着色器的每项设置都有自己的控件"},

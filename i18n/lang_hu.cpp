@@ -166,6 +166,7 @@ const I18n::Pair kPairs[] = {
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "Shaderek: ReShade- és GShade-lookok az Apexben, egyik telepítése nélkül"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "Shaderek: öt beépített look kezdésnek és a saját .fx-fájljaid"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "Shaderek: töltsd le a ReShade shadercsomagjait a menüből, választhatóan"},
+    {"Capture: screenshots and videos work when another mod sets a 10-bit screen", "Rögzítés: a képernyőképek és videók akkor is működnek, ha egy másik mod 10 bitesre állítja a képernyőt"},
     {"Capture: screenshots and videos with your effects, on a page of their own", "Rögzítés: képernyőképek és videók az effektjeiddel, saját oldalon"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "Előbeállítások: Rögzítés és Shaderek részek, a megosztott előbeállítások letöltik a szükséges csomagokat"},
     {"Shaders: every setting of a ReShade shader gets its own control", "Shaderek: egy ReShade-shader minden beállítása saját vezérlőt kap"},
