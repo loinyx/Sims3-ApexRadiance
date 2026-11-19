@@ -130,7 +130,7 @@ public sealed partial class MainWindow : Window
                     if (_busy) return; // (an install in progress finishes first)
                     try
                     {
-                        SelfUpdate.ReplaceAndStart(file, self, Environment.GetCommandLineArgs().Skip(1));
+                        SelfUpdate.ReplaceAndStart(file, self, LauncherInstall.HandoverArgs(Environment.GetCommandLineArgs().Skip(1)));
                         Application.Current.Exit();
                     }
                     catch (Exception e)

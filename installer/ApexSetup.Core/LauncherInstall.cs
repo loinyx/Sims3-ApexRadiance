@@ -24,6 +24,83 @@ public static partial class LauncherInstall
 
     public static bool IsInstalledCopy(string exe) => string.Equals(Path.GetFullPath(exe), Path.GetFullPath(Paths.InstalledExe), StringComparison.OrdinalIgnoreCase);
 
+    // ---------- installed or portable ----------
+
+    // Portable is a marker file next to the exe, so a portable folder moved as a whole stays portable. An exe moved without
+    // its marker is NotChosen again and the player is asked once more; its data stays in %LOCALAPPDATA% either way.
+    public const string PortableMarker = "ApexLauncher.portable", HandoverArg = "--handover";
+    public static string MarkerOf(string exe) => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(exe))!, PortableMarker);
+
+    public static LauncherMode ModeOf(string exe) =>
+        IsInstalledCopy(exe) ? LauncherMode.Installed
+        : File.Exists(MarkerOf(exe)) || Environment.GetEnvironmentVariable(PortableVar) == "1" ? LauncherMode.Portable
+        : LauncherMode.NotChosen;
+
+    public static LauncherMode Mode => Environment.ProcessPath is { } exe ? ModeOf(exe) : LauncherMode.NotChosen;
+
+    // What a start does before its window opens. NotChosen runs here and the window asks; it only hands over when the
+    // player installed before (a downloaded or old Setup copy started again).
+    public static StartStep FirstStep(string exe, bool elevated) => ModeOf(exe) switch
+    {
+        LauncherMode.Installed => StartStep.Register,
+        _ when elevated => StartStep.RestartAsPlayer, // (the update an old, elevated Setup started)
+        LauncherMode.NotChosen when File.Exists(Paths.InstalledExe) => StartStep.HandToInstalled,
+        _ => StartStep.RunHere,
+    };
+
+    // Copied into the install folder, registered, and that copy started: the caller exits right after. Also the switch from
+    // portable: the marker goes, the portable exe stays where it is (started again, it hands over to the installed copy).
+    public static void Install(string exe, IEnumerable<string>? args = null, Action<string, IEnumerable<string>>? start = null)
+    {
+        CopyIn(exe);
+        Register(Paths.InstalledExe, VersionOf(Paths.InstalledExe), LauncherSettings.Load().DesktopShortcut);
+        if (!IsInstalledCopy(exe)) TryDelete(MarkerOf(exe));
+        Handover(Paths.InstalledExe, args, start);
+    }
+
+    // Runs portable from folder (null: where it is; the installed copy needs a folder). Shortcuts, Run and the Installed apps
+    // entry go, the launcher's data stays. Moved: the new copy is started, the caller exits, and the old exe (or the install
+    // folder) is removed. Returns the portable exe.
+    public static string MakePortable(string exe, string? folder = null, IEnumerable<string>? args = null, Action<string, IEnumerable<string>>? start = null)
+    {
+        var target = folder is null ? Path.GetFullPath(exe) : Path.Combine(Path.GetFullPath(folder), Path.GetFileName(exe));
+        var installed = IsInstalledCopy(exe);
+        if (installed && IsInstalledCopy(target)) throw new ArgumentException("A portable launcher needs a folder outside the install folder.", nameof(folder));
+        var moved = !string.Equals(target, Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase);
+        if (moved)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(exe, target, true);
+        }
+        File.WriteAllText(MarkerOf(target), "Apex Launcher runs from this folder without installing. Delete this file to be asked again.\r\n");
+        RemoveTraces();
+        if (!moved) return target;
+        Handover(target, args, start);
+        if (installed) RemoveNowOrAfterExit(Paths.InstallDir);
+        else { TryDelete(MarkerOf(exe)); RemoveNowOrAfterExit(exe); }
+        return target;
+    }
+
+    // The arguments for a copy started while this one still holds the single-instance mutex: it waits for it instead of
+    // only bringing this window up.
+    public static IEnumerable<string> HandoverArgs(IEnumerable<string>? args) => (args ?? []).Where(a => a != HandoverArg).Append(HandoverArg);
+
+    static void Handover(string exe, IEnumerable<string>? args, Action<string, IEnumerable<string>>? start) => (start ?? SelfUpdate.Restart)(exe, HandoverArgs(args));
+
+    static string VersionOf(string exe) => Version.TryParse(FileVersionInfo.GetVersionInfo(exe).FileVersion, out var v) ? v.ToString(3) : "";
+
+    static void TryDelete(string file)
+    {
+        try { if (File.Exists(file)) File.Delete(file); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    // (a running exe, or a folder holding one, cannot be deleted: it goes once this process has closed)
+    static void RemoveNowOrAfterExit(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, true); else if (File.Exists(path)) File.Delete(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { DeleteAfterExit(path); }
+    }
+
     // The running exe copied to the install folder when that copy is missing or older (a downloaded update, or the first
     // start); true when the installed copy should be started in place of this one.
     public static bool CopyIn(string exe)
@@ -88,11 +165,11 @@ public static partial class LauncherInstall
         k?.DeleteValue(Name, false);
     }
 
-    // The install folder and the launcher's data removed once this process has closed: a running exe cannot delete itself.
-    // The log being written goes with them.
-    public static void DeleteAfterExit(params string[] dirs)
+    // Folders (the install folder, the launcher's data) and files (a portable exe) removed once this process has closed: a
+    // running exe cannot delete itself. The log being written goes with them.
+    public static void DeleteAfterExit(params string[] paths)
     {
-        var rd = string.Join(" & ", dirs.Where(Directory.Exists).Select(d => $"rd /s /q {SelfUpdate.Quote(d)}"));
+        var rd = string.Join(" & ", paths.Select(p => Directory.Exists(p) ? $"rd /s /q {SelfUpdate.Quote(p)}" : File.Exists(p) ? $"del /f /q {SelfUpdate.Quote(p)}" : null).OfType<string>());
         if (rd.Length == 0) return;
         Process.Start(new ProcessStartInfo("cmd.exe", $"/c timeout /t 3 /nobreak >nul & {rd}") { CreateNoWindow = true, UseShellExecute = false });
     }
@@ -155,3 +232,7 @@ public static partial class LauncherInstall
         void GetCurFile(out IntPtr file);
     }
 }
+
+public enum LauncherMode { Installed, Portable, NotChosen }
+
+public enum StartStep { RunHere, Register, HandToInstalled, RestartAsPlayer }

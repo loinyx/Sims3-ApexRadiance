@@ -89,15 +89,18 @@ public partial class App : Application
         {
             try
             {
-                // started as administrator and not installed yet (the update an old Setup started): again as the player
-                if (Elevation.IsElevated && !LauncherInstall.IsInstalledCopy(self)) { if (Elevation.RestartAsPlayer(self)) { Exit(); return; } }
-                else if (LauncherInstall.CopyIn(self))
+                // never installs by itself: a first start (NotChosen) opens here and the window asks installed or portable
+                switch (LauncherInstall.FirstStep(self, Elevation.IsElevated))
                 {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Paths.InstalledExe, string.Join(" ", argv.Select(SelfUpdate.Quote))) { UseShellExecute = true });
-                    Exit();
-                    return;
+                    // started as administrator and not installed (the update an old Setup started): again as the player
+                    case StartStep.RestartAsPlayer: if (Elevation.RestartAsPlayer(self)) { Exit(); return; } break;
+                    case StartStep.Register: LauncherInstall.Register(self, Version, LauncherSettings.Load().DesktopShortcut); break;
+                    // installed before: this copy updates the installed one when newer and hands over to it
+                    case StartStep.HandToInstalled when LauncherInstall.CopyIn(self):
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Paths.InstalledExe, string.Join(" ", argv.Select(SelfUpdate.Quote))) { UseShellExecute = true });
+                        Exit();
+                        return;
                 }
-                else LauncherInstall.Register(self, Version, LauncherSettings.Load().DesktopShortcut);
             }
             catch (Exception e) { Log(e); } // (an install that fails leaves this copy running: the launcher still works from here)
         }
@@ -106,6 +109,9 @@ public partial class App : Application
         {
             _single = new Mutex(true, @"Local\ApexLauncher", out var first);
             _show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ApexLauncher.Show");
+            // (started by Install, MakePortable or an update while the copy before it still closes: waits for it)
+            if (!first && argv.Contains(LauncherInstall.HandoverArg))
+                try { first = _single.WaitOne(TimeSpan.FromSeconds(20)); } catch (AbandonedMutexException) { first = true; }
             if (!first) { _show.Set(); Exit(); return; }
             var show = _show;
             new Thread(() => { while (show.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => { _window.AppWindow.Show(); _window.Activate(); }); }) { IsBackground = true }.Start();
