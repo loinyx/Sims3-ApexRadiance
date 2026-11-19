@@ -92,6 +92,8 @@ public static partial class ModConflicts
 
     // ---------- DBPF packages ----------
     public const uint TypeS3sa = 0x073faa07, TypeKey = 0x0166038c, TypeXml = 0x0333406c, TypeStbl = 0x220557da;
+    // a package's own manifest (one per package, instance 0): about the package, not the game's data
+    public const uint TypeManifest = 0x73e93eeb;
     static readonly Dictionary<uint, string> TypeNames = new()
     {
         [0x0333406c] = "_XML", [0x03b33ddf] = "ITUN", [0x034aeecb] = "CASP", [0x319e4f1d] = "OBJD", [0x073faa07] = "S3SA", [0x0166038c] = "_KEY", [0x00b2d882] = "_IMG",
@@ -878,7 +880,7 @@ public static partial class ModConflicts
         foreach (var rec in recs)
             foreach (var e in rec.Pkg.Entries)
             {
-                if (e.Type == TypeKey) continue;
+                if (e.Type is TypeKey or TypeManifest) continue;
                 if (!byKey.TryGetValue(e.Key, out var l)) byKey[e.Key] = l = new();
                 l.Add((rec, e));
             }

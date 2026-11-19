@@ -256,7 +256,7 @@ public sealed partial class MainWindow
             })) return false;
         if (_fTags.Count > 0 && !_fTags.Any(t => t == "" ? ModNotes.TagsOf(m.Rel).Count == 0 : ModNotes.TagsOf(m.Rel).Contains(t, StringComparer.OrdinalIgnoreCase))) return false;
         if (_fCreators.Count > 0 && !_fCreators.Contains(CreatorOf(m) ?? "")) return false;
-        if (_fAddedDays > 0 && Added(m) < DateTime.Now.AddDays(-_fAddedDays)) return false;
+        if (_fAddedDays != 0 && !AddedWithin(m, _fAddedDays)) return false;
         if (_fSizeMb > 0 && m.Size < (long)_fSizeMb << 20) return false;
         return true;
     }
@@ -701,7 +701,7 @@ public sealed partial class MainWindow
         else if (_fKinds.Count > 0) _fKinds.Remove(_fKinds.Last());
         else if (_fFiles.Count > 0) _fFiles.Remove(_fFiles.Last());
         else if (_fCreators.Count > 0) _fCreators.Remove(_fCreators.Last());
-        else if (_fAddedDays > 0) _fAddedDays = 0;
+        else if (_fAddedDays != 0) _fAddedDays = 0;
         else if (_fSizeMb > 0) _fSizeMb = 0;
         else return;
         e.Handled = true;
@@ -772,7 +772,7 @@ public sealed partial class MainWindow
         foreach (var s in _fStates.ToList()) Chip(StateName(s), StateIcon(s), null, () => _fStates.Remove(s));
         foreach (var t in _fTags.ToList()) Chip(t == "" ? T("Untagged") : t, "tag", t == "" ? null : ModNotes.ColorOf(t), () => _fTags.Remove(t));
         foreach (var c in _fCreators.ToList()) Chip(c == "" ? T("Unknown creator") : c, "users", null, () => _fCreators.Remove(c));
-        if (_fAddedDays > 0) Chip(T("Added in {0} days", _fAddedDays), "calendar-clock", null, () => _fAddedDays = 0);
+        if (_fAddedDays != 0) Chip(AddedLabel(_fAddedDays), "calendar-clock", null, () => _fAddedDays = 0);
         if (_fSizeMb > 0) Chip(T("Over {0} MB", _fSizeMb), "hard-drive", null, () => _fSizeMb = 0);
         ModChipsScroll.Visibility = ModChips.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         var n = FilterCount;
@@ -781,7 +781,20 @@ public sealed partial class MainWindow
         ModSearch.PlaceholderText = n > 0 ? T("Search") : T("Search mods");
     }
 
-    int FilterCount => _fFiles.Count + _fKinds.Count + _fStates.Count + _fTags.Count + _fCreators.Count + (_fAddedDays > 0 ? 1 : 0) + (_fSizeMb > 0 ? 1 : 0);
+    // added within d days (d > 0), or more than -d days ago (d < 0)
+    static bool AddedWithin(ModFile m, int d) => d > 0 ? Added(m) >= DateTime.Now.AddDays(-d) : Added(m) < DateTime.Now.AddDays(d);
+    static string AddedOption(int d) => d switch
+    {
+        1 => T("Today"), 7 => T("In the last 7 days"), 30 => T("In the last 30 days"), 90 => T("In the last 3 months"),
+        182 => T("In the last 6 months"), 365 => T("In the last year"), _ => T("Over a year ago"),
+    };
+    static string AddedLabel(int d) => d switch
+    {
+        1 => T("Added today"), 7 => T("Added this week"), 30 => T("Added this month"), 90 => T("Added in 3 months"),
+        182 => T("Added in 6 months"), 365 => T("Added this year"), _ => T("Added over a year ago"),
+    };
+
+    int FilterCount => _fFiles.Count + _fKinds.Count + _fStates.Count + _fTags.Count + _fCreators.Count + (_fAddedDays != 0 ? 1 : 0) + (_fSizeMb > 0 ? 1 : 0);
 
     static string FileTypeName(string f) => f == "asi" ? T("ASI plugin") : T("Package");
     static string FileTypeIcon(string f) => f == "asi" ? "plug" : "package";
@@ -806,7 +819,7 @@ public sealed partial class MainWindow
         var groups = new (string Label, string Icon, int InUse)[]
         {
             (T("File type"), "package", _fFiles.Count), (T("What it is"), "blocks", _fKinds.Count), (T("State"), "power", _fStates.Count),
-            (T("Tags"), "tag", _fTags.Count), (T("Creator"), "users", _fCreators.Count), (T("Added"), "calendar-clock", _fAddedDays > 0 ? 1 : 0), (T("Size"), "hard-drive", _fSizeMb > 0 ? 1 : 0),
+            (T("Tags"), "tag", _fTags.Count), (T("Creator"), "users", _fCreators.Count), (T("Added"), "calendar-clock", _fAddedDays != 0 ? 1 : 0), (T("Size"), "hard-drive", _fSizeMb > 0 ? 1 : 0),
         };
         var nav = new StackPanel { Spacing = 2, Padding = new Thickness(8), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
         for (int i = 0; i < groups.Length; i++)
@@ -852,7 +865,9 @@ public sealed partial class MainWindow
             var n = new TextBlock { Text = count.ToString(), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(n, 2);
             g.Children.Add(n);
-            var box = new CheckBox { Content = g, IsChecked = on, MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(8, 0, 4, 0) };
+            g.VerticalAlignment = VerticalAlignment.Center;
+            var box = new CheckBox { Content = g, IsChecked = on, MinWidth = 0, MinHeight = 36, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Center, Padding = new Thickness(8, 0, 4, 0) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, label);
             box.Click += (_, _) => { set(box.IsChecked == true); FillMods(); FillFilterPanel(); };
             list.Children.Add(box);
@@ -889,8 +904,8 @@ public sealed partial class MainWindow
                     Opt(c.Key == "" ? T("Unknown creator") : c.Key, "users", null, c.Count(), _fCreators.Contains(c.Key), on => Flip(_fCreators, c.Key, on));
                 break;
             case 5:
-                foreach (var d in new[] { 0, 7, 30, 90 })
-                    Opt(d == 0 ? T("Any time") : T("In the last {0} days", d), d == 0 ? "calendar-clock" : null, null, d == 0 ? inPlace.Count : inPlace.Count(r => Added(r.File) >= DateTime.Now.AddDays(-d)), _fAddedDays == d, on => _fAddedDays = on ? d : 0);
+                foreach (var d in new[] { 0, 1, 7, 30, 90, 182, 365, -365 })
+                    Opt(d == 0 ? T("Any time") : AddedOption(d), "calendar-clock", null, d == 0 ? inPlace.Count : inPlace.Count(r => AddedWithin(r.File, d)), _fAddedDays == d, on => _fAddedDays = on ? d : 0);
                 break;
             default:
                 foreach (var mb in new[] { 0, 10, 50, 200 })

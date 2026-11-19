@@ -103,7 +103,7 @@ static class HealthTests
             "script errors: the frame in a mod's assembly ties the error to its package (malformed, huge and empty logs read without throwing; the old one left out)");
         check(r.ByMod.Any(m => m.Mod is null && m.Count == 1) && r.ByMod.Any(m => m.Mod == "SomeMod") && r.ByMod.Any(m => m.Mod == "Crashy.asi" && m.Crashes == 1),
             "script errors: game-only stacks, a mod's own log and the game's crash log are told apart");
-        check(r.Summary.Args[0] == "5" && r.Summary.Args[2] == "fixturemod" && ScriptErrors.Findings(r).Any(f => f.Args.Contains("fixturemod")) && ScriptErrors.Read(docs, DateTime.Now.AddDays(-60), mods).Total == 6,
+        check(r.Summary.Args[0] == "5" && r.Summary.Args[2] == "fixturemod" && ScriptErrors.Findings(r).Any(f => f.Finding.Args.Contains("fixturemod") && f.Files.Count > 0) && ScriptErrors.Read(docs, DateTime.Now.AddDays(-60), mods).Total == 6,
             "script errors: summary, findings and the time window");
     }
 

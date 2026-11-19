@@ -29,7 +29,7 @@ public static class Health
         Add("sessions", () => SessionHistory.Check().Select(f => new Item(f, HealthArea.Stability, [])));
         // the errors since the last game start (a week when no session is recorded)
         Add("script errors", () => ScriptErrors.Findings(ScriptErrors.Read(docs, SessionHistory.List().FirstOrDefault()?.Started, mods))
-            .Select(f => new Item(f, HealthArea.Stability, [])));
+            .Select(m => new Item(m.Finding, HealthArea.Stability, m.Files)));
         return items;
     }
 

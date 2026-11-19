@@ -30,7 +30,9 @@ public sealed class ConflictCheck : IModCheck
     // the identical copies the last check found (two packages or assemblies with the same bytes: one can go)
     public List<DuplicateEntry> Duplicates => Last?.Duplicates ?? [];
 
-    public static string Fingerprint(IEnumerable<ModFile> mods) =>
+    // (Rules goes up when the scan's rules change, so a result kept from older rules is scanned again)
+    const int Rules = 2;
+    public static string Fingerprint(IEnumerable<ModFile> mods) => $"rules {Rules}\n" +
         string.Join("\n", mods.Where(Scanned).OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
             .Select(m => $"{m.Path}|{m.Size}|{(File.Exists(m.Path) ? File.GetLastWriteTimeUtc(m.Path).Ticks : 0)}"));
 

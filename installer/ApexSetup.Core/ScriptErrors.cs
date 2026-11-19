@@ -16,7 +16,8 @@ public static partial class ScriptErrors
 {
     public sealed record Error(DateTime When, string? Mod, IReadOnlyList<string> Files, string Exception, bool Crash, string Log);
     public sealed record ModErrors(string? Mod, IReadOnlyList<string> Files, int Count, int Crashes, DateTime Newest, string Exception);
-    public sealed record Report(DateTime Since, List<Error> Errors, List<ModErrors> ByMod)
+    // Unread: script logs past MaxFiles, not read (the counts are then "at least")
+    public sealed record Report(DateTime Since, List<Error> Errors, List<ModErrors> ByMod, int Unread = 0)
     {
         public int Total => Errors.Count;
         // the plain-English line for Health; args: count, since, the mod with most errors (empty when none)
@@ -38,11 +39,16 @@ public static partial class ScriptErrors
         var from = since ?? DateTime.Now.AddDays(-7);
         var errors = new List<Error>();
         Func<string, (string Mod, string File)?> map = Mapper(docs, mods);
+        // (every crash log: a mod that writes one log per script error must not push the few crashes out of the cap)
         IEnumerable<FileInfo> logs;
+        var unread = 0;
         try
         {
-            logs = new DirectoryInfo(docs).EnumerateFiles()
-                .Where(f => IsLog(f.Name) && f.LastWriteTime >= from).OrderByDescending(f => f.LastWriteTime).Take(MaxFiles).ToList();
+            var all = new DirectoryInfo(docs).EnumerateFiles().Where(f => IsLog(f.Name) && f.LastWriteTime >= from).OrderByDescending(f => f.LastWriteTime).ToList();
+            var crashes = all.Where(f => IsCrash(f.Name)).ToList();
+            var scripts = all.Where(f => !IsCrash(f.Name)).ToList();
+            unread = Math.Max(0, scripts.Count - MaxFiles);
+            logs = crashes.Concat(scripts.Take(MaxFiles)).ToList();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { logs = []; }
         foreach (var f in logs)
@@ -56,13 +62,15 @@ public static partial class ScriptErrors
                 text = System.Text.Encoding.UTF8.GetString(buf);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
-            errors.AddRange(f.Name.StartsWith("xcpt ", StringComparison.OrdinalIgnoreCase) ? Native(text, f, mods) : Script(text, f, map));
+            errors.AddRange(IsCrash(f.Name) ? Native(text, f, mods) : Script(text, f, map));
         }
         var byMod = errors.GroupBy(e => e.Mod ?? "").Select(g => new ModErrors(g.Key == "" ? null : g.Key, g.SelectMany(e => e.Files).Distinct().ToList(), g.Count(),
                 g.Count(e => e.Crash), g.Max(e => e.When), g.GroupBy(e => e.Exception).OrderByDescending(x => x.Count()).First().Key))
             .OrderByDescending(m => m.Newest).ThenByDescending(m => m.Count).ToList();
-        return new(from, errors.OrderByDescending(e => e.When).ToList(), byMod);
+        return new(from, errors.OrderByDescending(e => e.When).ToList(), byMod, unread);
     }
+
+    static bool IsCrash(string name) => name.StartsWith("xcpt ", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase);
 
     static bool IsLog(string name) =>
         name.StartsWith("ScriptError_", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
@@ -181,20 +189,23 @@ public static partial class ScriptErrors
         catch (Exception e) when (e is InvalidDataException or IOException or ArgumentException or IndexOutOfRangeException) { return []; }
     }
 
-    public static List<Finding> Findings(Report r)
+    // each with the files of the mod it names (to show it in Mods)
+    public static List<ModFinding> Findings(Report r)
     {
-        var f = new List<Finding>();
+        var f = new List<ModFinding>();
         foreach (var m in r.ByMod.Take(8))
         {
             var sev = m.Crashes > 0 || m.Count >= 5 ? Severity.Warning : Severity.Info; // (unverified cut: one stray error is common with ErrorTrap)
             if (m.Crashes > 0)
-                f.Add(new(sev, m.Crashes == 1
+                f.Add(new(new(sev, m.Crashes == 1
                         ? m.Mod is null ? "The game crashed once in its own code since {1}." : "The game crashed once in {1} since {2}."
                         : m.Mod is null ? "The game crashed {0} times in its own code since {1}." : "The game crashed {0} times in {1} since {2}.",
-                    m.Mod is null ? [m.Crashes.ToString(), r.Since.ToString("g")] : [m.Crashes.ToString(), m.Mod, r.Since.ToString("g")]));
+                    m.Mod is null ? [m.Crashes.ToString(), r.Since.ToString("g")] : [m.Crashes.ToString(), m.Mod, r.Since.ToString("g")]), m.Files));
             if (m.Count - m.Crashes is var n and > 0)
-                f.Add(new(sev, m.Mod is null ? "{0} script errors in the game's own code since {1} ({2})." : "{0} script errors went through {1} since {2} ({3}). If it misbehaves, update or remove it.",
-                    m.Mod is null ? [n.ToString(), r.Since.ToString("g"), m.Exception] : [n.ToString(), m.Mod, r.Since.ToString("g"), m.Exception]));
+                f.Add(new(new(sev, r.Unread > 0
+                        ? m.Mod is null ? "At least {0} script errors in the game's own code since {1} ({2})." : "At least {0} script errors went through {1} since {2} ({3}). If it misbehaves, update or remove it."
+                        : m.Mod is null ? "{0} script errors in the game's own code since {1} ({2})." : "{0} script errors went through {1} since {2} ({3}). If it misbehaves, update or remove it.",
+                    m.Mod is null ? [n.ToString(), r.Since.ToString("g"), m.Exception] : [n.ToString(), m.Mod, r.Since.ToString("g"), m.Exception]), m.Files));
         }
         return f;
     }

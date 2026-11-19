@@ -67,9 +67,26 @@ public sealed class Crystal : Grid
         Draw();
     }
 
-    public void SetState(HealthState s, bool animate = true)
+    public void SetState(HealthState s, bool animate = true) => SetLevel(s switch { HealthState.Blocked => 1, HealthState.NeedsYou => 0.55, _ => 0 }, animate);
+
+    // How much needs attention, 0 (all well: green) to 1 (the game is blocked: red), through yellow-green, yellow and
+    // orange, so a couple of small things do not turn it the same yellow as many.
+    static readonly (double At, Vector3 Rgb)[] Ramp =
+    [
+        (0, Palette[0]), (0.25, new(0.62f, 0.85f, 0.2f)), (0.5, Palette[1]), (0.75, new(0.95f, 0.45f, 0.16f)), (1, Palette[2]),
+    ];
+    public static Vector3 ColorAt(double level)
     {
-        _target = Palette[(int)s];
+        level = Math.Clamp(level, 0, 1);
+        for (var i = 1; i < Ramp.Length; i++)
+            if (level <= Ramp[i].At)
+                return Vector3.Lerp(Ramp[i - 1].Rgb, Ramp[i].Rgb, (float)((level - Ramp[i - 1].At) / (Ramp[i].At - Ramp[i - 1].At)));
+        return Ramp[^1].Rgb;
+    }
+
+    public void SetLevel(double level, bool animate = true)
+    {
+        _target = ColorAt(level);
         if (!animate) _color = _target;
         _glow.Fill = new RadialGradientBrush
         {
