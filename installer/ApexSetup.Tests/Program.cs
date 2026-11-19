@@ -1542,6 +1542,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
 }
 
 ModConflictsTests.Run(Check);
+InstallTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;

@@ -45,10 +45,13 @@ public static class Uninstall
             .Where(g => Scan.Run(g).ApexVersion is not null || Directory.Exists(Manifest.DirOf(g.Bin)) || Directory.Exists(Mods.Disabled(Scan.DocumentsFor(g))))
             .ToList();
 
-    // as the player, last: nothing of the launcher left once this process closes
-    public static void Launcher()
+    // as the player, last: nothing of the launcher left once this process closes (a copy outside the install folder, portable
+    // or never chosen, goes with its marker; the folder it sits in stays)
+    public static void Launcher(string? exe = null)
     {
+        exe ??= Environment.ProcessPath;
         LauncherInstall.RemoveTraces();
-        LauncherInstall.DeleteAfterExit(Paths.InstallDir, Paths.Data);
+        var outside = exe is not null && !LauncherInstall.IsInstalledCopy(exe);
+        LauncherInstall.DeleteAfterExit(outside ? [Paths.InstallDir, Paths.Data, exe!, LauncherInstall.MarkerOf(exe!)] : [Paths.InstallDir, Paths.Data]);
     }
 }
