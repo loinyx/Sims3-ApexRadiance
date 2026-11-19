@@ -1,6 +1,6 @@
 #pragma once
 // Shared room solve time while moving (option of Lot Lighting While Moving, `[patches.LotLightingMotion] sharedSolveTime`,
-// off by default; docs/features/performance/lot-lighting-motion.md "Shared room solve time").
+// on by default; docs/features/performance/lot-lighting-motion.md "Shared room solve time").
 //
 // Each frame the lot pass runs the lot lighting update 0x00ADB8F0 of every lot with lighting work, and each update solves
 // its levels (one call of 0x006A8BA0 per level, the CALL at 0x00ADB9AD) until its own budget is spent, with at least one
