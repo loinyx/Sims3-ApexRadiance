@@ -882,9 +882,14 @@
                     </Grid>
                     <!-- the chosen mod (or several) -->
                     <Border x:Name="ModDetailsPane" Grid.Column="2" Width="340" HorizontalAlignment="Right" BorderBrush="{StaticResource ApexCardBorderBrush}" BorderThickness="1,0,0,0" Background="#0F1013">
-                        <ScrollViewer>
-                            <StackPanel x:Name="ModDetails" Tag="dyn" Padding="20,20,20,24" Spacing="16" />
-                        </ScrollViewer>
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <StackPanel x:Name="ModDetailsHead" />
+                            <ScrollViewer Grid.Row="1">
+                                <StackPanel x:Name="ModDetails" Tag="dyn" Padding="20,18,20,24" Spacing="18" />
+                            </ScrollViewer>
+                            <Grid x:Name="ModDetailsFoot" Grid.Row="2" Padding="20,14,20,18" ColumnSpacing="8" BorderBrush="{StaticResource ApexCardBorderBrush}" BorderThickness="0,1,0,0" Visibility="Collapsed" />
+                        </Grid>
                     </Border>
                 </Grid>
 

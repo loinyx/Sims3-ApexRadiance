@@ -1358,6 +1358,10 @@ public sealed partial class MainWindow
     {
         var host = ModDetails;
         host.Children.Clear();
+        ModDetailsHead.Children.Clear();
+        ModDetailsFoot.Children.Clear();
+        ModDetailsFoot.ColumnDefinitions.Clear();
+        ModDetailsFoot.Visibility = Visibility.Collapsed;
         if (_modPlace == PackMods && _packInstalled && InstalledGrid.SelectedItem is InstalledRow ir)
         {
             ModDetailsPane.Visibility = Visibility.Visible;
@@ -1366,7 +1370,7 @@ public sealed partial class MainWindow
         }
         var picked = Picked();
         ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        if (_modsNarrow && picked.Count > 0)
+        if (_modsNarrow && picked.Count > 1)
         {
             var close = IconButton("x", T("Close"));
             close.HorizontalAlignment = HorizontalAlignment.Right;
@@ -1388,192 +1392,7 @@ public sealed partial class MainWindow
             return;
         }
         if (picked.Count > 1) { FillManyDetails(picked); return; }
-        var r = picked[0];
-        var m = r.File;
-        var mine = Mine(r);
-
-        // the picture: the player's own, else the package's; buttons to add or change it
-        var pic = new Grid { Height = 180, CornerRadius = new CornerRadius(10), Background = r.TileBrush };
-        var placeholder = Lucide.Icon(r.KindIcon, 44, r.GlyphBrush, 1.4);
-        placeholder.HorizontalAlignment = HorizontalAlignment.Center;
-        placeholder.VerticalAlignment = VerticalAlignment.Center;
-        pic.Children.Add(placeholder);
-        // (a package's own thumbnail is small: shown at twice its size, not blown up to the whole box)
-        if (r.Image is { } img)
-            pic.Children.Add(img is BitmapImage { PixelWidth: > 0 and < 160 } small
-                ? new Image { Source = img, Stretch = Stretch.Uniform, Width = small.PixelWidth * 2, Height = small.PixelHeight * 2, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
-                : new Image { Source = img, Stretch = Stretch.UniformToFill });
-        var own = ModNotes.PicturePath(m.Rel) is not null;
-        var picButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(10) };
-        if (own) picButtons.Children.Add(SmallButton(T("Remove picture"), "x", () => SetPicture(r, null)));
-        picButtons.Children.Add(SmallButton(own ? T("Change picture") : T("Add picture"), "image-plus", async () =>
-        {
-            var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
-            foreach (var x in new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif" }) picker.FileTypeFilter.Add(x);
-            if (await picker.PickSingleFileAsync() is { } file) SetPicture(r, file.Path);
-        }));
-        pic.Children.Add(picButtons);
-        host.Children.Add(pic);
-
-        // the name, renamed in place
-        var nameRow = new Grid { ColumnSpacing = 4 };
-        nameRow.ColumnDefinitions.Add(new ColumnDefinition());
-        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var nameText = new TextBlock { Text = r.Name, FontSize = 18, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
-        nameRow.Children.Add(nameText);
-        if (mine)
-        {
-            var rename = IconButton("pencil", T("Rename"));
-            rename.VerticalAlignment = VerticalAlignment.Top;
-            rename.Click += (_, _) =>
-            {
-                var box = new TextBox { Text = r.Name, FontSize = 15 };
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("New name"));
-                nameRow.Children.Remove(nameText);
-                nameRow.Children.Insert(0, box);
-                rename.Visibility = Visibility.Collapsed;
-                box.Loaded += (_, _) => { box.Focus(FocusState.Programmatic); box.SelectAll(); };
-                var done = false;
-                void End(bool save)
-                {
-                    if (done) return;
-                    done = true;
-                    if (save && box.Text.Trim() is { Length: > 0 } n && n != r.Name) RenameMod(r, n);
-                    else FillModDetails();
-                }
-                box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; End(true); } else if (e.Key == Windows.System.VirtualKey.Escape) { e.Handled = true; End(false); } };
-                box.LostFocus += (_, _) => End(true);
-            };
-            Grid.SetColumn(rename, 1);
-            nameRow.Children.Add(rename);
-        }
-        host.Children.Add(nameRow);
-
-        host.Children.Add(TagsRow([r]));
-
-        // notes, saved when the box loses focus
-        var notes = new TextBox
-        {
-            Text = ModNotes.Get(m.Rel)?.Notes ?? "", PlaceholderText = T("Notes: where it came from, what it changes"), AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap, MinHeight = 72, MaxHeight = 220,
-        };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(notes, T("Notes"));
-        notes.LostFocus += (_, _) =>
-        {
-            try { ModNotes.SetNotes(r.File.Rel, notes.Text); r.Refresh(); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The notes were not saved"), ErrorText(e)); }
-        };
-        host.Children.Add(notes);
-
-        // what it is
-        var facts = new Grid { ColumnSpacing = 12, RowSpacing = 8 };
-        facts.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(74) });
-        facts.ColumnDefinitions.Add(new ColumnDefinition());
-        void Fact(string k, UIElement v)
-        {
-            facts.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var key = Muted(k);
-            Grid.SetRow(key, facts.RowDefinitions.Count - 1);
-            if (v is FrameworkElement fe) { Grid.SetRow(fe, facts.RowDefinitions.Count - 1); Grid.SetColumn(fe, 1); }
-            facts.Children.Add(key);
-            facts.Children.Add(v);
-        }
-        TextBlock Val(string t) => new() { Text = t, FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap };
-        var kinds = new WrapPanel { Spacing = 6 };
-        foreach (var k in r.Kinds.Take(6))
-        {
-            var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-            chip.Children.Add(Lucide.Icon(KindIcon(k), 12, Res("ApexMutedBrush")));
-            chip.Children.Add(new TextBlock { Text = KindLabel(k), FontSize = 12, Foreground = Res("ApexSoftTextBrush") });
-            kinds.Children.Add(chip);
-        }
-        if (mine)
-        {
-            // the type can be changed by hand: the filters, the icon and the sort follow it
-            var change = new HyperlinkButton { Content = T("Change"), Padding = new Thickness(0), FontSize = 12 };
-            change.Click += (_, _) => PickKinds(r, change);
-            kinds.Children.Add(change);
-            if (ModNotes.Get(m.Rel)?.Kinds is not null)
-                kinds.Children.Add(new TextBlock { Text = T("Chosen by you"), FontSize = 11, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
-        }
-        Fact(T("Type"), kinds);
-        Fact(T("File"), Val(m.Name));
-        // a lot or world in Downloads: the store items it uses, installed or not
-        if (m.FileType == "sims3pack" && _installedIds is { } have && Sims3Pack.Read(m.Path) is { } pack && pack.StoreDependencies.ToList() is { Count: > 0 } needs)
-        {
-            var missing = needs.Count(d => !have.Contains(d));
-            var v = Val(missing == 0 ? (needs.Count == 1 ? T("1, installed") : T("{0}, all installed", needs.Count))
-                : T("{0} of {1} not installed: get them from the store, or the lot shows without them", missing, needs.Count));
-            if (missing > 0) v.Foreground = Res("ApexWarningBrush");
-            Fact(T("Store items"), v);
-        }
-        // the creator: the guess shows as the box's hint until the player writes one
-        var (who, guessed) = ModCreators.Of(m, _modCreatorGuess);
-        var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 12, MinWidth = 0, Padding = new Thickness(8, 4, 8, 4) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(creator, T("Creator"));
-        ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name; write the maker's name to set it.") : T("The maker's name."));
-        creator.LostFocus += (_, _) =>
-        {
-            try { ModNotes.SetCreator(r.File.Rel, creator.Text); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
-        };
-        Fact(T("Creator"), creator);
-        if (mine)
-        {
-            var where = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            where.Children.Add(Val(ModRow.Place(m)));
-            var move = new HyperlinkButton { Content = T("Move…"), Padding = new Thickness(0), FontSize = 12 };
-            move.Click += (_, _) => MoveMenu([r]).ShowAt(move);
-            where.Children.Add(move);
-            Fact(T("Folder"), where);
-        }
-        else Fact(T("Where"), Val(ModRow.Place(m)));
-        Fact(T("Size"), Val(r.Size));
-        Fact(T("Added"), Val(Added(m).ToString("d")));
-        Fact(T("State"), Val(m.Locked ? ModRow.LockText(m) : m.Enabled ? T("On") : HasItems(r) ? T("Off: the game does not load it; a game saved now loses its items") : T("Off: the game does not load it")));
-        if (ModMerge.IsMerged(m) && ModMerge.Info(m) is { } merged)
-        {
-            var made = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            made.Children.Add(Val(T("{0} mods", merged.Originals.Count)));
-            var split = new HyperlinkButton { Content = T("Split…"), Padding = new Thickness(0), FontSize = 12 };
-            split.Click += (_, _) => Safe(SplitAsync(r));
-            made.Children.Add(split);
-            Fact(T("Merged from"), made);
-        }
-        host.Children.Add(facts);
-        if (ModMerge.IsMerged(m) && ModMerge.Info(m) is { } mergeInfo) host.Children.Add(MergedPanel(r, mergeInfo));
-        if (r.Defaults.IsDefault && _gameIndex is { } gi) host.Children.Add(ReplacesPanel(r, gi));
-        if (m.FileType is "package" or "library") host.Children.Add(InsidePanel(r));
-
-        // what needs a look
-        if (m.Enabled && !Loaded(m))
-            host.Children.Add(Warn(T("The game does not load this folder"), T("Mods\\Resource.cfg does not list it, so the game skips this mod. Move it into Packages (or a folder inside it) to use it.")));
-        if (r.DuplicateOf is { } dup) host.Children.Add(Warn(T("Same as {0}", dup), T("The same file is in two places. Keep the newer one and remove the other.")));
-        foreach (var f in r.Findings) host.Children.Add(Warn(f, null, T("See in Health"), () => Show(HealthScreen)));
-
-        // actions
-        var acts = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
-        acts.ColumnDefinitions.Add(new ColumnDefinition());
-        acts.ColumnDefinitions.Add(new ColumnDefinition());
-        acts.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var show = WideButton("folder-search", T("Show file"), () => ShowFile(m.Path));
-        if (!m.Locked)
-        {
-            acts.Children.Add(WideButton(m.Enabled ? "power-off" : "power", m.Enabled ? T("Turn off") : T("Turn on"), () => SetMods([r], !r.File.Enabled)));
-            Grid.SetColumn(show, 1);
-        }
-        else Grid.SetColumnSpan(show, 2);
-        acts.Children.Add(show);
-        if (mine)
-        {
-            var remove = IconButton("trash-2", T("Remove to the Recycle Bin"), "ApexErrorBrush");
-            remove.Width = 36;
-            remove.Height = 34;
-            remove.Click += (_, _) => RemoveMods([r]);
-            Grid.SetColumn(remove, 2);
-            acts.Children.Add(remove);
-        }
-        host.Children.Add(acts);
+        FillOneModDetails(picked[0]);
     }
 
     void FillManyDetails(List<ModRow> picked)
@@ -1730,9 +1549,6 @@ public sealed partial class MainWindow
         var d = r.Defaults;
         var panel = new StackPanel { Spacing = 8 };
         var items = d.Objects.Count + d.CasParts.Count;
-        panel.Children.Add(new TextBlock { Text = T("REPLACES IN THE GAME"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 60, Foreground = Res("ApexMutedBrush") });
-        panel.Children.Add(Muted(d.Share >= 0.999 ? T("A pure default replacement: everything in it changes something the game already has.")
-            : T("{0} of its {1} resources replace the game's; the rest is new.", d.Replaced, d.Resources)));
         var wrap = new WrapPanel { Spacing = 6 };
         if (d.Objects.Count > 0) wrap.Children.Add(Pill(d.Objects.Count == 1 ? T("1 object") : T("{0} objects", d.Objects.Count), "ApexSoftTextBrush"));
         if (d.CasParts.Count > 0) wrap.Children.Add(Pill(d.CasParts.Count == 1 ? T("1 Create a Sim part") : T("{0} Create a Sim parts", d.CasParts.Count), "ApexSoftTextBrush"));
@@ -1764,57 +1580,6 @@ public sealed partial class MainWindow
         }
         if (items > shown) panel.Children.Add(Muted(T("and {0} more", items - shown)));
         return panel;
-    }
-
-    // ---------- a merge's own mods ----------
-
-    // the mods a merged package was made of, each with Take out (put back, the rest merged again), and Split for all
-    UIElement MergedPanel(ModRow r, MergeRecord info)
-    {
-        var panel = new StackPanel { Spacing = 6 };
-        panel.Children.Add(new TextBlock { Text = T("INSIDE THIS MERGE · {0} MODS", info.Originals.Count), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 60, Foreground = Res("ApexMutedBrush") });
-        foreach (var o in info.Originals.OrderBy(o => o.Rel, StringComparer.OrdinalIgnoreCase))
-        {
-            var g = new Grid { ColumnSpacing = 8 };
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var name = new TextBlock { Text = Path.GetFileNameWithoutExtension(o.Rel), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-            ToolTipService.SetToolTip(name, o.Rel);
-            g.Children.Add(name);
-            var size = new TextBlock { Text = ModRow.SizeText(o.Size), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(size, 1);
-            g.Children.Add(size);
-            var take = IconButton("folder-input", T("Take {0} out of the merge", Path.GetFileNameWithoutExtension(o.Rel)));
-            take.Width = take.Height = 28;
-            var rel = o.Rel;
-            take.Click += (_, _) => Safe(TakeOutAsync(r, [rel]));
-            Grid.SetColumn(take, 2);
-            g.Children.Add(take);
-            panel.Children.Add(g);
-        }
-        var split = WideButton("merge", T("Split it back into its {0} mods", info.Originals.Count), () => Safe(SplitAsync(r)));
-        split.Margin = new Thickness(0, 4, 0, 0);
-        panel.Children.Add(split);
-        return panel;
-    }
-
-    async Task TakeOutAsync(ModRow r, List<string> rels)
-    {
-        var name = Path.GetFileNameWithoutExtension(rels[0]);
-        if (!await Confirm(T("Take {0} out of the merge?", name), T("It goes back where it was, checked against the copy kept at the merge. The others are merged again into {0}, written and verified the same way.", r.Name), T("Take it out"))) return;
-        ModsInfo.IsOpen = true;
-        ModsInfo.Severity = InfoBarSeverity.Informational;
-        ModsInfo.Title = T("Taking {0} out of the merge…", name);
-        ModsInfo.Message = "";
-        ModMerge.TakeOutResult? res = null;
-        try { res = await Task.Run(() => ModMerge.TakeOut(Docs, r.File, rels)); }
-        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merge was not changed as asked"), ErrorText(e)); }
-        if (res is not null)
-            ModsResult(res.Remerged is { } m ? T("{0} is back on its own; {1} now holds {2} mods", name, m.Merged.Name, m.Mods) : T("{0} is back on its own; the other mod is back too", name), null);
-        _modsLoaded = false;
-        _folderSig = "";
-        await LoadModsAsync();
     }
 
     // ---------- what a package holds ----------
