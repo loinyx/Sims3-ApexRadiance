@@ -74,7 +74,7 @@ Shipped in the package; players do not need to change them.
 | `bridge.conf` | `rewindMode` | not set | Rewind mode for test harnesses (patch 0015); off for play |
 | `bridge.conf` | `rewindMaxKeptMB` | not set (1024) | With rewind mode: megabytes a snapshot may keep alive on the server before it is given up |
 | `bridge.conf` | `rewindParkTimeoutSec` | not set (120) | With rewind mode: seconds a parked client waits without an Op from its host before it logs the host as gone and runs on |
-| `dxvk.conf` | `d3d9.customVendorId`, `d3d9.customDeviceId`, `d3d9.customDeviceDesc` | `10de`, `1080`, `Geforce GTX 580` | DXVK's TS3W profile, so `Options.ini` is kept |
+| `dxvk.conf` | `d3d9.customVendorId`, `d3d9.customDeviceId` | `10de`, `1080` | The ids of DXVK's TS3W profile, so `Options.ini` is kept. Its name is not repeated: the game finds device `0x1080` in `GraphicsCards.sgr` and tiers by that entry, and the logs show the real card |
 | `dxvk.conf` | `d3d9.countLosableResources` | `False` | A Reset succeeds although one losable resource is still alive |
 
 ## Compatibility and interactions
@@ -141,6 +141,7 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
 | 0013 | Idle copy fetches: under the bridge, small parts of the picture (a lamp's sprite, pieces of objects or pillars) blinked now and then with the lot left still, and stopped with `freeIdle*Sec = 0`. The fetch of a freed copy now fails the lock when the server sends no whole copy (before, the lock went on and the next `Unlock` uploaded an unfetched copy over the server's); a freed MANAGED level is always fetched (`DISCARD`, which MANAGED ignores, skipped the fetch and left the rest of the copy undefined); a texture fetch is checked by a CRC32C like a buffer's; and only copies of 64 KB and more, which come from `VirtualAlloc`, are freed (a heap copy gives back almost no address space). Which of these caused the blinking is unverified |
 | 0014 | A new client copy starts zeroed: the client made a texture level's CPU copy under 64 KB with `new[]` and left it uninitialized, while a new d3d9 or DXVK texture starts zeroed. The game writes part of a lot's terrain overlay weights (64x64 A8R8G8B8) and uploads the rest as it is, so the rest held heap leftovers and some lots drew their ground black on some loads (painting the terrain there painted black). Measured with the in-game runner on the save that opens on such a lot: black on 4 of 4 loads before, right on 4 of 4 after |
 | 0015 | `rewindMode` (off): rewind mode for test harnesses, see below |
+| 0016 | The server's DXVK reads the `dxvk.conf` next to the client `d3d9.dll`: the client sets `DXVK_CONFIG_FILE` to it before starting the server, unless the variable is already set. DXVK looks for `dxvk.conf` in the working folder, and the server inherits the folder the game was started from, so a start from another folder (a shortcut, a launcher or a command line elsewhere) reported the real card's id, and the game reset `Options.ini` for the new `lastdevice` |
 
 ### Diagnostics
 
