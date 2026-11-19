@@ -86,7 +86,7 @@ Repeat until the tester stops you or a round finds nothing new three times in a 
 **Mods (most important)**
 
 - The side pane: Library places (All mods, New, Default replacements, Needs a look, Duplicates, Turned off), folders,
-  tags, Game plugins (ASI), Sims3Packs, Library. Clicking each one shows its mods; counts match the list.
+  tags, Game plugins (ASI), Library. Clicking each one shows its mods; counts match the list.
 - List and grid views, search (name, folder, notes, tags, creator, type), every filter group (file type, what it is:
   Create a Sim, Buy mode, Build mode with walls, floors, fences, roofs, terrain paints..., state, tags, creator, date
   added, size), sorting, Select all and Clear.
@@ -99,9 +99,8 @@ Repeat until the tester stops you or a round finds nothing new three times in a 
   says why.
 - Merge: the plan, the run with its log, the check of the result, splitting back, taking one mod out of a merge; the
   originals come back identical (compare file hashes).
-- Add mods: the picker, drag and drop from Explorer, and "Open with" on `.package`, `.sims3pack` and `.zip`; every
-  file is checked first; damaged and duplicate files are refused or offered as a copy; Sims3Packs of lots and worlds
-  go to Downloads.
+- Add mods: the picker, drag and drop from Explorer, and "Open with" on `.package` and `.zip`; every file is checked
+  first; damaged and duplicate files are refused or offered as a copy; a `.sims3pack` is refused (not a mod file).
 - The problem-mod hunt: start, answer rounds, stop; every mod is back where it was.
 - Remove to the Recycle Bin, with its confirmation.
 

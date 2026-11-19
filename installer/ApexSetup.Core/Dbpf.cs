@@ -9,7 +9,7 @@ public static class Dbpf
 
     const int MaxEntries = 200_000; // (no real package comes close; a bigger count is a damaged header)
 
-    // read only, alongside a program that has the file open to write (the game holds its DCCache this way while it runs)
+    // read only, alongside a program that has the file open to write (the game holds files this way while it runs)
     public static FileStream OpenShared(string path) => new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
 
     public static List<Entry> Index(string path)

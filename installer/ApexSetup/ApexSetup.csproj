@@ -53,10 +53,6 @@
     <TrimmerRootAssembly Include="WinRT.Runtime" />
     <TrimmerRootAssembly Include="Microsoft.WinUI" />
     <TrimmerRootAssembly Include="Microsoft.InteractiveExperiences.Projection" />
-    <!-- Sims3Pack manifests are read with XDocument: the trimmed single file dropped its facade (a FileNotFoundException on the first manifest read) -->
-    <TrimmerRootAssembly Include="System.Xml.XDocument" />
-    <TrimmerRootAssembly Include="System.Private.Xml.Linq" />
-    <TrimmerRootAssembly Include="System.Private.Xml" />
   </ItemGroup>
   <!-- The self-contained Windows App SDK runtime ships its AI, machine-learning (onnxruntime, DirectML) and Widgets
        parts too; Setup never calls them, and they load only when called, so they stay out of the exe. -->

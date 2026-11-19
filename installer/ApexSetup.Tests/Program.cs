@@ -1406,7 +1406,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         LauncherInstall.SetRunAtStartup(Paths.InstalledExe, true);
         Check(LauncherInstall.Registered() && LauncherInstall.RunsAtStartup() && File.Exists(LauncherInstall.StartMenuLink) && File.Exists(LauncherInstall.DesktopLink),
             "Installed apps entry, Start menu and desktop shortcuts, start with Windows");
-        Check(LauncherInstall.OffersOpenWith(), "the launcher is offered in Open with for .package and .sims3pack");
+        Check(LauncherInstall.OffersOpenWith(), "the launcher is offered in Open with for .package");
         LauncherInstall.RemoveTraces();
         Check(!LauncherInstall.Registered() && !LauncherInstall.RunsAtStartup() && !File.Exists(LauncherInstall.StartMenuLink) && !File.Exists(LauncherInstall.DesktopLink)
             && !LauncherInstall.OffersOpenWith(), "uninstall removes the entry, the shortcuts, the Run value and Open with");
@@ -1460,11 +1460,10 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         var all2 = Mods.List(lg, Path.Combine(lr, "Docs2"));
         Check(all2.Single(m => m.Name == "Bistro.package") is { Kind: ModKind.Lot, FileType: "library", Locked: true }
             && all2.Single(m => m.Name == "Family.package").Kind == ModKind.Household
-            && all2.Single(m => m.Name == "Rinn Fada.Sims3Pack") is { Kind: ModKind.World, FileType: "sims3pack" }
-            && all2.Single(m => m.Name == "House.Sims3Pack").Kind == ModKind.Lot,
-            "mods: the Library's lots and households, and Sims3Packs by what their header says (a world, a lot)");
-        Check(all2.Select(m => m.FileType).SequenceEqual(all2.Select(m => m.FileType).OrderBy(t => t switch { "asi" => 1, "sims3pack" => 2, "library" => 3, _ => 0 })),
-            "mods: packages first, then ASI plugins, Sims3Packs and the Library");
+            && !all2.Any(m => m.Name.EndsWith(".Sims3Pack", StringComparison.OrdinalIgnoreCase)),
+            "mods: the Library's lots and households; Sims3Packs in Downloads are not listed");
+        Check(all2.Select(m => m.FileType).SequenceEqual(all2.Select(m => m.FileType).OrderBy(t => t switch { "asi" => 1, "library" => 2, _ => 0 })),
+            "mods: packages first, then ASI plugins and the Library");
 
         // a pack's icon from its game definition file; a world's own picture, never a lot's
         var gdfDir = Path.Combine(lr, "EPx", "Game", "Bin");
@@ -1565,7 +1564,6 @@ ModMergeTests.Run(Check);
 ModKindsTests.Run(Check);
 HealthTests.Run(Check);
 ModToolsTests.Run(Check);
-DcCacheTests.Run(Check);
 DefaultReplacementsTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");

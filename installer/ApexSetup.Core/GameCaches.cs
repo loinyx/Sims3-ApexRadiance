@@ -8,7 +8,7 @@ public sealed record CacheFile(string Path, string Rel, long Size);
 public static class GameCaches
 {
     // Each was seen in a real Documents folder; the list is the one Mod The Sims' and NRaas' "delete your caches" guides give.
-    // DCCache is left out on purpose: its .dbc files hold installed Sims3Pack content, not a cache.
+    // DCCache is left out on purpose: its .dbc files hold the game's installed store content, not a cache.
     static readonly string[] RootFiles =
     [
         "CASPartCache.package",       // CAS parts index, rebuilt at start

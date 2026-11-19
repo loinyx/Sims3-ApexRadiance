@@ -204,7 +204,7 @@ public static class ModNotes
 }
 
 // The player's folders under Mods, and moving, renaming and removing mods in them. Only the player's own packages under
-// Mods: a locked mod (installed by the launcher, in Game\Bin, a Sims3Pack, the Library) is never moved, renamed or removed
+// Mods: a locked mod (installed by the launcher, in Game\Bin, the Library) is never moved, renamed or removed
 // here. A switched-off mod lives at the same place under Mods\Disabled (Apex Launcher), and goes along.
 public static partial class ModLibrary
 {

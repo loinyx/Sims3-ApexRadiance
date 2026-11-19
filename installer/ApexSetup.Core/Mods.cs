@@ -1,21 +1,20 @@
 namespace ApexSetup;
 
-public enum ModKind { Package, Script, Cas, Objects, Lighting, Sound, Textures, Tuning, Interface, Asi, Sims3Pack, World, Lot, Household }
+public enum ModKind { Package, Script, Cas, Objects, Lighting, Sound, Textures, Tuning, Interface, Asi, Lot, Household }
 
 // One mod file as the Mods screen lists it. Rel is its path as the game sees it (under Mods, or under Game\Bin for an
 // ASI), the same whether it is on or off. Locked: the launcher installed it (switched in Components) or it is in Game\Bin.
 public sealed record ModFile(string Path, string Rel, long Size, ModKind Kind, bool Enabled, bool Locked)
 {
-    // the file's own type, for the Mods screen's tabs: a package of Mods, an ASI plugin, a Sims3Pack, the Library
+    // the file's own type, for the Mods screen's tabs: a package of Mods, an ASI plugin, the Library
     public string FileType => Path.EndsWith(".asi", StringComparison.OrdinalIgnoreCase) ? "asi"
-        : Path.EndsWith(".sims3pack", StringComparison.OrdinalIgnoreCase) ? "sims3pack"
         : Rel.StartsWith("Library", StringComparison.OrdinalIgnoreCase) ? "library" : "package";
     public string Name => System.IO.Path.GetFileName(Path);
     public string Folder => System.IO.Path.GetDirectoryName(Rel) ?? "";
 }
 
-// The player's mods: .package files under Documents\...\Mods, the .asi files in Game\Bin, the Sims3Packs in Downloads (installed
-// with the game's own launcher) and the households and lots saved to the Library. A mod is switched off by
+// The player's mods: .package files under Documents\...\Mods, the .asi files in Game\Bin and the households and lots saved
+// to the Library. A mod is switched off by
 // moving it to Mods\Disabled (Apex Launcher) (outside Packages, so Resource.cfg does not load it) and on by moving it
 // back to the same place. Only the player's Documents is touched: no admin needed.
 public static class Mods
@@ -50,14 +49,12 @@ public static class Mods
         foreach (var p in new[] { g.Bin, Path.Combine(g.Bin, "scripts"), Path.Combine(g.Bin, "plugins") }.Where(Directory.Exists)
                      .SelectMany(d => Directory.EnumerateFiles(d, "*.asi")))
             list.Add(new ModFile(p, Path.GetRelativePath(g.Root, p), Size(p), ModKind.Asi, true, true));
-        // (the game's own launcher installs and removes these: listed, not switched here)
-        foreach (var (dir, pattern) in new[] { ("Downloads", "*.sims3pack"), ("Library", "*.package") })
-            if (Path.Combine(docs, dir) is var d && Directory.Exists(d))
-                foreach (var p in Files(d, pattern))
-                    list.Add(new ModFile(p, Path.Combine(dir, Path.GetRelativePath(d, p)), Size(p),
-                        !kinds ? ModKind.Package : dir == "Downloads" ? Sims3PackKind(p) : LibraryKind(p), true, true));
-        // the player's packages first, then the game folder's plugins, the Sims3Packs and the Library
-        return list.OrderBy(m => m.FileType switch { "asi" => 1, "sims3pack" => 2, "library" => 3, _ => 0 })
+        // (the game manages these: listed, not switched here)
+        if (Path.Combine(docs, "Library") is var lib && Directory.Exists(lib))
+            foreach (var p in Files(lib, "*.package"))
+                list.Add(new ModFile(p, Path.Combine("Library", Path.GetRelativePath(lib, p)), Size(p), kinds ? LibraryKind(p) : ModKind.Package, true, true));
+        // the player's packages first, then the game folder's plugins and the Library
+        return list.OrderBy(m => m.FileType switch { "asi" => 1, "library" => 2, _ => 0 })
             .ThenBy(m => m.Rel, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
@@ -90,34 +87,12 @@ public static class Mods
         return ModKind.Package;
     }
 
-    // what a Sims3Pack holds, as its header says (<Sims3Package Type="world" ...>): a world, a lot, a household, an object
-    public static ModKind Sims3PackKind(string path)
-    {
-        try
-        {
-            using var f = File.OpenRead(path);
-            var head = new byte[4096];
-            var n = f.Read(head, 0, head.Length);
-            var text = System.Text.Encoding.UTF8.GetString(head, 0, n);
-            var at = text.IndexOf("<Sims3Package Type=\"", StringComparison.Ordinal);
-            if (at < 0) return ModKind.Sims3Pack;
-            var type = text[(at + 20)..].Split('"')[0].ToLowerInvariant();
-            return type switch
-            {
-                "world" => ModKind.World, "lot" => ModKind.Lot, "household" => ModKind.Household,
-                "object" => ModKind.Objects, "caspart" or "outfit" or "hair" => ModKind.Cas, "pattern" => ModKind.Textures,
-                _ => ModKind.Sims3Pack,
-            };
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return ModKind.Sims3Pack; }
-    }
-
     // a lot saved to the Library carries its lot pictures; a household does not
     public static ModKind LibraryKind(string package) => Dbpf.Index(package).Any(e => e.Type == LotImage) ? ModKind.Lot : ModKind.Household;
 
     public static byte[]? Thumbnail(ModFile m) => m.Kind switch
     {
-        _ when m.FileType is "asi" or "sims3pack" => null,
+        _ when m.FileType == "asi" => null,
         ModKind.Lot => Dbpf.First(m.Path, [LotImage]),
         ModKind.Household => Dbpf.First(m.Path, [Saves.PhotoType]),
         _ => Dbpf.First(m.Path, ThumbTypes),

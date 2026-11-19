@@ -807,7 +807,7 @@ public static partial class ModConflicts
                 // ModFolders: every first-level folder is one mod (a collection of versions); else every file
                 var p = new Party(Path.GetFileNameWithoutExtension(f), file, o.ModFolders && relRoot.Contains('/') ? $"{rootName}/{relRoot.Split('/')[0]}" : file);
                 parties.Add(p);
-                if (ext == ".dbc") { p.Unknown.Add("DCCache .dbc (installed .sims3pack content): not scanned"); continue; }
+                if (ext == ".dbc") { p.Unknown.Add("DCCache .dbc (the game's installed store content): not scanned"); continue; }
                 if (ext == ".asi") { DoAsi(p, File.ReadAllBytes(f), f, f); continue; }
                 if (ext == ".package") { DoPackage(p, () => Package.Open(f), p.File, rel, dirs); continue; }
                 // as if unpacked into a folder named after the archive (unverified: players unpack that way or flatten)

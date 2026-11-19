@@ -13,31 +13,14 @@ using static ApexSetup.Strings;
 namespace ApexSetup;
 
 // The Mods screen. The side pane lists places in four groups: the library (all mods, new since the last game, what needs a
-// look, duplicates, what is off), the player's folders, their tags and the game's own places (ASI plugins, Sims3Packs, the
-// Library). The list shows the chosen place through the search, the filters (file type, kind, state, tags, age, size) and
+// look, duplicates, what is off), the player's folders, their tags and the game's own places (ASI plugins, the Library). The list shows the chosen place through the search, the filters (file type, kind, state, tags, age, size) and
 // the sort; the details pane shows the chosen mod or what several chosen mods share. Moves, renames, removals and merges go
 // through ModLibrary and ModMerge, notes and tags through ModNotes.
 public sealed partial class MainWindow
 {
     const string DefaultMods = "*default", AllMods = "*all", NewMods = "*new", LookMods = "*look", DupMods = "*dup", OffMods = "*off",
-        AsiMods = "*asi", PackMods = "*sims3pack", LibraryMods = "*library", NewTag = "*newtag", InstalledMods = "*installed";
-    // what the game's own launcher installed into its cache (null: not read yet)
-    List<InstalledRow>? _installed;
-    HashSet<uint>? _installedIds;
-    List<List<string>> _setLists = [];
-    Dictionary<string, string> _recordNames = [];
-    bool _packInstalled; // (Sims3Packs: the Installed tab)
+        AsiMods = "*asi", LibraryMods = "*library", NewTag = "*newtag";
 
-    void OnPackTab(SelectorBar sender, SelectorBarSelectionChangedEventArgs e)
-    {
-        var installed = sender.SelectedItem == PackTabInstalled;
-        if (installed == _packInstalled) return;
-        _packInstalled = installed;
-        ModList.SelectedItems.Clear();
-        ModGrid.SelectedItems.Clear();
-        FillMods();
-        FillModDetails();
-    }
     string _modPlace = AllMods;
     List<ModRow> _modRows = [];
     readonly ObservableCollection<ModRow> _modShown = [];
@@ -92,13 +75,12 @@ public sealed partial class MainWindow
                 IsNew = since is { } s && Added(m) > s,
                 DuplicateOf = dups.TryGetValue(m.Path, out var d) ? Path.GetFileNameWithoutExtension(d) : null,
                 DetectedKinds = kinds.TryGetValue(m.Path, out var k) && k.Kinds.Any() ? k.Kinds.Select(x => x.ToString()).ToList()
-                    : [m.FileType switch { "asi" => "Asi", "sims3pack" => "Sims3Pack", _ => m.Kind.ToString() }],
+                    : [m.FileType == "asi" ? "Asi" : m.Kind.ToString()],
             }).ToList();
             foreach (var r in _modRows) ApplyKinds(r);
             _modsLoaded = true;
             Safe(LoadModPicturesAsync(_modRows));
             Safe(LoadDefaultsAsync(g, _modRows));
-            Safe(LoadInstalledAsync());
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not read your mods"), ErrorText(e)); }
         finally { _modsLoading = false; }
@@ -173,14 +155,6 @@ public sealed partial class MainWindow
             var shown = Sorted(inPlace.Where(Matches)).ToList();
             ModRow.ShowPlace = !IsFolder(_modPlace);
             Sync(shown);
-            PackTabs.Visibility = _modPlace == PackMods ? Visibility.Visible : Visibility.Collapsed;
-            if (_modPlace == PackMods)
-            {
-                PackTabDownloads.Text = T("In Downloads ({0})", inPlace.Count);
-                PackTabInstalled.Text = T("Installed ({0})", _installed?.Count ?? 0);
-                if (_packInstalled) { FillInstalled(); return; }
-            }
-            InstalledGrid.Visibility = Visibility.Collapsed;
             ModsSelectAll.Visibility = ModsSelectNone.Visibility = Visibility.Visible;
             ModList.Visibility = ModListHead.Visibility = _modsGrid ? Visibility.Collapsed : Visibility.Visible;
             ModGrid.Visibility = _modsGrid ? Visibility.Visible : Visibility.Collapsed;
@@ -240,7 +214,7 @@ public sealed partial class MainWindow
     (string Crumb, string Title) PlaceTitle(string place) => place switch
     {
         AllMods => ("", T("All mods")), NewMods => ("", T("New since last play")), DefaultMods => ("", T("Default replacements")), LookMods => ("", T("Needs a look")), DupMods => ("", T("Duplicates")),
-        OffMods => ("", T("Turned off")), AsiMods => ("", T("Game plugins")), PackMods => ("", "Sims3Packs"), LibraryMods => ("", T("Library")),
+        OffMods => ("", T("Turned off")), AsiMods => ("", T("Game plugins")), LibraryMods => ("", T("Library")),
         _ when place.StartsWith('#') => (T("Tag"), place[1..]),
         "" => ("", "Mods"),
         _ => (string.Join(" › ", new[] { "Mods" }.Concat(place.Split(Path.DirectorySeparatorChar).SkipLast(1))), Path.GetFileName(place)),
@@ -258,7 +232,6 @@ public sealed partial class MainWindow
             DupMods => r.DuplicateOf is not null,
             OffMods => !m.Enabled,
             AsiMods => m.FileType == "asi",
-            PackMods => m.FileType == "sims3pack",
             LibraryMods => m.FileType == "library",
             _ when place.StartsWith('#') => ModNotes.TagsOf(m.Rel).Contains(place[1..], StringComparer.OrdinalIgnoreCase),
             _ => InDir(m, place),
@@ -320,7 +293,7 @@ public sealed partial class MainWindow
                     new(DupMods, T("Duplicates"), "copy", N(DupMods)), new(OffMods, T("Turned off"), "power-off", N(OffMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace)).ToList()),
             ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", _mods.Count(m => InDir(m, d)), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
             ("tags", T("TAGS"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
-            ("game", T("GAME"), null, new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)), new(PackMods, "Sims3Packs", "package", N(PackMods) + (_installed?.Count ?? 0)),
+            ("game", T("GAME"), null, new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)),
                 new(LibraryMods, T("Library"), "library", N(LibraryMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace).ToList()),
         };
         if (!groups.SelectMany(g => g.Items).Any(p => p.Key.Equals(_modPlace, StringComparison.OrdinalIgnoreCase))) _modPlace = AllMods;
@@ -532,7 +505,7 @@ public sealed partial class MainWindow
         if (ModNotes.Tags.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
         foreach (var t in ModNotes.Tags) Add("#" + t.Name, t.Name, "tag");
         menu.Items.Add(new MenuFlyoutSeparator());
-        foreach (var (k, l, i) in new[] { (AsiMods, T("Game plugins (ASI)"), "plug"), (PackMods, "Sims3Packs", "package"), (LibraryMods, T("Library"), "library") }) Add(k, l, i);
+        foreach (var (k, l, i) in new[] { (AsiMods, T("Game plugins (ASI)"), "plug"), (LibraryMods, T("Library"), "library") }) Add(k, l, i);
         menu.ShowAt(ModsPlaces);
     }
 
@@ -699,7 +672,7 @@ public sealed partial class MainWindow
     async void OnModsAdd(object sender, RoutedEventArgs e)
     {
         var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
-        foreach (var x in new[] { ".package", ".sims3pack", ".zip" }) picker.FileTypeFilter.Add(x);
+        foreach (var x in new[] { ".package", ".zip" }) picker.FileTypeFilter.Add(x);
         var files = await picker.PickMultipleFilesAsync();
         if (files is null || files.Count == 0) return;
         await InstallFilesAsync(files.Select(f => f.Path).ToList());
@@ -757,7 +730,7 @@ public sealed partial class MainWindow
     void OnModsSelectNone(object sender, RoutedEventArgs e) => CloseModDetails();
     void OnModsOpenFolder(object sender, RoutedEventArgs e) => OpenFolder(_modPlace switch
     {
-        AsiMods => _game?.Bin ?? "", PackMods => Path.Combine(Docs, "Downloads"), LibraryMods => Path.Combine(Docs, "Library"), OffMods => Mods.Disabled(Docs),
+        AsiMods => _game?.Bin ?? "", LibraryMods => Path.Combine(Docs, "Library"), OffMods => Mods.Disabled(Docs),
         _ when IsFolder(_modPlace) => Path.Combine(Docs, "Mods", _modPlace), _ => Path.Combine(Docs, "Mods"),
     });
 
@@ -812,8 +785,8 @@ public sealed partial class MainWindow
 
     int FilterCount => _fFiles.Count + _fKinds.Count + _fStates.Count + _fTags.Count + _fCreators.Count + (_fAddedDays > 0 ? 1 : 0) + (_fSizeMb > 0 ? 1 : 0);
 
-    static string FileTypeName(string f) => f switch { "package" => T("Package"), "sims3pack" => "Sims3Pack", "asi" => T("ASI plugin"), _ => T("Library item") };
-    static string FileTypeIcon(string f) => f switch { "package" => "package", "sims3pack" => "package", "asi" => "plug", _ => "library" };
+    static string FileTypeName(string f) => f switch { "package" => T("Package"), "asi" => T("ASI plugin"), _ => T("Library item") };
+    static string FileTypeIcon(string f) => f switch { "package" => "package", "asi" => "plug", _ => "library" };
     static string StateName(string s) => s switch { "on" => T("On"), "off" => T("Off"), "look" => T("Needs a look"), "new" => T("New"), "default" => T("Default replacement"), _ => T("Duplicate") };
     static string StateIcon(string s) => s switch { "on" => "power", "off" => "power-off", "look" => "triangle-alert", "new" => "sparkles", "default" => "replace", _ => "copy" };
 
@@ -890,7 +863,7 @@ public sealed partial class MainWindow
         switch (_filterGroup)
         {
             case 0:
-                foreach (var f in new[] { "package", "sims3pack", "asi", "library" })
+                foreach (var f in new[] { "package", "asi", "library" })
                     if (_modRows.Count(r => r.File.FileType == f) is > 0 and var n) Opt(FileTypeName(f), FileTypeIcon(f), null, n, _fFiles.Contains(f), on => Flip(_fFiles, f, on));
                 break;
             case 1:
@@ -973,7 +946,7 @@ public sealed partial class MainWindow
         "Pool" => T("Pools and fountains"), "TerrainPaint" => T("Terrain paints"), "TerrainTool" => T("Terrain tools"), "Water" => T("Water"),
         "Lighting" => T("Lighting"), "Effects" => T("Effects"), "Patterns" => T("Patterns"), "Animations" => T("Animations and poses"), "Sound" => T("Music and sound"),
         "Interface" => T("Interface"), "Textures" => T("Textures"), "Translations" => T("Translations"),
-        "Asi" => T("ASI plugin"), "Sims3Pack" => "Sims3Pack", "World" => T("World"), "Lot" => T("Lot"), "Household" => T("Household"),
+        "Asi" => T("ASI plugin"), "Lot" => T("Lot"), "Household" => T("Household"),
         _ => T("Other"),
     };
 
@@ -987,8 +960,8 @@ public sealed partial class MainWindow
         "BuildFlower" or "BuildShrub" or "BuildTree" => "mountain", "Wall" or "WallPattern" => "brick-wall", "FloorPattern" => "layout-grid", "Fence" or "Railing" => "fence",
         "Stairs" or "BuildSpiralStaircase" or "BuildElevator" => "layers", "RoofStyle" or "RoofPattern" or "Foundation" => "house", "Pool" or "Water" => "waves",
         "TerrainPaint" or "TerrainTool" => "mountain", "Lighting" => "lamp", "Effects" => "wand-sparkles", "Patterns" => "palette", "Animations" => "person-standing",
-        "Sound" => "music", "Interface" => "app-window", "Textures" => "image", "Translations" => "languages", "Asi" => "plug", "Sims3Pack" => "package",
-        "World" => "globe", "Lot" => "house", "Household" => "users",
+        "Sound" => "music", "Interface" => "app-window", "Textures" => "image", "Translations" => "languages", "Asi" => "plug",
+        "Lot" => "house", "Household" => "users",
         _ when k.StartsWith("Buy") || k == "Objects" => "sofa", _ when k.StartsWith("Build") => "hammer",
         _ => "puzzle",
     };
@@ -1000,7 +973,7 @@ public sealed partial class MainWindow
         _ when k.StartsWith("Buy") || k == "Objects" => 2,
         _ when k.StartsWith("Build") || k is "Wall" or "WallPattern" or "FloorPattern" or "Fence" or "Railing" or "Stairs" or "RoofStyle" or "RoofPattern" or "Foundation" or "Pool" or "TerrainPaint" or "TerrainTool" or "Water" => 3,
         "Lighting" or "Effects" or "Patterns" or "Animations" or "Sound" or "Interface" or "Textures" or "Translations" => 4,
-        "World" or "Lot" or "Household" => 5,
+        "Lot" or "Household" => 5,
         _ => 6,
     };
     static int KindGroupOrder(int g) => g;
@@ -1175,74 +1148,6 @@ public sealed partial class MainWindow
 
     void CloseModDetails() { ModList.SelectedItems.Clear(); ModGrid.SelectedItems.Clear(); FillModDetails(); FillFooter(); }
 
-    // ---------- what the game's own launcher installed ----------
-
-    async Task LoadInstalledAsync()
-    {
-        var docs = Docs;
-        var items = await Task.Run(() => InstalledContent.Read(docs));
-        _installedIds = await Task.Run(() => InstalledContent.InstalledIds(docs));
-        _setLists = await Task.Run(() => DcCache.SetLists(docs));
-        _recordNames = await Task.Run(() => DcCache.Names(docs));
-        _installed = items.OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase).Select(i => new InstalledRow(i, KindLabel(i.Kind), KindIcon(i.Kind))).ToList();
-        _folderSig = "";
-        if (_step == ModsScreen) FillMods();
-    }
-
-    // read only: searched by name and type, its pictures read as the tiles show
-    void FillInstalled()
-    {
-        var all = _installed ?? [];
-        var q = ModSearch.Text?.Trim() ?? "";
-        var shown = q.Length == 0 ? all : all.Where(r => r.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || r.Kind.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
-        InstalledGrid.ItemTemplate = (DataTemplate)Root.Resources[_modsGrid ? "InstalledTileTemplate" : "InstalledRowTemplate"];
-        InstalledGrid.ItemsSource = shown;
-        ModsViewList.IsChecked = !_modsGrid;
-        ModsViewGallery.IsChecked = _modsGrid;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => OnInstalledSized(InstalledGrid, null!)); // (the panel exists once the items are set)
-        InstalledGrid.Visibility = Visibility.Visible;
-        ModsSelectAll.Visibility = ModsSelectNone.Visibility = Visibility.Collapsed;
-        ModList.Visibility = ModListHead.Visibility = ModGrid.Visibility = Visibility.Collapsed;
-        ModsEmpty.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        (ModsEmptyIcon.Kind, ModsEmptyText.Text) = _installed is null ? ("loader-circle", T("Reading what the game's launcher installed…"))
-            : all.Count > 0 ? ("search", T("Nothing matches the search."))
-            : ("package", T("The game's launcher installed nothing here."));
-        ModsCrumb.Visibility = Visibility.Collapsed;
-        ModsTitle.Text = ModsPlacesText.Text = "Sims3Packs";
-        ModsSummary.Text = string.Join(" · ", new[] { T("{0} items", all.Count), ModRow.SizeText(InstalledContent.Bytes(Docs)), T("the game's own content") });
-        ModsAdd.IsEnabled = true;
-        HuntBanner();
-        FillChips();
-        FillSortText();
-        ModsFooter.Text = shown.Count == all.Count ? T("{0} shown", shown.Count) : T("{0} of {1} shown", shown.Count, all.Count);
-    }
-
-    // as many columns as fit, stretched to the full width (the list stays virtual: thousands of tiles)
-    void OnInstalledSized(object sender, SizeChangedEventArgs e)
-    {
-        if (InstalledGrid.ItemsPanelRoot is not ItemsWrapGrid wrap) return;
-        // (the grid's width less its padding: the panel itself shrinks to its tiles, so it cannot be the measure)
-        var width = InstalledGrid.ActualWidth - InstalledGrid.Padding.Left - InstalledGrid.Padding.Right;
-        if (width <= 0) return;
-        var cols = CardGrid.Columns(width, 128, 8);
-        if (!_modsGrid) { wrap.ItemWidth = width - 8; wrap.ItemHeight = 56; return; } // (the list: one item a row)
-        wrap.ItemWidth = Math.Floor(width / cols) - 8; // (each tile's 8 px margin comes on top of its width)
-        wrap.ItemHeight = 206; // (picture, two lines of name, the type: every row the same height)
-    }
-
-    void OnInstalledPicked(object sender, SelectionChangedEventArgs e) { if (!_fillingMods) FillModDetails(); }
-
-    void OnInstalledTile(ListViewBase sender, ContainerContentChangingEventArgs args)
-    {
-        if (args.InRecycleQueue || args.Item is not InstalledRow r || r.Image is not null || r.Loading) return;
-        r.Loading = true;
-        _ = Task.Run(() => InstalledContent.Thumbnail(r.Item)).ContinueWith(async t =>
-        {
-            try { if (await SaveCard.ImageOf(t.IsCompletedSuccessfully ? t.Result : null) is { } img) r.Image = img; }
-            catch (Exception e) { App.Log(e); }
-        }, TaskScheduler.FromCurrentSynchronizationContext());
-    }
-
     // the player's choice of type, else the package's own
     static void ApplyKinds(ModRow r)
     {
@@ -1257,7 +1162,7 @@ public sealed partial class MainWindow
     {
         var picked = r.Kinds.ToHashSet();
         var list = new StackPanel { Spacing = 2 };
-        foreach (var group in Enum.GetNames<Kind>().Where(k => k != nameof(Kind.Other)).Concat(["Asi", "Sims3Pack"])
+        foreach (var group in Enum.GetNames<Kind>().Where(k => k != nameof(Kind.Other)).Concat(["Asi"])
                      .GroupBy(KindGroup).OrderBy(g => KindGroupOrder(g.Key)))
         {
             list.Children.Add(new TextBlock { Text = KindGroupName(group.Key), FontSize = 11, CharacterSpacing = 60, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(4, list.Children.Count == 0 ? 0 : 12, 0, 4) });
@@ -1320,12 +1225,6 @@ public sealed partial class MainWindow
         ModDetailsFoot.Children.Clear();
         ModDetailsFoot.ColumnDefinitions.Clear();
         ModDetailsFoot.Visibility = Visibility.Collapsed;
-        if (_modPlace == PackMods && _packInstalled && InstalledGrid.SelectedItem is InstalledRow ir)
-        {
-            ModDetailsPane.Visibility = Visibility.Visible;
-            FillInstalledDetails(ir);
-            return;
-        }
         var picked = Picked();
         ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (picked.Count == 0)

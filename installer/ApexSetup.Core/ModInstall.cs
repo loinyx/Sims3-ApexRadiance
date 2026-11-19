@@ -5,8 +5,7 @@ namespace ApexSetup;
 
 // What the launcher checks before it adds a file to the player's mods, so a broken or wrong file never reaches the game:
 // a .package must be a Sims 3 package (DBPF 2.0; 2.1 is The Sims 4's), not a protected one, with an index that lies inside
-// the file and resources that do too; a .sims3pack must carry its header; a zip's packages and Sims3Packs are checked
-// one by one. A file already installed (same bytes) is not added twice. Nothing here writes; Inspect is read-only and
+// the file and resources that do too; a zip's packages are checked one by one. A file already installed (same bytes) is not added twice. Nothing here writes; Inspect is read-only and
 // ModLibrary.AddAny checks every file again before it copies.
 public static class ModInstall
 {
@@ -18,7 +17,7 @@ public static class ModInstall
     // every file the player gave (zips opened), each with what is wrong with it and what is worth knowing
     public static List<Item> Inspect(IEnumerable<string> paths, IReadOnlyList<ModFile> installed)
     {
-        var hashes = installed.Where(m => m.FileType is "package" or "sims3pack").GroupBy(m => m.Size).ToDictionary(g => g.Key, g => g.ToList());
+        var hashes = installed.Where(m => m.FileType == "package").GroupBy(m => m.Size).ToDictionary(g => g.Key, g => g.ToList());
         var items = new List<Item>();
         foreach (var p in paths)
         {
@@ -33,7 +32,7 @@ public static class ModInstall
     {
         var name = Path.GetFileName(entry ?? path);
         var ext = Path.GetExtension(name).ToLowerInvariant();
-        var kind = ext switch { ".package" => "package", ".sims3pack" => "sims3pack", _ => "" };
+        var kind = ext == ".package" ? "package" : "";
         var problems = new List<string>();
         var warnings = new List<string>();
         long size = 0;
@@ -41,10 +40,9 @@ public static class ModInstall
         try
         {
             size = new FileInfo(path).Length;
-            if (kind == "") problems.Add("Not a mod file: only .package, .sims3pack and zips of them are added.");
+            if (kind == "") problems.Add("Not a mod file: only .package files and zips of them are added.");
             else if (size == 0) problems.Add("The file is empty.");
-            else if (kind == "package") problems.AddRange(PackageProblems(path, warnings));
-            else if (!Sims3PackOk(path)) problems.Add("Not a Sims3Pack: its header is missing.");
+            else problems.AddRange(PackageProblems(path, warnings));
             if (problems.Count == 0 && installed.TryGetValue(size, out var sameSize))
             {
                 var hash = Hash(path);
@@ -66,14 +64,14 @@ public static class ModInstall
             foreach (var e in z.Entries.Where(e => e.Length > 0))
             {
                 var n = Path.GetFileName(e.FullName.Replace('\\', '/'));
-                if (!n.EndsWith(".package", StringComparison.OrdinalIgnoreCase) && !n.EndsWith(".sims3pack", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!n.EndsWith(".package", StringComparison.OrdinalIgnoreCase)) continue;
                 if (e.Length > 4L << 30) { items.Add(new(n, zip, e.FullName, "package", e.Length, ["The file is too big for the game (over 4 GB)."], [], null)); continue; }
                 Directory.CreateDirectory(tmp);
                 var t = Path.Combine(tmp, Guid.NewGuid().ToString("N") + Path.GetExtension(n));
                 e.ExtractToFile(t);
                 items.Add(CheckFile(t, e.FullName, installed) with { Source = zip });
             }
-            if (items.Count == 0) items.Add(new(Path.GetFileName(zip), zip, null, "", new FileInfo(zip).Length, ["The zip holds no .package or .sims3pack."], [], null));
+            if (items.Count == 0) items.Add(new(Path.GetFileName(zip), zip, null, "", new FileInfo(zip).Length, ["The zip holds no .package."], [], null));
         }
         catch (Exception e) when (e is InvalidDataException or IOException or UnauthorizedAccessException)
         {
@@ -109,16 +107,6 @@ public static class ModInstall
         if (entries.Any(e => e.Offset + (long)e.Size > f.Length)) p.Add("The package is damaged: some of it is missing (a download cut short?).");
         if (warnings is not null && entries.Any(e => e.Type == 0x073FAA07)) warnings.Add("A script mod: it runs code in the game. Install it only from a maker you trust.");
         return p;
-    }
-
-    static bool Sims3PackOk(string path)
-    {
-        using var f = File.OpenRead(path);
-        var head = new byte[Math.Min(4096, (int)Math.Min(f.Length, 4096))];
-        f.ReadExactly(head);
-        var text = System.Text.Encoding.UTF8.GetString(head);
-        // (the game's own: a uint32 7 then "TS3Pack", checked on a player's 8 Sims3Packs; an XML header alone is accepted too)
-        return head.Length >= 11 && BitConverter.ToUInt32(head, 0) == 7 && text[4..11] == "TS3Pack" || text.Contains("<Sims3Package", StringComparison.Ordinal);
     }
 
     static string Hash(string path) { using var s = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(s)); }

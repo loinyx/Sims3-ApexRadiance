@@ -34,15 +34,14 @@ public static partial class ModLibrary
 
     public sealed record AddResult(List<string> Added, List<string> Skipped);
 
-    // files the player dropped or picked: packages into the folder, Sims3Packs into Downloads (the game's launcher installs
-    // them from there), a zip's packages and Sims3Packs taken out by name only (never a path from inside the zip). Every file
+    // files the player dropped or picked: packages into the folder, a zip's packages taken out by name only (never a path
+    // from inside the zip). Every file
     // is checked first (ModInstall): a broken, protected, Sims 4 or empty one is not added, nor one already installed unless
     // asked. Skipped: "name: why".
     public static AddResult AddAny(string docs, string folderRel, IEnumerable<string> files, IReadOnlyList<ModFile>? installed = null, bool duplicates = false)
     {
         Engine.CheckWritable();
         var dir = Under(docs, folderRel);
-        var downloads = Path.Combine(docs, "Downloads");
         var added = new List<string>();
         var skipped = new List<string>();
         foreach (var item in ModInstall.Inspect(files, installed ?? []))
@@ -50,36 +49,6 @@ public static partial class ModLibrary
             if (!item.Ok) { skipped.Add($"{item.Name}: {item.Problems[0]}"); continue; }
             if (item.SameAs is { } same && !duplicates) { skipped.Add($"{item.Name}: already installed as {same}"); continue; }
             if (!SafeFileName(item.Name)) { skipped.Add($"{item.Name}: the name can't be used for a file"); continue; }
-            // a Sims3Pack of objects, Create a Sim parts or patterns: its packages taken out into a folder named after it
-            if (item.Kind == "sims3pack")
-            {
-                var src = item.Source;
-                string? tmp = null;
-                if (item.ZipEntry is { } ze)
-                {
-                    tmp = Path.Combine(Path.GetTempPath(), "apex-s3p-" + Guid.NewGuid().ToString("N") + ".sims3pack");
-                    using var z = ZipFile.OpenRead(item.Source);
-                    (z.GetEntry(ze) ?? throw new SetupException("The zip changed while it was being added.")).ExtractToFile(tmp);
-                    src = tmp;
-                }
-                try
-                {
-                    if (Sims3Pack.Read(src) is { Extractable: true } info)
-                    {
-                        var folder = Path.Combine(dir, SafeFolder(info.DisplayName) ?? Path.GetFileNameWithoutExtension(item.Name));
-                        var (got, no) = Sims3Pack.Extract(src, info, folder);
-                        added.AddRange(got);
-                        skipped.AddRange(no.Select(x => $"{item.Name} › {x}"));
-                        if (got.Count > 0) continue;
-                    }
-                    Directory.CreateDirectory(downloads);
-                    var dl = Mods.Free(Path.Combine(downloads, item.Name));
-                    File.Copy(src, dl);
-                    added.Add(dl);
-                }
-                finally { if (tmp is not null) try { File.Delete(tmp); } catch (IOException) { } }
-                continue;
-            }
             var into = dir;
             var target = Mods.Free(Path.Combine(into, item.Name));
             // (the game, a 32-bit program, does not read files past the old 260-character path limit)

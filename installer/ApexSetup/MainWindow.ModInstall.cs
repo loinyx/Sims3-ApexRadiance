@@ -8,10 +8,10 @@ namespace ApexSetup;
 
 // Adding mods: every file checked first and shown (what goes where, what is not added and why), then installed with the
 // crystal turning over a progress bar, then what happened. Files come from Add mods, a drop from Explorer, or "Open with"
-// on a .package, .sims3pack or zip (a second launcher started that way hands its files to this one).
+// on a .package or zip (a second launcher started that way hands its files to this one).
 public sealed partial class MainWindow
 {
-    static readonly string[] ModExtensions = [".package", ".sims3pack", ".zip"];
+    static readonly string[] ModExtensions = [".package", ".zip"];
     List<string>? _openWhenReady;
 
     public static List<string> ModFilesIn(IEnumerable<string> args) =>
@@ -71,16 +71,7 @@ public sealed partial class MainWindow
         var dir = IsFolder(_modPlace) ? _modPlace : NewFolderParent();
         var installed = _mods.ToList();
         List<ModInstall.Item> items;
-        Dictionary<string, Sims3Pack.Info?> packs;
-        try
-        {
-            (items, packs) = await Task.Run(() =>
-            {
-                var it = ModInstall.Inspect(paths, installed);
-                var ps = it.Where(i => i.Kind == "sims3pack" && i.ZipEntry is null).ToDictionary(i => i.Source, i => Sims3Pack.Read(i.Source), StringComparer.OrdinalIgnoreCase);
-                return (it, ps);
-            });
-        }
+        try { items = await Task.Run(() => ModInstall.Inspect(paths, installed)); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The files could not be read"), ErrorText(e)); return; }
 
         // 1. what will happen to each file
@@ -98,8 +89,6 @@ public sealed partial class MainWindow
             text.Children.Add(new TextBlock { Text = i.Name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
             var why = !i.Ok ? T(i.Problems[0])
                 : i.SameAs is { } s ? T("Already installed as {0}", s)
-                : i.Kind == "sims3pack" ? (packs.GetValueOrDefault(i.Source) is { Extractable: true } p ? T("A {0} set: its packages go into Mods › {1}", p.Type, PlaceTitle(dir).Title)
-                    : T("A {0}: goes to Downloads for the game's own launcher", packs.GetValueOrDefault(i.Source)?.Type ?? "Sims3Pack"))
                 : i.Warnings.FirstOrDefault() is { } w ? T(w) : ModRow.SizeText(i.Size);
             text.Children.Add(new TextBlock { Text = why, FontSize = 12, Foreground = Res(!i.Ok ? "ApexErrorBrush" : good ? "ApexMutedBrush" : "ApexWarningBrush"), TextWrapping = TextWrapping.Wrap });
             Grid.SetColumn(text, 1);

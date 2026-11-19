@@ -86,7 +86,6 @@ public sealed partial class MainWindow
         if (problem) badges.Children.Add(StripBadge(T("Needs a look"), "triangle-alert", "#E0A84F"));
         if (m.Locked) badges.Children.Add(m.FileType switch
         {
-            "sims3pack" => PackInstalled(m) ? StripBadge(T("Installed in the game"), "circle-check", "#93D27C") : StripBadge(T("Not installed yet"), "package", "#E6E6EC"),
             "library" => StripBadge(T("In the Library"), "library", "#E6E6EC"),
             "asi" => StripBadge(T("In the game folder"), "plug", "#CECBF6"),
             _ => StripBadge(T("Installed by Apex Launcher"), "lock", "#CECBF6"),
@@ -168,7 +167,7 @@ public sealed partial class MainWindow
             FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis,
         });
         foot.Children.Add(names);
-        if (!m.Locked && m.FileType != "sims3pack")
+        if (!m.Locked)
         {
             var sw = new ToggleSwitch { IsOn = m.Enabled, OnContent = "", OffContent = "", MinWidth = 0, VerticalAlignment = VerticalAlignment.Bottom };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(sw, m.Enabled ? T("Turn off") : T("Turn on"));
@@ -240,7 +239,7 @@ public sealed partial class MainWindow
         Tile(2, T("Creator"), creator);
         Tile(3, merge is not null ? T("Made from") : T("State"),
             merge is not null ? Big(T("{0} mods", merge.Originals.Count))
-            : Big(!m.Locked ? (m.Enabled ? T("On") : T("Off")) : m.FileType switch { "sims3pack" => PackInstalled(m) ? T("Installed") : T("Not installed"), "library" => T("In the Library"), "asi" => T("Loaded"), _ => T("Managed") },
+            : Big(!m.Locked ? (m.Enabled ? T("On") : T("Off")) : m.FileType switch { "library" => T("In the Library"), "asi" => T("Loaded"), _ => T("Managed") },
                 m.Enabled || m.Locked ? null : "ApexWarningBrush"));
         if (m.Locked) host.Children.Add(Note("lock", "ApexMutedBrush", ModRow.LockText(m)));
         host.Children.Add(tiles);
@@ -268,15 +267,6 @@ public sealed partial class MainWindow
             var tags = Section(T("Tags"), null, out _);
             tags.Children.Add(TagsRow([r]));
             host.Children.Add(tags);
-        }
-
-        // a lot or world in Downloads: the store items it uses
-        if (m.FileType == "sims3pack" && _installedIds is { } have && Sims3Pack.Read(m.Path) is { } pack && pack.StoreDependencies.ToList() is { Count: > 0 } needs)
-        {
-            var missing = needs.Count(d => !have.Contains(d));
-            host.Children.Add(missing == 0
-                ? Note("circle-check", "ApexSuccessBrush", needs.Count == 1 ? T("The store item it uses is installed.") : T("All {0} store items it uses are installed.", needs.Count))
-                : Warn(T("{0} of {1} store items it uses are not installed", missing, needs.Count), T("Get them from the store, or the lot shows without them.")));
         }
 
         // where it is, in full
@@ -562,17 +552,6 @@ public sealed partial class MainWindow
         f.ColumnDefinitions.Add(new ColumnDefinition());
         Button main;
         if (m.FileType == "library") main = MainButton(T("Show file"), () => ShowFile(m.Path));
-        else if (m.FileType == "sims3pack")
-        {
-            var pack = Sims3Pack.Read(m.Path);
-            if (pack is { Extractable: true }) main = MainButton(T("Install"), () => Safe(InstallFilesAsync([m.Path])));
-            else if (pack is not null && PackInstalled(m)) main = MainButton(T("Remove from the game"), () => Safe(GameContentAsync(GameContent.Mode.Remove, [pack.PackageId], r.Name)));
-            else
-            {
-                main = MainButton(T("Install in the game"), () => Safe(GameContentAsync(GameContent.Mode.Install, [m.Path], r.Name)));
-                main.IsEnabled = pack is { PackageId.Length: 34 } && _game is not null;
-            }
-        }
         else if (m.Locked) main = MainButton(T("Open in Components"), () => Show(ComponentsStep));
         else if (merge is not null && mine) main = MainButton(T("Edit merge"), () => Safe(EditMergeAsync(r, merge)));
         else main = MainButton(m.Enabled ? T("Turn off") : T("Turn on"), () => SetMods([r], !r.File.Enabled));

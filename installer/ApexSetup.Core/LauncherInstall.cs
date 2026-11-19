@@ -19,11 +19,12 @@ public static partial class LauncherInstall
     const string Key = "ApexLauncher", Name = "Apex Launcher";
     static string UninstallKey => RegistryBase + @"\Uninstall\" + Key;
     static string RunKey => RegistryBase + @"\Run";
-    // "Open with" for mods: the launcher is offered for .package and .sims3pack files, never made their default (a
-    // Sims3Pack stays EA's to open unless the player picks the launcher). Settable for tests.
+    // "Open with" for mods: the launcher is offered for .package files, never made their default. Settable for tests.
     public static string ClassesBase = @"Software\Classes";
     const string ProgId = "ApexLauncher.Mod";
-    static readonly string[] OpenTypes = [".package", ".sims3pack"];
+    static readonly string[] OpenTypes = [".package"];
+    // (offered by earlier builds: taken back on the next registration and on uninstall)
+    static readonly string[] DroppedTypes = [".sims3pack"];
     static string AppKey => ClassesBase + @"\Applications\ApexLauncher.exe";
     public static string StartMenuLink => Path.Combine(StartMenuDir, Name + ".lnk");
     public static string DesktopLink => Path.Combine(DesktopDir, Name + ".lnk");
@@ -159,6 +160,12 @@ public static partial class LauncherInstall
             using var w = Registry.CurrentUser.CreateSubKey(ClassesBase + @"\" + t + @"\OpenWithProgids");
             w.SetValue(ProgId, Array.Empty<byte>(), RegistryValueKind.None);
         }
+        foreach (var t in DroppedTypes)
+        {
+            using (var types = Registry.CurrentUser.OpenSubKey(AppKey + @"\SupportedTypes", true)) types?.DeleteValue(t, false);
+            using var w = Registry.CurrentUser.OpenSubKey(ClassesBase + @"\" + t + @"\OpenWithProgids", true);
+            w?.DeleteValue(ProgId, false);
+        }
         SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero); // (Explorer reads the new "Open with" entries now)
     }
 
@@ -198,7 +205,7 @@ public static partial class LauncherInstall
         using (var k = Registry.CurrentUser.OpenSubKey(RunKey, true)) k?.DeleteValue(Name, false);
         Registry.CurrentUser.DeleteSubKeyTree(ClassesBase + @"\" + ProgId, false);
         Registry.CurrentUser.DeleteSubKeyTree(AppKey, false);
-        foreach (var t in OpenTypes)
+        foreach (var t in OpenTypes.Concat(DroppedTypes))
         {
             using var w = Registry.CurrentUser.OpenSubKey(ClassesBase + @"\" + t + @"\OpenWithProgids", true);
             w?.DeleteValue(ProgId, false);

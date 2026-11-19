@@ -2,19 +2,11 @@ using System.IO.Compression;
 using ApexSetup;
 
 // The Mods screen's helpers: the problem-mod hunt (every answer path, Stop, a restart in the middle), folders moved into
-// folders, files added (packages, Sims3Packs, zips, unsafe names), duplicates found by content, and the remembered view.
+// folders, files added (packages, zips, unsafe names), duplicates found by content, and the remembered view.
 static class ModToolsTests
 {
     public static void Run(Action<bool, string> check)
     {
-        // the game's installer mode: one entry per line, the switches the game's launcher passes, ids by their first 8 digits
-        check(GameContent.ListText([@"C:\D\a.Sims3Pack", " 0xa7e6b0d106f518b841b3aba09cd79153 "]) == "C:\\D\\a.Sims3Pack\n0xa7e6b0d106f518b841b3aba09cd79153\n"
-            && GameContent.Args(GameContent.Mode.Remove, @"C:\t\l.txt") == "-ccuninstall:\"C:\\t\\l.txt\" -r:450x350 -w -nosound"
-            && GameContent.ShortId("0xa7e6b0d106f518b841b3aba09cd79153") == 0xA7E6B0D1 && GameContent.ShortId("") == 0,
-            "game content: the list file, the switches and the short id");
-        var rr = GameContent.ReadResult("1 C:\\D\\a.Sims3Pack\r\n0 C:\\D\\b.Sims3Pack\r\n", [@"C:\D\a.Sims3Pack", @"C:\D\b.Sims3Pack"]);
-        check(rr is { Done.Count: 1, Failed.Count: 1 } && rr.Done[0] == @"C:\D\a.Sims3Pack" && GameContent.ReadResult("C:\\D\\a.Sims3Pack\n", [@"C:\D\a.Sims3Pack"]) is null,
-            "game content: the game's result lines (1 done, 0 refused); the list as written is no result yet");
         var root = Path.Combine(Path.GetTempPath(), "apex-modtools-" + Guid.NewGuid().ToString("N"));
         var oldLocal = Paths.LocalAppData;
         try
@@ -77,14 +69,13 @@ static class ModToolsTests
                 && Refused(() => ModLibrary.MoveFolder(docs, Path.Combine("Packages", "B"), Path.Combine("Packages", "B", "A"))),
                 "folders: moved into another with its notes; into itself refused");
 
-            // files added, every one checked first: real packages and a Sims3Pack go in (the Sims3Pack to Downloads), a zip's
-            // by name only; a Sims 4 package, a protected one, a cut-short one, an empty one, text named .package, a Sims3Pack
-            // without its header and a file already installed are not added, each with its reason
+            // files added, every one checked first: real packages go in, a zip's by name only; a Sims 4 package, a protected
+            // one, a cut-short one, an empty one, text named .package, a Sims3Pack and a file already installed are not added,
+            // each with its reason
             var drop = Path.Combine(root, "drop");
             Directory.CreateDirectory(drop);
             File.WriteAllBytes(Path.Combine(drop, "new.package"), Dbpf20(1));
             File.WriteAllBytes(Path.Combine(drop, "house.sims3pack"), [7, 0, 0, 0, .. "TS3Pack"u8.ToArray(), 1, 2, 3]);
-            File.WriteAllBytes(Path.Combine(drop, "fake.sims3pack"), "not one"u8.ToArray());
             Write(Path.Combine(drop, "readme.txt"), "r");
             Write(Path.Combine(drop, "text.package"), "just text, not a package at all, but long enough to have a header of ninety six bytes ................");
             var ts4 = Dbpf20(2); ts4[8] = 1; File.WriteAllBytes(Path.Combine(drop, "sims4.package"), ts4);
@@ -99,51 +90,25 @@ static class ModToolsTests
                 using (var w = new StreamWriter(z.CreateEntry("broken.package").Open())) w.Write("broken");
                 using (var w = new StreamWriter(z.CreateEntry("notes.txt").Open())) w.Write("t");
             }
-            var all = new[] { "new.package", "house.sims3pack", "fake.sims3pack", "readme.txt", "text.package", "sims4.package", "protected.package", "cut.package", "empty.package" }
+            var all = new[] { "new.package", "house.sims3pack", "readme.txt", "text.package", "sims4.package", "protected.package", "cut.package", "empty.package" }
                 .Select(n => Path.Combine(drop, n)).Append(zip).ToList();
             var looked = ModInstall.Inspect(all, list());
             string Why(string n) => looked.First(x => x.Name == n).Problems.FirstOrDefault() ?? "ok";
-            check(Why("new.package") == "ok" && Why("house.sims3pack") == "ok" && Why("inner.package") == "ok" && Why("evil.package") == "ok"
+            check(Why("new.package") == "ok" && Why("house.sims3pack").StartsWith("Not a mod file") && Why("inner.package") == "ok" && Why("evil.package") == "ok"
                 && Why("sims4.package").Contains("Sims 4") && Why("protected.package").Contains("protected") && Why("cut.package").Contains("damaged")
                 && Why("empty.package").Contains("empty") && Why("text.package").StartsWith("Not a package") && Why("broken.package").StartsWith("Not a package")
-                && Why("fake.sims3pack").Contains("header") && Why("readme.txt").StartsWith("Not a mod file"),
-                "install: each file checked, with the reason a Sims 4, protected, cut-short, empty or fake file is not added | " + string.Join(" | ", looked.Select(x => x.Name + "=" + (x.Problems.FirstOrDefault() ?? "ok"))));
+                && Why("readme.txt").StartsWith("Not a mod file"),
+                "install: each file checked, with the reason a Sims 4, protected, cut-short, empty, fake or Sims3Pack file is not added | " + string.Join(" | ", looked.Select(x => x.Name + "=" + (x.Problems.FirstOrDefault() ?? "ok"))));
             var res = ModLibrary.AddAny(docs, "Packages", all, list());
-            check(File.Exists(Path.Combine(mods, "Packages", "new.package")) && File.Exists(Path.Combine(docs, "Downloads", "house.sims3pack"))
+            check(File.Exists(Path.Combine(mods, "Packages", "new.package")) && !File.Exists(Path.Combine(docs, "Downloads", "house.sims3pack"))
                 && File.Exists(Path.Combine(mods, "Packages", "inner.package")) && File.Exists(Path.Combine(mods, "Packages", "evil.package"))
                 && !File.Exists(Path.Combine(root, "evil.package")) && !File.Exists(Path.Combine(docs, "evil.package"))
-                && res.Added.Count == 4 && res.Skipped.Count == 8 && !File.Exists(Path.Combine(mods, "Packages", "sims4.package")),
+                && res.Added.Count == 3 && res.Skipped.Count == 8 && !File.Exists(Path.Combine(mods, "Packages", "sims4.package")),
                 "install: only the files that pass go in, a zip's by name only (no path from inside it) | " + res.Added.Count + " | " + string.Join(" | ", res.Skipped));
             var again = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "new.package")], list());
             var forced = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "new.package")], list(), duplicates: true);
             check(again.Added.Count == 0 && again.Skipped.Single().Contains("already installed as new.package") && forced.Added.Single().EndsWith("new (2).package"),
                 "install: a file already installed is not added twice unless asked, then it gets \" (2)\"");
-
-            // Sims3Packs: an object set's packages taken out into a folder named after it (a broken one inside refused), a lot
-            // left for the game's launcher in Downloads, a manifest pointing past the file unread
-            var objPack = Sims3PackFile("object", "Pretty Chairs", ("a.package", Dbpf20(2)), ("b.package", "broken"u8.ToArray()), ("thumb.png", [1, 2, 3]));
-            var lotPack = Sims3PackFile("lot", "Cozy Lot", ("lot.package", Dbpf20(3)));
-            File.WriteAllBytes(Path.Combine(drop, "chairs.sims3pack"), objPack);
-            File.WriteAllBytes(Path.Combine(drop, "lot.sims3pack"), lotPack);
-            var badPack = (byte[])objPack.Clone(); Array.Resize(ref badPack, badPack.Length - 10);
-            var info = Sims3Pack.Read(Path.Combine(drop, "chairs.sims3pack"));
-            File.WriteAllBytes(Path.Combine(drop, "bad.sims3pack"), badPack);
-            var s3 = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "chairs.sims3pack"), Path.Combine(drop, "lot.sims3pack")], list());
-            check(info is { Type: "object", DisplayName: "Pretty Chairs", Extractable: true } && info.Files.Count == 3 && Sims3Pack.Read(Path.Combine(drop, "bad.sims3pack")) is null
-                && File.Exists(Path.Combine(mods, "Packages", "Pretty Chairs", "a.package")) && !File.Exists(Path.Combine(mods, "Packages", "Pretty Chairs", "b.package"))
-                && File.Exists(Path.Combine(docs, "Downloads", "lot.sims3pack")) && s3.Skipped.Any(x => x.Contains("b.package")),
-                "sims3pack: an object set taken out into its own folder, a broken package in it refused, a lot left for the game's launcher");
-            // what a lot needs: its manifest's dependencies, the base game and the packs set aside; and the installed ids the
-            // game's cache directory records (bytes 8 to 11 of each item's 16-byte id)
-            File.WriteAllBytes(Path.Combine(drop, "needs.sims3pack"), Sims3PackDeps("lot", "0x5ad2691e000000005ad2691e00000000", "0x050cffe800000000050cffe800000000", "0x062d9a0700000000062d9a0700000000"));
-            var needs = Sims3Pack.Read(Path.Combine(drop, "needs.sims3pack"));
-            var record = new byte[52];
-            byte[] id = [1, 2, 3, 4, 5, 6, 7, 8, 0x5A, 0xD2, 0x69, 0x1E, 9, 10, 11, 12];
-            id.CopyTo(record, 4); id.CopyTo(record, 36);
-            byte[] base3 = [0x05, 0x0C, 0xFF, 0xE8]; base3.CopyTo(record, 20); base3.CopyTo(record, 28);
-            check(needs is { Dependencies.Count: 3 } && needs.StoreDependencies.SequenceEqual([0x5AD2691Eu]) && InstalledContent.IdsIn(record).SequenceEqual([0x5AD2691Eu])
-                  && !InstalledContent.IdsIn(new byte[52]).Any(),
-                "sims3pack: the store items a lot needs, matched to the ids of what the game's launcher installed");
 
             // a folder so deep that the file would pass the game's 260-character path: not installed, said why
             var deep = Path.Combine("Packages", new string('d', 120), new string('e', 120));
@@ -206,30 +171,6 @@ static class ModToolsTests
         ms.Position = 0x24; w.Write((uint)n);
         ms.Position = 0x2C; w.Write(end - at);
         ms.Position = 0x40; w.Write(at);
-        return ms.ToArray();
-    }
-
-    // a Sims3Pack as the game writes one: uint32 7, "TS3Pack", uint16 version, uint32 manifest length, the manifest, the files
-    static byte[] Sims3PackDeps(string type, params string[] deps)
-    {
-        var x = System.Text.Encoding.UTF8.GetBytes($"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Sims3Package Type=\"{type}\"><DisplayName>needs</DisplayName><Dependencies>{string.Concat(deps.Select(d => $"<Dependency>{d}</Dependency>"))}</Dependencies></Sims3Package>");
-        using var ms = new MemoryStream();
-        var w = new BinaryWriter(ms);
-        w.Write(7u); w.Write("TS3Pack"u8.ToArray()); w.Write((ushort)0x0501); w.Write((uint)x.Length); w.Write(x);
-        return ms.ToArray();
-    }
-
-    static byte[] Sims3PackFile(string type, string name, params (string Name, byte[] Data)[] files)
-    {
-        var xml = new System.Text.StringBuilder($"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Sims3Package Type=\"{type}\" SubType=\"0x00000000\"><DisplayName>{name}</DisplayName>");
-        long off = 0;
-        foreach (var (n, d) in files) { xml.Append($"<PackagedFile><Name>{n}</Name><Length>{d.Length}</Length><Offset>{off}</Offset><ContentType>{type}</ContentType></PackagedFile>"); off += d.Length; }
-        xml.Append("</Sims3Package>");
-        var x = System.Text.Encoding.UTF8.GetBytes(xml.ToString());
-        using var ms = new MemoryStream();
-        var w = new BinaryWriter(ms);
-        w.Write(7u); w.Write("TS3Pack"u8.ToArray()); w.Write((ushort)0x0501); w.Write((uint)x.Length); w.Write(x);
-        foreach (var (_, d) in files) w.Write(d);
         return ms.ToArray();
     }
 

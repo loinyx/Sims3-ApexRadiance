@@ -36,7 +36,7 @@ public static class ModCreators
     // every mod's guessed maker, from the whole list (a prefix shared by two or more files, or a known one)
     public static Dictionary<string, string> Guess(IEnumerable<ModFile> mods)
     {
-        var list = mods.Where(m => m.FileType is "package" or "asi" or "sims3pack").ToList();
+        var list = mods.Where(m => m.FileType is "package" or "asi").ToList();
         var counts = list.Select(m => Prefix(m.Name)).OfType<string>().GroupBy(p => p, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
         var guess = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         // (a maker's name at the end, "Smart-vehicles-decisions-BoringBones", counts the same way)
