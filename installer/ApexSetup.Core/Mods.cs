@@ -1,20 +1,18 @@
 namespace ApexSetup;
 
-public enum ModKind { Package, Script, Cas, Objects, Lighting, Sound, Textures, Tuning, Interface, Asi, Lot, Household }
+public enum ModKind { Package, Script, Cas, Objects, Lighting, Sound, Textures, Tuning, Interface, Asi }
 
 // One mod file as the Mods screen lists it. Rel is its path as the game sees it (under Mods, or under Game\Bin for an
 // ASI), the same whether it is on or off. Locked: the launcher installed it (switched in Components) or it is in Game\Bin.
 public sealed record ModFile(string Path, string Rel, long Size, ModKind Kind, bool Enabled, bool Locked)
 {
-    // the file's own type, for the Mods screen's tabs: a package of Mods, an ASI plugin, the Library
-    public string FileType => Path.EndsWith(".asi", StringComparison.OrdinalIgnoreCase) ? "asi"
-        : Rel.StartsWith("Library", StringComparison.OrdinalIgnoreCase) ? "library" : "package";
+    // the file's own type, for the Mods screen's tabs: a package of Mods or an ASI plugin
+    public string FileType => Path.EndsWith(".asi", StringComparison.OrdinalIgnoreCase) ? "asi" : "package";
     public string Name => System.IO.Path.GetFileName(Path);
     public string Folder => System.IO.Path.GetDirectoryName(Rel) ?? "";
 }
 
-// The player's mods: .package files under Documents\...\Mods, the .asi files in Game\Bin and the households and lots saved
-// to the Library. A mod is switched off by
+// The player's mods: .package files under Documents\...\Mods and the .asi files in Game\Bin. A mod is switched off by
 // moving it to Mods\Disabled (Apex Launcher) (outside Packages, so Resource.cfg does not load it) and on by moving it
 // back to the same place. Only the player's Documents is touched: no admin needed.
 public static class Mods
@@ -22,10 +20,10 @@ public static class Mods
     public const string DisabledName = "Disabled (Apex Launcher)";
     public static string Disabled(string docs) => Path.Combine(docs, "Mods", DisabledName);
 
-    // resource types that say what a package is, read from its index (checked on a player's 80 mods and 86 Library items)
+    // resource types that say what a package is, read from its index (checked on a player's 80 mods)
     const uint S3sa = 0x073FAA07, Casp = 0x034AEECB, Objd = 0x319E4F1D, Objk = 0x02DC343F, Ftpt = 0xD382BF57, Lite = 0x03B4C61D,
         LightFx = 0x1F886EAD, Img = 0x00B2D882, Png = 0x2F7D0004, Xml = 0x0333406C, Itun = 0x03B33DDF, Layout = 0x025C95B6,
-        Stbl = 0x220557DA, PackageManifest = 0x0166038C, LotImage = 0xD84E7FC6;
+        Stbl = 0x220557DA, PackageManifest = 0x0166038C;
     static readonly uint[] Audio = [0x01A527DB, 0x01EEF63A, 0x8070223D];
     // the thumbnail types of CAS parts and objects, tried in this order: an object's 128, 54 then 32 px one (a 32 px picture
     // stretched over a 148 px tile reads blurred), then the others (unverified beyond a few packages)
@@ -49,12 +47,8 @@ public static class Mods
         foreach (var p in new[] { g.Bin, Path.Combine(g.Bin, "scripts"), Path.Combine(g.Bin, "plugins") }.Where(Directory.Exists)
                      .SelectMany(d => Directory.EnumerateFiles(d, "*.asi")))
             list.Add(new ModFile(p, Path.GetRelativePath(g.Root, p), Size(p), ModKind.Asi, true, true));
-        // (the game manages these: listed, not switched here)
-        if (Path.Combine(docs, "Library") is var lib && Directory.Exists(lib))
-            foreach (var p in Files(lib, "*.package"))
-                list.Add(new ModFile(p, Path.Combine("Library", Path.GetRelativePath(lib, p)), Size(p), kinds ? LibraryKind(p) : ModKind.Package, true, true));
-        // the player's packages first, then the game folder's plugins and the Library
-        return list.OrderBy(m => m.FileType switch { "asi" => 1, "library" => 2, _ => 0 })
+        // the player's packages first, then the game folder's plugins
+        return list.OrderBy(m => m.FileType == "asi" ? 1 : 0)
             .ThenBy(m => m.Rel, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
@@ -87,14 +81,9 @@ public static class Mods
         return ModKind.Package;
     }
 
-    // a lot saved to the Library carries its lot pictures; a household does not
-    public static ModKind LibraryKind(string package) => Dbpf.Index(package).Any(e => e.Type == LotImage) ? ModKind.Lot : ModKind.Household;
-
     public static byte[]? Thumbnail(ModFile m) => m.Kind switch
     {
         _ when m.FileType == "asi" => null,
-        ModKind.Lot => Dbpf.First(m.Path, [LotImage]),
-        ModKind.Household => Dbpf.First(m.Path, [Saves.PhotoType]),
         _ => Dbpf.First(m.Path, ThumbTypes),
     };
 

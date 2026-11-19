@@ -79,7 +79,7 @@ public sealed class ModRow : INotifyPropertyChanged
             ModKind.Script => Rgb(0x8E, 0x9C, 0xFF), ModKind.Cas => Rgb(0xF0, 0x8F, 0xC4), ModKind.Objects => Rgb(0xE8, 0xC4, 0x66),
             ModKind.Lighting => Rgb(0xF2, 0xB2, 0x5C), ModKind.Sound => Rgb(0x62, 0xCB, 0xDD), ModKind.Textures => Rgb(0x93, 0xD2, 0x7C),
             ModKind.Tuning => Rgb(0x6E, 0xD3, 0xA8), ModKind.Interface => Rgb(0xB5, 0x98, 0xF6),
-            ModKind.Lot => Rgb(0xEF, 0x98, 0x72), ModKind.Household => Rgb(0xE9, 0xB4, 0x72), ModKind.Asi => Rgb(0xA6, 0xAC, 0xCC),
+            ModKind.Asi => Rgb(0xA6, 0xAC, 0xCC),
             _ => Rgb(0xA2, 0xA5, 0xB2),
         };
         GlyphBrush = new SolidColorBrush(hue);
@@ -101,23 +101,21 @@ public sealed class ModRow : INotifyPropertyChanged
     {
         ModKind.Script => "code-xml", ModKind.Cas => "shirt", ModKind.Objects => "sofa", ModKind.Lighting => "lamp", ModKind.Sound => "music",
         ModKind.Textures => "image", ModKind.Tuning => "sliders-vertical", ModKind.Interface => "app-window", ModKind.Asi => "plug",
-        ModKind.Lot => "house", ModKind.Household => "users", _ => "puzzle",
+        _ => "puzzle",
     };
 
     public static string SizeText(long n) => n >= 1L << 30 ? $"{n / (1024.0 * 1024 * 1024):0.#} GB" : n >= 1 << 20 ? $"{n / (1024.0 * 1024):0.#} MB" : $"{Math.Max(1, n / 1024)} KB";
 
-    // where a mod is, as the side pane names it ("Packages › NRaas"); the game folder or the Library
+    // where a mod is, as the side pane names it ("Packages › NRaas"); the game folder
     public static string Place(ModFile f) => f.FileType switch
     {
         "asi" => T("Game folder"),
-        "library" => T("Library"),
         _ => string.Join(" \u203a ", f.Folder.Split(System.IO.Path.DirectorySeparatorChar).Skip(1)) is { Length: > 0 } p ? p : "Mods",
     };
 
     public static string LockText(ModFile f) => f.FileType switch
     {
         "asi" => T("In the game folder: installed and removed in Components or by hand."),
-        "library" => T("A household or lot saved to the Library: managed in the game."),
         _ => T("Installed by the launcher: switch it in Components."),
     };
 
@@ -125,7 +123,7 @@ public sealed class ModRow : INotifyPropertyChanged
     {
         ModKind.Script => T("Script mod"), ModKind.Cas => T("Create a Sim"), ModKind.Objects => T("Objects"), ModKind.Lighting => T("Lighting"),
         ModKind.Sound => T("Music and sound"), ModKind.Textures => T("Textures"), ModKind.Tuning => T("Tuning"), ModKind.Interface => T("Interface"),
-        ModKind.Asi => T("ASI plugin"), ModKind.Lot => T("Lot"), ModKind.Household => T("Household"), _ => T("Other"),
+        ModKind.Asi => T("ASI plugin"), _ => T("Other"),
     };
 
     ImageSource? _image;

@@ -13,13 +13,13 @@ using static ApexSetup.Strings;
 namespace ApexSetup;
 
 // The Mods screen. The side pane lists places in four groups: the library (all mods, new since the last game, what needs a
-// look, duplicates, what is off), the player's folders, their tags and the game's own places (ASI plugins, the Library). The list shows the chosen place through the search, the filters (file type, kind, state, tags, age, size) and
+// look, duplicates, what is off), the player's folders, their tags and the game folder's ASI plugins. The list shows the chosen place through the search, the filters (file type, kind, state, tags, age, size) and
 // the sort; the details pane shows the chosen mod or what several chosen mods share. Moves, renames, removals and merges go
 // through ModLibrary and ModMerge, notes and tags through ModNotes.
 public sealed partial class MainWindow
 {
     const string DefaultMods = "*default", AllMods = "*all", NewMods = "*new", LookMods = "*look", DupMods = "*dup", OffMods = "*off",
-        AsiMods = "*asi", LibraryMods = "*library", NewTag = "*newtag";
+        AsiMods = "*asi", NewTag = "*newtag";
 
     string _modPlace = AllMods;
     List<ModRow> _modRows = [];
@@ -58,7 +58,7 @@ public sealed partial class MainWindow
             {
                 var m = Mods.List(g, docs);
                 // every kind each package holds (read once per file; ModKinds never throws)
-                var k = m.Where(x => x.FileType is "package" or "library").ToDictionary(x => x.Path, x => ModKinds.Read(x.Path), StringComparer.OrdinalIgnoreCase);
+                var k = m.Where(x => x.FileType == "package").ToDictionary(x => x.Path, x => ModKinds.Read(x.Path), StringComparer.OrdinalIgnoreCase);
                 return (m, ModChecks.Run(m, g, docs), ModLibrary.Folders(docs), ModLibrary.LoadedBy(docs), ModLibrary.Duplicates(m), k);
             });
             _mods = mods;
@@ -214,7 +214,7 @@ public sealed partial class MainWindow
     (string Crumb, string Title) PlaceTitle(string place) => place switch
     {
         AllMods => ("", T("All mods")), NewMods => ("", T("New since last play")), DefaultMods => ("", T("Default replacements")), LookMods => ("", T("Needs a look")), DupMods => ("", T("Duplicates")),
-        OffMods => ("", T("Turned off")), AsiMods => ("", T("Game plugins")), LibraryMods => ("", T("Library")),
+        OffMods => ("", T("Turned off")), AsiMods => ("", T("Game plugins")),
         _ when place.StartsWith('#') => (T("Tag"), place[1..]),
         "" => ("", "Mods"),
         _ => (string.Join(" › ", new[] { "Mods" }.Concat(place.Split(Path.DirectorySeparatorChar).SkipLast(1))), Path.GetFileName(place)),
@@ -232,7 +232,6 @@ public sealed partial class MainWindow
             DupMods => r.DuplicateOf is not null,
             OffMods => !m.Enabled,
             AsiMods => m.FileType == "asi",
-            LibraryMods => m.FileType == "library",
             _ when place.StartsWith('#') => ModNotes.TagsOf(m.Rel).Contains(place[1..], StringComparer.OrdinalIgnoreCase),
             _ => InDir(m, place),
         };
@@ -293,8 +292,7 @@ public sealed partial class MainWindow
                     new(DupMods, T("Duplicates"), "copy", N(DupMods)), new(OffMods, T("Turned off"), "power-off", N(OffMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace)).ToList()),
             ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", _mods.Count(m => InDir(m, d)), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
             ("tags", T("TAGS"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
-            ("game", T("GAME"), null, new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)),
-                new(LibraryMods, T("Library"), "library", N(LibraryMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace).ToList()),
+            ("game", T("GAME"), null, new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace).ToList()),
         };
         if (!groups.SelectMany(g => g.Items).Any(p => p.Key.Equals(_modPlace, StringComparison.OrdinalIgnoreCase))) _modPlace = AllMods;
 
@@ -505,7 +503,7 @@ public sealed partial class MainWindow
         if (ModNotes.Tags.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
         foreach (var t in ModNotes.Tags) Add("#" + t.Name, t.Name, "tag");
         menu.Items.Add(new MenuFlyoutSeparator());
-        foreach (var (k, l, i) in new[] { (AsiMods, T("Game plugins (ASI)"), "plug"), (LibraryMods, T("Library"), "library") }) Add(k, l, i);
+        foreach (var (k, l, i) in new[] { (AsiMods, T("Game plugins (ASI)"), "plug") }) Add(k, l, i);
         menu.ShowAt(ModsPlaces);
     }
 
@@ -730,7 +728,7 @@ public sealed partial class MainWindow
     void OnModsSelectNone(object sender, RoutedEventArgs e) => CloseModDetails();
     void OnModsOpenFolder(object sender, RoutedEventArgs e) => OpenFolder(_modPlace switch
     {
-        AsiMods => _game?.Bin ?? "", LibraryMods => Path.Combine(Docs, "Library"), OffMods => Mods.Disabled(Docs),
+        AsiMods => _game?.Bin ?? "", OffMods => Mods.Disabled(Docs),
         _ when IsFolder(_modPlace) => Path.Combine(Docs, "Mods", _modPlace), _ => Path.Combine(Docs, "Mods"),
     });
 
@@ -785,8 +783,8 @@ public sealed partial class MainWindow
 
     int FilterCount => _fFiles.Count + _fKinds.Count + _fStates.Count + _fTags.Count + _fCreators.Count + (_fAddedDays > 0 ? 1 : 0) + (_fSizeMb > 0 ? 1 : 0);
 
-    static string FileTypeName(string f) => f switch { "package" => T("Package"), "asi" => T("ASI plugin"), _ => T("Library item") };
-    static string FileTypeIcon(string f) => f switch { "package" => "package", "asi" => "plug", _ => "library" };
+    static string FileTypeName(string f) => f == "asi" ? T("ASI plugin") : T("Package");
+    static string FileTypeIcon(string f) => f == "asi" ? "plug" : "package";
     static string StateName(string s) => s switch { "on" => T("On"), "off" => T("Off"), "look" => T("Needs a look"), "new" => T("New"), "default" => T("Default replacement"), _ => T("Duplicate") };
     static string StateIcon(string s) => s switch { "on" => "power", "off" => "power-off", "look" => "triangle-alert", "new" => "sparkles", "default" => "replace", _ => "copy" };
 
@@ -863,7 +861,7 @@ public sealed partial class MainWindow
         switch (_filterGroup)
         {
             case 0:
-                foreach (var f in new[] { "package", "asi", "library" })
+                foreach (var f in new[] { "package", "asi" })
                     if (_modRows.Count(r => r.File.FileType == f) is > 0 and var n) Opt(FileTypeName(f), FileTypeIcon(f), null, n, _fFiles.Contains(f), on => Flip(_fFiles, f, on));
                 break;
             case 1:
@@ -946,7 +944,7 @@ public sealed partial class MainWindow
         "Pool" => T("Pools and fountains"), "TerrainPaint" => T("Terrain paints"), "TerrainTool" => T("Terrain tools"), "Water" => T("Water"),
         "Lighting" => T("Lighting"), "Effects" => T("Effects"), "Patterns" => T("Patterns"), "Animations" => T("Animations and poses"), "Sound" => T("Music and sound"),
         "Interface" => T("Interface"), "Textures" => T("Textures"), "Translations" => T("Translations"),
-        "Asi" => T("ASI plugin"), "Lot" => T("Lot"), "Household" => T("Household"),
+        "Asi" => T("ASI plugin"),
         _ => T("Other"),
     };
 
@@ -961,7 +959,6 @@ public sealed partial class MainWindow
         "Stairs" or "BuildSpiralStaircase" or "BuildElevator" => "layers", "RoofStyle" or "RoofPattern" or "Foundation" => "house", "Pool" or "Water" => "waves",
         "TerrainPaint" or "TerrainTool" => "mountain", "Lighting" => "lamp", "Effects" => "wand-sparkles", "Patterns" => "palette", "Animations" => "person-standing",
         "Sound" => "music", "Interface" => "app-window", "Textures" => "image", "Translations" => "languages", "Asi" => "plug",
-        "Lot" => "house", "Household" => "users",
         _ when k.StartsWith("Buy") || k == "Objects" => "sofa", _ when k.StartsWith("Build") => "hammer",
         _ => "puzzle",
     };
@@ -973,7 +970,6 @@ public sealed partial class MainWindow
         _ when k.StartsWith("Buy") || k == "Objects" => 2,
         _ when k.StartsWith("Build") || k is "Wall" or "WallPattern" or "FloorPattern" or "Fence" or "Railing" or "Stairs" or "RoofStyle" or "RoofPattern" or "Foundation" or "Pool" or "TerrainPaint" or "TerrainTool" or "Water" => 3,
         "Lighting" or "Effects" or "Patterns" or "Animations" or "Sound" or "Interface" or "Textures" or "Translations" => 4,
-        "Lot" or "Household" => 5,
         _ => 6,
     };
     static int KindGroupOrder(int g) => g;

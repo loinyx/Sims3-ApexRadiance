@@ -32,7 +32,7 @@ public sealed partial class MainWindow
 
         var tabs = new List<(string Key, string Label)> { ("overview", T("Overview")) };
         if (merge is not null) tabs.Add(("inside", T("Inside ({0})", merge.Originals.Count)));
-        else if (m.FileType is "package" or "library") tabs.Add(("inside", T("Inside")));
+        else if (m.FileType == "package") tabs.Add(("inside", T("Inside")));
         if (r.Defaults.IsDefault && _gameIndex is not null) tabs.Add(("replaces", T("Replaces")));
         if (problems.Count > 0) tabs.Add(("problems", T("Problems ({0})", problems.Count)));
         if (mine) tabs.Add(("notes", T("Notes")));
@@ -86,7 +86,6 @@ public sealed partial class MainWindow
         if (problem) badges.Children.Add(StripBadge(T("Needs a look"), "triangle-alert", "#E0A84F"));
         if (m.Locked) badges.Children.Add(m.FileType switch
         {
-            "library" => StripBadge(T("In the Library"), "library", "#E6E6EC"),
             "asi" => StripBadge(T("In the game folder"), "plug", "#CECBF6"),
             _ => StripBadge(T("Installed by Apex Launcher"), "lock", "#CECBF6"),
         });
@@ -239,7 +238,7 @@ public sealed partial class MainWindow
         Tile(2, T("Creator"), creator);
         Tile(3, merge is not null ? T("Made from") : T("State"),
             merge is not null ? Big(T("{0} mods", merge.Originals.Count))
-            : Big(!m.Locked ? (m.Enabled ? T("On") : T("Off")) : m.FileType switch { "library" => T("In the Library"), "asi" => T("Loaded"), _ => T("Managed") },
+            : Big(!m.Locked ? (m.Enabled ? T("On") : T("Off")) : m.FileType switch { "asi" => T("Loaded"), _ => T("Managed") },
                 m.Enabled || m.Locked ? null : "ApexWarningBrush"));
         if (m.Locked) host.Children.Add(Note("lock", "ApexMutedBrush", ModRow.LockText(m)));
         host.Children.Add(tiles);
@@ -551,8 +550,7 @@ public sealed partial class MainWindow
         f.Visibility = Visibility.Visible;
         f.ColumnDefinitions.Add(new ColumnDefinition());
         Button main;
-        if (m.FileType == "library") main = MainButton(T("Show file"), () => ShowFile(m.Path));
-        else if (m.Locked) main = MainButton(T("Open in Components"), () => Show(ComponentsStep));
+        if (m.Locked) main = MainButton(T("Open in Components"), () => Show(ComponentsStep));
         else if (merge is not null && mine) main = MainButton(T("Edit merge"), () => Safe(EditMergeAsync(r, merge)));
         else main = MainButton(m.Enabled ? T("Turn off") : T("Turn on"), () => SetMods([r], !r.File.Enabled));
         f.Children.Add(main);
@@ -575,12 +573,9 @@ public sealed partial class MainWindow
             power.Click += (_, _) => SetMods([r], !r.File.Enabled);
             Icon(power);
         }
-        if (m.FileType != "library")
-        {
-            var show = IconButton("folder-search", T("Show file"));
-            show.Click += (_, _) => ShowFile(m.Path);
-            Icon(show);
-        }
+        var show = IconButton("folder-search", T("Show file"));
+        show.Click += (_, _) => ShowFile(m.Path);
+        Icon(show);
         if (mine)
         {
             var remove = IconButton("trash-2", T("Remove to the Recycle Bin"), "ApexErrorBrush");

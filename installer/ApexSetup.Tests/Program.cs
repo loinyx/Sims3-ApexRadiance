@@ -1451,19 +1451,14 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
             && Mods.KindOf(Types((0x0333406C, 76), (0x0166038C, 1))) == ModKind.Tuning
             && Mods.KindOf(Types((0xB1CC1AF6, 13))) == ModKind.Package,
             "mods: scripts, CAS, objects, lighting, sound, textures and tuning told apart");
-        var lib = Path.Combine(lr, "Docs2", "Library");
-        TestPackage(Path.Combine(lib, "Bistro.package"), (0xD84E7FC6u, "l"u8.ToArray(), false, 1));
-        TestPackage(Path.Combine(lib, "Family.package"), (0x033A1435u, "h"u8.ToArray(), false, 1));
+        // (the game's Library and Sims3Packs in Downloads are the game's: not listed)
+        TestPackage(Path.Combine(lr, "Docs2", "Library", "Bistro.package"), (0xD84E7FC6u, "l"u8.ToArray(), false, 1));
         Directory.CreateDirectory(Path.Combine(lr, "Docs2", "Downloads"));
-        File.WriteAllText(Path.Combine(lr, "Docs2", "Downloads", "Rinn Fada.Sims3Pack"), "TS3Pack <?xml version=\"1.0\"?><Sims3Package Type=\"world\" SubType=\"0x0\">");
         File.WriteAllText(Path.Combine(lr, "Docs2", "Downloads", "House.Sims3Pack"), "TS3Pack <?xml version=\"1.0\"?><Sims3Package Type=\"lot\" SubType=\"0x0\">");
         var all2 = Mods.List(lg, Path.Combine(lr, "Docs2"));
-        Check(all2.Single(m => m.Name == "Bistro.package") is { Kind: ModKind.Lot, FileType: "library", Locked: true }
-            && all2.Single(m => m.Name == "Family.package").Kind == ModKind.Household
-            && !all2.Any(m => m.Name.EndsWith(".Sims3Pack", StringComparison.OrdinalIgnoreCase)),
-            "mods: the Library's lots and households; Sims3Packs in Downloads are not listed");
-        Check(all2.Select(m => m.FileType).SequenceEqual(all2.Select(m => m.FileType).OrderBy(t => t switch { "asi" => 1, "library" => 2, _ => 0 })),
-            "mods: packages first, then ASI plugins and the Library");
+        Check(!all2.Any(m => m.Name is "Bistro.package" or "House.Sims3Pack"), "mods: the game's Library and Sims3Packs in Downloads are not listed");
+        Check(all2.Select(m => m.FileType).SequenceEqual(all2.Select(m => m.FileType).OrderBy(t => t == "asi" ? 1 : 0)),
+            "mods: packages first, then ASI plugins");
 
         // a pack's icon from its game definition file; a world's own picture, never a lot's
         var gdfDir = Path.Combine(lr, "EPx", "Game", "Bin");

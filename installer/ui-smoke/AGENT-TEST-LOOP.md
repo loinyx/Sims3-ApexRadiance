@@ -86,7 +86,7 @@ Repeat until the tester stops you or a round finds nothing new three times in a 
 **Mods (most important)**
 
 - The side pane: Library places (All mods, New, Default replacements, Needs a look, Duplicates, Turned off), folders,
-  tags, Game plugins (ASI), Library. Clicking each one shows its mods; counts match the list.
+  tags, Game plugins (ASI). Clicking each one shows its mods; counts match the list.
 - List and grid views, search (name, folder, notes, tags, creator, type), every filter group (file type, what it is:
   Create a Sim, Buy mode, Build mode with walls, floors, fences, roofs, terrain paints..., state, tags, creator, date
   added, size), sorting, Select all and Clear.
