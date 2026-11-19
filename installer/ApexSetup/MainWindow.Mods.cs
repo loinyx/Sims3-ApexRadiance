@@ -41,7 +41,7 @@ public sealed partial class MainWindow
     Func<string, bool>? _modLoadedBy;
     List<string> _modDirs = [];
     string _folderSig = "";
-    bool _fillingMods;
+    bool _fillingMods, _modsAgain;
     List<ModRow>? _dragRows;
     string? _dragFolder;
     readonly Dictionary<string, ModContents> _modContents = new(StringComparer.OrdinalIgnoreCase);
@@ -60,8 +60,11 @@ public sealed partial class MainWindow
 
     async Task LoadModsAsync()
     {
-        if (_game is not { } g || _modsLoading) return;
+        if (_game is not { } g) return;
+        // (a change made while the list is read: the list is read again once this read ends)
+        if (_modsLoading) { _modsAgain = true; return; }
         _modsLoading = true;
+        _modsAgain = false;
         ModsSummary.Text = T("Reading your mods…");
         var docs = Docs;
         try
@@ -99,6 +102,7 @@ public sealed partial class MainWindow
         finally { _modsLoading = false; }
         _folderSig = "";
         FillMods();
+        if (_modsAgain) await LoadModsAsync();
     }
 
     // the game's own keys (cached; read once, in a second or two, when the game's files change) and which mods replace them
@@ -156,7 +160,7 @@ public sealed partial class MainWindow
     void FillMods()
     {
         if (_game is null) { ModsSummary.Text = T("Choose the game first."); return; }
-        if (!_modsLoaded) { Safe(LoadModsAsync()); return; }
+        if (!_modsLoaded) { if (!_modsLoading) Safe(LoadModsAsync()); return; }
         _fillingMods = true;
         try
         {
@@ -195,7 +199,7 @@ public sealed partial class MainWindow
             ModsTitle.Text = title;
             ModsPlacesText.Text = title;
             var off = inPlace.Count(r => !r.File.Enabled);
-            var looks = inPlace.Count(r => r.Findings.Count > 0);
+            var looks = inPlace.Count(NeedsLook);
             ModsSummary.Text = string.Join(" · ", new[]
             {
                 inPlace.Count == 1 ? T("1 file") : T("{0} files", inPlace.Count), ModRow.SizeText(inPlace.Sum(r => r.File.Size)),
@@ -254,7 +258,7 @@ public sealed partial class MainWindow
             AllMods => m.FileType == "package",
             NewMods => r.IsNew,
             DefaultMods => r.Defaults.IsDefault,
-            LookMods => r.Findings.Count > 0 || !Loaded(m) && m.Enabled,
+            LookMods => NeedsLook(r),
             DupMods => r.DuplicateOf is not null,
             OffMods => !m.Enabled,
             AsiMods => m.FileType == "asi",
@@ -262,6 +266,9 @@ public sealed partial class MainWindow
             _ => InDir(m, place),
         };
     }
+
+    // a finding, or on in a place the game does not load: the side pane's Needs a look, the state filter and the summary alike
+    bool NeedsLook(ModRow r) => r.Findings.Count > 0 || !Loaded(r.File) && r.File.Enabled;
 
     bool Matches(ModRow r)
     {
@@ -278,7 +285,7 @@ public sealed partial class MainWindow
         if (_fKinds.Count > 0 && !r.Kinds.Any(_fKinds.Contains)) return false;
         if (_fStates.Count > 0 && !_fStates.Any(s => s switch
             {
-                "on" => m.Enabled, "off" => !m.Enabled, "look" => r.Findings.Count > 0, "new" => r.IsNew, "dup" => r.DuplicateOf is not null, "default" => r.Defaults.IsDefault, _ => false,
+                "on" => m.Enabled, "off" => !m.Enabled, "look" => NeedsLook(r), "new" => r.IsNew, "dup" => r.DuplicateOf is not null, "default" => r.Defaults.IsDefault, _ => false,
             })) return false;
         if (_fTags.Count > 0 && !_fTags.Any(t => t == "" ? ModNotes.TagsOf(m.Rel).Count == 0 : ModNotes.TagsOf(m.Rel).Contains(t, StringComparer.OrdinalIgnoreCase))) return false;
         if (_fCreators.Count > 0 && !_fCreators.Contains(CreatorOf(m) ?? "")) return false;
@@ -649,9 +656,18 @@ public sealed partial class MainWindow
         }
         _dragRows = null;
         var where = Path.GetFileName(dir) is { Length: > 0 } f ? f : "Mods";
-        if (error is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), error);
-        else if (back.Count > 0) ModsResult(back.Count == 1 ? T("Mod moved to {0}", where) : T("{0} mods moved to {1}", back.Count, where),
-            () => { foreach (var (r, d) in back) try { Replace(r, ModLibrary.Move(r.File, Docs, d)); } catch (Exception e) { App.Log(e); } _folderSig = ""; FillMods(); });
+        void Undo()
+        {
+            string? failed = null;
+            foreach (var (r, d) in back) try { Replace(r, ModLibrary.Move(r.File, Docs, d)); } catch (Exception e) { App.Log(e); failed ??= ErrorText(e); }
+            if (failed is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), failed);
+            _folderSig = "";
+            FillMods();
+        }
+        // (some moved, some not: the ones that moved can still be undone)
+        if (error is not null && back.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), error);
+        else if (error is not null) ModsResult(T("Some mods were not moved"), Undo, error, InfoBarSeverity.Warning);
+        else if (back.Count > 0) ModsResult(back.Count == 1 ? T("Mod moved to {0}", where) : T("{0} mods moved to {1}", back.Count, where), Undo);
         _folderSig = "";
         FillMods();
     }
@@ -951,7 +967,7 @@ public sealed partial class MainWindow
         {
             case 0:
                 foreach (var f in new[] { "package", "asi" })
-                    if (_modRows.Count(r => r.File.FileType == f) is > 0 and var n) Opt(FileTypeName(f), FileTypeIcon(f), null, n, _fFiles.Contains(f), on => Flip(_fFiles, f, on));
+                    if (inPlace.Count(r => r.File.FileType == f) is var n && (n > 0 || _fFiles.Contains(f))) Opt(FileTypeName(f), FileTypeIcon(f), null, n, _fFiles.Contains(f), on => Flip(_fFiles, f, on));
                 break;
             case 1:
                 // (an icon two kinds share tells them apart from nothing: those rows go without)
@@ -967,7 +983,7 @@ public sealed partial class MainWindow
             case 2:
                 foreach (var s in new[] { "on", "off", "look", "new", "dup", "default" })
                 {
-                    var n = inPlace.Count(r => s switch { "on" => r.File.Enabled, "off" => !r.File.Enabled, "look" => r.Findings.Count > 0, "new" => r.IsNew, "default" => r.Defaults.IsDefault, _ => r.DuplicateOf is not null });
+                    var n = inPlace.Count(r => s switch { "on" => r.File.Enabled, "off" => !r.File.Enabled, "look" => NeedsLook(r), "new" => r.IsNew, "default" => r.Defaults.IsDefault, _ => r.DuplicateOf is not null });
                     if (n > 0 || _fStates.Contains(s)) Opt(StateName(s), StateIcon(s), null, n, _fStates.Contains(s), on => Flip(_fStates, s, on));
                 }
                 break;
@@ -1417,7 +1433,12 @@ public sealed partial class MainWindow
         try
         {
             Replace(r, ModLibrary.Rename(r.File, name));
-            ModsResult(T("Renamed to {0}", r.Name), () => { try { Replace(r, ModLibrary.Rename(r.File, old)); } catch (Exception e) { App.Log(e); } FillMods(); });
+            ModsResult(T("Renamed to {0}", r.Name), () =>
+            {
+                try { Replace(r, ModLibrary.Rename(r.File, old)); }
+                catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
+                FillMods();
+            });
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         FillMods();
@@ -1680,10 +1701,15 @@ public sealed partial class MainWindow
 
     void TagMods(List<ModRow> rows, string tag, bool on)
     {
-        try { foreach (var r in rows) { ModNotes.SetTag(r.File.Rel, tag, on); r.Refresh(); } }
+        // (Undo takes the tag off only the mods that did not have it)
+        var added = rows.Where(r => !ModNotes.TagsOf(r.File.Rel).Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
+        try
+        {
+            foreach (var r in rows) { ModNotes.SetTag(r.File.Rel, tag, on); r.Refresh(); }
+            if (rows.Count > 1 && on) ModsResult(T("{0} mods tagged {1}", rows.Count, tag), () => TagMods(added, tag, false));
+        }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         _dragRows = null;
-        if (rows.Count > 1 && on) ModsResult(T("{0} mods tagged {1}", rows.Count, tag), () => TagMods(rows, tag, false));
         _folderSig = "";
         FillMods();
     }

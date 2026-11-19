@@ -271,9 +271,11 @@ public sealed partial class MainWindow
         host.Children.Add(Body(T("{0} of the {1} mods still suspected are off for this round. Play until the problem would show, then come back.", st.Off.Count, st.Suspects.Count)));
         host.Children.Add(Warn(T("Do not save over your game while hunting"), T("Objects and outfits of the mods that are off would be taken out of it. Use Save As, or quit without saving.")));
         var a = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        a.Children.Add(Button(T("The problem is still there"), () => _ = HuntAnswer(true), accent: true));
-        a.Children.Add(Button(T("It is gone"), () => _ = HuntAnswer(false)));
-        a.Children.Add(Button(T("Stop and put every mod back"), () => _ = HuntStop()));
+        // (one answer per round: the buttons stay off until the list is read again and the banner rebuilt)
+        void Once(Func<Task> act) { foreach (var b in a.Children.OfType<Control>()) b.IsEnabled = false; _ = act(); }
+        a.Children.Add(Button(T("The problem is still there"), () => Once(() => HuntAnswer(true)), accent: true));
+        a.Children.Add(Button(T("It is gone"), () => Once(() => HuntAnswer(false))));
+        a.Children.Add(Button(T("Stop and put every mod back"), () => Once(HuntStop)));
         host.Children.Add(a);
     }
 }

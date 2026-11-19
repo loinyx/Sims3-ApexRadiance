@@ -215,7 +215,7 @@ public static partial class ModLibrary
         if (!Directory.Exists(mods)) return [];
         try
         {
-            return Directory.EnumerateDirectories(mods, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
+            return Directory.EnumerateDirectories(mods, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 })
                 .Select(d => Path.GetRelativePath(mods, d))
                 .Where(r => !new[] { Mods.DisabledName, ModMerge.FolderName }.Any(n => r.Equals(n, StringComparison.OrdinalIgnoreCase) || r.StartsWith(n + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
                 .Order(StringComparer.OrdinalIgnoreCase).ToList();
