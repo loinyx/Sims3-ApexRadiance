@@ -10,4 +10,7 @@ namespace ApexSetup;
 [JsonSerializable(typeof(LauncherSettings))]
 [JsonSerializable(typeof(ModNotesFile))]
 [JsonSerializable(typeof(MergeRecord))]
+[JsonSerializable(typeof(List<SessionInfo>))]
+[JsonSerializable(typeof(Dictionary<string, List<SizePoint>>))]
+[JsonSerializable(typeof(ConflictResult))]
 public partial class SetupJson : JsonSerializerContext;

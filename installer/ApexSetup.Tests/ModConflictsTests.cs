@@ -16,7 +16,7 @@ static class ModConflictsTests
 
     // An assembly with one method, Fixture.Entry.Init, whose body runs ops: ("call", ns, type, member, 0), ("stsfld", ...),
     // ("listen", "", "", "", event id) as EventTracker.AddListener(id, new ProcessEventDelegate(...)). events: an EventTypeId enum.
-    static byte[] Asm(string name, Guid mvid, (string Op, string Ns, string Type, string Member, int Id)[] ops, (string Name, int Value)[]? events = null)
+    internal static byte[] Asm(string name, Guid mvid, (string Op, string Ns, string Type, string Member, int Id)[] ops, (string Name, int Value)[]? events = null)
     {
         var mb = new MetadataBuilder();
         StringHandle S(string s) => mb.GetOrAddString(s);

@@ -1545,6 +1545,7 @@ ModConflictsTests.Run(Check);
 InstallTests.Run(Check);
 ModMergeTests.Run(Check);
 ModKindsTests.Run(Check);
+HealthTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
