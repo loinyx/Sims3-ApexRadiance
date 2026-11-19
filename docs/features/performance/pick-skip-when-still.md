@@ -11,8 +11,8 @@ to 0.25 s late.
 
 | | |
 |---|---|
-| Availability | In development (Experimental) |
-| Default | Off |
+| Availability | Released in 4.0.7 |
+| Default | On |
 | Menu | System > Performance > Camera and lighting > *Fewer mouse picks when still* |
 | Configuration | `[patches.PickSkipWhenStill]` in `ApexRadiance.toml` |
 | Source | [`features/pick_readback.{h,cpp}`](../../../features/pick_readback.cpp), [`framework/overlay.cpp`](../../../framework/overlay.cpp) (`InputEvents`), [`patches/performance_patches.cpp`](../../../patches/performance_patches.cpp) |
@@ -72,7 +72,7 @@ is turned off. Held presses are counted (`pick_click_holds`, the developer log l
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Fewer mouse picks when still (Experimental) | `[patches.PickSkipWhenStill] enabled` | bool | off | | Turns the skip and the motion cap on. Off: the game's own cadence (with the read-back deferral) |
+| Fewer mouse picks when still | `[patches.PickSkipWhenStill] enabled` | bool | on | | Turns the skip and the motion cap on. Off: the game's own cadence (with the read-back deferral) |
 
 ## Compatibility and interactions
 
