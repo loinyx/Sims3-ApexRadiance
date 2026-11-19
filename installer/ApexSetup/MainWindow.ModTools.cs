@@ -138,13 +138,13 @@ public sealed partial class MainWindow
         });
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(400);
-        timer.Tick += (_, _) =>
+        void ReadLog()
         {
-            time.Text = clock.Elapsed.ToString(@"mm\:ss");
             if (plan.LogPath is { } lp && File.Exists(lp))
                 try { using var fs = new FileStream(lp, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); using var sr = new StreamReader(fs); var all = sr.ReadToEnd(); if (all.Length != log.Text.Length) { log.Text = all; log.SelectionStart = all.Length; } }
                 catch (IOException) { }
-        };
+        }
+        timer.Tick += (_, _) => { time.Text = clock.Elapsed.ToString(@"mm\:ss"); ReadLog(); };
         timer.Start();
         var shown = ShowDialog(d);
         MergeResult? result = null;
@@ -153,6 +153,7 @@ public sealed partial class MainWindow
         catch (Exception e) { error = e; App.Log(e); }
         timer.Stop();
         clock.Stop();
+        ReadLog(); // (a merge quicker than the timer still shows its whole log)
         if (result is not null)
         {
             foreach (var (s, _) in steps) Mark(s, "done");

@@ -44,6 +44,10 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // status bars in a dark tint of their colour (the window's own resources: read before any bar draws), not the default
+        // olive and brown
+        foreach (var (key, c) in new[] { ("Success", 0xFF14231Bu), ("Warning", 0xFF2A2214u), ("Error", 0xFF2C1718u), ("Informational", 0xFF17172Au) })
+            Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, (byte)(c >> 16), (byte)(c >> 8), (byte)c));
         // the log's context line: the game, its edition and version, the renderer and the loaders Setup found
         App.Context = () => _game is not { } cg ? "no game chosen"
             : $"game {cg.Root} ({cg.Label} {cg.Version}, {cg.Exe}); renderer {_state?.Layer.ToString() ?? "?"}; loaders {(Scan.Loaders(cg.Bin) is { Count: > 0 } ls ? string.Join(", ", ls) : "none")}";
@@ -1707,7 +1711,7 @@ public sealed partial class MainWindow : Window
     async Task RemoveAsync(string c)
     {
         if (_game is not { } g || _busy || _running) return;
-        if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. Setup removes the files and puts back the ones it replaced."), T("Remove"))) return;
+        if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. Setup removes the files and puts back the ones it replaced."), T("Remove"), danger: true)) return;
         await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)), label: "Remove {0}", args: Components.Name(c));
         AfterFrameGenOff();
         RefreshComponents();
@@ -1716,7 +1720,7 @@ public sealed partial class MainWindow : Window
     async Task UninstallAll()
     {
         if (_game is not { } g || _busy || _running) return;
-        if (!await Confirm(T("Uninstall everything?"), T("Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"))) return;
+        if (!await Confirm(T("Uninstall everything?"), T("Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"), danger: true)) return;
         await Guarded(() => Engine.RemoveAll(g), T("Everything Setup installed was removed."), label: "Uninstall everything");
         AfterFrameGenOff();
         RefreshComponents();
@@ -1912,9 +1916,15 @@ public sealed partial class MainWindow : Window
     async Task Message(string title, string text) =>
         await ShowDialog(new ContentDialog { Title = title, Content = text, CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
 
-    async Task<bool> Confirm(string title, string text, string yes) =>
-        await ShowDialog(new ContentDialog { Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot })
-            == ContentDialogResult.Primary;
+    // the action in the accent colour; one that deletes or removes says so in red and lights neither button (Enter does nothing)
+    async Task<bool> Confirm(string title, string text, string yes, bool danger = false)
+    {
+        var d = new ContentDialog { Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot,
+            DefaultButton = danger ? ContentDialogButton.None : ContentDialogButton.Primary };
+        if (danger)
+            d.PrimaryButtonStyle = new Style(typeof(Button)) { BasedOn = (Style)Application.Current.Resources["DefaultButtonStyle"], Setters = { new Setter(Control.ForegroundProperty, Res("ApexErrorBrush")) } };
+        return await ShowDialog(d) == ContentDialogResult.Primary;
+    }
 
     // every dialog in the launcher's near-black instead of Windows' grey: the body a step above the button strip, a quiet
     // border, a deeper shade behind (the dialog's template reads these from its own resources first)

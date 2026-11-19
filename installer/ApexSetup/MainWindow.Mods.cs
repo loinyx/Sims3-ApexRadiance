@@ -577,7 +577,7 @@ public sealed partial class MainWindow
 
     async Task DeleteFolderAsync(string dir)
     {
-        if (!await Confirm(T("Delete this folder?"), T("{0} is deleted. Only an empty folder can be deleted; your mods are never deleted with it.", Path.GetFileName(dir)), T("Delete"))) return;
+        if (!await Confirm(T("Delete this folder?"), T("{0} is deleted. Only an empty folder can be deleted; your mods are never deleted with it.", Path.GetFileName(dir)), T("Delete"), danger: true)) return;
         await ModsChange(() => { ModLibrary.DeleteFolder(Docs, dir); _modPlace = Path.GetDirectoryName(dir) is { Length: > 0 } up ? up : AllMods; }, T("Folder deleted"));
     }
 
@@ -1463,7 +1463,7 @@ public sealed partial class MainWindow
             : T("{0} mods go to the Recycle Bin. You can restore them from there.", rows.Count))
             + (merged > 0 ? "\n\n" + T("A merged mod's originals stay kept in Mods\\{0}; use Split instead to get them back.", ModMerge.FolderName) : "")
             + (rows.Any(HasItems) ? "\n\n" + T("Lots and Sims that use its objects or outfits lose them the next time a game is saved without it.") : "");
-        if (!await Confirm(rows.Count == 1 ? T("Remove this mod?") : T("Remove these mods?"), text, T("Remove"))) return;
+        if (!await Confirm(rows.Count == 1 ? T("Remove this mod?") : T("Remove these mods?"), text, T("Remove"), danger: true)) return;
         await ModsChange(() => { foreach (var r in rows) ModLibrary.Remove(r.File); }, rows.Count == 1 ? T("Mod moved to the Recycle Bin") : T("{0} mods moved to the Recycle Bin", rows.Count));
     }
 
@@ -1733,7 +1733,7 @@ public sealed partial class MainWindow
 
     async Task DeleteTagAsync(string name)
     {
-        if (!await Confirm(T("Delete this tag?"), T("{0} is taken off every mod. The mods stay as they are.", name), T("Delete"))) return;
+        if (!await Confirm(T("Delete this tag?"), T("{0} is taken off every mod. The mods stay as they are.", name), T("Delete"), danger: true)) return;
         try { ModNotes.DeleteTag(name); _fTags.Remove(name); } catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         foreach (var r in _modRows) r.Refresh();
         _folderSig = "";
