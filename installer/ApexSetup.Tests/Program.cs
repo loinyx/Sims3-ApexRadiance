@@ -1565,6 +1565,7 @@ ModMergeTests.Run(Check);
 ModKindsTests.Run(Check);
 HealthTests.Run(Check);
 ModToolsTests.Run(Check);
+DcCacheTests.Run(Check);
 DefaultReplacementsTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");

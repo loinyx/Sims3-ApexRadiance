@@ -9,6 +9,8 @@ public sealed record InstalledItem(string Name, string Kind, string File, uint T
 {
     // the id lots and worlds name it by in their <Dependency> (0: its record was not found)
     public uint Id { get; init; }
+    // its whole id as the game removes it by ("0x" and 32 hex digits; null: not known)
+    public string? FullId { get; init; }
 }
 
 public static class InstalledContent
@@ -29,6 +31,7 @@ public static class InstalledContent
     public static List<InstalledItem> Read(string docs, CancellationToken ct = default)
     {
         var list = new List<InstalledItem>();
+        var full = new Dictionary<uint, string>();
         foreach (var f in Files(docs))
         {
             ct.ThrowIfCancellationRequested();
@@ -37,7 +40,11 @@ public static class InstalledContent
                 var index = Dbpf.Index(f);
                 var ids = new Dictionary<(uint, ulong), uint>();
                 foreach (var e in index.Where(e => e.Type == DirectoryType))
-                    if (Dbpf.Read(f, e) is { } dir) foreach (var (key, id) in ItemIds(dir)) ids.TryAdd(key, id);
+                    if (Dbpf.Read(f, e) is { } dir)
+                    {
+                        foreach (var (key, id) in ItemIds(dir)) ids.TryAdd(key, id);
+                        foreach (var (id, fid) in FullIds(dir)) full.TryAdd(id, fid);
+                    }
                 // English names: the string tables whose instance's top byte is 0
                 var names = new Dictionary<ulong, string>();
                 foreach (var e in index.Where(e => e.Type == ModKinds.Stbl && e.Instance >> 56 == 0))
@@ -52,7 +59,48 @@ public static class InstalledContent
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or IndexOutOfRangeException) { Engine.Log(e); }
         }
-        return list;
+        list.AddRange(LotsAndWorlds(docs, full.Keys.ToHashSet()));
+        return list.Select(i => i.FullId is null && full.TryGetValue(i.Id, out var fid) ? i with { FullId = fid } : i).ToList();
+    }
+
+    // Installed lots, households and worlds: the game keeps each one's package, Sims3Pack manifest and all, in
+    // DCBackup\0x<id>.package (resource 0x73E93EEB: title, type, picture); one whose id is no longer in the cache was
+    // removed (the game leaves its backup behind).
+    public const uint ManifestType = 0x73E93EEB;
+    public static IEnumerable<InstalledItem> LotsAndWorlds(string docs, HashSet<uint> installed)
+    {
+        var dir = Path.Combine(docs, "DCBackup");
+        IEnumerable<string> files;
+        try { files = Directory.Exists(dir) ? Directory.EnumerateFiles(dir, "0x*.package").ToList() : []; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { yield break; }
+        foreach (var f in files)
+        {
+            InstalledItem? item = null;
+            try
+            {
+                var index = Dbpf.Index(f);
+                var m = index.FirstOrDefault(e => e.Type == ManifestType);
+                if (m.Type != ManifestType || Dbpf.Read(f, m) is not { } b) continue;
+                var x = System.Xml.Linq.XDocument.Parse(System.Text.Encoding.UTF8.GetString(b).TrimEnd('\0')).Root;
+                var id = ((string?)x?.Element("packageid"))?.Trim().ToLowerInvariant() ?? "";
+                if (x is null || id.Length != 34 || !uint.TryParse(id.AsSpan(2, 8), System.Globalization.NumberStyles.HexNumber, null, out var shortId) || !installed.Contains(shortId)) continue;
+                var kind = ((string?)x.Attribute("packagetype"))?.ToLowerInvariant() switch { "world" => "World", "household" => "Household", _ => "Lot" };
+                // its picture: the manifest names it as type:group:instance
+                var thumb = ((string?)x.Element("thumbnail"))?.Split(':');
+                uint type = 0; ulong inst = 0;
+                if (thumb is { Length: 3 } && uint.TryParse(thumb[0], System.Globalization.NumberStyles.HexNumber, null, out var t) && ulong.TryParse(thumb[2], System.Globalization.NumberStyles.HexNumber, null, out var i)) (type, inst) = (t, i);
+                item = new(((string?)x.Element("packagetitle"))?.Trim() is { Length: > 0 } n ? n : id, kind, f, type, inst, 0) { Id = shortId, FullId = id };
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Xml.XmlException or ArgumentException or IndexOutOfRangeException) { Engine.Log(e); }
+            if (item is not null) yield return item;
+        }
+    }
+
+    // each record's whole id, as the game names it: the record keeps its two 8-byte halves swapped
+    static IEnumerable<(uint Id, string Full)> FullIds(byte[] d)
+    {
+        foreach (var (id, at) in Records(d))
+            yield return (id, "0x" + Convert.ToHexString(d, at + 12, 8).ToLowerInvariant() + Convert.ToHexString(d, at + 4, 8).ToLowerInvariant());
     }
 
     // The ids other content names installed items by: each cache file's directory (type 0x7672F0C5, big-endian) holds a
@@ -116,6 +164,9 @@ public static class InstalledContent
     {
         List<Dbpf.Entry> index;
         lock (Indexes) if (!Indexes.TryGetValue(item.File, out index!)) Indexes[item.File] = index = Dbpf.Index(item.File);
+        // (a lot or world names its own picture)
+        if (item.Kind is "Lot" or "World" or "Household")
+            return item.Type != 0 && index.FirstOrDefault(e => e.Type == item.Type && e.Instance == item.Instance) is { Size: > 0 } own ? Dbpf.Read(item.File, own) : null;
         var tries = item.Type == ModKinds.Casp
             ? new[] { (CasThumbTypes, item.Instance) }
             : new[] { (ObjectThumbTypes, item.Instance), (ModKinds.IconTypes, item.PngInstance) };

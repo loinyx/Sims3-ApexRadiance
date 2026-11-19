@@ -118,7 +118,7 @@ public sealed class ModRow : INotifyPropertyChanged
     public static string LockText(ModFile f) => f.FileType switch
     {
         "asi" => T("In the game folder: installed and removed in Components or by hand."),
-        "sims3pack" => T("Installed and removed with the game's own launcher."),
+        "sims3pack" => T("Installed into the game's own content, not Mods: the launcher installs and removes it there."),
         "library" => T("A household or lot saved to the Library: managed in the game."),
         _ => T("Installed by the launcher: switch it in Components."),
     };

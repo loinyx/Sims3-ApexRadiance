@@ -86,7 +86,7 @@ public sealed partial class MainWindow
         if (problem) badges.Children.Add(StripBadge(T("Needs a look"), "triangle-alert", "#E0A84F"));
         if (m.Locked) badges.Children.Add(m.FileType switch
         {
-            "sims3pack" => StripBadge(T("Not installed yet"), "package", "#E6E6EC"),
+            "sims3pack" => PackInstalled(m) ? StripBadge(T("Installed in the game"), "circle-check", "#93D27C") : StripBadge(T("Not installed yet"), "package", "#E6E6EC"),
             "library" => StripBadge(T("In the Library"), "library", "#E6E6EC"),
             "asi" => StripBadge(T("In the game folder"), "plug", "#CECBF6"),
             _ => StripBadge(T("Installed by Apex Launcher"), "lock", "#CECBF6"),
@@ -240,7 +240,7 @@ public sealed partial class MainWindow
         Tile(2, T("Creator"), creator);
         Tile(3, merge is not null ? T("Made from") : T("State"),
             merge is not null ? Big(T("{0} mods", merge.Originals.Count))
-            : Big(!m.Locked ? (m.Enabled ? T("On") : T("Off")) : m.FileType switch { "sims3pack" => T("Not installed"), "library" => T("In the Library"), "asi" => T("Loaded"), _ => T("Managed") },
+            : Big(!m.Locked ? (m.Enabled ? T("On") : T("Off")) : m.FileType switch { "sims3pack" => PackInstalled(m) ? T("Installed") : T("Not installed"), "library" => T("In the Library"), "asi" => T("Loaded"), _ => T("Managed") },
                 m.Enabled || m.Locked ? null : "ApexWarningBrush"));
         if (m.Locked) host.Children.Add(Note("lock", "ApexMutedBrush", ModRow.LockText(m)));
         host.Children.Add(tiles);
@@ -566,16 +566,11 @@ public sealed partial class MainWindow
         {
             var pack = Sims3Pack.Read(m.Path);
             if (pack is { Extractable: true }) main = MainButton(T("Install"), () => Safe(InstallFilesAsync([m.Path])));
+            else if (pack is not null && PackInstalled(m)) main = MainButton(T("Remove from the game"), () => Safe(GameContentAsync(GameContent.Mode.Remove, [pack.PackageId], r.Name)));
             else
             {
-                var exe = _game is { } g ? Path.Combine(g.Bin, "Sims3Launcher.exe") : null;
-                main = MainButton(T("Install in the game's launcher"), () =>
-                {
-                    if (Games.IsRunning()) { SetInfo(ModsInfo, InfoBarSeverity.Warning, T("Close The Sims 3 first"), ""); return; }
-                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe!) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! }); }
-                    catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The game's launcher did not open"), ErrorText(e)); }
-                });
-                main.IsEnabled = exe is not null && File.Exists(exe);
+                main = MainButton(T("Install in the game"), () => Safe(GameContentAsync(GameContent.Mode.Install, [m.Path], r.Name)));
+                main.IsEnabled = pack is { PackageId.Length: 34 } && _game is not null;
             }
         }
         else if (m.Locked) main = MainButton(T("Open in Components"), () => Show(ComponentsStep));

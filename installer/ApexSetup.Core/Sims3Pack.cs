@@ -15,6 +15,8 @@ public static class Sims3Pack
     {
         // what it needs installed, as the manifest's <Dependency> ids: "0x" then a 32-bit id, 8 zero digits, the id again
         public IReadOnlyList<uint> Dependencies { get; init; } = [];
+        // its own id ("0x" and 32 hex digits): the one the game installs it under and removes it by
+        public string PackageId { get; init; } = "";
         // the store items among them (the base game's 050cffe8 and the packs' 062d9a.. ids set aside: which pack each is
         // is unverified)
         public IEnumerable<uint> StoreDependencies => Dependencies.Where(d => d != 0x050CFFE8 && d >> 12 != 0x062D9);
@@ -49,7 +51,7 @@ public static class Sims3Pack
                 .Where(s => s.Length >= 10 && s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
                 .Select(s => uint.TryParse(s.AsSpan(2, 8), System.Globalization.NumberStyles.HexNumber, null, out var v) ? v : 0).Where(v => v != 0).Distinct().ToList();
             return new((string?)root.Attribute("Type") ?? "", (string?)root.Element("DisplayName") ?? Path.GetFileNameWithoutExtension(path),
-                (string?)root.Element("Description") ?? "", dataStart, files) { Dependencies = deps };
+                (string?)root.Element("Description") ?? "", dataStart, files) { Dependencies = deps, PackageId = ((string?)root.Element("PackageId"))?.Trim().ToLowerInvariant() ?? "" };
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Xml.XmlException or EndOfStreamException or ArgumentException) { return null; }
     }

@@ -82,6 +82,19 @@ public sealed partial class MainWindow
         // what they share: findings that name more than one of them
         foreach (var f in picked.SelectMany(r => r.Findings).GroupBy(f => f).Where(g => g.Count() > 1).Select(g => g.Key))
             host.Children.Add(Warn(f, null, T("See in Health"), () => Show(HealthScreen)));
+        // Sims3Packs of lots, worlds and store items, installed or removed through the game in one go
+        var packs = picked.Where(r => r.File.FileType == "sims3pack").Select(r => (Row: r, Pack: Sims3Pack.Read(r.File.Path))).Where(x => x.Pack is { Extractable: false, PackageId.Length: 34 }).ToList();
+        var toInstall = packs.Where(x => !PackInstalled(x.Row.File)).ToList();
+        var toRemove = packs.Where(x => PackInstalled(x.Row.File)).ToList();
+        if (toInstall.Count + toRemove.Count > 0 && _game is not null)
+        {
+            var game = Section(T("In the game"), null, out _);
+            if (toInstall.Count > 0) game.Children.Add(ActionRow("package", T("Install {0} in the game", toInstall.Count), null,
+                () => Safe(GameContentAsync(GameContent.Mode.Install, toInstall.Select(x => x.Row.File.Path).ToList(), toInstall.Count == 1 ? toInstall[0].Row.Name : T("{0} Sims3Packs", toInstall.Count)))));
+            if (toRemove.Count > 0) game.Children.Add(ActionRow("trash-2", T("Remove {0} from the game", toRemove.Count), null,
+                () => Safe(GameContentAsync(GameContent.Mode.Remove, toRemove.Select(x => x.Pack!.PackageId).ToList(), toRemove.Count == 1 ? toRemove[0].Row.Name : T("{0} Sims3Packs", toRemove.Count)))));
+            host.Children.Add(game);
+        }
         if (mine.Count == 0) return;
 
         var tags = Section(T("Tags"), null, out _);
@@ -222,14 +235,86 @@ public sealed partial class MainWindow
         var foot = ModDetailsFoot;
         foot.Visibility = Visibility.Visible;
         foot.ColumnDefinitions.Add(new ColumnDefinition());
-        var exe = _game is { } g ? Path.Combine(g.Bin, "Sims3Launcher.exe") : null;
-        var open = MainButton(T("Remove in the game's launcher"), () =>
+        var remove = MainButton(T("Remove from the game"), () => Safe(GameContentAsync(GameContent.Mode.Remove, [r.Item.FullId!], r.Name)));
+        remove.IsEnabled = r.Item.FullId is not null && _game is not null;
+        foot.Children.Add(remove);
+    }
+
+    bool PackInstalled(ModFile m) => _installedIds is { } ids && Sims3Pack.Read(m.Path) is { } p && ids.Contains(GameContent.ShortId(p.PackageId));
+
+    // removing: written straight into the game's content cache, the way the game itself does it (no game start); every
+    // file it changes is kept first, so Undo puts it back. Installing: the game's own installer, which shows its screen
+    // for the half minute it takes; closing it when it says Done is what saves the install.
+    async Task GameContentAsync(GameContent.Mode mode, List<string> entries, string what)
+    {
+        if (_game is not { } g) return;
+        if (DryRun) { SetInfo(ModsInfo, InfoBarSeverity.Informational, T("Dry run: nothing was changed"), ""); return; }
+        if (Games.IsRunning()) { SetInfo(ModsInfo, InfoBarSeverity.Warning, T("Close The Sims 3 first"), ""); return; }
+        if (mode == GameContent.Mode.Remove) { await RemoveContentAsync(entries, what); return; }
+        using var cts = new CancellationTokenSource();
+        var status = new TextBlock { Text = T("Starting the game's installer…"), FontSize = 12, Foreground = Res("ApexMutedBrush") };
+        var body = new StackPanel { Spacing = 14, Width = 420 };
+        body.Children.Add(new TextBlock
         {
-            if (Games.IsRunning()) { SetInfo(ModsInfo, InfoBarSeverity.Warning, T("Close The Sims 3 first"), ""); return; }
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe!) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! }); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The game's launcher did not open"), ErrorText(e)); }
+            Text = T("The game installs it itself, the same way its own launcher does: its installer screen shows for about half a minute and closes when it is done."),
+            TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush"),
         });
-        open.IsEnabled = exe is not null && File.Exists(exe);
-        foot.Children.Add(open);
+        body.Children.Add(new ProgressBar { IsIndeterminate = true });
+        body.Children.Add(status);
+        var d = new ContentDialog { Title = T("Installing {0}", what), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
+        var finished = false;
+        d.Closing += (_, _) => { if (!finished) cts.Cancel(); };
+        var progress = new Progress<GameContent.Step>(s => status.Text = s switch
+        {
+            GameContent.Step.Working => T("Installing…"),
+            GameContent.Step.Finishing => T("Saving…"),
+            _ => T("Starting the game's installer…"),
+        });
+        var shown = ShowDialog(d);
+        GameContent.Result? res = null;
+        Exception? error = null;
+        try { res = await GameContent.InstallAsync(g, entries, progress, cts.Token); }
+        catch (OperationCanceledException) { }
+        catch (Exception e) { App.Log(e); error = e; }
+        finished = true;
+        d.Hide();
+        await shown;
+        _modsLoaded = false;
+        _folderSig = "";
+        await LoadModsAsync();
+        if (error is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was installed"), ErrorText(error));
+        else if (res is null) SetInfo(ModsInfo, InfoBarSeverity.Informational, T("Cancelled: nothing was changed"), "");
+        else if (res.Failed.Count == 0) ModsResult(T("{0} installed in the game", what), null);
+        else SetInfo(ModsInfo, InfoBarSeverity.Warning, T("{0} of {1} were not installed", res.Failed.Count, entries.Count),
+            T("The game did not take them: one may need an expansion pack you don't have, or be damaged."));
+    }
+
+    async Task RemoveContentAsync(List<string> ids, string what)
+    {
+        var root = Path.Combine(Paths.Data, "content-backups");
+        var backup = Path.Combine(root, DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        SetInfo(ModsInfo, InfoBarSeverity.Informational, T("Removing {0}…", what), "");
+        DcCache.RemoveResult? res = null;
+        try { res = await Task.Run(() => DcCache.Remove(Docs, ids, backup)); }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was removed"), ErrorText(e)); }
+        // (the newest few backups are kept: each holds whole cache files)
+        try { foreach (var old in Directory.GetDirectories(root).OrderDescending().Skip(3)) Directory.Delete(old, true); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
+        _modsLoaded = false;
+        _folderSig = "";
+        await LoadModsAsync();
+        if (res is null) return;
+        if (res.Removed.Count == 0) { SetInfo(ModsInfo, InfoBarSeverity.Warning, T("Nothing was removed"), T("The game's cache no longer lists it.")); return; }
+        ModsResult(res.NotFound.Count == 0 ? T("{0} removed from the game", what) : T("{0} of {1} removed from the game", res.Removed.Count, ids.Count), () => Safe(UndoRemoveAsync(backup, what)));
+    }
+
+    async Task UndoRemoveAsync(string backup, string what)
+    {
+        try { await Task.Run(() => DcCache.Restore(Docs, backup)); }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("It could not be put back"), ErrorText(e)); return; }
+        _modsLoaded = false;
+        _folderSig = "";
+        await LoadModsAsync();
+        ModsResult(T("{0} is back in the game", what), null);
     }
 }

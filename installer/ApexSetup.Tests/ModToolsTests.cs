@@ -7,6 +7,14 @@ static class ModToolsTests
 {
     public static void Run(Action<bool, string> check)
     {
+        // the game's installer mode: one entry per line, the switches the game's launcher passes, ids by their first 8 digits
+        check(GameContent.ListText([@"C:\D\a.Sims3Pack", " 0xa7e6b0d106f518b841b3aba09cd79153 "]) == "C:\\D\\a.Sims3Pack\n0xa7e6b0d106f518b841b3aba09cd79153\n"
+            && GameContent.Args(GameContent.Mode.Remove, @"C:\t\l.txt") == "-ccuninstall:\"C:\\t\\l.txt\" -r:450x350 -w -nosound"
+            && GameContent.ShortId("0xa7e6b0d106f518b841b3aba09cd79153") == 0xA7E6B0D1 && GameContent.ShortId("") == 0,
+            "game content: the list file, the switches and the short id");
+        var rr = GameContent.ReadResult("1 C:\\D\\a.Sims3Pack\r\n0 C:\\D\\b.Sims3Pack\r\n", [@"C:\D\a.Sims3Pack", @"C:\D\b.Sims3Pack"]);
+        check(rr is { Done.Count: 1, Failed.Count: 1 } && rr.Done[0] == @"C:\D\a.Sims3Pack" && GameContent.ReadResult("C:\\D\\a.Sims3Pack\n", [@"C:\D\a.Sims3Pack"]) is null,
+            "game content: the game's result lines (1 done, 0 refused); the list as written is no result yet");
         var root = Path.Combine(Path.GetTempPath(), "apex-modtools-" + Guid.NewGuid().ToString("N"));
         var oldLocal = Paths.LocalAppData;
         try
