@@ -19,6 +19,10 @@ constexpr const char* k407Improved[] = {
     "RTX Remix bridge: the game keeps its graphics settings on every start",
     nullptr};
 
+constexpr const char* k408Fixed[] = {
+    "RTX Remix bridge: no longer crashes at start with Turbo Simulation Engine installed",
+    nullptr};
+
 constexpr const char* k407Fixed[] = {
     "Night Lights: no lamp light through a wall at its end or just behind it",
     "Night Lights: no band of lamp light on the floor or ground beside a wall",
@@ -756,6 +760,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.0.8", "2026-11-19", nullptr, nullptr, k408Fixed},
     {"4.0.7", "2026-11-19", k407Added, k407Improved, k407Fixed, "Lamp light stays behind walls and follows every switch and drag at once", k407Highlights},
     {"4.0.6", "2026-11-18", nullptr, k406Improved, nullptr, "Potted plants cast soft, leaf-shaped shadows under your lamps", k406Highlights},
     {"4.0.5", "2026-11-18", k405Added, k405Improved, k405Fixed,
