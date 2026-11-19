@@ -109,6 +109,22 @@ inline int PaneCount(const std::vector<Pane>& panes, const float a[3], const flo
 // fell to 595)
 inline float PaneShare(const std::vector<Pane>& panes, const float a[3], const float b[3]) { return std::pow(WallOpenings::kWindowPass, static_cast<float>(PaneCount(panes, a, b))); }
 
+// The roofed room of `story` whose quadrant holds the lot point P (its id), 0 none: room 0, a roofless room, past the grid, or the ids
+// not known
+inline int RoofedRoomAt(const Lot& lot, int story, const float P[3]) {
+    for (const Story& s : lot.stories) {
+        if (s.story != story) continue;
+        const float fx = std::floor(P[0]), fz = std::floor(P[2]);
+        const int ix = static_cast<int>(fx), iz = static_cast<int>(fz);
+        if (ix < 0 || iz < 0 || ix >= s.w || iz >= s.h || s.room.size() != 4 * static_cast<size_t>(s.w) * s.h) return 0;
+        const float x = P[0] - fx, z = P[2] - fz;
+        const int q = std::fabs(x - 0.5f) <= std::fabs(z - 0.5f) ? (z > 0.5f ? 2 : 0) : (x > 0.5f ? 1 : 3); // (LampVis::Quadrant)
+        const size_t t = static_cast<size_t>(iz) * s.w + ix;
+        const int32_t id = s.room[4 * t + q];
+        return id > 0 && t < s.roofed.size() && ((s.roofed[t] >> q) & 1u) ? id : 0;
+    }
+    return 0;
+}
 // A room's texel the game samples just past its own diagonal wall (a half tile's texel, its centre over the wall line; the game's
 // tests light it, the shadow mesh's wall shaded it: a dark band along the room's diagonal walls, 1:8 of a captured scene) is
 // taken for the shadow test kInset inside the nearest quadrant of its room in the same tile (lot space, P's height kept). False:
@@ -647,7 +663,10 @@ inline void Build(const Lot& lot, Mesh& m, bool ceilingsOpen = false) {
 }
 
 // ---- the reference ----
-// Segment a -> b (t in (tMin, tMax)) against one triangle (Moller-Trumbore, both sides)
+// Barycentric slack of the triangle test: a segment through the shared edge of two triangles (two wall quads meet on a tile
+// corner, which a ray between tile centres crosses) hits both, never neither (watertight; about 10 micrometres on a 1 m quad)
+constexpr float kEdgeTol = 1e-5f;
+// Segment a -> b (t in (tMin, tMax)) against one triangle (Moller-Trumbore, both sides, edges included)
 inline bool SegTri(const float o[3], const float d[3], const Tri& t, float tMin, float tMax) {
     const float e1[3] = {t.v[1][0] - t.v[0][0], t.v[1][1] - t.v[0][1], t.v[1][2] - t.v[0][2]};
     const float e2[3] = {t.v[2][0] - t.v[0][0], t.v[2][1] - t.v[0][1], t.v[2][2] - t.v[0][2]};
@@ -657,14 +676,15 @@ inline bool SegTri(const float o[3], const float d[3], const Tri& t, float tMin,
     const float inv = 1.0f / det;
     const float s[3] = {o[0] - t.v[0][0], o[1] - t.v[0][1], o[2] - t.v[0][2]};
     const float u = (s[0] * p[0] + s[1] * p[1] + s[2] * p[2]) * inv;
-    if (u < 0.0f || u > 1.0f) return false;
+    if (u < -kEdgeTol || u > 1.0f + kEdgeTol) return false;
     const float q[3] = {s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0]};
     const float v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv;
-    if (v < 0.0f || u + v > 1.0f) return false;
+    if (v < -kEdgeTol || u + v > 1.0f + kEdgeTol) return false;
     const float tt = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
     return tt > tMin && tt < tMax;
 }
-// True when the segment from a to b (excluding `skip` metres at each end) meets no triangle
+// True when the segment from a to b (excluding `skip` metres at each end; a negative skip extends it, up to 1 mm past b: the
+// grid cells hold each triangle 1 mm beyond its bounds) meets no triangle
 inline bool Clear(const Mesh& m, const float a[3], const float b[3], float skipA = 0.01f, float skipB = 0.01f, std::vector<uint32_t>* stamp = nullptr,
                   uint32_t mark = 0) {
     const float d[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
@@ -727,22 +747,28 @@ inline int FirstHit(const Mesh& m, const float a[3], const float b[3], float ski
         const float inv = 1.0f / det;
         const float sv[3] = {a[0] - t.v[0][0], a[1] - t.v[0][1], a[2] - t.v[0][2]};
         const float u = (sv[0] * p[0] + sv[1] * p[1] + sv[2] * p[2]) * inv;
-        if (u < 0.0f || u > 1.0f) continue;
+        if (u < -kEdgeTol || u > 1.0f + kEdgeTol) continue;
         const float q[3] = {sv[1] * e1[2] - sv[2] * e1[1], sv[2] * e1[0] - sv[0] * e1[2], sv[0] * e1[1] - sv[1] * e1[0]};
         const float v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv;
-        if (v < 0.0f || u + v > 1.0f) continue;
+        if (v < -kEdgeTol || u + v > 1.0f + kEdgeTol) continue;
         const float tt = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
         if (tt > tMin && tt < tMax && tt < tHit) tHit = tt, best = static_cast<int>(i);
     }
     return best;
 }
 constexpr int kRefSamples = 64;
+constexpr float kEmitGuard = 0.001f; // m: a disc point this close in front of a surface does not emit (its ray could start past it)
+// m: the shadow's origin is the lamp centre this much lower, here and on the GPU (rt_lamp_gpu.cpp's cube shadows, Shadow in
+// rt_lamps_hlsl.h): a lamp hangs from what is over it, so a centre on a ceiling or less than 1 cm under it belongs to the room
+// below (on the plane, the reference's rays only touched the ceiling; under 5 mm, the GPU's near plane clipped it)
+constexpr float kShadowDrop = 0.01f;
 // The share of a lamp ball (centre L, radius R) the point P sees (stratified points on the disc across the ray: rings of
 // equal area, golden-angle turns). The emitter is the part of the ball its centre sees: a lamp hung 5 cm under a ceiling or
 // mounted on a wall shines from its own side only (a point of the disc behind a surface, seen from the centre, is not
-// light). R <= 0: the centre alone.
-inline float Visibility(const Mesh& m, const float L[3], float R, const float P[3], int samples = kRefSamples, std::vector<uint32_t>* stamp = nullptr,
+// light). R <= 0: the centre alone. The ball's centre is the lamp's kShadowDrop lower.
+inline float Visibility(const Mesh& m, const float lamp[3], float R, const float P[3], int samples = kRefSamples, std::vector<uint32_t>* stamp = nullptr,
                         uint32_t* mark = nullptr) {
+    const float L[3] = {lamp[0], lamp[1] - kShadowDrop, lamp[2]};
     float d[3] = {P[0] - L[0], P[1] - L[1], P[2] - L[2]};
     const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     if (!(len > 1e-4f)) return 1.0f;
@@ -755,7 +781,7 @@ inline float Visibility(const Mesh& m, const float L[3], float R, const float P[
         }
         return *mark;
     };
-    if (!(R > 0.0f)) return Clear(m, L, P, 0.01f, 0.01f, stamp, next()) ? 1.0f : 0.0f;
+    if (!(R > 0.0f)) return Clear(m, L, P, 0.0f, 0.01f, stamp, next()) ? 1.0f : 0.0f;
     float t[3] = {std::fabs(d[1]) < 0.9f ? 0.0f : 1.0f, std::fabs(d[1]) < 0.9f ? 1.0f : 0.0f, 0.0f};
     float u[3] = {d[1] * t[2] - d[2] * t[1], d[2] * t[0] - d[0] * t[2], d[0] * t[1] - d[1] * t[0]};
     float ul = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
@@ -767,11 +793,14 @@ inline float Visibility(const Mesh& m, const float L[3], float R, const float P[
         const float a = static_cast<float>(i) * 2.39996323f;
         const float ca = std::cos(a) * r, sa = std::sin(a) * r;
         const float q[3] = {L[0] + u[0] * ca + w[0] * sa, L[1] + u[1] * ca + w[1] * sa, L[2] + u[2] * ca + w[2] * sa};
-        if (!Clear(m, L, q, 0.0f, 0.0f, stamp, next())) continue; // behind a surface from the lamp's centre: no light there
+        // behind a surface from the lamp's centre, or within kEmitGuard in front of one: no light there. The emitter end of a ray
+        // is never skipped: a 1 cm skip from a disc point just under a ceiling crossed it (a lamp 5 cm under a ceiling lit the
+        // story above)
+        if (!Clear(m, L, q, 0.0f, -kEmitGuard, stamp, next())) continue;
         emit++;
-        if (Clear(m, q, P, 0.01f, 0.01f, stamp, next())) clear++;
+        if (Clear(m, q, P, 0.0f, 0.01f, stamp, next())) clear++;
     }
-    if (!emit) return Clear(m, L, P, 0.01f, 0.01f, stamp, next()) ? 1.0f : 0.0f;
+    if (!emit) return Clear(m, L, P, 0.0f, 0.01f, stamp, next()) ? 1.0f : 0.0f;
     return static_cast<float>(clear) / static_cast<float>(emit);
 }
 

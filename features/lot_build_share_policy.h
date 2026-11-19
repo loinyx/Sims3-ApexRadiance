@@ -26,10 +26,13 @@ struct Decision {
     bool forced = false;  // runs only because it waited kMaxSkips frames
 };
 
-// longestWait: the most frames any lot had waited when this frame began
-inline Decision Decide(double spentMs, bool moving, bool priority, int stage, int skips, bool forcedThisFrame = false, int longestWait = 0) {
+// longestWait: the most frames any lot had waited when this frame began; frameLeftMs: the time left before the frame
+// deadline (Frame deadline while moving, deadline_slicing.h; very large without one): the share never runs past it
+inline Decision Decide(double spentMs, bool moving, bool priority, int stage, int skips, bool forcedThisFrame = false, int longestWait = 0,
+                       double frameLeftMs = 1e9) {
     if (stage < 0 || stage >= kFirstWaitStage || priority) return {};
-    const double left = (moving ? kMovingMs : kStillMs) - spentMs;
+    const double share = (moving ? kMovingMs : kStillMs) - spentMs;
+    const double left = share < frameLeftMs ? share : frameLeftMs;
     if (left >= kRunFloorMs) return {true, static_cast<uint32_t>(left)}; // floor, at least 1
     if (skips >= kMaxSkips && skips >= longestWait && !forcedThisFrame) return {true, 1, true};
     return {false, 0};

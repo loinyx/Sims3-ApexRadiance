@@ -4,6 +4,7 @@
 //   check.exe [--csv-dir <folder with LotLoadAnalysis-*.csv>] [--exe <TS3W.exe>]
 // Part of Apex Radiance. Credits: @loinyx
 #include "lot_build_share_policy.h"
+#include "deadline_slicing.h"
 #include "lot_visibility_override.h"
 #include <algorithm>
 #include <cmath>
@@ -55,6 +56,12 @@ static void PolicyChecks() {
     // a lot that waited less than the longest waiter is not forced
     CHECK(!P::Decide(30.0, false, false, 6, P::kMaxSkips + 1, false, P::kMaxSkips + 4).run, "only the longest waiter is forced");
     CHECK(P::Decide(30.0, false, false, 6, P::kMaxSkips + 4, false, P::kMaxSkips + 4).forced, "the longest waiter is forced");
+    // the frame deadline caps the share, and a frame past it waits like a spent budget (forcing rule unchanged)
+    d = P::Decide(0.0, true, false, 3, 0, false, 0, 2.5);
+    CHECK(d.run && d.sliceMs == 2, "2.5 ms to the deadline -> slice 2, got %u", d.sliceMs);
+    CHECK(!P::Decide(0.0, true, false, 3, 0, false, 0, -3.0).run, "past the deadline: wait");
+    CHECK(P::Decide(0.0, true, false, 3, P::kMaxSkips, false, 0, -3.0).forced, "past the deadline, the longest waiter is still forced");
+    CHECK(P::Decide(0.0, true, true, 3, 0, false, 0, -3.0).run, "the lot being played ignores the deadline");
     // a negative or unknown stage is never held
     CHECK(P::Decide(30.0, false, false, -1, 0).run, "unknown stage must pass");
 }
@@ -355,6 +362,19 @@ static void ExeChecks(const std::string& exe) {
     }
 }
 
+// Frame deadline while moving: its log lines carry the counters (the Off line printed "Off (Off)"), every 10 s while on
+static void DeadlineLogChecks() {
+    namespace D = DeadlineSlicing;
+    const std::string t = D::CountersText({120, 40, 30, 7, 2, 5, 1});
+    CHECK(t == "40 of 120 frames moving; finalize slice lowered 30; scene drain shortened 7 / past the deadline 2; lot builds shortened 5 / waited 1",
+          "counter text: %s", t.c_str());
+    int64_t next = 0;
+    CHECK(!D::LogDue(1000, next, 10) && next == 1010, "the first call arms the clock without a line");
+    CHECK(!D::LogDue(1009, next, 10), "no line before the period");
+    CHECK(D::LogDue(1010, next, 10) && next == 1020, "a line at the period, then the next one a period later");
+    CHECK(D::LogDue(1500, next, 10) && next == 1510 && !D::LogDue(1505, next, 10), "a late frame logs once, not once per missed period");
+}
+
 int main(int argc, char** argv) {
     std::string csvDir, exe;
     for (int i = 1; i + 1 < argc; i++) {
@@ -362,6 +382,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--exe")) exe = argv[++i];
     }
     PolicyChecks();
+    DeadlineLogChecks();
     SyntheticReplay();
     WaitBound();
     HysteresisChecks();

@@ -1,0 +1,77 @@
+{
+ "id": "room-solve-share-pan",
+ "description": "Shared room solve time on a pan at street height over the densest neighbourhood's lots of any night save, so the active lot changes while the camera moves; the pan stops by itself, then one F8. Pass: the option logs On (variant on), the Frame Profiler card shows waits only while moving and a longest wait of at most 30 frames, the lights after the stop match the off variant.",
+ "save": "ApexTest-Night",
+ "toml": {
+  "ui": {
+   "developer_mode": true,
+   "screenshot_key": "F8"
+  },
+  "screen": {
+   "fps_limit": 0,
+   "background_fps_limit": 0
+  },
+  "qol.frame_profiler": {
+   "start_at_load": true,
+   "report_every_s": 60,
+   "write_file": true
+  }
+ },
+ "variants": {
+  "off": {
+   "toml": {
+    "patches.LotLightingMotion": {
+     "sharedSolveTime": false
+    }
+   },
+   "fail": [
+    "\\[RoomSolveShare\\] On:"
+   ]
+  },
+  "on": {
+   "toml": {
+    "patches.LotLightingMotion": {
+     "sharedSolveTime": true
+    }
+   },
+   "expect": [
+    "\\[RoomSolveShare\\] On:"
+   ]
+  }
+ },
+ "steps": [
+  {
+   "do": "speed",
+   "speed": "pause"
+  },
+  {
+   "do": "wait",
+   "minutes": 1.5
+  },
+  {
+   "do": "camera_pan",
+   "lots": 8,
+   "height": 25,
+   "seconds": 40,
+   "passes": 4
+  },
+  {
+   "do": "wait",
+   "minutes": 3
+  },
+  {
+   "do": "key",
+   "vk": 119
+  },
+  {
+   "do": "wait",
+   "minutes": 0.2
+  }
+ ],
+ "expect": [
+  "\\[RtOutdoorLamps\\] Active lot tracker"
+ ],
+ "fail": [
+  "\\[(RoomSolveShare|LotLightingMotion|RtOutdoorLamps)\\].*(could not|left off|left as it is)"
+ ]
+}

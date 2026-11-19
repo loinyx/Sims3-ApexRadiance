@@ -1382,6 +1382,52 @@ int main(int argc, char** argv) {
         }
     }
     if (argc > 2) std::printf("Captures: %d distinct pixel shaders, %d match (%d created natively)\n", capPs, capMatched, cst.created);
+    // 5b: the lot terrain's room-map read (ShaderPatches::PatchTerrainRoomMapUv) over every vertex shader of the package and the
+    // captures: only the def of (0.4921875, 0.25, 0, 0) changes, to (0.5, 0, 0, 0), and the copy is created
+    {
+        std::set<std::vector<DWORD>> vsSeen;
+        std::vector<std::vector<DWORD>> all;
+        for (const Blob& b : blobs)
+            if (b.vs && vsSeen.insert(b.code).second) all.push_back(b.code);
+        for (int a = 2; a < argc; a++) {
+            std::error_code ec;
+            for (auto it = std::filesystem::recursive_directory_iterator(argv[a], ec); !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+                const auto& p = it->path();
+                if (!it->is_regular_file() || p.extension() != ".bin" || p.filename().string().rfind("VS_", 0) != 0) continue;
+                std::ifstream in(p, std::ios::binary);
+                std::vector<unsigned char> raw{std::istreambuf_iterator<char>(in), {}};
+                if (raw.size() < 8 || raw.size() % 4) continue;
+                std::vector<DWORD> code(raw.size() / 4);
+                std::memcpy(code.data(), raw.data(), raw.size());
+                if ((code[0] & 0xFFFF0000u) == 0xFFFE0000u && vsSeen.insert(code).second) all.push_back(code);
+            }
+        }
+        int matched = 0, onlyDef = 0, created = 0, withConst = 0;
+        for (const auto& code : all) {
+            for (size_t k = 0; k + 5 < code.size(); k++) { // (def: opcode, register, four values)
+                float v[4];
+                std::memcpy(v, &code[k + 2], sizeof v);
+                if ((code[k] & 0xFFFF) == 0x51 && v[0] == 0.4921875f && v[1] == 0.25f) {
+                    withConst++;
+                    break;
+                }
+            }
+            std::vector<DWORD> t = code;
+            if (!ShaderPatches::PatchTerrainRoomMapUv(t)) continue;
+            matched++;
+            size_t diff = 0, at = 0;
+            for (size_t k = 0; k < t.size(); k++)
+                if (t[k] != code[k]) diff++, at = k;
+            float v[4] = {};
+            if (at >= 2) std::memcpy(v, &t[at - 1], sizeof v);
+            onlyDef += t.size() == code.size() && diff >= 1 && diff <= 2 && v[0] == 0.5f && v[1] == 0.0f;
+            IDirect3DVertexShader9* vs = nullptr;
+            if (gpu.dev && SUCCEEDED(gpu.dev->CreateVertexShader(t.data(), &vs)) && vs) created++, vs->Release();
+        }
+        std::printf("Terrain room-map read: %zu distinct vertex shaders, %d with the terrain's def, %d patched (%d only that def, %d created natively)\n", all.size(),
+                    withConst, matched, onlyDef, created);
+        Check(matched >= 1 && onlyDef == matched && (!gpu.dev || created == matched), "terrain room-map read: the def alone becomes the floors' x / 64");
+    }
     // 6: dither offset
     {
         double sum = 0.0;

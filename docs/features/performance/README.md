@@ -61,7 +61,9 @@ Every switch works at the exact game function behind one measured cost, and foll
 | Faster room lighting (with *Lamp edits all at once*, 2.7.0 as *Lamp switches all at once*) | Camera and lighting | 2.1.0 or earlier | [room-light-queue.md](room-light-queue.md) |
 | Spread lot lighting while moving | Camera and lighting | 2.1.0 or earlier | [lot-lighting-motion.md](lot-lighting-motion.md) |
 | Wall shading waits while moving | Camera and lighting | 2.1.0 or earlier | [wall-shading-while-moving.md](wall-shading-while-moving.md) |
+| Fewer mouse picks when still (Experimental, off; not in the Overview group) | Camera and lighting | In development | [pick-skip-when-still.md](pick-skip-when-still.md) |
 | Spread new objects over frames | Camera and lighting | 2.1.0 or earlier | [scene-node-budget.md](scene-node-budget.md) |
+| Frame deadline while moving (Experimental, off; not in the Overview group) | Camera and lighting | In development | [deadline-slicing.md](deadline-slicing.md) |
 | Faster game file lookups | Files and objects | 2.1.0 or earlier | [resource-lookup-cache.md](resource-lookup-cache.md) |
 | Remember missing files (shown under the row above) | Files and objects | 2.1.0 or earlier | [remember-missing-files.md](remember-missing-files.md) |
 | Faster file lists | Files and objects | 2.1.0 or earlier | [file-list-cache.md](file-list-cache.md) |
@@ -74,6 +76,7 @@ Every switch works at the exact game function behind one measured cost, and foll
 | Restart host (no menu option, `[ui] restart_host`, off) | None | In development | [restart-host.md](restart-host.md) |
 | Lighter window updates | Game and scripts | 2.7.0 | [lighter-window-updates.md](lighter-window-updates.md) |
 | Faster scripts | Game and scripts | 2.7.0 | [faster-scripts.md](faster-scripts.md) |
+| Per-draw light cache (no menu option, `[dev_build]` switches, off) | None | In development | [per-draw-light-cache.md](per-draw-light-cache.md) |
 
 The System > Lot Streaming page holds three more switches, off by default (Extended lot detail, Keep lot visibility
 stable, Pause lot streaming in map view; Experimental, 2.7.0, research and code by idavidveiga):

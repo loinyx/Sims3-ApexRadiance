@@ -455,6 +455,7 @@ bool ReadGpuTexels(IDirect3DDevice9* dev, IDirect3DTexture9* tex, UINT w, UINT h
         if (sys) sys->Release();
         if (rt) rt->Release();
     };
+    D3D9Hooks::SettleDeferredShaders(dev); // (the state block below keeps the game's shaders)
     if (FAILED(dev->CreateRenderTarget(w, h, D3DFMT_A32B32G32R32F, D3DMULTISAMPLE_NONE, 0, FALSE, &rt, nullptr)) ||
         FAILED(dev->CreateOffscreenPlainSurface(w, h, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &sys, nullptr)) || FAILED(dev->CreateStateBlock(D3DSBT_ALL, &sb))) {
         release();
@@ -977,6 +978,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(IDirect3DDevice9* dev, c
                 dev->GetSamplerState(s, D3DSAMP_MAGFILTER, &r.filt[s][1]);
                 dev->GetSamplerState(s, D3DSAMP_MIPFILTER, &r.filt[s][2]);
             }
+            D3D9Hooks::SettleDeferredShaders(dev);
             dev->GetVertexShader(&r.vs);
             dev->GetPixelShader(&r.ps);
             for (int i = 0; i < 14; i++) dev->GetRenderState(kRecordedStates[i], &r.rs[i]);

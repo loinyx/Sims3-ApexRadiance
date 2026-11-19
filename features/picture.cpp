@@ -900,6 +900,7 @@ void CopyDepth(IDirect3DDevice9* dev) {
     DWORD rs[std::size(kStates)]{}, ss[std::size(kSamp)]{};
     dev->GetRenderTarget(0, &rt);
     ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
+    D3D9Hooks::SettleDeferredShaders(dev);
     dev->GetPixelShader(&ps);
     dev->GetVertexShader(&vs);
     dev->GetVertexDeclaration(&decl);
@@ -1763,6 +1764,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
         dev->GetTexture(s, &oldTex[s]);
         for (size_t i = 0; i < std::size(kSS); i++) dev->GetSamplerState(s, kSS[i], &ss[s][i]);
     }
+    D3D9Hooks::SettleDeferredShaders(dev);
     dev->GetPixelShader(&oldPs);
     dev->GetVertexShader(&oldVs);
     dev->GetVertexDeclaration(&oldDecl);

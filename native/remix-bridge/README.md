@@ -8,8 +8,8 @@ maintainers handed it over to Apex Radiance. Findings, numbers and next steps: `
   (x86 client) and `out\.trex\NvRemixBridge.exe` (x64 server). Needs git, VS 2022 C++ build tools and meson + ninja.
   It applies `patches\` only when it clones `src\` and skips that step when `src\.git` exists: after pulling a head that
   changes `patches\`, run `rmdir /s /q src` here before `build.cmd`, or the old patches stay in.
-- `conf\`: `bridge.conf` (next to `d3d9.dll` and in `.trex`) and `dxvk.conf` (in Bin; it repeats DXVK's TS3W profile,
-  without which the game resets Options.ini).
+- `conf\`: `bridge.conf` (next to `d3d9.dll` and in `.trex`) and `dxvk.conf` (in Bin next to `d3d9.dll`; it repeats the ids of DXVK's TS3W
+  profile, without which the game resets Options.ini).
 
 Patches. Each applies after the ones before it. "Internal" is the name the #40 run reports use.
 
@@ -27,9 +27,10 @@ Patches. Each applies after the ones before it. "Internal" is the name the #40 r
 | 0010 | 0016 | render target 0 is the implicit swapchain's back buffer 0 object, so `GetRenderTarget(0)` and `GetBackBuffer(0, 0)` return the same surface, as in d3d9 and DXVK (upstream made a separate place-holder; Apex Radiance compares the two by pointer and drew a black picture). The back buffer is not counted as an implicit reference to the device, so an AddRef and a Release on a new device (a CreateDevice hook) keep its swapchain | always |
 | 0011 | | render target 0 also resets the viewport and the scissor rectangle, as d3d9 does | always |
 | 0012 | | `SetFVF` and `SetVertexDeclaration` replace each other, as in d3d9 (a stale declaration stayed bound) | always |
-| 0013 | | idle copy fetches: a freed MANAGED level is always fetched, a lock fails when no whole copy came back, texture fetches are CRC32C-checked, only copies of 64 KB and more are freed | with 0003 / 0008 |
+| 0013 | | idle copy fetches: a freed MANAGED level is always fetched, a lock fails when no whole copy came back, texture fetches are CRC32C-checked, only copies of 64 KB and more are freed. Review fixes from upstream pull request 172: a Present frees only its own device's copies, a copy is freed only when its readback fits one server response (about half the server's data ring), write-only (D3DUSAGE_WRITEONLY) buffers keep their copy | with 0003 / 0008 |
 | 0014 | | a surface's new client copy starts zeroed, as a new d3d9 or DXVK texture does (some lots drew their ground black: the game uploads part of a terrain overlay map it never wrote) | always |
 | 0015 | | `rewindMode`: rewind mode for test harnesses. A test host snapshots the game process and later puts its memory back, and the server returns to the D3D9 state of the snapshot exactly or refuses. `rewindMaxKeptMB` (1024) limits what a snapshot keeps alive. Offline tests: `test-rewind.cmd` | off |
+| 0016 | | the server's DXVK reads the `dxvk.conf` next to the client `d3d9.dll` (`DXVK_CONFIG_FILE`, unless already set), not one in the folder the game was started from | always |
 
 The TS3-only options patch the game's code in memory only when the bytes there match TS3W 1.67. Otherwise they change
 nothing.

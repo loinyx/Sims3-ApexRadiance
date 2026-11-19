@@ -16,6 +16,8 @@
 #include "d3d9_extra_hooks.h"
 #include <atomic>
 #include <cmath>
+#include <deque>
+#include <utility>
 #include <format>
 #include <mutex>
 
@@ -34,6 +36,7 @@ std::atomic<bool> g_clearInput{false};
 std::atomic<bool> g_wndProcInstalled{false};
 std::atomic<int> g_wheel{0}; // WM_MOUSEWHEEL deltas since the last TakeWheel
 std::atomic<bool> g_frameFailed{false}; // the menu frame threw (Frame): no drawing, no input capture
+std::atomic<UINT> g_inputEvents{0}; // InputEvents
 constexpr LPARAM kSyntheticGameKey = 1ll << 25; // reserved LPARAM bit: stripped before the game's original procedure
 HWND g_window = nullptr;
 WNDPROC g_original = nullptr;
@@ -80,6 +83,81 @@ bool IsKeyboardMessage(UINT msg) {
     default:
         return false;
     }
+}
+
+// ---- Mouse messages held back for a fresh pick (SetMouseHoldGate) ----
+struct HeldMsg {
+    HWND hwnd;
+    UINT msg;
+    WPARAM wp;
+    LPARAM lp;
+    ULONGLONG tick;
+};
+constexpr ULONGLONG kMaxHoldMs = 250;
+constexpr size_t kMaxHeld = 256;
+std::mutex g_holdLock;
+std::deque<HeldMsg> g_held;   // not yet seen by the game
+std::deque<std::pair<WPARAM, HeldMsg>> g_replay; // posted back as kReplayMsg with their number, on their way to the game
+WPARAM g_replayNext = 0;
+// A held message goes back as a private message carrying its number, never as itself: a mouse message posted meanwhile
+// (another tool, the runner's steps) is then new input, and a held one is never taken for new input (counted, scaled and
+// held again)
+UINT ReplayMsg() {
+    static const UINT m = RegisterWindowMessageW(L"ApexRadiance.HeldMouse"); // (first use: on the window thread, not at load)
+    return m;
+}
+std::atomic<bool (*)()> g_holdGate{nullptr};
+
+bool IsButtonPress(UINT msg) {
+    switch (msg) {
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONDBLCLK:
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONDBLCLK:
+        return true;
+    default:
+        return false;
+    }
+}
+
+void ReleaseHeldLocked() {
+    for (const HeldMsg& h : g_held)
+        if (ReplayMsg() && PostMessageW(h.hwnd, ReplayMsg(), g_replayNext, 0)) g_replay.push_back({g_replayNext++, h}); // (a full queue drops it)
+    g_held.clear();
+}
+
+// A held message posted back: true, and it went to the game (as Apex forwarded it the first time)
+bool Replay(HWND hwnd, UINT msg, WPARAM wp, LPARAM, LRESULT& result) {
+    if (msg < 0xC000 || msg != ReplayMsg()) return false; // (registered messages are 0xC000..0xFFFF)
+    result = 0;
+    HeldMsg h{};
+    {
+        std::lock_guard<std::mutex> lock(g_holdLock);
+        while (!g_replay.empty() && g_replay.front().first != wp) g_replay.pop_front(); // (earlier ones were lost)
+        if (g_replay.empty()) return true; // not ours any more: dropped
+        h = g_replay.front().second;
+        g_replay.pop_front();
+    }
+    result = CallWindowProcW(g_original, h.hwnd ? h.hwnd : hwnd, h.msg, h.wp, h.lp);
+    return true;
+}
+
+// A mouse message the game would get: true, it waits (a gated button press, or anything after one, keeping the order)
+bool Hold(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (!IsMouseMessage(msg)) return false;
+    const ULONGLONG now = GetTickCount64();
+    std::lock_guard<std::mutex> lock(g_holdLock);
+    if (g_held.empty()) {
+        bool (*const gate)() = g_holdGate.load();
+        if (!IsButtonPress(msg) || !gate || !gate()) return false;
+    }
+    g_held.push_back({hwnd, msg, wp, lp, now});
+    if (g_held.size() >= kMaxHeld || now - g_held.front().tick > kMaxHoldMs) ReleaseHeldLocked(); // (a safety net only)
+    return true;
 }
 
 // Client-area mouse position -> back buffer pixels (they differ when the back buffer is stretched to the window).
@@ -183,6 +261,12 @@ WndDecision Decide(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 LRESULT CALLBACK ApexWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    LRESULT replayed;
+    if (Replay(hwnd, msg, wp, lp, replayed)) return replayed; // counted, and seen by the menu, when it first came
+    // A button, wheel or key press or release, or a focus change (key auto-repeat and mouse moves are not counted)
+    if ((IsMouseMessage(msg) && msg != WM_MOUSEMOVE) || msg == WM_KEYUP || msg == WM_SYSKEYUP || msg == WM_ACTIVATEAPP ||
+        ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30))))
+        g_inputEvents.fetch_add(1, std::memory_order_relaxed);
     if (msg == WM_MOUSEWHEEL) g_wheel += GET_WHEEL_DELTA_WPARAM(wp);
     // Apex's part never throws into the window procedure: on an exception the message goes to the game as it would
     // without Apex (the screenshot's marker bit stripped), and Apex's input handling stays off from then on
@@ -199,6 +283,7 @@ LRESULT CALLBACK ApexWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_visible.store(false);
     }
     if (!d.forward) return d.result;
+    if (Hold(hwnd, msg, wp, d.lp)) return 0;
     const LRESULT forwarded = CallWindowProcW(g_original, hwnd, msg, wp, d.lp);
     if (d.keyDownAfter && g_client)
         HookGuard::Try("Apex hotkeys (game key)", [&] { g_client->GameKeyDown(wp, (d.lp & (1 << 30)) != 0); });
@@ -248,6 +333,12 @@ void InstallWndProc() {
 }
 
 bool WndProcInstalled() { return g_wndProcInstalled.load(); }
+UINT InputEvents() { return g_inputEvents.load(std::memory_order_relaxed); }
+void SetMouseHoldGate(bool (*gate)()) { g_holdGate.store(gate); }
+void ReleaseHeldMouse() {
+    std::lock_guard<std::mutex> lock(g_holdLock);
+    ReleaseHeldLocked();
+}
 
 namespace {
 void DrawFrame(IDirect3DDevice9* device);

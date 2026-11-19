@@ -634,6 +634,7 @@ bool RunDepthPass(IDirect3DDevice9* dev) {
     D3DVIEWPORT9 oldVp{};
     RECT oldScissor{};
     dev->GetRenderTarget(0, &oldRt);
+    D3D9Hooks::SettleDeferredShaders(dev);
     dev->GetPixelShader(&oldPs);
     dev->GetVertexShader(&oldVs);
     dev->GetVertexDeclaration(&oldDecl);
@@ -751,6 +752,7 @@ void RunFxaa(IDirect3DDevice9* dev, bool useDepth) {
     float oldConst[kPSConsts * 4];
     D3DVIEWPORT9 oldVp{};
     RECT oldScissor{};
+    D3D9Hooks::SettleDeferredShaders(dev);
     dev->GetPixelShader(&oldPs);
     dev->GetVertexShader(&oldVs);
     dev->GetVertexDeclaration(&oldDecl);
@@ -863,6 +865,7 @@ void RunSmaa(IDirect3DDevice9* dev, bool useDepth, const float subsample[4]) {
     D3DVIEWPORT9 oldVp{};
     RECT oldScissor{};
     dev->GetRenderTarget(0, &oldRt);
+    D3D9Hooks::SettleDeferredShaders(dev);
     dev->GetPixelShader(&oldPs);
     dev->GetVertexShader(&oldVs);
     dev->GetVertexDeclaration(&oldDecl);

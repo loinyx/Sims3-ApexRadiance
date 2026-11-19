@@ -16,6 +16,9 @@
 //  4. Physical indoor lamps (PhysKeptCheck): the game's 3D test on the GPU (T3dPS) against RoomLightTests::occlude, the kept
 //     shadow tiles against the reference, and RelightKeptPhys against the CPU's law x share x T3D, KeptTexel, pack and blur;
 //     room 0's lot lamps from their laws (Room0PhysCheck: AccumulatePhys, the floor mask and exit alpha) against the CPU.
+//  5. --leak (LeakCheck): the proxy's light leaks, the reference and the GPU: a ceiling lamp 0 to 6 cm under the ceiling
+//     lights nothing of the story above, and rays between tile centres crossing a closed wall on a tile corner (the seam of
+//     two wall quads) are blocked.
 // Read-only: prints to stdout, writes no file. A missing D3D9 device or capture is a failure.
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -46,6 +49,12 @@
 #include "features/rt_outdoor_lamps.h"
 #include "features/lamp_reach.h"
 #include "features/phys_tiles.h"
+// (the harness hooks no device: the engine's vertex input mark, framework/d3d9_extra_hooks.cpp, has nothing to restore here)
+namespace ExtraHooks {
+VertexInputMark MarkVertexInput() { return {}; }
+void RestoreVertexInput(VertexInputMark) {}
+} // namespace ExtraHooks
+
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
 namespace RoomMapDither {
@@ -101,6 +110,7 @@ void Check(bool ok, const std::string& text) {
 
 // ---------------------------------------------------------------- the device
 IDirect3DDevice9* g_dev = nullptr;
+bool g_leakOnly = false; // --leak: LeakCheck alone
 HWND g_wnd = nullptr;
 bool MakeDevice() {
     WNDCLASSA wc{};
@@ -1117,6 +1127,19 @@ void BesideWallFloorCheck() {
         const float up[3] = {0, 1, 0}, side[3] = {0, 0, 1};
         RtLampProxy::OffWallLine(sc.lot, 0, a, up), RtLampProxy::OffWallLine(sc.lot, 0, b, up), RtLampProxy::OffWallLine(sc.lot, 0, c, up), RtLampProxy::OffWallLine(sc.lot, 0, w, side);
         Check(std::fabs(a[2] - 10.07f) < 1e-5f && std::fabs(b[2] - 9.93f) < 1e-5f && c[2] == 10.2f && w[2] == 10.03f, "OffWallLine: a floor point leaves the wall's line on its own side only");
+    }
+    { // RoofedRoomAt: a room-0 texel under a roofed room (no GPU lamp there, rt_outdoor_lamps.cpp PrepareJob); not under a roofless one
+        RtLampProxy::Lot lot;
+        RtLampProxy::Story st;
+        st.story = 0, st.w = 4, st.h = 2;
+        st.room.assign(4 * 8, 0), st.roofed.assign(8, 0);
+        for (int q = 0; q < 4; q++) st.room[4 * 1 + q] = 11, st.room[4 * 2 + q] = 5; // tile (1, 0) room 11 roofed, (2, 0) room 5 roofless
+        st.roofed[1] = 0xF;
+        lot.stories.push_back(st);
+        const float in[3] = {1.4f, 0.0f, 0.6f}, yard[3] = {2.5f, 0.0f, 0.5f}, out[3] = {0.5f, 0.0f, 0.5f}, past[3] = {9.0f, 0.0f, 0.5f};
+        Check(RtLampProxy::RoofedRoomAt(lot, 0, in) == 11 && RtLampProxy::RoofedRoomAt(lot, 0, yard) == 0 && RtLampProxy::RoofedRoomAt(lot, 0, out) == 0 &&
+                  RtLampProxy::RoofedRoomAt(lot, 0, past) == 0 && RtLampProxy::RoofedRoomAt(lot, 1, in) == 0,
+              "RoofedRoomAt: only a roofed room's quadrant of the point's story");
     }
 }
 
@@ -5023,6 +5046,123 @@ void FloorLineSweep() {
     Check(ok && n > 0 && leaks == 0 && worst < 0.05, "floor line: the GPU's walk at the moved point leaks light through the slab or leaves the reference");
 }
 
+// The proxy's light leaks (--leak): IndoorRooms with the partition closed. A ceiling lamp hung 0 to 6 cm under the ceiling
+// (game ceiling lamps hang about 5 cm under it) must light none of story 1, and lamps at tile centres none of the room next
+// door: a ray between tile centres crosses the partition where two wall quads meet. The reference first (its emitter end is
+// never skipped, its triangle test is watertight), then the GPU's share of the same receivers from the cube shadows.
+bool LeakCheck(bool gpu) {
+    Scene sc = IndoorRooms();
+    for (RtLampProxy::Story& st : sc.lot.stories)
+        for (RtLampProxy::Edge& e : st.edges) e.open = false;
+    RtLampProxy::Mesh mesh;
+    RtLampProxy::Build(sc.lot, mesh, sc.ceilingsOpen);
+    std::printf("\n[proxy leaks%s] %zu triangles, partition closed\n", gpu ? ", GPU" : "", mesh.tris.size());
+    {
+        const float a[3] = {8.5f, 1.0f, 6.5f}, b[3] = {9.5f, 1.0f, 7.5f}; // through the partition's seam at z = 7
+        float t = 0.0f;
+        Check(!RtLampProxy::Clear(mesh, a, b, 0.01f, 0.01f) && RtLampProxy::FirstHit(mesh, a, b, 0.01f, 0.01f, t) >= 0,
+              "proxy leaks: a ray between tile centres passes the seam of two wall quads");
+    }
+    sc.lamps.clear();
+    const auto lamp = [&](float x, float y, float z, const char* name) {
+        LampDef l;
+        l.pos[0] = x, l.pos[1] = y, l.pos[2] = z;
+        l.range = 25.0f;
+        l.name = name;
+        sc.lamps.push_back(l);
+    };
+    lamp(6.5f, 2.98f, 8.5f, "ceiling lamp 2 cm under");
+    lamp(6.5f, 2.95f, 8.5f, "ceiling lamp 5 cm under");
+    lamp(7.5f, 2.94f, 5.5f, "ceiling lamp 6 cm under");
+    // Less than 1 cm under the ceiling and on its plane: the shadow's origin RtLampProxy::kShadowDrop under the lamp keeps them
+    // in the room below on both (without it the reference's rays only touched the plane, and the GPU's near plane clipped it)
+    lamp(7.5f, 2.9995f, 6.5f, "ceiling lamp 0.5 mm under");
+    lamp(5.5f, 2.999f, 7.5f, "ceiling lamp 1 mm under");
+    lamp(6.5f, 2.995f, 5.5f, "ceiling lamp 5 mm under");
+    lamp(7.5f, 3.0f, 9.5f, "ceiling lamp on the ceiling");
+    lamp(8.5f, 1.0f, 6.5f, "tile-centre lamp");
+    lamp(5.5f, 2.0f, 9.5f, "tile-centre lamp, high");
+    // receivers that must stay dark: story 1's walls and floor, its ceiling; story 0's room past the partition (x > 9)
+    std::vector<Receiver> dark;
+    for (const Receiver& r : sc.recv)
+        if (r.story == 1 ? r.p[1] > 3.04f : r.p[0] > 9.01f) dark.push_back(r); // (not story 1's floor texels on the ceiling plane)
+    for (float z = 4.125f; z < 12.0f; z += 0.25f)
+        for (float x = 4.125f; x < 14.0f; x += 0.25f) dark.push_back(Receiver{{x, 5.95f, z}, {0, -1, 0}, 1, 1});
+    for (float z = 4.5f; z < 12.0f; z += 1.0f) // tile centres next door, 5 cm over the floor
+        for (float x = 9.5f; x < 14.0f; x += 1.0f) dark.push_back(Receiver{{x, 0.05f, z}, {0, 1, 0}, 1, 0});
+    // the ceiling lamps are tested against story 1, the low lamps against the room next door (story 0)
+    const auto against = [](const LampDef& l, const Receiver& r) { return (l.pos[1] > 2.5f) == (r.story == 1); };
+    if (!gpu) {
+        std::vector<uint32_t> stamp;
+        uint32_t mark = 0;
+        for (const LampDef& l : sc.lamps) {
+            long lit = 0, n = 0;
+            for (const Receiver& r : dark) {
+                if (!against(l, r)) continue;
+                n++;
+                for (const float R : {0.0f, 0.15f, 0.3f}) lit += RtLampProxy::Visibility(mesh, l.pos, R, r.p, RtLampProxy::kRefSamples, &stamp, &mark) > 0.0f;
+            }
+            std::printf("  %-26s reference: %ld of %ld dark points x 3 ball sizes lit\n", l.name.c_str(), lit, n);
+            Check(n > 0 && lit == 0, "proxy leaks: the reference lets the " + l.name + " through");
+        }
+        return true;
+    }
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    const int n = static_cast<int>(std::min<size_t>(RtLampGpu::kAtlasLamps, sc.lamps.size()));
+    float pos[RtLampGpu::kAtlasLamps][3];
+    std::vector<RtLampModel::Lamp> lamps;
+    for (int k = 0; k < n; k++) {
+        for (int c = 0; c < 3; c++) pos[k][c] = sc.lamps[k].pos[c];
+        lamps.push_back(ToLamp(sc.lamps[k]));
+    }
+    bool ok = eng.Init(g_dev, g_shaders, 256, err) && eng.SetProxy(g_dev, mesh, err) && eng.EnsureTiles(g_dev, 1, err);
+    if (ok) {
+        g_dev->BeginScene();
+        eng.Begin(g_dev);
+        ok = eng.RenderShadows(g_dev, pos, n, 64.0f, err);
+        eng.End(g_dev);
+        g_dev->EndScene();
+    }
+    const int w = 1024, h = static_cast<int>((dark.size() + w - 1) / w);
+    std::vector<RtLampGpu::TexelVertex> verts(dark.size());
+    for (size_t j = 0; j < dark.size(); j++) {
+        RtLampGpu::TexelVertex& v = verts[j];
+        v.x = static_cast<float>(j % w), v.y = static_cast<float>(j / w), v.z = 0.0f, v.w = 1.0f;
+        for (int c = 0; c < 3; c++) v.p[c] = dark[j].p[c], v.n[c] = dark[j].n[c];
+    }
+    RtLampGpu::Map m;
+    m.w = w, m.h = h, m.count = static_cast<UINT>(verts.size());
+    ok = ok && RtLampGpu::Engine::MakeVb(g_dev, verts.data(), m.count, &m.vb);
+    for (int k = 0; ok && k < n; k++) {
+        RtLampGpu::Params p;
+        p.radius = 0.15f, p.thr = 0.0f, p.debugLamp = k, p.aa = 0.0f; // (the share alone, as ShadowCompare)
+        std::vector<float> sum;
+        g_dev->BeginScene();
+        eng.Begin(g_dev);
+        ok = eng.Accumulate(g_dev, m, lamps.data(), n, p, true, err);
+        eng.End(g_dev);
+        g_dev->EndScene();
+        ok = ok && eng.ReadSum(g_dev, w, h, sum);
+        long lit = 0, reached = 0;
+        float worst = 0.0f;
+        for (size_t j = 0; ok && j < dark.size(); j++) {
+            if (!against(sc.lamps[k], dark[j])) continue;
+            const float g = sum[j * 4];
+            float law[3];
+            GpuLampLaw::Eval(lamps[k].law, dark[j].p, dark[j].n, GpuLampLaw::WallReach(dark[j].n, true), law);
+            const float lawMax = std::min(std::max({law[0], law[1], law[2]}), 1.0f);
+            if (g < 0.0f || lawMax < 1.0f / 255.0f) continue; // (the lamp adds nothing here)
+            reached++, worst = std::max(worst, g), lit += g * lawMax * 255.0f >= 1.0f;
+        }
+        std::printf("  %-26s GPU: %ld of %ld reached dark points get 1/255 or more (largest share %.3f)\n", sc.lamps[k].name.c_str(), lit, reached, worst);
+        Check(!ok || lit == 0, "proxy leaks: the GPU's cube shadow lets the " + sc.lamps[k].name + " through");
+    }
+    if (m.vb) m.vb->Release();
+    Check(ok, "proxy leaks: " + err);
+    return ok;
+}
+
 int main(int argc, char** argv) {
     TileDragBench();
     {
@@ -5065,6 +5205,7 @@ int main(int argc, char** argv) {
         const std::string a = argv[i];
         if (a == "--lamps" && i + 1 < argc) maxLamps = std::atoi(argv[++i]);
         else if (a == "--probe") g_allLamps = true;
+        else if (a == "--leak") g_leakOnly = true;
         else worlds.push_back(a);
     }
     if (g_allLamps) { // (the probe only: where the lamp heads sit against the occluders, no device)
@@ -5072,6 +5213,13 @@ int main(int argc, char** argv) {
         for (const std::string& w : worlds) LoadWorld(w, scenes, 100000);
         for (const Scene& sc : scenes) Probe(sc);
         return 0;
+    }
+    if (g_leakOnly) { // (the proxy's leaks only: the reference, then the GPU)
+        LeakCheck(false);
+        if (MakeDevice() && MakeShaders()) LeakCheck(true);
+        else Check(false, "no Direct3D 9 HAL device for the GPU's leak check");
+        std::printf("\n%d checks, %d failures\n", checks, failures);
+        return failures ? 1 : 0;
     }
     if (!MakeDevice()) {
         std::printf("FAIL: no Direct3D 9 HAL device\n");

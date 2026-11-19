@@ -84,6 +84,23 @@ const I18n::Entry kEntries[] = {
      "Pendant que la caméra bouge, l'ombrage doux des murs extérieurs des terrains tout juste chargés attend que la caméra s'arrête (ou deux "
      "secondes), et jamais plus d'une passe de murs par image : survoler un quartier en cours de chargement saccade moins. Fait partie d'"
      APEX_PRODUCT_NAME ". Crédits : @loinyx"},
+    {"The game checks which object is under the mouse every other frame, even when nothing moves, about 2 ms each under the "
+     "RTX Remix bridge. While the camera and the mouse stay still, that check waits (at most 0.25 s), and while the camera "
+     "moves it runs every 4th frame. A click made while the check waits is held for a new check (about 3 frames). Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
+     "O jogo verifica qual objeto está sob o mouse a cada dois quadros, mesmo quando nada se move, cerca de 2 ms cada vez com a ponte "
+     "RTX Remix. Enquanto a câmera e o mouse ficam parados, essa verificação espera (no máximo 0,25 s), e enquanto a câmera se move "
+     "ela roda a cada 4 quadros. Um clique feito enquanto a verificação espera aguarda uma nova verificação (cerca de 3 quadros). Parte do " APEX_PRODUCT_NAME ". Créditos: @loinyx",
+     "El juego comprueba qué objeto está bajo el ratón cada dos fotogramas, incluso cuando nada se mueve, unos 2 ms cada vez con el "
+     "puente RTX Remix. Mientras la cámara y el ratón están quietos, esa comprobación espera (como máximo 0,25 s), y mientras la cámara "
+     "se mueve se hace cada 4 fotogramas. Un clic hecho mientras la comprobación espera aguarda una nueva comprobación (unos 3 fotogramas). Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
+     "Le jeu vérifie quel objet se trouve sous la souris une image sur deux, même quand rien ne bouge, environ 2 ms à chaque fois avec "
+     "le pont RTX Remix. Tant que la caméra et la souris restent immobiles, cette vérification attend (0,25 s au plus), et pendant que "
+     "la caméra bouge elle a lieu toutes les 4 images. Un clic fait pendant que la vérification attend patiente jusqu'à une nouvelle vérification (environ 3 images). Fait partie d'"
+     APEX_PRODUCT_NAME ". Crédits : @loinyx"},
+    {"While the camera moves, work that can wait (new objects, lots being built, loaded files being set up) only gets the time left before a 12 ms point in the frame, so it no longer piles up on a frame that is already slow. Nothing is skipped: it runs in the next frames. Needs Spread lot lighting while moving. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
+     "Enquanto a câmera se move, o trabalho que pode esperar (objetos novos, lotes sendo montados, arquivos carregados sendo preparados) recebe só o tempo que falta até um ponto de 12 ms no quadro, então não se acumula mais num quadro que já está lento. Nada é pulado: roda nos próximos quadros. Requer Espalhar a iluminação dos lotes em movimento. Parte do " APEX_PRODUCT_NAME ". Créditos: @loinyx",
+     "Mientras la cámara se mueve, el trabajo que puede esperar (objetos nuevos, solares en construcción, archivos cargados que se preparan) solo recibe el tiempo que queda hasta un punto de 12 ms del fotograma, así que ya no se acumula en un fotograma que ya es lento. No se omite nada: se hace en los siguientes fotogramas. Requiere Repartir la iluminación de solares en movimiento. Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
+     "Pendant que la caméra bouge, le travail qui peut attendre (nouveaux objets, terrains en construction, fichiers chargés en préparation) ne reçoit que le temps restant avant un point de 12 ms dans l'image : il ne s'empile plus sur une image déjà lente. Rien n'est sauté : il se fait aux images suivantes. Nécessite Répartir l'éclairage des terrains en mouvement. Fait partie d'" APEX_PRODUCT_NAME ". Crédits : @loinyx"},
     {"While the camera moves, lots relight, and lots that just loaded are built, in smaller steps each frame instead of taking up to "
      "15 ms (lighting) or 35 ms (building) at once, so panning over busy neighborhoods stutters less. Everything finishes "
      "as soon as the camera stops. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",

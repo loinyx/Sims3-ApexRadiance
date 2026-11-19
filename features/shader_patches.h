@@ -377,6 +377,11 @@ struct RoomMapUv {
 bool RoomMapUvScale(const std::vector<DWORD>& vs, RoomMapUv& out);
 // Packed interior-floor positions and static room UVs; these can also match the generic object VS detector.
 bool IsPackedRoomFloorVs(const std::vector<DWORD>& vs);
+// The lot terrain's room-map read (vs_3_0): "def cR, 0.4921875, 0.25, 0, 0", "mad rN.xy, v0, cR.x, cR.y", "mul oK.xy, rN, cS" puts the
+// terrain vertex (v0 = lot metres x 2) at (0.984375 x + 0.25) / 64 of the story's room light map, while the floors and the solve lay
+// the map out at x / 64: up to 25 cm off (11 cm at x = 9), so the ground of a roofed room without a floor read the next room's
+// light through their wall. The def becomes (0.5, 0, 0, 0): the floors' x / 64. True when the shader is that one and was changed
+bool PatchTerrainRoomMapUv(std::vector<DWORD>& vs);
 struct WallMatrices { int clip = -1, world = -1; };
 // Consecutive clip/world dp4 rows over the same position in a wall-map vertex shader.
 bool FindWallMatrices(const std::vector<DWORD>& vs, WallMatrices& out);

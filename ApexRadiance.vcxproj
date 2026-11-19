@@ -106,6 +106,7 @@
     <ClCompile Include="features\fast_cas.cpp" />
     <ClCompile Include="features\compositor_readback.cpp" />
     <ClCompile Include="features\pick_readback.cpp" />
+    <ClCompile Include="features\readback_bench.cpp" />
     <ClCompile Include="features\fast_crc.cpp" />
     <ClCompile Include="features\fast_memory.cpp" />
     <ClCompile Include="features\memory_guard.cpp" />
@@ -168,6 +169,8 @@
     <ClCompile Include="features\tester_toggles.cpp" />
     <ClCompile Include="features\lot_lighting_motion.cpp" />
     <ClCompile Include="features\lot_build_share.cpp" />
+    <ClCompile Include="features\room_solve_share.cpp" />
+    <ClCompile Include="features\deadline_slicing.cpp" />
     <ClCompile Include="features\map_view.cpp" />
     <ClCompile Include="features\object_index.cpp" />
     <ClCompile Include="features\object_light_bridge.cpp" />
@@ -302,6 +305,7 @@
     <ClInclude Include="features\fast_cas.h" />
     <ClInclude Include="features\compositor_readback.h" />
     <ClInclude Include="features\pick_readback.h" />
+    <ClInclude Include="features\readback_bench.h" />
     <ClInclude Include="features\fast_crc.h" />
     <ClInclude Include="features\fast_memory.h" />
     <ClInclude Include="features\memory_guard.h" />
@@ -396,7 +400,10 @@
     <ClInclude Include="features\room_light_queue.h" />
     <ClInclude Include="features\lot_lighting_motion.h" />
     <ClInclude Include="features\lot_build_share.h" />
+    <ClInclude Include="features\deadline_slicing.h" />
     <ClInclude Include="features\lot_build_share_policy.h" />
+    <ClInclude Include="features\room_solve_share.h" />
+    <ClInclude Include="features\room_solve_share_policy.h" />
     <ClInclude Include="features\map_view.h" />
     <ClInclude Include="features\object_index.h" />
     <ClInclude Include="features\object_light_bridge.h" />

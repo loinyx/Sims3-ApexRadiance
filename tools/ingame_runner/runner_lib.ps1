@@ -26,7 +26,7 @@ function Get-UntilCommand([string]$Field) {
 }
 function Format-Until($Until) { $p = @($Until.PSObject.Properties)[0]; return "$($p.Value) $($p.Name)" }
 # Every step run.ps1 knows.
-$script:KnownSteps = @('speed', 'wait', 'profile', 'camera', 'camera_pan', 'save', 'reload', 'camera_jumps', 'vfx_burst', 'mode', 'stop_repros', 'key', 'camera_orbit', 'lots', 'lights_on', 'lamp_drag', 'wait_file', 'camera_read', 'camera_goto', 'lamp_edit', 'track_record', 'track_play', 'input_record', 'input_play', 'clip_session', 'floor', 'memory', 'check_files')
+$script:KnownSteps = @('speed', 'wait', 'profile', 'camera', 'camera_pan', 'save', 'reload', 'camera_jumps', 'vfx_burst', 'mode', 'stop_repros', 'key', 'click', 'camera_orbit', 'lots', 'lights_on', 'lamp_drag', 'wait_file', 'camera_read', 'camera_goto', 'lamp_edit', 'track_record', 'track_play', 'input_record', 'input_play', 'clip_session', 'floor', 'memory', 'check_files', 'mouse_move', 'expect_pick', 'walk')
 
 function ConvertTo-TomlLiteral($Value) {
     if ($Value -is [bool]) { if ($Value) { return 'true' } else { return 'false' } }
@@ -90,6 +90,39 @@ function Get-JobLoads($Job, [string]$Variant, [switch]$AB) {
 }
 
 # A job's steps; without a steps list: set the speed, then one measured wait of `minutes`.
+# WM_LBUTTONDOWN lParam: y in the high word, x in the low word
+function Get-ClickLParam([int]$X, [int]$Y) { return ($Y -shl 16) -bor ($X -band 0xFFFF) }
+
+# The agent's screenpos reply (World.GetScreenSpacePos) as a client pixel of a W x H window.
+# shortcut: the unit of World.GetScreenSpacePos is unverified; a reply inside 0..1 on both axes is read as fractions of
+# the client area, anything else as pixels. Once a game run shows the unit, drop the other branch.
+function Get-ScreenPoint($Sp, [int]$W, [int]$H) {
+    $x = [double]$Sp.x; $y = [double]$Sp.y
+    if ($x -ge 0 -and $x -le 1 -and $y -ge 0 -and $y -le 1) { $x *= $W; $y *= $H }
+    return @([int][math]::Round($x), [int][math]::Round($y))
+}
+
+# A pick as text that is the same in every load: its type and name (object ids change between loads).
+function Get-PickKey($Pick) { if ($Pick.name) { "$($Pick.type) $($Pick.name)" } else { [string]$Pick.type } }
+
+# Why an agent pick misses an expect_pick step, $null when it matches: `type` (one type or a list), `name` (a regular
+# expression), `same_target` (the name of the last aimed-at Sim or object, $Target).
+function Test-PickExpect($Pick, $Step, $Target) {
+    if ($Step.type -and @($Step.type) -notcontains $Pick.type) { return "picked $(Get-PickKey $Pick), expected type $(@($Step.type) -join ' or ')" }
+    if ($Step.name -and [string]$Pick.name -notmatch $Step.name) { return "picked $(Get-PickKey $Pick), expected a name matching $($Step.name)" }
+    if ($Step.same_target -and [string]$Pick.name -ne [string]$Target.name) { return "picked $(Get-PickKey $Pick), aimed at $($Target.name)" }
+    return $null
+}
+
+# Keeps a load's pick for one step slot under its variant and compares it with what loads of variant $Other picked
+# there earlier in the run: $null when equal or when $Other has not run yet, else the difference.
+function Compare-PickLog([hashtable]$Log, [string]$Slot, [string]$Variant, [string]$Key, [string]$Other) {
+    $Log["$Slot|$Variant"] = @(@($Log["$Slot|$Variant"]) + $Key | Where-Object { $_ })
+    $diff = @($Log["$Slot|$Other"] | Where-Object { $_ -and $_ -ne $Key })
+    if ($diff) { return "picked $Key, $Other picked $($diff[0])" }
+    return $null
+}
+
 function Get-JobSteps($JobDef) {
     if ($JobDef.steps) { return @($JobDef.steps) }
     $speed = if ($JobDef.speed) { $JobDef.speed } else { 'normal' }
@@ -265,6 +298,20 @@ function Get-SlowFrames($Frames, [double]$Ms = 100) {
         Stages = @($stageMs.Keys | Sort-Object { - $stageMs[$_] } | ForEach-Object { [pscustomobject]@{ Stage = $_; Lead = [int]$lead[$_]; Ms = [math]::Round($stageMs[$_]) } })
         Services = @($svc.Keys | Sort-Object { - $svc[$_] } | Select-Object -First 5 | ForEach-Object { [pscustomobject]@{ Service = $_; Lead = [int]$svcLead[$_]; Ms = [math]::Round($svc[$_]) } })
     }
+}
+
+# Processes that work for the game and count as its CPU, not as other programs: the RTX Remix bridge server renders the
+# game's frames. Their CPU time by process id; Get-HelperTicksDelta adds what each used since the previous sample
+$script:GameHelperNames = @('NvRemixBridge')
+function Get-GameHelperTicks {
+    $t = @{}
+    foreach ($p in @(Get-Process -Name $script:GameHelperNames -ErrorAction SilentlyContinue)) { try { $t[$p.Id] = $p.TotalProcessorTime.Ticks } catch {} }
+    return $t
+}
+function Get-HelperTicksDelta($Prev, $Now) {
+    $d = 0L
+    foreach ($k in $Now.Keys) { $d += $Now[$k] - $(if ($Prev -and $Prev.ContainsKey($k)) { $Prev[$k] } else { 0L }) }
+    return $d
 }
 
 # One measured wait: <Base>-seconds.csv / -hitches.jsonl / -freezes.jsonl (stutter-profile.js), <Base>-frames.csv

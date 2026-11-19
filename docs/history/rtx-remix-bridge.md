@@ -86,3 +86,14 @@ not dynamic cannot be locked, in d3d9 and in DXVK; `UpdateTexture` and `UpdateSu
 written. `StretchRect` does copy one into a render target of the same format, and a render target can be read, so
 the server takes that way round before the write and puts the contents back with `UpdateSurface`. Compressed
 formats have no render target and still give the snapshot up.
+
+### 2026-11-19: graphics options reset on a start from another folder
+
+A player's diagnostics showed the game seeing a GeForce GTX 1050 Ti (`0x1c82`) on one start and the usual GeForce GTX 580
+(`0x1080`) on the others; the server's DXVK log of that start showed no device override, and the change of `lastdevice` resets
+`Options.ini`. DXVK reads `dxvk.conf` from the working folder (`DXVK_CONFIG_FILE` overrides it, DXVK 3.1.1
+`Config::getUserConfig`), and the client starts the server with the game's working folder, so a start from another folder
+than Bin found no `dxvk.conf`. Which folder that start used is unverified. Patch 0016 points the server at the `dxvk.conf`
+next to the client. The package's `dxvk.conf` keeps the profile's ids but no longer sets its name: the game finds device
+`0x1080` in `GraphicsCards.sgr` and takes the tier from that entry, so the name only reaches the logs (verified in the
+1.67 script files; in game unverified).

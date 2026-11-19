@@ -37,6 +37,11 @@ void Load() {
                          monoCoresBottom.load() ? "on" : "off", bigBlockReuse.load() ? "on" : "off", streamArena.load() ? "on" : "off",
                          streamArenaGrow.load() ? "on" : "off", streamArenaScratch.load() ? "on" : "off", streamArenaPackage.load() ? "on" : "off",
                          streamArenaAssemble.load() ? "on" : "off", streamArenaVerify.load()));
+    drawLightCache.store(offUnlessSet("draw_light_cache"));
+    lazyShaderRestore.store(offUnlessSet("lazy_shader_restore"));
+    drawLightCacheCheck.store(offUnlessSet("draw_light_cache_check"));
+    LOG_INFO(std::format("[DevBuild] Per-draw light switches: draw_light_cache {}, lazy_shader_restore {}, draw_light_cache_check {}", drawLightCache.load() ? "on" : "off",
+                         lazyShaderRestore.load() ? "on" : "off", drawLightCacheCheck.load() ? "on" : "off"));
     measurements.store(get("measurements"));
     drawReadsNoWait.store(get("draw_reads_nowait"));
     occlusionRelight.store(get("occlusion_relight"));
