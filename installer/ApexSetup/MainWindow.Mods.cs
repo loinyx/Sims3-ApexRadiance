@@ -533,6 +533,7 @@ public sealed partial class MainWindow
         try { Fact(T("Changed"), Val(File.GetLastWriteTime(m.Path).ToString("d"))); } catch (Exception) { }
         Fact(T("State"), Val(m.Locked ? ModRow.LockText(m) : m.Enabled ? T("On") : T("Off: the game does not load it")));
         host.Children.Add(facts);
+        if (m.FileType is "package" or "library") host.Children.Add(InsidePanel(r));
 
         // what needs a look
         if (m.Enabled && !Loaded(m))
@@ -691,6 +692,63 @@ public sealed partial class MainWindow
         _folderSig = "";
         FillMods();
     }
+
+    // ---------- what a package holds ----------
+
+    readonly Dictionary<string, ModContents> _modContents = new(StringComparer.OrdinalIgnoreCase);
+
+    // "Inside": how many objects and Create a Sim parts of each kind, and their names, read when the mod is chosen
+    UIElement InsidePanel(ModRow r)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = T("INSIDE"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 60, Foreground = Res("ApexMutedBrush") });
+        var path = r.File.Path;
+        void Fill(ModContents c)
+        {
+            while (panel.Children.Count > 1) panel.Children.RemoveAt(1);
+            if (c.Parts.Count == 0 && c.Names.Count == 0)
+            {
+                panel.Children.Add(Muted(r.File.Kind == ModKind.Script ? T("Game code and settings: no objects or Create a Sim parts.") : T("No objects or Create a Sim parts: it changes what the game already has.")));
+                return;
+            }
+            var wrap = new WrapPanel { Spacing = 6 };
+            foreach (var (kind, n) in c.Parts) wrap.Children.Add(Pill(PartsText(kind, n), "ApexSoftTextBrush"));
+            panel.Children.Add(wrap);
+            var names = c.Names.Count > 0 ? c.Names : c.PartNames;
+            const int shown = 8;
+            foreach (var n in names.Take(shown))
+                panel.Children.Add(new TextBlock { Text = "\u2022  " + n, FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+            var more = c.Parts.Sum(x => x.Count) - Math.Min(shown, names.Count);
+            if (names.Count > 0 && more > 0) panel.Children.Add(Muted(T("and {0} more", more)));
+        }
+        if (_modContents.TryGetValue(path, out var known)) Fill(known);
+        else
+        {
+            panel.Children.Add(Muted(T("Reading what it holds…")));
+            _ = Task.Run(() => { try { return ModContent.Read(path); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) { return new ModContents([], [], []); } })
+                .ContinueWith(t => DispatcherQueue.TryEnqueue(() => { _modContents[path] = t.Result; Fill(t.Result); }));
+        }
+        return panel;
+    }
+
+    // "12 objects", "1 hairstyle"
+    static string PartsText(string kind, int n) => (kind, n == 1) switch
+    {
+        ("Object", true) => T("1 object"), ("Object", _) => T("{0} objects", n),
+        ("Hair", true) => T("1 hairstyle"), ("Hair", _) => T("{0} hairstyles", n),
+        ("Outfit", true) => T("1 outfit"), ("Outfit", _) => T("{0} outfits", n),
+        ("Top", true) => T("1 top"), ("Top", _) => T("{0} tops", n),
+        ("Bottom", true) => T("1 bottom"), ("Bottom", _) => T("{0} bottoms", n),
+        ("Shoes", true) => T("1 pair of shoes"), ("Shoes", _) => T("{0} pairs of shoes", n),
+        ("Accessory", true) => T("1 accessory"), ("Accessory", _) => T("{0} accessories", n),
+        ("Facial hair", true) => T("1 facial hair"), ("Facial hair", _) => T("{0} facial hair", n),
+        ("Makeup", true) => T("1 makeup"), ("Makeup", _) => T("{0} makeup", n),
+        ("Eyebrows", true) => T("1 eyebrows"), ("Eyebrows", _) => T("{0} eyebrows", n),
+        ("Eye colour", true) => T("1 eye colour"), ("Eye colour", _) => T("{0} eye colours", n),
+        ("Skin detail", true) => T("1 skin detail"), ("Skin detail", _) => T("{0} skin details", n),
+        ("Tattoo", true) => T("1 tattoo"), ("Tattoo", _) => T("{0} tattoos", n),
+        (_, true) => T("1 Create a Sim part"), _ => T("{0} Create a Sim parts", n),
+    };
 
     MenuFlyout MoveMenu(List<ModRow> rows)
     {

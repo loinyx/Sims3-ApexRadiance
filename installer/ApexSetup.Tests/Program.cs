@@ -1511,6 +1511,26 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Paths.LocalAppData = oldLocal2;
         ModNotes.Reload();
 
+        // what a package holds: an object's catalog name through the package's strings, a CAS part's kind and name
+        static byte[] Stbl(params (ulong Key, string Text)[] items)
+        {
+            var b = new List<byte>();
+            b.AddRange("STBL"u8.ToArray()); b.Add(2); b.AddRange(new byte[2]); b.AddRange(BitConverter.GetBytes((uint)items.Length)); b.AddRange(new byte[6]);
+            foreach (var (k, t) in items) { b.AddRange(BitConverter.GetBytes(k)); b.AddRange(BitConverter.GetBytes(t.Length)); b.AddRange(System.Text.Encoding.Unicode.GetBytes(t)); }
+            return b.ToArray();
+        }
+        var objd = new List<byte>(); objd.AddRange(new byte[13]); objd.AddRange(BitConverter.GetBytes(0x1111UL)); objd.AddRange(BitConverter.GetBytes(0x2222UL)); objd.AddRange(new byte[9]);
+        var casp = new List<byte>(); casp.AddRange(BitConverter.GetBytes(0x12u)); casp.AddRange(new byte[4]); casp.AddRange(BitConverter.GetBytes(0));
+        var partName = System.Text.Encoding.BigEndianUnicode.GetBytes("afHairLong"); casp.Add((byte)partName.Length); casp.AddRange(partName);
+        casp.AddRange(new byte[5]); casp.AddRange(BitConverter.GetBytes(1u)); casp.AddRange(new byte[16]);
+        var cp = Path.Combine(lr, "Contents", "Sofa.package");
+        var stblData = Stbl((0x1111, "Comfy Sofa"), (0x2222, "A sofa."));
+        TestPackage(cp, (0x220557DAu, stblData, false, stblData.Length), (0x319E4F1Du, objd.ToArray(), false, objd.Count), (0x034AEECBu, casp.ToArray(), false, casp.Count));
+        var inside = ModContent.Read(cp);
+        Check(inside.Names.SequenceEqual(["Comfy Sofa"]) && inside.PartNames.SequenceEqual(["afHairLong"])
+            && inside.Parts.Contains(("Object", 1)) && inside.Parts.Contains(("Hair", 1)),
+            "mods: an object's catalog name from the package's strings, a CAS part's kind and name");
+
         var cf = Elevation.SaveChoices(new Dictionary<string, string> { ["renderer"] = "dxvk", ["s3pparchive"] = @"C:\D\a=b.zip" });
         var ch = Elevation.Choices(["--maintain", "x", "--choices", cf]);
         Check(ch["renderer"] == "dxvk" && ch["s3pparchive"] == @"C:\D\a=b.zip" && !File.Exists(cf) && Elevation.Choices(["--choices", cf]).Count == 0,
