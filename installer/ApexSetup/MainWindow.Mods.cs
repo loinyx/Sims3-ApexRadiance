@@ -637,6 +637,9 @@ public sealed partial class MainWindow
         e.Data.SetText(string.Join("\n", _dragRows.Select(r => r.Name)));
     }
 
+    // (a drag let go outside a target or cancelled with Esc: a later drop from Explorer must not act on these rows)
+    void OnModDragDone(ListViewBase sender, DragItemsCompletedEventArgs e) => _dragRows = null;
+
     void MoveMods(List<ModRow> rows, string dir)
     {
         var back = new List<(ModRow Row, string Dir)>();
