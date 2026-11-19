@@ -459,7 +459,7 @@ void DrawnTable(Entry& e, const void* room, int cls) {
 namespace {
 // A kept map's data (OutdoorDelta::BuildKeptMap) with its physical points in the lot's space (base keeps the world position;
 // mask.xyz = where the shadow is looked up: a texel past its room's diagonal wall inside the room, RtLampProxy::IntoRoom; a wall
-// texel on a floor's plane off it, OffFloorLine). The render thread or a worker: xf and lot are read by the render thread.
+// texel on a floor's plane off it, OffFloorLine; a floor texel by a wall's line off it, OffWallLine). The render thread or a worker: xf and lot are read by the render thread.
 // shortcut: the lot's room ids as this entry is built; a lot edit since leaves them until the entry is made again
 bool BuildData(const void* room, int cls, uint32_t version, int m, int id, bool xfOk, const float* xf, const std::shared_ptr<const RtLampProxy::Lot>& lot, RtLampGpu::KeptMapData& d,
                bool& space) {
@@ -473,7 +473,7 @@ bool BuildData(const void* room, int cls, uint32_t version, int m, int id, bool 
                 for (int k = 0; k < 3; k++)
                     p[k] = v.base[0] * xf[k] + v.base[1] * xf[4 + k] + v.base[2] * xf[8 + k] + xf[12 + k], n[k] = v.n[0] * xf[k] + v.n[1] * xf[4 + k] + v.n[2] * xf[8 + k];
                 std::memcpy(v.p, p, sizeof p), std::memcpy(v.n, n, sizeof n), std::memcpy(v.mask, p, sizeof p);
-                if (lot) RtLampProxy::IntoRoom(*lot, d.story, id, v.mask), RtLampProxy::OffFloorLine(*lot, d.story, v.mask, n);
+                if (lot) RtLampProxy::IntoRoom(*lot, d.story, id, v.mask), RtLampProxy::OffFloorLine(*lot, d.story, v.mask, n), RtLampProxy::OffWallLine(*lot, d.story, v.mask, n);
             }
     return true;
 }

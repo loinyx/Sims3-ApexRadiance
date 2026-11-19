@@ -292,7 +292,7 @@ void BakedMaskChecks() {
     const auto plain = placed(0, 0);
     Check(plain->b.g.openings[0].shaped == 0 && plain->b.g.openings[0].u1 == 1.0f, "unmasked neighbours lose the jamb as before");
 }
-// A window cut on a diagonal wall opens that diagonal (03/11: it opened the edge along x at its low corner instead), and two
+// A window cut on a diagonal wall opens that diagonal (before the fix it opened the edge along x at its low corner instead), and two
 // windows side by side along the diagonal lose their shared jamb
 void DiagonalCutChecks() {
     Builder b(12, 12);
@@ -311,7 +311,7 @@ void DiagonalCutChecks() {
     const auto& E = b.g.edges;
     Check(E[up0].open && E[up1].open && E[down].open && !E[axis].open, "a diagonal window opens its diagonal wall, not the edge along x at its corner");
     Check(b.g.openings[E[up0].open - 1].u1 == 1.0f && b.g.openings[E[up1].open - 1].u0 == 0.0f, "two diagonal windows in a row share no jamb");
-    // (03/11 log: 96 posts 'its key is not one side edge of a cell') a diagonal cut post is taken; a longer span is not
+    // (an earlier log: 96 posts 'its key is not one side edge of a cell') a diagonal cut post is taken; a longer span is not
     Check(CutKeyOnCell(1, 1) && CutKeyOnCell(1, -1) && CutKeyOnCell(0, 1) && CutKeyOnCell(-1, 0) && !CutKeyOnCell(2, 0) && !CutKeyOnCell(1, 2) && !CutKeyOnCell(0, 0),
           "a cut post spans one side or the diagonal of a cell");
     // a diagonal window's light and a glass door's pane on its diagonal are found there (not on the edge along x at its corner)

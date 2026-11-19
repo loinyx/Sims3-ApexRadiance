@@ -94,21 +94,23 @@ public static class Releases
     static string? Header(HttpResponseMessage r, string name) => r.Headers.TryGetValues(name, out var v) ? v.FirstOrDefault() : null;
 
     // The repo's recent published releases, newest first (drafts and prereleases left out); used when the latest one lacks
-    // a file another edition needs
+    // a file another edition needs. experimental: also the prereleases tagged -exp. (Sims 3 Modernization's test channel)
     // (without the API: the latest release alone, from its page)
-    public static async Task<IReadOnlyList<Release>> RecentAsync(string repo, CancellationToken ct = default)
+    public static async Task<IReadOnlyList<Release>> RecentAsync(string repo, CancellationToken ct = default, bool experimental = false)
     {
         string json;
         using (var api = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
             api.CancelAfter(TimeSpan.FromSeconds(20));
-            try { json = await GetStringAsync($"https://api.github.com/repos/{repo}/releases?per_page=10", api.Token); }
-            // (GitHub's rate limit is the news itself: an older edition's build may be in a release the latest one does not show)
-            catch (Exception e) when (e is not SetupException && !ct.IsCancellationRequested) { return new[] { await LatestAsync(repo, ct) }; }
+            try { json = await GetStringAsync($"https://api.github.com/repos/{repo}/releases?per_page=20", api.Token); }
+            // (GitHub's rate limit is the news itself: an older edition's build may be in a release the latest one does not show;
+            // not for the experimental listing, whose failure must change no channel)
+            catch (Exception e) when (!experimental && e is not SetupException && !ct.IsCancellationRequested) { return new[] { await LatestAsync(repo, ct) }; }
         }
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.EnumerateArray()
-            .Where(r => !r.GetProperty("draft").GetBoolean() && !r.GetProperty("prerelease").GetBoolean())
+            .Where(r => !r.GetProperty("draft").GetBoolean()
+                && (!r.GetProperty("prerelease").GetBoolean() || experimental && IsExperimental(r.GetProperty("tag_name").GetString()!)))
             .Select(r => new Release(repo, r.GetProperty("tag_name").GetString()!, r.GetProperty("assets").EnumerateArray().Select(a => new Asset(
                 a.GetProperty("name").GetString()!,
                 a.GetProperty("browser_download_url").GetString()!,
@@ -117,13 +119,25 @@ public static class Releases
             .ToList();
     }
 
-    // a final release is newer than a prerelease of the same number (3.2.0 over 3.2.0-beta)
+    // a test-channel tag: vX.Y.Z-exp.YYYYMMDD
+    public static bool IsExperimental(string tagOrVersion) => tagOrVersion.Contains("-exp.", StringComparison.OrdinalIgnoreCase);
+
+    // a final release is newer than a prerelease of the same number (3.2.0 over 3.2.0-beta); of two -exp. builds of the same
+    // number, the later date
     public static bool Newer(string? latest, string? installed)
     {
         static Version? V(string? s) => s is null ? null : Version.TryParse(s.Split('-', '+')[0], out var v) ? v : null;
         static bool Pre(string s) => s.IndexOfAny(new[] { '-', '+' }) >= 0;
+        // the date, then a same-day build's number (-exp.YYYYMMDD.N; none = 0)
+        static long Exp(string s)
+        {
+            if (!IsExperimental(s)) return -1;
+            var p = s[(s.IndexOf("-exp.", StringComparison.OrdinalIgnoreCase) + 5)..].Split('+')[0].Split('.');
+            return long.TryParse(p[0], out var d) ? d * 1000 + (p.Length > 1 && int.TryParse(p[1], out var k) ? Math.Clamp(k, 0, 999) : 0) : -1;
+        }
         if (installed is null || V(latest) is not { } l) return false;
-        return V(installed) is not { } i || l > i || l == i && Pre(installed) && !Pre(latest!); // a copy without a version is older than any release
+        return V(installed) is not { } i || l > i || l == i && Pre(installed) && !Pre(latest!) // a copy without a version is older than any release
+            || l == i && Exp(latest!) > Exp(installed) && Exp(installed) >= 0;
     }
 
     // The release page: /releases/latest redirects to the tag; expanded_assets lists each file with its SHA-256.

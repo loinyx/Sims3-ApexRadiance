@@ -15,6 +15,8 @@ before its hand-over to Apex Radiance (rodneypantonial/sims3-modernization#316).
 | `render-still` | Fixed scene: 90 s still at the save's camera, then 90 s at a town overview, ABBA | the same harness | The game, a GPU |
 | `dxvkx` (scratch test app: an x86 window process and an x64 Desktop Duplication probe) | Present-to-desktop and key-to-desktop latency, 20 s runs, ABBA x2, V-Sync at 240 Hz | | A GPU |
 | `tools/memory/nt-heap.py` (read-only heap walk) | The client's process heap by bucket | every 10 min in al325 | |
+| `test_rewind_server` (patch 0015) | Rewind mode, server side, on a D3D9 device without a client: handle tables, deferred destroys, kept contents, render target and depth contents, device state, query answers, the memory limit, every refusal, a rewind that fails part-way, no reference left on the device | `native\remix-bridge\test-rewind.cmd` | A GPU |
+| `test_rewind_device` (patch 0015) | Rewind mode through the built bridge pair from a 32-bit test app: the park at `Present`, snapshot, plan and drop, another thread kept from sending while parked; and with the mode off, that nothing is published | the same | A GPU |
 
 ## Latest results
 
@@ -124,6 +126,19 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 | 2026-11-13 | release/3.2.2 c2697794, standard flavour | The same with Sims3SettingsSetter, the whole route (orbits, a pan over 8 lots, 7 min) | pass, no error in the log; `Second device asked with Turbo.asi loaded` once; 107 shaders from the ASI, 0 to compile |
 | 2026-11-13 | release/3.2.2 c2697794, standard flavour | Without Turbo, same route | pass, no error, one device as before |
 
+### Rewind mode (patch 0015)
+
+| Date | Build | Check | Result |
+|---|---|---|---|
+| 2026-11-15 | patch 0015 on f35b86a with 0001 to 0014, `build.cmd` from a fresh fetch | `test_rewind_server` on the system's d3d9.dll and on DXVK (`d3d9vk_x64.dll` of the 4.0.1 package), NVIDIA GPU | 75 checks pass on each: tables and a reused id, contents of buffers, textures, render targets, the back buffer and the depth surface, device state, query answers, two rewinds to one snapshot, the memory limit, the refusals, `E_ABORT` after a failed write-back, no reference left on the device; a snapshot taken inside a scene; the game's 1024x768 D24S8 depth surface made with Discard: not copied, kept while each frame clears it first, given up at a draw before the `Clear`; a 4096x1 A32B32G32R32F default pool texture written by `UpdateTexture` after the snapshot: kept, and back float for float after a rewind |
+| 2026-11-15 | the same pair | `test_rewind_device`, mode on and off, 12 runs each | pass: park, snapshot, plan (1 object to revive, 1 to drop), drop; a second thread's command waits for the whole park; with the mode off no cooperation block |
+| 2026-11-15 | the pair of commit 8caad90, Apex Radiance 4.0.1, Steam 1.67.2, bridge with DXVK 3.1.1, a loaded world at 1024x768 | In game: the first snapshot | refused, nothing changed: `a 1024x768 depth surface of format 75 could not be copied (0x8876086c)`. The surface is one the game makes with Discard, which `StretchRect` does not copy; the test above reproduces the code. Such surfaces are no longer copied (feature page, Rewind mode) |
+| 2026-11-16 | the pair of commit a358170, the same setup | In game: snapshot, plan and one rewind with the host tool | the snapshot kept 25,497 objects, 339 surfaces and 448 MB, with 5 depth surfaces made with Discard left out; the plan counted 166 objects to revive and 694 to drop; the rewind was applied and the game process came back equal to its snapshot. The server then read no command for 60 s (`The client did not come back within 60 s of a rewind`), so the game stopped presenting and the next park request timed out. Cause: the host sets events back to their state at the snapshot, which unset the event that told the client about the rewind. The server now reads the client's return from shared memory, and the client also parks from the semaphore wait |
+| 2026-11-16 | the pair of commit 3eea11c, the same setup | In game: start of a session | one start in two crashed when the device was made: access violation reading 0 in the client's `GetBackBuffer`, called from a mod's `CreateDevice` hook, right after the client had destroyed the implicit swapchain. Cause: patch 0010's count of implicit references (patch 0016 then, now part of 0010 on the release branch). `test_rewind_device` now takes and returns a reference on a new device: it failed on the pair before 0016 with `AddRef` 1 and `Release` 0, and passes with it |
+| 2026-11-16 | the pair of commit 956d61c, the same setup | In game: snapshot, 14 s of play, plan | the snapshot went through (25,468 objects, 339 surfaces, 448 MB); the plan was refused, nothing changed: `a 4096x1 surface of format 116 written after the snapshot could not be read first`. Format 116 is A32B32G32R32F, and a surface that cannot be locked is a level of a default pool texture. The server now reads such a level through a render target |
+| 2026-11-17 | patch 0015 with the review fixes, `test_rewind_server` and `test_rewind_device` built from an exact upstream checkout | `test_rewind_server` on the system's d3d9.dll and on DXVK (`d3d9vk_x64.dll` of the 4.0.1 package); `test_rewind_device` mode on and off, both timeout settings | pass. New: a texture with a linked level and a swap chain with a back buffer linked without a reference, made after the snapshot, are freed by each of three rewinds (the device's count returns to its count at the snapshot; the code before the fix fails these checks on both libraries); after `fail` every Op is answered with `E_ABORT`; a park whose host stops writing Ops ends after `rewindParkTimeoutSec` (2 s in the test) and does not park again while `request` stays set. `test_rewind_device` needs the 0010 fix of a new device's reference count on the base (release 4.0.2 pull request), or its first check fails |
+| 2026-11-16 | this pair | In game | not run yet, see Open checks |
+
 ## In-game test plan
 
 1. Install the zip into `Game\Bin`, start the game. **Expected:** `Options.ini` kept; Apex's log says `d3d9: RTX Remix
@@ -140,6 +155,10 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
    black quarter on the loading screen; in `Recording.txt`, `scene_target.cpp Resolve: N save(s), 0 STALE` (every
    other pass 0 STALE too). With an older bridge and Apex 3.1.1 STALE can still be counted (it is the client's answer),
    but the quarter stays drawn: the pass restores the FVF set last.
+7. Rewind mode (test harnesses only): add `rewindMode = True` to both `bridge.conf` copies and play. **Expected:** no
+   difference; `bridge32.log` has one `[Rewind] Rewind mode is on` line and `bridge64.log` no `[Rewind]` line until a
+   host asks. With a host tool: snapshot in a loaded world, play 20 s, rewind. **Expected:** the game is back at the
+   moment of the snapshot with the right picture and plays on, or the tool reports a refusal and nothing changed.
 
 ## Confirmed in game
 
@@ -148,6 +167,14 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 
 ## Open checks
 
+- Rewind mode (patch 0015) in game: the mode on and idle for a session, the numbers of a plan in a loaded world,
+  and one rewind. The rewind Op itself (queue positions, the server's wait for the client) has no offline test:
+  it needs a host that puts the game process back.
+- The 32-bit test apps that run through the bridge (`test_rewind_device`, and upstream's `test_sent_state_device`)
+  ended with an access violation in the client at the first `Present` in some early runs on the test machine, after
+  the client had destroyed its implicit swapchain right after `CreateDevice`. That is the signature of patch 0010's reference
+  count fault, which needs something in the process to take and return a reference on the new device. What did so in the
+  test apps is not found (an injected overlay is the guess), and the runs are not repeated since the fix.
 - Release 3.1.0 (commit `release: 3.1.0`): the release candidate ran under the bridge in game with Display set to Fullscreen as Borderless; the update card, the bridge guide and the uncompressed-textures card were not each exercised under the bridge on this machine.
 - A report of walls flickering under the bridge with *Street lamps light lots* on (Steam 1.67.2, 3.0.0, session 2026-11-10 10-49-24); not reproduced or explained yet.
 

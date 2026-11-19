@@ -10,10 +10,10 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Unreleased, planned for 4.0.3 (Setup 1.2.0) |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Unreleased, planned for 4.0.3 (Setup 1.2.0). Sims 3 Modernization's experimental channel: Unreleased |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
-| Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup); restore points in `Game\Bin\Apex Radiance backup\restore`; language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
+| Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup; also Sims 3 Modernization's channel, `ModernizationChannel`); restore points in `Game\Bin\Apex Radiance backup\restore`; language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
 | Source | [`installer/`](../../installer/) ([installer/README.md](../../installer/README.md)) |
 
 ## The problem
@@ -168,6 +168,14 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 ## Compatibility and interactions
 
 - Setup refuses to change files while `TS3W.exe`, `TS3.exe`, the launcher (`Sims3Launcher.exe`, `Sims3LauncherW.exe`) or the restart host (`ts3wrap.exe`) runs.
+- Sims 3 Modernization has a channel under its switch: *Stable* (default) or *Experimental*, test builds published as
+  GitHub prereleases tagged `vX.Y.Z-exp.YYYYMMDD`. Experimental takes the newest of them with the game's build
+  (`Engine.PickModernization`) and falls back to stable when there is none (the EA app for now); the log names the
+  release and channel. The choice is kept in `setup.json`. An update within a channel keeps `ts3native.ini`; a channel
+  change copies it to `ts3native.ini.<left channel>.bak` (`stable` or `experimental`, the last one kept) next to itself
+  and writes the channel's own, since the switches differ between channels. When the release listing fails, the
+  experimental channel shows no update and no channel change. Same-day builds (`-exp.YYYYMMDD.N`) count as newer by
+  `N`. The status row shows the installed tag, with *Experimental* when it is one.
 - It needs administrator rights (`Game\Bin` is usually under Program Files) and an internet connection to download.
 - Mods published outside GitHub are recognised and listed with a link to their official page, never downloaded. The
   Sims 3 Performance Patch is on Nexus Mods only: Setup opens its page and installs the file when the download

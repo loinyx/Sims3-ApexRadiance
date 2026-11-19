@@ -36,3 +36,53 @@ DXVK refusing each `Reset` ("device still has alive losable resources: Remaining
 Reset again every frame. DXVK's resources are not lost on a Reset, so the package's `dxvk.conf` sets
 `d3d9.countLosableResources = False`: DXVK resets anyway and the one resource left alive stays valid. Confirmed in game
 the same day; the zip was published again. Which resource stays alive was not found.
+
+### 2026-11-15: rewind mode for test harnesses
+
+A world load takes minutes, and a test that needs the same start state pays it every time. A harness that snapshots
+the game process and puts its memory back avoids the load, but under the bridge the renderer lives in the server,
+which a rewind of the game alone leaves in the later state: other data queue positions, ids handed out twice,
+destroyed objects the game uses again. Patch 0015 adds the server's side, off unless `rewindMode = True`.
+
+The first version left render target contents alone and counted the writes it could not undo. That is a silent
+difference in the picture, so the patch now copies render targets and depth surfaces at the snapshot and refuses
+what it cannot put back exactly (multisampled targets, volume writes). The client code showed that nothing limits
+D3D9 calls to one thread: a command takes only its channel's send lock and `Present` does not take the device
+lock. The parked client therefore holds both send locks, and the server reads no command between a rewind and the
+client's return to the snapshot.
+
+The first run in game refused its snapshot: the copy of a 1024x768 D24S8 depth surface failed with
+`D3DERR_INVALIDCALL`. The game makes its depth surfaces with Discard (`0x617C5F` passes TRUE), and `StretchRect`
+refuses such a source in d3d9 and in DXVK. D3D9 also leaves a Discard surface undefined after a `Present`, which is
+where a snapshot is taken, so there is nothing to keep as long as the game clears the surface before it draws with
+it. The server now checks exactly that in the command stream and gives the snapshot up when a draw comes first.
+
+### 2026-11-16: the server waited for a client that could not answer
+
+The first rewind that went through in game left the server silent for 60 s. After a rewind the server reads no
+command until the client is back at its snapshot, and it waited for an event the client set once it saw another
+event from the server. The host tool puts kernel objects back as well as memory, so it unset the server's event with
+everything else, the client never saw it, and the game hung in its next call until the server's time limit. The
+state now lives where a restore is the signal: a spare word in the client's channel mapping that the server sets and
+the host's restore clears. A `Present` that waits for the server also answers a park request now, since a host
+that cannot park the game cannot tell a slow server from a stopped one.
+
+### 2026-11-16: a new device with no reference of its own
+
+One game start crashed while the device was made: an access violation reading 0 in the client's `GetBackBuffer`,
+called from a mod's `CreateDevice` hook. The server's log showed the client destroying the implicit depth surface and
+swapchain right after `CreateDevice`. Patch 0010 had made render target 0 the swapchain's back buffer but still
+counted it among the references the implicit objects hold on the device, and a back buffer references its swapchain.
+So the device read its creator's reference as an implicit one: `AddRef` returned 1, and the matching `Release` found
+the count at the implicit references and tore the device's implicit objects down. Code that already holds a second
+reference does not trigger it. Why only some starts took and returned a reference that early is not established.
+The fix takes the render target out of the count; it is part of patch 0010 on the release branch.
+
+### 2026-11-16: a texture that cannot be locked
+
+Fourteen seconds after a snapshot a 4096x1 A32B32G32R32F surface was written and the server gave the snapshot up:
+it keeps the old contents of a surface by locking it, and the lock failed. A level of a default pool texture that is
+not dynamic cannot be locked, in d3d9 and in DXVK; `UpdateTexture` and `UpdateSurface` are how such a texture is
+written. `StretchRect` does copy one into a render target of the same format, and a render target can be read, so
+the server takes that way round before the write and puts the contents back with `UpdateSurface`. Compressed
+formats have no render target and still give the snapshot up.

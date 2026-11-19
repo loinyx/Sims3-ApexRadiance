@@ -1,0 +1,35 @@
+name: RTX Remix bridge build
+on:
+  pull_request:
+    paths: ['native/remix-bridge/**', '.github/workflows/bridge.yml']
+  push:
+    branches: [main]
+    paths: ['native/remix-bridge/**', '.github/workflows/bridge.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: bridge-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  bridge:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install meson and ninja
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check meson ninja
+      - name: Apply the patches and build the client and server
+        shell: cmd
+        run: native\remix-bridge\build.cmd
+      - name: Assemble the player package
+        shell: pwsh
+        run: ./native/remix-bridge/package.ps1
+      - name: Preserve the bridge package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: RemixBridge-${{ github.sha }}
+          path: native/remix-bridge/out/Apex-Radiance-RTX-Remix-bridge.zip
+          if-no-files-found: error
+          retention-days: 14

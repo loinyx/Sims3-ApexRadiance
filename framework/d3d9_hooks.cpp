@@ -774,6 +774,8 @@ bool RegisterCreateVertexShader(const std::string& n, CreateVertexShaderHook h, 
 bool RegisterSetPixelShaderConstantF(const std::string& n, SetPixelShaderConstantFHook h, Priority p) { return Add(g_psc, n, std::move(h), p); }
 bool RegisterSetVertexShaderConstantF(const std::string& n, SetVertexShaderConstantFHook h, Priority p) { return Add(g_vsc, n, std::move(h), p); }
 
+std::recursive_mutex& RegistrationLock() { return g_lock; }
+
 void UnregisterAll(const std::string& name) {
     bool lockFreeChanged = false;
     {

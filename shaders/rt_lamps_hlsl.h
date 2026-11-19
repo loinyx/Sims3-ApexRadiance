@@ -239,10 +239,13 @@ float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWal
     // The centre ray's surface is taken at the point's own plane's depth along dc (Recv) only when it is that plane (its distance
     // from the lamp the same); another one is in front of the point when it is nearer than the point. Recv put a wall a few cm
     // to 13 cm before a floor texel behind the wall at a grazing angle (a low lamp outside: the floor behind the wall took it).
-    // Such a surface within the stretch the walk leaves out puts the point in its shadow's core
+    // Such a surface within the stretch the walk leaves out puts the point in its shadow's core. The stretch reaches one bias
+    // further back than the walk's last step sees (zEnd - bias), so a disc tap whose crossing lies a few mm nearer than the
+    // centre's is never left between the two: a wall crossed about 7.5 cm before a wall's end texel let 25 to 44% of the lamp
+    // through, a band at the joint
     const float own = abs(dot(N, P - L));
     const bool other = abs(c0.y - own) > 0.01 + 0.002 * own;
-    const bool hidden = other && c0.x >= nearM && c0.y >= R && c0.x < dr - bias && c0.x > zEnd - bias;
+    const bool hidden = other && c0.x >= nearM && c0.y >= R && c0.x < dr - bias && c0.x > zEnd - 2.0 * bias;
     const float lnZ = log(max(zEnd, nearM * 1.01) / nearM);
     float bSum = 0, bN = 0;
     if (c0.x >= nearM && c0.y >= R && c0.x < (other ? dr : Recv(N, dc, planeD, dr)) - bias) {
