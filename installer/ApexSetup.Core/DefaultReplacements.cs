@@ -241,6 +241,24 @@ public static class DefaultReplacements
         return null;
     }
 
+    // the mod's own thumbnail of a replaced item, found the same way in the mod's package; null when it brings none (the
+    // game then shows its own picture for it)
+    static readonly Dictionary<string, List<Dbpf.Entry>> ModIndexes = new(StringComparer.OrdinalIgnoreCase);
+    public static byte[]? ModThumbnail(string package, ReplacedItem item)
+    {
+        List<Dbpf.Entry> index;
+        lock (ModIndexes) if (!ModIndexes.TryGetValue(package, out index!)) ModIndexes[package] = index = Dbpf.Index(package);
+        var types = item.Type == ModKinds.Casp ? CasThumbTypes : ObjectThumbTypes;
+        foreach (var (inst, ts) in new[] { (item.Instance, types), (item.PngInstance, ModKinds.IconTypes) })
+        {
+            if (inst == 0) continue;
+            foreach (var t in ts)
+                if (index.FirstOrDefault(e => e.Type == t && e.Instance == inst) is { Size: > 0 } e && Dbpf.Read(package, e) is { Length: > 0 } d) return d;
+        }
+        return null;
+    }
+    public static void ForgetModIndex(string package) { lock (ModIndexes) ModIndexes.Remove(package); }
+
     // the thumbnails and icons the game holds, by instance (about 110,000 entries: built once, when first asked)
     internal static Dictionary<ulong, List<(int, Dbpf.Entry)>> ThumbMap(GameIndex gi)
     {

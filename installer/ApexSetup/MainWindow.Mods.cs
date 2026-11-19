@@ -1352,43 +1352,145 @@ public sealed partial class MainWindow
 
     // ---------- a default replacement ----------
 
-    // the game items it replaces: objects with the game's own name and thumbnail, CAS parts, then textures and the rest
+    // the game items it replaces: objects and CAS parts by name, each with the game's picture and the mod's (when it brings
+    // one), then textures and the rest; the first few here, every one of them in See all
     UIElement ReplacesPanel(ModRow r, GameIndex gi)
     {
         var d = r.Defaults;
         var panel = new StackPanel { Spacing = 8 };
-        var items = d.Objects.Count + d.CasParts.Count;
+        var all = d.Objects.Concat(d.CasParts).ToList();
         var wrap = new WrapPanel { Spacing = 6 };
         if (d.Objects.Count > 0) wrap.Children.Add(Pill(d.Objects.Count == 1 ? T("1 object") : T("{0} objects", d.Objects.Count), "ApexSoftTextBrush"));
         if (d.CasParts.Count > 0) wrap.Children.Add(Pill(d.CasParts.Count == 1 ? T("1 Create a Sim part") : T("{0} Create a Sim parts", d.CasParts.Count), "ApexSoftTextBrush"));
         if (d.Images > 0) wrap.Children.Add(Pill(d.Images == 1 ? T("1 texture") : T("{0} textures", d.Images), "ApexSoftTextBrush"));
         foreach (var (type, n) in d.Other.Take(4)) wrap.Children.Add(Pill($"{n} {type}", "ApexSoftTextBrush"));
         panel.Children.Add(wrap);
+        if (all.Count == 0) return panel;
+        var head = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        TextBlock H(string text, int col) { var x = new TextBlock { Text = text, FontSize = 11, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = col == 3 ? HorizontalAlignment.Left : HorizontalAlignment.Center }; Grid.SetColumn(x, col); return x; }
+        head.Children.Add(H(T("Game"), 0));
+        head.Children.Add(H(T("Mod"), 2));
+        panel.Children.Add(head);
         const int shown = 8;
-        foreach (var it in d.Objects.Concat(d.CasParts).Take(shown))
+        foreach (var it in all.Take(shown)) panel.Children.Add(ReplacedRow(it, gi, r.File.Path, d.Objects.Contains(it)));
+        if (all.Count > shown)
         {
-            var g = new Grid { ColumnSpacing = 10 };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            var thumb = new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(6), Background = Res("ApexPillBrush") };
-            var ph = Lucide.Icon(d.Objects.Contains(it) ? "sofa" : "shirt", 16, Res("ApexMutedBrush"));
-            ph.HorizontalAlignment = HorizontalAlignment.Center;
-            ph.VerticalAlignment = VerticalAlignment.Center;
-            thumb.Child = ph;
-            g.Children.Add(thumb);
-            var item = it;
-            _ = Task.Run(() => DefaultReplacements.OriginalThumbnail(gi, item)).ContinueWith(async t =>
-            {
-                if (t.Result is { } bytes && await SaveCard.ImageOf(bytes) is { } img) thumb.Child = new Image { Source = img, Stretch = Stretch.UniformToFill };
-            }, TaskScheduler.FromCurrentSynchronizationContext());
-            var name = new TextBlock { Text = it.Name ?? T("A game item"), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap, MaxLines = 2, VerticalAlignment = VerticalAlignment.Center };
-            ToolTipService.SetToolTip(name, $"{it.Name}  {it.Type:X8}:{it.Group:X8}:{it.Instance:X16}");
-            Grid.SetColumn(name, 1);
-            g.Children.Add(name);
-            panel.Children.Add(g);
+            var more = new Button { Content = T("See all {0}", all.Count), HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 4, 0, 0) };
+            more.Click += (_, _) => Safe(SeeAllReplacedAsync(r, gi, all));
+            panel.Children.Add(more);
         }
-        if (items > shown) panel.Children.Add(Muted(T("and {0} more", items - shown)));
         return panel;
+    }
+
+    // one replaced item: the game's picture, an arrow, the mod's picture (or "same" when it brings none), its name
+    Grid ReplacedRow(ReplacedItem it, GameIndex gi, string package, bool isObject)
+    {
+        var g = new Grid { ColumnSpacing = 0 };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        var (game, mod) = (ThumbBox(isObject), ThumbBox(isObject));
+        g.Children.Add(game);
+        var arrow = Lucide.Icon("chevron-right", 14, Res("ApexMutedBrush"));
+        arrow.HorizontalAlignment = HorizontalAlignment.Center;
+        arrow.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(arrow, 1);
+        g.Children.Add(arrow);
+        Grid.SetColumn(mod, 2);
+        g.Children.Add(mod);
+        var name = new TextBlock { Text = it.Name ?? T("A game item"), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap, MaxLines = 2, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+        ToolTipService.SetToolTip(name, $"{it.Name}  {it.Type:X8}:{it.Group:X8}:{it.Instance:X16}");
+        Grid.SetColumn(name, 3);
+        g.Children.Add(name);
+        LoadReplacedThumbs(it, gi, package, game, mod);
+        return g;
+    }
+
+    static Border ThumbBox(bool isObject, double size = 40)
+    {
+        var ph = Lucide.Icon(isObject ? "sofa" : "shirt", size * 0.4, Res("ApexMutedBrush"));
+        ph.HorizontalAlignment = HorizontalAlignment.Center;
+        ph.VerticalAlignment = VerticalAlignment.Center;
+        return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(6), Background = Res("ApexPillBrush"), Child = ph };
+    }
+
+    void LoadReplacedThumbs(ReplacedItem it, GameIndex gi, string package, Border game, Border mod)
+    {
+        _ = Task.Run(() => (DefaultReplacements.OriginalThumbnail(gi, it), DefaultReplacements.ModThumbnail(package, it))).ContinueWith(async t =>
+        {
+            try
+            {
+                if (!t.IsCompletedSuccessfully) return;
+                var (g, m) = t.Result;
+                if (g is not null && await SaveCard.ImageOf(g) is { } gimg) game.Child = new Image { Source = gimg, Stretch = Stretch.UniformToFill };
+                if (m is not null && await SaveCard.ImageOf(m) is { } mimg) mod.Child = new Image { Source = mimg, Stretch = Stretch.UniformToFill };
+                else
+                {
+                    // (no picture of its own: the game keeps showing its own for it)
+                    mod.Child = new TextBlock { Text = T("same"), FontSize = 10, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                    ToolTipService.SetToolTip(mod, T("The mod brings no picture of its own for it: the game shows its own."));
+                }
+            }
+            catch (Exception e) { App.Log(e); }
+        }, TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    // every item it replaces, searchable, as tiles: the game's picture and the mod's side by side; pictures load as the
+    // tiles come into view
+    async Task SeeAllReplacedAsync(ModRow r, GameIndex gi, List<ReplacedItem> all)
+    {
+        var grid = new GridView { SelectionMode = ListViewSelectionMode.None, Height = 520, Padding = new Thickness(0, 4, 0, 0) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(grid, T("What it replaces"));
+        var loaded = new HashSet<ReplacedItem>();
+        StackPanel Tile(ReplacedItem it)
+        {
+            var isObject = r.Defaults.Objects.Contains(it);
+            var pics = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center };
+            var (game, mod) = (ThumbBox(isObject, 72), ThumbBox(isObject, 72));
+            pics.Children.Add(game);
+            pics.Children.Add(mod);
+            var tile = new StackPanel { Width = 156, Spacing = 6, Padding = new Thickness(4, 6, 4, 6), Tag = (it, game, mod) };
+            tile.Children.Add(pics);
+            tile.Children.Add(new TextBlock { Text = it.Name ?? T("A game item"), FontSize = 11, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
+            ToolTipService.SetToolTip(tile, $"{it.Name}  {it.Type:X8}:{it.Group:X8}:{it.Instance:X16}");
+            return tile;
+        }
+        var tiles = all.Select(Tile).ToList();
+        grid.ContainerContentChanging += (_, args) =>
+        {
+            if (args.InRecycleQueue || args.Item is not StackPanel { Tag: (ReplacedItem it, Border game, Border mod) } || !loaded.Add(it)) return;
+            LoadReplacedThumbs(it, gi, r.File.Path, game, mod);
+        };
+        grid.ItemsSource = tiles;
+        var search = new TextBox { PlaceholderText = T("Search by name") };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(search, T("Search by name"));
+        var count = new TextBlock { FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
+        void Filter()
+        {
+            var q = search.Text.Trim();
+            var shown = q.Length == 0 ? tiles : tiles.Where(x => x.Tag is (ReplacedItem it, Border, Border) && (it.Name ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+            grid.ItemsSource = shown;
+            count.Text = shown.Count == tiles.Count ? T("{0} items · game picture, then the mod's", tiles.Count) : T("{0} of {1}", shown.Count, tiles.Count);
+        }
+        search.TextChanged += (_, _) => Filter();
+        Filter();
+        var top = new Grid { ColumnSpacing = 12 };
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
+        top.ColumnDefinitions.Add(new ColumnDefinition());
+        top.Children.Add(search);
+        Grid.SetColumn(count, 1);
+        top.Children.Add(count);
+        var body = new StackPanel { Spacing = 12, Width = 860 };
+        body.Children.Add(top);
+        body.Children.Add(grid);
+        var d = new ContentDialog { Title = T("What {0} replaces", r.Name), Content = body, CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
+        d.Resources["ContentDialogMaxWidth"] = 940.0;
+        await ShowDialog(d);
     }
 
     // ---------- what a package holds ----------
