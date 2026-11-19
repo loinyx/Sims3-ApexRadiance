@@ -322,5 +322,13 @@ try {
     Check ($free -gt 1MB -and $free -le 0xFFFF0000L) "largest free block read below 4 GB ($([math]::Round($free / 1MB)) MB)"
 } finally { $client.Dispose(); [FakeAgent]::Stop() }
 
+# readback-bench: its wait holds the whole benchmark at 25 fps (cases from features/readback_bench.cpp's enum)
+$rbJob = Get-Content -Raw (Join-Path $PSScriptRoot 'jobs/readback-bench.json') | ConvertFrom-Json
+$rbSrc = Get-Content -Raw (Join-Path $PSScriptRoot '../../features/readback_bench.cpp')
+$rbCases = if ($rbSrc -match 'enum[^{]*\{([^}]*?)kCases\s*\}') { ($Matches[1] -split ',' | Where-Object { $_.Trim() }).Count } else { 0 }
+$rb = $rbJob.toml.readback_bench
+$rbWaitS = 60 * ($rbJob.steps | Where-Object { $_.do -eq 'wait' } | Measure-Object -Property minutes -Sum).Sum
+$rbNeedS = $rb.iterations * $rbCases * $rb.every_frames / 25 + $rb.delay_s
+Check ($rbCases -gt 0 -and $rbNeedS -le $rbWaitS) "readback-bench wait ($rbWaitS s) holds the benchmark at 25 fps ($rbNeedS s, $rbCases cases)"
 Write-Output "$($script:checks) checks, $($script:failures) failures"
 if ($script:failures) { exit 1 }

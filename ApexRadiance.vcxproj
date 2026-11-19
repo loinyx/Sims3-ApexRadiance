@@ -106,6 +106,7 @@
     <ClCompile Include="features\fast_cas.cpp" />
     <ClCompile Include="features\compositor_readback.cpp" />
     <ClCompile Include="features\pick_readback.cpp" />
+    <ClCompile Include="features\readback_bench.cpp" />
     <ClCompile Include="features\fast_crc.cpp" />
     <ClCompile Include="features\fast_memory.cpp" />
     <ClCompile Include="features\memory_guard.cpp" />
@@ -303,6 +304,7 @@
     <ClInclude Include="features\fast_cas.h" />
     <ClInclude Include="features\compositor_readback.h" />
     <ClInclude Include="features\pick_readback.h" />
+    <ClInclude Include="features\readback_bench.h" />
     <ClInclude Include="features\fast_crc.h" />
     <ClInclude Include="features\fast_memory.h" />
     <ClInclude Include="features\memory_guard.h" />

@@ -96,7 +96,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Developer mode](features/developer-mode.md): optional diagnostic tools in the unified build | Released in 2.5.5 |
 | [Frame Profiler](features/frame-profiler.md): per-service and per-hook timing, hitches | Developer mode; since 3.1.2: measurement presets and a per-frame timeline |
 | [Light Probe](features/dev-tools/light-probe.md), [Light Diag](features/dev-tools/light-diag.md), [Recorder](features/dev-tools/recorder.md) | Released (player captures) |
-| [Frame Capture](features/dev-tools/frame-capture.md), [Census](features/dev-tools/census.md) (with the exterior surface capture, 2.12.3), [Tester tab](features/dev-tools/tester.md) (since 2.13.0) | Developer mode |
+| [Frame Capture](features/dev-tools/frame-capture.md), [Census](features/dev-tools/census.md) (with the exterior surface capture, 2.12.3), [Tester tab](features/dev-tools/tester.md) (since 2.13.0), [Read-back benchmark](features/dev-tools/readback-bench.md) | Developer mode |
 
 ### Installation
 
