@@ -31,7 +31,7 @@ public sealed class ConflictCheck : IModCheck
     public List<DuplicateEntry> Duplicates => Last?.Duplicates ?? [];
 
     // (Rules goes up when the scan's rules change, so a result kept from older rules is scanned again)
-    const int Rules = 2;
+    const int Rules = 3;
     public static string Fingerprint(IEnumerable<ModFile> mods) => $"rules {Rules}\n" +
         string.Join("\n", mods.Where(Scanned).OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
             .Select(m => $"{m.Path}|{m.Size}|{(File.Exists(m.Path) ? File.GetLastWriteTimeUtc(m.Path).Ticks : 0)}"));
@@ -70,7 +70,18 @@ public sealed class ConflictCheck : IModCheck
         if (Result(mods, game, docs) is not { } r) return [];
         string[] FilesOf(IEnumerable<string> parties) => parties.SelectMany(p => mods.Where(m => Path.GetFileNameWithoutExtension(m.Path).Equals(p, StringComparison.OrdinalIgnoreCase)).Select(m => m.Path)).Distinct().ToArray();
         var f = new List<ModFinding>();
-        foreach (var c in r.Conflicts)
+        // the game's own ccmerged.package (the store content's merged buff, recipe, plant, skill and ingredient lists, kept
+        // in DCBackup) copied into Mods overrides what mods change in those lists: said as that, with the copy to take out
+        var own = Path.Combine(docs, "DCBackup", "ccmerged.package");
+        bool GameCopy(string party) => party.Equals("ccmerged", StringComparison.OrdinalIgnoreCase)
+            && FilesOf([party]).Any(p => File.Exists(own) && new FileInfo(p).Length == new FileInfo(own).Length && File.ReadAllBytes(p).AsSpan().SequenceEqual(File.ReadAllBytes(own)));
+        foreach (var c in r.Conflicts.Where(c => c.Parties.Any(GameCopy)))
+        {
+            var others = c.Parties.Where(p => !GameCopy(p)).ToArray();
+            f.Add(new(new Finding(Severity.Warning, "ccmerged.package in Mods is a copy of the game's own file: there it overrides {0}'s changes to the same lists. Take it out of Mods; the game keeps its own.",
+                [string.Join(", ", others)]), FilesOf(c.Parties.Where(GameCopy))));
+        }
+        foreach (var c in r.Conflicts.Where(c => !c.Parties.Any(GameCopy)))
             f.Add(new(c.Winner is { } w
                 ? new Finding(Severity.Warning, "{0} change the same game data; {1} likely wins and the others' changes are lost.", [string.Join(", ", c.Parties), w])
                 : new Finding(Severity.Warning, "{0} conflict: {1}", [string.Join(", ", c.Parties), c.Text]), FilesOf(c.Parties)));
