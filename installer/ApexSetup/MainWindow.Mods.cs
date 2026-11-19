@@ -918,7 +918,12 @@ public sealed partial class MainWindow
     }
 
     // a kind's name, icon and group: ModKinds.Kind names, and the older ModKind names for files ModKinds does not read
-    static string KindLabel(string k) => k switch
+    // the package reader names build surfaces "BuildWall", "BuildFence"...: read as "Wall", "Fence" here (without this
+    // every one of them fell to "Other")
+    static readonly HashSet<string> Surfaces = ["Wall", "WallPattern", "FloorPattern", "Fence", "Railing", "Stairs", "RoofStyle", "RoofPattern", "Foundation", "Pool", "TerrainPaint", "TerrainTool", "Water"];
+    static string Bare(string k) => k.StartsWith("Build") && Surfaces.Contains(k[5..]) ? k[5..] : k;
+
+    static string KindLabel(string k) => Bare(k) switch
     {
         "Script" => T("Script mod"), "CoreMod" => T("Core mod"), "Tuning" => T("Tuning"), "Skill" => T("Skills"), "Buff" => T("Moodlets"),
         "Hair" => T("Hair"), "Clothing" => T("Clothing"), "Accessories" => T("Accessories"), "Makeup" => T("Makeup"), "FacialHair" => T("Facial hair"),
@@ -941,7 +946,7 @@ public sealed partial class MainWindow
         _ => T("Other"),
     };
 
-    static string KindIcon(string k) => k switch
+    static string KindIcon(string k) => Bare(k) switch
     {
         "Script" => "code-xml", "CoreMod" => "cpu", "Tuning" => "sliders-vertical", "Skill" => "graduation-cap", "Buff" => "heart-pulse",
         "Hair" => "scissors", "Clothing" => "shirt", "Accessories" => "gem", "Makeup" => "brush", "FacialHair" or "Eyebrows" => "scan-face", "Eyes" => "eye",
