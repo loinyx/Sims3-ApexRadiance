@@ -13,11 +13,13 @@ Sim Occlusion has its own page: [validation/sim-occlusion.md](sim-occlusion.md).
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
 | [`tools/post_scene_test`](../../tools/post_scene_test/README.md) | Post-scene chain: order, once per frame, hidden-UI fallback, depth mismatch and recovery, reset | See the harness README | None |
+| [`tools/ao_options_check`](../../tools/ao_options_check/README.md) | Every GtaoPS variant within 512 slots and accepted by native D3D9; Fewer directions when far and Smooth flat surfaces against the default pass on a synthetic depth buffer; AO pass GPU time at 4K | `tools/ao_options_check/run.ps1` | Native D3D9 |
 
 ## Latest results
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-17 | this branch | `tools/ao_options_check` | 82 checks passed: 20 GtaoPS variants within 512 slots (default 505 to 507, options 348 to 369) and accepted; zoom option equal to the default up close, 0.12 to 0.13 of a level apart at 80 and 150 m, floor roughness unchanged; smooth flat surfaces: open-floor stray shade down about a third, 96 to 97% of the contact shade kept | Native D3D9, laptop RTX 30-series |
 | 2026-10-08 | 28eb532 | Retained full-resolution AO shader equivalence and native device creation | 41 checks passed; stripped instructions identical to the previous modes with temporal and thin-object detail disabled | Native D3D9 |
 | 2026-10-04 | PR #2 | Post-scene chain | 12 passed | None |
 | 2026-09-30 | 2.1.0 | GPU shader against the CPU reference (`gpucheck.cpp`, four saved frames) | Raw AO within 0.08 to 0.11 of 255 levels, composite within 0.06 to 0.09; repeat run bit-identical | Native D3D9 |

@@ -48,10 +48,12 @@ Each frame:
 | Distance | `distance` | float | 752 m | 25 to 1000 m | View distance where the shade fades out (fade starts at 37.5% of it). Not used in map view |
 | Quality | `qualidade` | enum | High | Very Low, Low, Medium, High, Ultra | Directions per pixel: 2, 4, 6, 8, 12. Stored as 4, 0, 1, 2, 3 for compatibility with 2.1.0 |
 | Also in map view | `noMapa` | bool | on | | Shades the map view with radii sized for houses and trees (contact 4 m, large 15 m, no distance fade) |
+| Fewer directions when far | `zoomSlices` | bool | off | | One direction count per frame, from the depth at the screen centre: the Quality's count closer than 60 m, 3/4 of it from 60 m, 1/2 from 120 m (at least 2) |
+| Smooth flat surfaces | `blendNormals` | bool | off | | Blended normal reconstruction (XeGTAO's edge weights): no per-pixel pick of the neighbour, so a depth crease along a mesh seam cannot flip the normal pixel by pixel |
 | Reach | `alcance` | float | 166% | 50 to 200% | Scales all radii |
 | Keep lamp light | `protegerLuz` | float | 46% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
 | Developer > Visual effects > Ambient shadows > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey (developer mode) |
-| (none) | `revisao` | int | 9 | | Settings revision. Older files keep every saved value and only gain missing keys |
+| (none) | `revisao` | int | 10 | | Settings revision. Older files keep every saved value and only gain missing keys |
 
 All settings apply immediately. Keys from the old combined build (`intensidade`, `raioM`, `visualizar`) are not read.
 
@@ -105,6 +107,19 @@ step reads the pyramid bilinearly at the nearest level to its spacing minus 2 (p
 (far) at strength 0.5 to 0.8, blending between 20 and 40 m. XeGTAO falloff (full to 38.5% of the radius). Exact `acos`.
 Isolated pixels (leaf edges, thin rails) fade out. Off-screen samples count as sky.
 
+**Fewer directions when far** (`zoomSlices`). Every pixel reads the same 1/z (pyramid level 7, bilinear, at the screen
+centre) and picks the same count, so every 4x4 block keeps one direction set and the box still cancels the interleave (a
+per-pixel count broke it and looked blotchy; see [the profile notes](../history/ambient-occlusion.md)). Each count spreads
+its own angles, `(s + b1) pi / count`. Thresholds are 60 m and 120 m along the view axis, without hysteresis: a count
+change moves the image by about 0.1 of a level on average (offline check). Thresholds are not yet tuned in game.
+
+**Smooth flat surfaces** (`blendNormals`). The normal is the sum of the four quadrant normals (left-up, up-right,
+right-down, down-left), each weighted by the product of its two edge weights, `saturate(1.25 - e / (0.011 z))` with the
+slope-adjusted depth step `e` (XeGTAO, Intel, MIT). On a plane all four are parallel, so the result is the plane.
+
+Both options compile as separate GtaoPS variants; their 4-step march is a loop instead of unrolled, to stay within ps_3_0's
+512 instruction slots (default 505, options 348 to 369). With both off the AO pass is the same bytecode as before.
+
 **Composite.** `v = 1 - saturate((1 - ao - 0.05) / 0.95)`, then per channel
 `m = MultiBounce(v, min(0.9, colour^2.2))` (Jimenez 2016), then `m = lerp(m, 1, saturate((luma - 0.35) * 2.5) * keep)`.
 With the Banding Fix on, `colour x m` then gets the Banding Fix's grain (its Strength and phase, the same clamp-aware
@@ -131,6 +146,11 @@ device reset and rebuilt on the next frame.
 | Ultra | 12 | 4.1 to 4.5 ms |
 
 About 0.55 ms is fixed (copy and pyramid 0.26, blur 0.2, composite 0.09).
+
+The pass times itself with timestamp queries read a few frames later (every frame in a developer build, every 250 ms in
+a public one). The card shows the smoothed value, and while the pass runs the log gets
+`[AO] GPU ms: mean M, max X over N samples (S slices)` every 10 s, from the samples of those 10 s. Not checked under the
+Remix bridge: without timestamp data there is no line.
 
 ## Rejected approaches
 

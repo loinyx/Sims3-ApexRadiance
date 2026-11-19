@@ -3554,6 +3554,7 @@ void AboutTab() {
         CreditLine("Sims3SettingsSetter by sims3fiend: project origin and framework reference.");
         CreditLine("FXAA 3.11: Timothy Lottes (NVIDIA).");
         CreditLine("FidelityFX CAS: AMD (MIT).");
+        CreditLine("Smooth flat surfaces in Ambient Occlusion: based on Intel's XeGTAO (MIT).");
         CreditLine("Upper-floor ground light: Arro's technique, adapted in Apex Radiance.");
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
         CreditLine("Scene update safety: contribution by @rodneypantonial.");
