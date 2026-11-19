@@ -146,7 +146,7 @@
             </Button>
         </Grid>
 
-        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Auto" CompactModeThresholdWidth="0" ExpandedModeThresholdWidth="1280" IsPaneToggleButtonVisible="False"
+        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Auto" CompactModeThresholdWidth="0" ExpandedModeThresholdWidth="1100" IsPaneToggleButtonVisible="False"
                         IsBackButtonVisible="Collapsed" IsSettingsVisible="False" OpenPaneLength="232"
                         IsTitleBarAutoPaddingEnabled="False" SelectionChanged="OnNavSelection" ItemInvoked="OnNavInvoked">
             <NavigationView.Resources>
@@ -707,7 +707,7 @@
                                 <Grid ColumnSpacing="8">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                     <local:LucideIcon Kind="search" Size="16" Stroke="{StaticResource ApexMutedBrush}" VerticalAlignment="Center" />
-                                    <ScrollViewer Grid.Column="1" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" MaxWidth="360">
+                                    <ScrollViewer x:Name="ModChipsScroll" Grid.Column="1" Visibility="Collapsed" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" MaxWidth="360">
                                         <StackPanel x:Name="ModChips" Tag="dyn" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" />
                                     </ScrollViewer>
                                     <TextBox x:Name="ModSearch" Grid.Column="2" PlaceholderText="Search mods" TextChanged="OnModSearch" BorderThickness="0" Background="Transparent"

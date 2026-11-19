@@ -108,7 +108,8 @@ public sealed partial class MainWindow
     static bool InDir(ModFile m, string dir) => m.FileType == "package"
         && (DirOf(m).Equals(dir, StringComparison.OrdinalIgnoreCase) || DirOf(m).StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
     bool Loaded(ModFile m) => m.FileType != "package" || _modLoadedBy is not { } by || by(Path.GetRelativePath("Mods", m.Rel));
-    bool FolderLoaded(string dir) => _modLoadedBy is not { } by || by(Path.Combine(dir, "x.package"));
+    // (a folder the game loads, or one Resource.cfg names a file of, like PackedFile TinyUIFix/tiny-ui-fix.package)
+    bool FolderLoaded(string dir) => _modLoadedBy is not { } by || by(Path.Combine(dir, "x.package")) || _mods.Any(m => InDir(m, dir) && m.Enabled && Loaded(m));
     static bool IsFolder(string place) => !place.StartsWith('*') && !place.StartsWith('#');
 
     // ---------- filling the screen ----------
@@ -721,6 +722,7 @@ public sealed partial class MainWindow
         foreach (var t in _fTags.ToList()) Chip(t == "" ? T("Untagged") : t, "tag", t == "" ? null : ModNotes.ColorOf(t), () => _fTags.Remove(t));
         if (_fAddedDays > 0) Chip(T("Added in {0} days", _fAddedDays), "calendar-clock", null, () => _fAddedDays = 0);
         if (_fSizeMb > 0) Chip(T("Over {0} MB", _fSizeMb), "hard-drive", null, () => _fSizeMb = 0);
+        ModChipsScroll.Visibility = ModChips.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         var n = FilterCount;
         ModFilterCount.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
         ModFilterCountText.Text = n.ToString();
