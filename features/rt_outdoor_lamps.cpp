@@ -2726,6 +2726,36 @@ void Frame(IDirect3DDevice9* dev) {
         for (int S = 0; S <= 7; S++)
             if ((missing >> S & 1) && RtLampModel::Drawn(r.f, rns[S].lot)) g.mult[S] = mult;
     }
+    // A lamp of the lot that is on but on no room-0 list: switched on (while it was off every story gathered again without it)
+    // or not yet gathered. Drawn on every story where it is drawable at once, as a listed lamp's missing stories are above; the
+    // lists take it at their next solve (the switch's usual path) and the base never held it. Before, a switched-on post lit
+    // no wall until those solves, about 3 to 10 s
+    {
+        std::vector<OutdoorDelta::LotLamp> table;
+        OutdoorDelta::LotLamps(table);
+        bool known = false;
+        if (!table.empty()) OutdoorDelta::InLotLamps(tracker, table.front().light, known);
+        for (const OutdoorDelta::LotLamp& T : known ? table : std::vector<OutdoorDelta::LotLamp>{}) {
+            if (std::any_of(lamps.begin(), lamps.end(), [&](const GpuLamp& g) { return g.light == T.light; })) continue;
+            LampRead r;
+            if (!ReadLamp(T.light, r) || !(r.f.flags & 0x20) || !(r.intensity > 0.0f)) continue;
+            GpuLamp g{};
+            int first = -1;
+            for (int S = 0; S <= 7; S++)
+                if (rooms[S] && RtLampModel::Drawn(r.f, rns[S].lot)) g.mult[S] = 1, first = first < 0 ? S : first;
+            if (first < 0) continue;
+            g.light = T.light;
+            ToLaw(r, gc, rns[first].xf, reachOn, g.lamp.law);
+            g.esum = std::max(r.colour[0], 0.0f) + std::max(r.colour[1], 0.0f) + std::max(r.colour[2], 0.0f);
+            g.spill = r.f.type == 5 ? std::max({1.0f, r.S[0], r.S[1], r.S[2]}) : 1.0f;
+            g.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type);
+            g.post = r.f.type == 11;
+            if (g.post && InTerrainBake(r)) g.inBake = true, FillBake(r, coneSpill, g.bake);
+            Mix(allSig, &g.light, sizeof g.light);
+            Mix(allSig, &g.lamp.law, sizeof g.lamp.law);
+            lamps.push_back(g);
+        }
+    }
     // every lamp listed here, drawn on every story or not: its terrain stamp needs no room map (a picked-up lamp drawn
     // only on the upper stories kept the CPU terrain relight for its whole drag)
     for (const GpuLamp& g : lamps) g_stampLights.push_back(g.light);
@@ -3370,7 +3400,11 @@ void Frame(IDirect3DDevice9* dev) {
         const double gpuEst = s.gpuMs > 0.0 ? s.gpuMs : units * kMsPerUnit;
         const bool cpuFits = Ms(t0, tn) <= (urgent.count(sp) || edited.count(sp) ? kEditFrameCpuMs : kFrameCpuMs);
         const bool mustGo = urgent.count(sp) && (dragStory < 0 || s.story == dragStory);
-        if (relit > 0 && !mustGo && (!cpuFits || gpuPlanned + gpuEst > kFrameGpuMs)) {
+        // a map of the active lot whose own lamps changed during a lamp edit (moved, switched) goes past the CPU budget, within the
+        // GPU's: a story with room 0 alone (a roof with half walls) is never urgent nor edited, and the kept rooms over room 0 of the
+        // stories below spent the budget on every drag frame, so its walls showed the lamp where it stood up to a second before
+        const bool ownLampsChanged = !s.mgr && s.lampsSig && lampsSig != s.lampsSig && (dragStory >= 0 || !urgent.empty() || !edited.empty());
+        if (relit > 0 && !mustGo && (!(cpuFits || ownLampsChanged) || gpuPlanned + gpuEst > kFrameGpuMs)) {
             if (cpuFits) g_why.deferred++;
             left++; // (it keeps its last copy and stays dirty until its turn)
             continue;
