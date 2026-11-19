@@ -159,10 +159,36 @@ public static class Worlds
     static readonly string[] Store = ["Riverview", "Barnacle Bay", "Hidden Springs", "Lunar Lakes", "Lucky Palms", "Sunlit Tides",
         "Monte Vista", "Aurora Skies", "Dragon Valley", "Midnight Hollow", "Roaring Heights"];
 
-    // A world's own picture, as the game's world chooser shows it (0x0668F635, else 0x8F78F74B in store worlds). World
-    // Adventures' destinations have none: no lot's picture stands in for a world, the pack's icon shows instead.
+    // A world's own picture, as the game's world chooser shows it (0x0668F635, else 0x8F78F74B in store worlds). The
+    // destinations (World Adventures' three, Sims University, Oasis Landing) have none in their .world: their pack's
+    // loading-screen image stands in, a PNG named world_loading_<place> (instance = FNV-64 of the name) in the pack's
+    // packages (checked: cairo, beijing, paris, university, future).
     public static readonly uint[] PictureTypes = [0x0668F635, 0x8F78F74B];
-    public static byte[]? Picture(World w) => Dbpf.First(w.Path, PictureTypes);
+    const uint Png = 0x2F7D0004;
+    static readonly Dictionary<string, string> LoadingName = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["China"] = "beijing", ["Egypt"] = "cairo", ["France"] = "paris", ["Sims University"] = "university", ["Oasis Landing"] = "future",
+    };
+    public static byte[]? Picture(World w)
+    {
+        if (Dbpf.First(w.Path, PictureTypes) is { } own) return own;
+        if (w.Kind != WorldKind.Expansion) return null;
+        var stem = System.IO.Path.GetFileNameWithoutExtension(w.Path);
+        var names = new[] { LoadingName.GetValueOrDefault(stem), stem.Replace(" ", "").ToLowerInvariant() }.OfType<string>().Select(n => Fnv64("world_loading_" + n)).ToHashSet();
+        // (Worlds sits in <pack>\GameData\Shared\NonPackaged\Worlds; the images are in <pack>\GameData\Shared\Packages)
+        var packages = System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(w.Path)!, "..", "..", "Packages"));
+        if (!Directory.Exists(packages)) return null;
+        foreach (var f in Directory.EnumerateFiles(packages, "*.package"))
+            if (Dbpf.Index(f).FirstOrDefault(e => e.Type == Png && names.Contains(e.Instance)) is { Type: Png } hit) return Dbpf.Read(f, hit);
+        return null;
+    }
+
+    static ulong Fnv64(string s)
+    {
+        var h = 0xCBF29CE484222325UL;
+        foreach (var c in s.ToLowerInvariant()) { h *= 0x100000001B3UL; h ^= (byte)c; }
+        return h;
+    }
 
     // a pack's own test or helper worlds shipped beside the playable ones
     static bool Hidden(string name) => name.Contains('_') || name.EndsWith("Test", StringComparison.OrdinalIgnoreCase);
