@@ -39,7 +39,8 @@ public sealed partial class MainWindow
                 // (a long name cut in a list row is by design, with its full text in a tooltip)
                 if (tb.IsTextTrimmed && !InListRow(tb)) lines.Add($"{screen}\t{size}\ttrimmed\t{path}/{name}\t{tb.Text}");
                 var inControl = InSingleLineControl(tb);
-                if (inControl && tb.DesiredSize.Height > tb.FontSize * 2.0) lines.Add($"{screen}\t{size}\twrapped\t{path}/{name}\t{tb.Text}");
+                // (a text box's placeholder measures with the box's own padding: its height says nothing about wrapping)
+                if (inControl && name != "PlaceholderTextContentPresenter" && tb.DesiredSize.Height > tb.FontSize * 2.0) lines.Add($"{screen}\t{size}\twrapped\t{path}/{name}\t{tb.Text}");
             }
             if (d is Control { ActualWidth: > 0 } c && c is Microsoft.UI.Xaml.Controls.Button or ComboBox or TextBox or AutoSuggestBox or ToggleSwitch)
             {

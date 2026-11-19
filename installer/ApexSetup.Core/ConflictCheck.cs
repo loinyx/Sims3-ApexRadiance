@@ -24,6 +24,7 @@ public sealed class ConflictCheck : IModCheck
     public ConflictResult? Last { get; private set; }
 
     static string CacheFile => Path.Combine(Paths.Data, "conflicts.json");
+    static readonly object Gate = new();
     static readonly Regex Winner = new(@"likely winner: ([^;]+)");
 
     // the identical copies the last check found (two packages or assemblies with the same bytes: one can go)
@@ -86,7 +87,7 @@ public sealed class ConflictCheck : IModCheck
 
     static void Save(ConflictResult r)
     {
-        try { Directory.CreateDirectory(Paths.Data); Fs.WriteAtomic(CacheFile, JsonSerializer.Serialize(r, SetupJson.Default.ConflictResult)); }
+        try { Directory.CreateDirectory(Paths.Data); var text = JsonSerializer.Serialize(r, SetupJson.Default.ConflictResult); lock (Gate) Fs.Retry(() => Fs.WriteAtomic(CacheFile, text)); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }
 }

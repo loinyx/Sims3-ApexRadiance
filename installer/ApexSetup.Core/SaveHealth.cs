@@ -27,6 +27,9 @@ public static class SaveHealth
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return new(); }
     }
 
+    // (two checks at once, e.g. Check now while the start-up check runs, write the history one after the other)
+    static readonly object Gate = new();
+
     public static List<SaveReport> Check(string docs, bool record = true)
     {
         var history = Load();
@@ -48,7 +51,7 @@ public static class SaveHealth
             list.Add(new(s, bytes, points, LastBackup(s, docs), incomplete));
         }
         if (record)
-            try { Directory.CreateDirectory(Paths.Data); Fs.WriteAtomic(FilePath, JsonSerializer.Serialize(history, SetupJson.Default.DictionaryStringListSizePoint)); }
+            try { Directory.CreateDirectory(Paths.Data); var text = JsonSerializer.Serialize(history, SetupJson.Default.DictionaryStringListSizePoint); lock (Gate) Fs.Retry(() => Fs.WriteAtomic(FilePath, text)); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         return list;
     }
