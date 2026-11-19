@@ -24,6 +24,18 @@ public sealed partial class MainWindow
     // what the game's own launcher installed into its cache (null: not read yet)
     List<InstalledRow>? _installed;
     HashSet<uint>? _installedIds;
+    bool _packInstalled; // (Sims3Packs: the Installed tab)
+
+    void OnPackTab(SelectorBar sender, SelectorBarSelectionChangedEventArgs e)
+    {
+        var installed = sender.SelectedItem == PackTabInstalled;
+        if (installed == _packInstalled) return;
+        _packInstalled = installed;
+        ModList.SelectedItems.Clear();
+        ModGrid.SelectedItems.Clear();
+        FillMods();
+        FillModDetails();
+    }
     string _modPlace = AllMods;
     List<ModRow> _modRows = [];
     readonly ObservableCollection<ModRow> _modShown = [];
@@ -159,7 +171,13 @@ public sealed partial class MainWindow
             var shown = Sorted(inPlace.Where(Matches)).ToList();
             ModRow.ShowPlace = !IsFolder(_modPlace);
             Sync(shown);
-            if (_modPlace == InstalledMods) { FillInstalled(); return; }
+            PackTabs.Visibility = _modPlace == PackMods ? Visibility.Visible : Visibility.Collapsed;
+            if (_modPlace == PackMods)
+            {
+                PackTabDownloads.Text = T("In Downloads ({0})", inPlace.Count);
+                PackTabInstalled.Text = T("Installed ({0})", _installed?.Count ?? 0);
+                if (_packInstalled) { FillInstalled(); return; }
+            }
             InstalledGrid.Visibility = Visibility.Collapsed;
             ModsSelectAll.Visibility = ModsSelectNone.Visibility = Visibility.Visible;
             ModList.Visibility = ModListHead.Visibility = _modsGrid ? Visibility.Collapsed : Visibility.Visible;
@@ -221,7 +239,6 @@ public sealed partial class MainWindow
     {
         AllMods => ("", T("All mods")), NewMods => ("", T("New since last play")), DefaultMods => ("", T("Default replacements")), LookMods => ("", T("Needs a look")), DupMods => ("", T("Duplicates")),
         OffMods => ("", T("Turned off")), AsiMods => ("", T("Game plugins")), PackMods => ("", "Sims3Packs"), LibraryMods => ("", T("Library")),
-        InstalledMods => ("", T("Installed content")),
         _ when place.StartsWith('#') => (T("Tag"), place[1..]),
         "" => ("", "Mods"),
         _ => (string.Join(" › ", new[] { "Mods" }.Concat(place.Split(Path.DirectorySeparatorChar).SkipLast(1))), Path.GetFileName(place)),
@@ -301,9 +318,8 @@ public sealed partial class MainWindow
                     new(DupMods, T("Duplicates"), "copy", N(DupMods)), new(OffMods, T("Turned off"), "power-off", N(OffMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace)).ToList()),
             ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", _mods.Count(m => InDir(m, d)), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
             ("tags", T("TAGS"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
-            ("game", T("GAME"), null, new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)), new(PackMods, "Sims3Packs", "package", N(PackMods)),
-                new(LibraryMods, T("Library"), "library", N(LibraryMods)), new(InstalledMods, T("Installed content"), "package", _installed?.Count ?? 0) }
-                .Where(p => p.Count > 0 || p.Key == _modPlace).ToList()),
+            ("game", T("GAME"), null, new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)), new(PackMods, "Sims3Packs", "package", N(PackMods) + (_installed?.Count ?? 0)),
+                new(LibraryMods, T("Library"), "library", N(LibraryMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace).ToList()),
         };
         if (!groups.SelectMany(g => g.Items).Any(p => p.Key.Equals(_modPlace, StringComparison.OrdinalIgnoreCase))) _modPlace = AllMods;
 
@@ -1175,7 +1191,10 @@ public sealed partial class MainWindow
         var all = _installed ?? [];
         var q = ModSearch.Text?.Trim() ?? "";
         var shown = q.Length == 0 ? all : all.Where(r => r.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || r.Kind.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        InstalledGrid.ItemTemplate = (DataTemplate)Root.Resources[_modsGrid ? "InstalledTileTemplate" : "InstalledRowTemplate"];
         InstalledGrid.ItemsSource = shown;
+        ModsViewList.IsChecked = !_modsGrid;
+        ModsViewGallery.IsChecked = _modsGrid;
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => OnInstalledSized(InstalledGrid, null!)); // (the panel exists once the items are set)
         InstalledGrid.Visibility = Visibility.Visible;
         ModsSelectAll.Visibility = ModsSelectNone.Visibility = Visibility.Collapsed;
@@ -1184,9 +1203,8 @@ public sealed partial class MainWindow
         (ModsEmptyIcon.Kind, ModsEmptyText.Text) = _installed is null ? ("loader-circle", T("Reading what the game's launcher installed…"))
             : all.Count > 0 ? ("search", T("Nothing matches the search."))
             : ("package", T("The game's launcher installed nothing here."));
-        var (crumb, title) = PlaceTitle(_modPlace);
         ModsCrumb.Visibility = Visibility.Collapsed;
-        ModsTitle.Text = ModsPlacesText.Text = title;
+        ModsTitle.Text = ModsPlacesText.Text = "Sims3Packs";
         ModsSummary.Text = string.Join(" · ", new[] { T("{0} items", all.Count), ModRow.SizeText(InstalledContent.Bytes(Docs)), T("added and removed in the game's own launcher") });
         ModsAdd.IsEnabled = true;
         HuntBanner();
@@ -1203,8 +1221,57 @@ public sealed partial class MainWindow
         var width = InstalledGrid.ActualWidth - InstalledGrid.Padding.Left - InstalledGrid.Padding.Right;
         if (width <= 0) return;
         var cols = CardGrid.Columns(width, 128, 8);
+        if (!_modsGrid) { wrap.ItemWidth = width - 8; wrap.ItemHeight = 56; return; } // (the list: one item a row)
         wrap.ItemWidth = Math.Floor(width / cols) - 8; // (each tile's 8 px margin comes on top of its width)
         wrap.ItemHeight = 206; // (picture, two lines of name, the type: every row the same height)
+    }
+
+    void OnInstalledPicked(object sender, SelectionChangedEventArgs e) { if (!_fillingMods) FillModDetails(); }
+
+    // an installed item: its picture, what it is, the lots and worlds in Downloads that use it, and the way to remove it
+    void FillInstalledDetails(InstalledRow r)
+    {
+        var host = ModDetails;
+        var pic = new Grid { Height = 180, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush") };
+        var ph = Lucide.Icon(r.KindIcon, 44, Res("ApexMutedBrush"), 1.4);
+        ph.HorizontalAlignment = HorizontalAlignment.Center;
+        ph.VerticalAlignment = VerticalAlignment.Center;
+        pic.Children.Add(ph);
+        if (r.Image is { } img) pic.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, MaxWidth = 128, MaxHeight = 128 });
+        host.Children.Add(pic);
+        host.Children.Add(new TextBlock { Text = r.Name, FontSize = 18, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        var facts = new Grid { ColumnSpacing = 14, RowSpacing = 8 };
+        facts.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        facts.ColumnDefinitions.Add(new ColumnDefinition());
+        void Fact(string k, string v, Brush? brush = null)
+        {
+            facts.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var key = Muted(k);
+            var val = new TextBlock { Text = v, FontSize = 12, Foreground = brush ?? Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap };
+            Grid.SetRow(key, facts.RowDefinitions.Count - 1);
+            Grid.SetRow(val, facts.RowDefinitions.Count - 1);
+            Grid.SetColumn(val, 1);
+            facts.Children.Add(key);
+            facts.Children.Add(val);
+        }
+        Fact(T("Type"), r.Kind);
+        Fact(T("Installed by"), T("The game's own launcher"));
+        // (which pack it came from is not kept by the game: the lots and worlds waiting in Downloads that use it are)
+        var users = _modRows.Where(x => x.File.FileType == "sims3pack" && r.Item.Id != 0 && Sims3Pack.Read(x.File.Path)?.StoreDependencies.Contains(r.Item.Id) == true)
+            .Select(x => x.Name).ToList();
+        Fact(T("Used by"), users.Count == 0 ? T("No lot or world in Downloads") : string.Join(", ", users));
+        Fact(T("Kept in"), "DCCache › " + Path.GetFileName(r.Item.File));
+        host.Children.Add(facts);
+        host.Children.Add(Muted(T("The game's own launcher installs and removes these: Apex Launcher only reads its cache, so it never breaks the store content your saves use.")));
+        var exe = _game is { } g ? Path.Combine(g.Bin, "Sims3Launcher.exe") : null;
+        var open = WideButton("trash-2", T("Remove in the game's launcher…"), () =>
+        {
+            if (Games.IsRunning()) { SetInfo(ModsInfo, InfoBarSeverity.Warning, T("Close The Sims 3 first"), ""); return; }
+            try { Process.Start(new ProcessStartInfo(exe!) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! }); }
+            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The game's launcher did not open"), ErrorText(e)); }
+        }, "ApexErrorBrush");
+        open.IsEnabled = exe is not null && File.Exists(exe);
+        host.Children.Add(open);
     }
 
     void OnInstalledTile(ListViewBase sender, ContainerContentChangingEventArgs args)
@@ -1291,6 +1358,12 @@ public sealed partial class MainWindow
     {
         var host = ModDetails;
         host.Children.Clear();
+        if (_modPlace == PackMods && _packInstalled && InstalledGrid.SelectedItem is InstalledRow ir)
+        {
+            ModDetailsPane.Visibility = Visibility.Visible;
+            FillInstalledDetails(ir);
+            return;
+        }
         var picked = Picked();
         ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (_modsNarrow && picked.Count > 0)

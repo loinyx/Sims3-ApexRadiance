@@ -5,7 +5,11 @@ namespace ApexSetup;
 // 26 files, 267,766 resources). They keep no Sims3Pack manifest, so the list is per item, as the game's launcher shows it:
 // every catalog item (an OBJD or a build catalog resource, named from the English string tables) and every Create a Sim
 // part (its own name). Read only: removing them is the game's launcher's job.
-public sealed record InstalledItem(string Name, string Kind, string File, uint Type, ulong Instance, ulong PngInstance);
+public sealed record InstalledItem(string Name, string Kind, string File, uint Type, ulong Instance, ulong PngInstance)
+{
+    // the id lots and worlds name it by in their <Dependency> (0: its record was not found)
+    public uint Id { get; init; }
+}
 
 public static class InstalledContent
 {
@@ -31,17 +35,20 @@ public static class InstalledContent
             try
             {
                 var index = Dbpf.Index(f);
+                var ids = new Dictionary<(uint, ulong), uint>();
+                foreach (var e in index.Where(e => e.Type == DirectoryType))
+                    if (Dbpf.Read(f, e) is { } dir) foreach (var (key, id) in ItemIds(dir)) ids.TryAdd(key, id);
                 // English names: the string tables whose instance's top byte is 0
                 var names = new Dictionary<ulong, string>();
                 foreach (var e in index.Where(e => e.Type == ModKinds.Stbl && e.Instance >> 56 == 0))
                     if (Dbpf.Read(f, e) is { } b)
                         foreach (var (k, t) in ModContent.Strings(b)) names.TryAdd(k, t);
                 foreach (var it in ModKinds.Read(f).Items)
-                    if (names.GetValueOrDefault(it.NameKey) is { Length: > 0 } name)
-                        list.Add(new(name, (it.Kinds.FirstOrDefault()).ToString(), f, it.Type, it.Instance, it.PngInstance));
+                    if (names.GetValueOrDefault(it.NameKey)?.Trim() is { Length: > 0 } name)
+                        list.Add(new(name, (it.Kinds.FirstOrDefault()).ToString(), f, it.Type, it.Instance, it.PngInstance) { Id = ids.GetValueOrDefault((it.Type, it.Instance)) });
                 foreach (var e in index.Where(e => e.Type == ModKinds.Casp))
                     if (Dbpf.Read(f, e) is { } b && ModContent.Part(b) is { } part && part.Name.Length > 0)
-                        list.Add(new(part.Name, ModKinds.CasKind(part.Clothing, part.AgeGender).ToString(), f, e.Type, e.Instance, e.Instance));
+                        list.Add(new(part.Name, ModKinds.CasKind(part.Clothing, part.AgeGender).ToString(), f, e.Type, e.Instance, e.Instance) { Id = ids.GetValueOrDefault((e.Type, e.Instance)) });
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or IndexOutOfRangeException) { Engine.Log(e); }
         }
@@ -67,15 +74,39 @@ public static class InstalledContent
         return ids;
     }
 
-    public static IEnumerable<uint> IdsIn(byte[] d)
+    public static IEnumerable<uint> IdsIn(byte[] d) => Records(d).Select(r => r.Id);
+
+    // where each record starts and its id
+    static List<(uint Id, int At)> Records(byte[] d)
     {
+        var list = new List<(uint, int)>();
         for (var i = 0; i + 52 <= d.Length; i++)
         {
             var s = d.AsSpan(i);
             if (!s.Slice(4, 16).SequenceEqual(s.Slice(36, 16)) || !s.Slice(20, 4).SequenceEqual(s.Slice(28, 4))
                 || s.Slice(24, 4).IndexOfAnyExcept((byte)0) >= 0 || s.Slice(32, 4).IndexOfAnyExcept((byte)0) >= 0 || s.Slice(4, 16).IndexOfAnyExcept((byte)0) < 0) continue;
-            yield return System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(s.Slice(12, 4));
+            list.Add((System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(s.Slice(12, 4)), i));
             i += 51;
+        }
+        return list;
+    }
+
+    // the catalog entries and parts each record installed, by their key: a record lists its resources as type, group and
+    // an instance whose two 32-bit halves are swapped (checked: every OBJD and CASP key of a player's dcdb0 matches its index)
+    public static IEnumerable<((uint Type, ulong Instance) Key, uint Id)> ItemIds(byte[] d)
+    {
+        var records = Records(d);
+        for (var r = 0; r < records.Count; r++)
+        {
+            var end = r + 1 < records.Count ? records[r + 1].At : d.Length;
+            for (var i = records[r].At + 52; i + 16 <= end; i++)
+            {
+                var t = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(d.AsSpan(i));
+                if (t != ModKinds.Objd && t != ModKinds.Casp && !ModKinds.IsCatalog(t)) continue;
+                var v = System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(d.AsSpan(i + 8));
+                yield return ((t, v << 32 | v >> 32), records[r].Id);
+                i += 15;
+            }
         }
     }
 
