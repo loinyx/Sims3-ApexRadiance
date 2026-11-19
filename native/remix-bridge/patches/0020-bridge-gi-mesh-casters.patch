@@ -490,8 +490,8 @@ index b62ca7d1..c21e1818 100644
  
  # Remix API Bridge App Tests
  # Each x86 app runs against the client and server from a regular bridge build in _output.
--bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device', 'gi_device', 'gi_pixel_device' ]
-+bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device', 'gi_device', 'gi_pixel_device', 'gi_mesh_device' ]
+-bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'device_refcount_device', 'async_readback_device', 'gi_device', 'gi_pixel_device' ]
++bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'device_refcount_device', 'async_readback_device', 'gi_device', 'gi_pixel_device', 'gi_mesh_device' ]
  if (cpu_family == 'x86')
  foreach name : bridge_app_tests
    tests += executable(

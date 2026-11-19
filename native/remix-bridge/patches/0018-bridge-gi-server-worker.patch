@@ -2295,10 +2295,10 @@ index 0000000000000000000000000000000000000000..649698b2b3fa68bc0e03f350f8bbd323
 +  void queueJob(const std::shared_ptr<Job>& job);
 +}
 diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
-index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812d9c49949 100644
+index 68851ded..2f6fe58c 100644
 --- a/bridge/src/server/main.cpp
 +++ b/bridge/src/server/main.cpp
-@@ -50,6 +50,7 @@
+@@ -52,6 +52,7 @@
  #include "config/global_options.h"
  #include "server_options.h"
  #include "async_readback.h"
@@ -2306,7 +2306,7 @@ index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812
  #include "../client/client_options.h"
  
  #include "../tracy/tracy.hpp"
-@@ -558,6 +559,7 @@ void ProcessDeviceCommandQueue() {
+@@ -619,6 +620,7 @@ void ProcessDeviceCommandQueue() {
        {
          GET_RES(pD3DDevice, gpD3DDevices);
          async_readback::dropAll();
@@ -2314,7 +2314,7 @@ index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812
          safeDestroy(pD3DDevice, pD3DDeviceHandle);
          gpD3DDevices.erase(pD3DDeviceHandle);
          ServerMessage { Commands::Bridge_Ack, currentUID };
-@@ -702,6 +704,7 @@ void ProcessDeviceCommandQueue() {
+@@ -763,6 +765,7 @@ void ProcessDeviceCommandQueue() {
        {
          GET_RES(pD3DDevice, gpD3DDevices);
          async_readback::dropAll();
@@ -2322,7 +2322,7 @@ index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812
          uint32_t* rawPresentationParameters = nullptr;
          DeviceBridge::get_data((void**) &rawPresentationParameters);
          D3DPRESENT_PARAMETERS PresentationParameters = getPresParamFromRaw(rawPresentationParameters);
-@@ -724,6 +727,7 @@ void ProcessDeviceCommandQueue() {
+@@ -785,6 +788,7 @@ void ProcessDeviceCommandQueue() {
        {
          GET_RES(pD3DDevice, gpD3DDevices);
          async_readback::dropAll();
@@ -2330,7 +2330,7 @@ index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812
          uint32_t* rawPresentationParameters = nullptr;
          DeviceBridge::get_data((void**) &rawPresentationParameters);
  
-@@ -763,6 +767,7 @@ void ProcessDeviceCommandQueue() {
+@@ -824,6 +828,7 @@ void ProcessDeviceCommandQueue() {
  
          const auto hresult = pD3DDevice->Present(pSourceRect, pDestRect, hwnd, pDirtyRegion);
          async_readback::poll();
@@ -2338,7 +2338,7 @@ index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812
          if (!SUCCEEDED(hresult)) {
            std::stringstream ss;
            ss << "Present() failed! Check all logs for reported errors.";
-@@ -1833,6 +1838,7 @@ void ProcessDeviceCommandQueue() {
+@@ -1909,6 +1914,7 @@ void ProcessDeviceCommandQueue() {
  
          const auto hresult = pSwapChain->Present(pSourceRect, pDestRect, hwnd, pDirtyRegion, dwFlags);
          async_readback::poll();
@@ -2346,7 +2346,7 @@ index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812
  
          if (!SUCCEEDED(hresult)) {
            std::stringstream ss;
-@@ -2979,6 +2985,35 @@ void ProcessDeviceCommandQueue() {
+@@ -3098,6 +3104,35 @@ void ProcessDeviceCommandQueue() {
          gpD3DVolumes.erase(pHandle);
          break;
        }
@@ -2382,7 +2382,7 @@ index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812
        /*
         * BridgeApi commands
         */
-@@ -3387,6 +3422,7 @@ void ProcessDeviceCommandQueue() {
+@@ -3506,6 +3541,7 @@ void ProcessDeviceCommandQueue() {
          dispatch(rpcHeader, (uint32_t) currentUID);
        }
        async_readback::onCommand();
@@ -2391,7 +2391,7 @@ index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812
  
      // Ensure the data position between client and server is in sync after processing the command
 diff --git a/bridge/src/server/meson.build b/bridge/src/server/meson.build
-index 6eca0315aa0e962adc7190d1260e858c23b5dc97..ba7f1dfa879991344738eea48992677aded31e23 100644
+index 4d418be8..f26a4bec 100644
 --- a/bridge/src/server/meson.build
 +++ b/bridge/src/server/meson.build
 @@ -21,11 +21,34 @@
@@ -2428,8 +2428,8 @@ index 6eca0315aa0e962adc7190d1260e858c23b5dc97..ba7f1dfa879991344738eea48992677a
 +
  server_header = files([
  	'module_processing.h',
- 	'server_options.h',
-@@ -47,10 +70,11 @@ server_resource = windows.compile_resources('NvRemixBridge.rc',
+ 	'rewind_mode.h',
+@@ -48,10 +71,11 @@ server_resource = windows.compile_resources('NvRemixBridge.rc',
  )
  
  server_exe = executable('NvRemixBridge', server_src, server_header, server_version, server_resource,
@@ -2456,7 +2456,7 @@ index 1c879f50f26b7b9b1b9e7ee11a76e67f2f3b0b7f..b0b678647cc7e284909a3b74deb8ae28
  	'log/log_strings.h',
  	'config/config.h',
 diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
-index 65090f0e68d70d2d127eea182b1f4ad693a5a7ac..d57ce08bc1853d558135da23645c7417214ef611 100644
+index 111dff30..f37384b5 100644
 --- a/bridge/src/util/util_commands.h
 +++ b/bridge/src/util/util_commands.h
 @@ -63,6 +63,11 @@ namespace Commands {
@@ -2471,7 +2471,7 @@ index 65090f0e68d70d2d127eea182b1f4ad693a5a7ac..d57ce08bc1853d558135da23645c7417
      // These are not actually official D3D9 API calls.
      IDirect3DDevice9Ex_LinkSwapchain,
      IDirect3DDevice9Ex_LinkBackBuffer,
-@@ -496,6 +501,10 @@ namespace Commands {
+@@ -499,6 +504,10 @@ namespace Commands {
      case Bridge_SharedHeap_AddSeg: return "SharedHeap_AddSeg";
      case Bridge_SharedHeap_Alloc: return "SharedHeap_Alloc";
      case Bridge_SharedHeap_Dealloc: return "SharedHeap_Dealloc";
@@ -2650,15 +2650,15 @@ index 0000000000000000000000000000000000000000..d8a80a71f57adbd1428c427f79ddb8e8
 +  }
 +}
 diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
-index e523b21dc80a6450df739dd8ce4f4fab39d7ee4a..f91e64f3c9011f901b9c6214745b1480b670968b 100644
+index de4f2962..54eb329b 100644
 --- a/bridge/test/rtx/unit/meson.build
 +++ b/bridge/test/rtx/unit/meson.build
-@@ -67,7 +67,7 @@ endif
+@@ -84,7 +84,7 @@ endif
  
  # Remix API Bridge App Tests
  # Each x86 app runs against the client and server from a regular bridge build in _output.
--bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device' ]
-+bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device', 'gi_device' ]
+-bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'device_refcount_device', 'async_readback_device' ]
++bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'device_refcount_device', 'async_readback_device', 'gi_device' ]
  if (cpu_family == 'x86')
  foreach name : bridge_app_tests
    tests += executable(
