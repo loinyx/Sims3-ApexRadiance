@@ -750,7 +750,7 @@ Apex Radiance builds on the work, research and tools of many people and projects
 - **AdaptiveSharpen and Colourfulness** — bacondither, BSD 2-Clause style, from [reshade-shaders](https://github.com/crosire/reshade-shaders/tree/legacy).
 - **prod80 shaders** — by [prod80](https://github.com/prod80/prod80-ReShade-Repository), MIT.
 - **FidelityFX CAS** — by AMD, MIT.
-- **XeGTAO** — by Intel, MIT; its edge-aware normal reconstruction is the basis of Ambient Occlusion's *Smooth flat surfaces*.
+- **XeGTAO** — by Intel, MIT; its edge weights and edge-aware normal reconstruction are the basis of Ambient Occlusion's *Smooth flat surfaces* and *Edge-aware smoothing*.
 - **RetroTint** — by [Daodan317081](https://github.com/Daodan317081/reshade-shaders), BSD 3-Clause.
 - **ReShade FX compiler** — by [crosire](https://github.com/crosire/reshade), BSD-3-Clause. It compiles players' own `.fx` shaders in Looks.
 - **Shader packs** — downloaded by the player from the authors listed in [ReShade's official shader list](https://github.com/crosire/reshade-shaders/tree/list), under each author's license. Apex does not include those packs by default.

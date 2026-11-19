@@ -25,7 +25,7 @@ and lamp lighting do not add contact shading.
 
 Apex Radiance runs a full-resolution GTAO (ground-truth ambient occlusion) pass on the game's depth buffer and blends the
 result into the finished 3D image. The result is deterministic: a still camera always produces the same image, with no
-temporal noise. The composite keeps lamp-lit and bright surfaces bright and preserves their colour, so the shade does
+temporal noise (the option Refine while the camera is still, off by default, is the one exception). The composite keeps lamp-lit and bright surfaces bright and preserves their colour, so the shade does
 not leave a grey film.
 
 Each frame:
@@ -49,11 +49,15 @@ Each frame:
 | Quality | `qualidade` | enum | High | Very Low, Low, Medium, High, Ultra | Directions per pixel: 2, 4, 6, 8, 12. Stored as 4, 0, 1, 2, 3 for compatibility with 2.1.0 |
 | Also in map view | `noMapa` | bool | on | | Shades the map view with radii sized for houses and trees (contact 4 m, large 15 m, no distance fade) |
 | Fewer directions when far | `zoomSlices` | bool | off | | One direction count per frame, from the depth at the screen centre: the Quality's count closer than 60 m, 3/4 of it from 60 m, 1/2 from 120 m (at least 2) |
+| Steady direction count | `zoomHysteresis` | bool | off | | With Fewer directions when far: the count changes 10% past a threshold and changes back 10% before it (60 m: 66 and 54 m; 120 m: 132 and 108 m) |
+| Fewer directions in the open | `blockSlices` | bool | off | | One direction count per 4x4 block of pixels: half the Quality's count where the depth does not bend within reach, the full count elsewhere and one block around |
 | Smooth flat surfaces | `blendNormals` | bool | off | | Blended normal reconstruction (XeGTAO's edge weights): no per-pixel pick of the neighbour, so a depth crease along a mesh seam cannot flip the normal pixel by pixel |
+| Edge-aware smoothing | `edgeBlur` | bool | off | | The 4x4 box weighs each tap by the AO pass's edge weights instead of the 1/z ratio, and the tent passes are dropped. The AO targets get 4 channels (A16B16G16R16F); without that format the usual blur runs |
+| Refine while the camera is still | `temporalStill` | bool | off | | Quality Low only: while the camera is still, each frame uses other directions and joins a history (a plain average of the first 16 frames, then 1/16 per frame). Any camera movement starts again from the fixed pattern |
 | Reach | `alcance` | float | 166% | 50 to 200% | Scales all radii |
 | Keep lamp light | `protegerLuz` | float | 46% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
 | Developer > Visual effects > Ambient shadows > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey (developer mode) |
-| (none) | `revisao` | int | 10 | | Settings revision. Older files keep every saved value and only gain missing keys |
+| (none) | `revisao` | int | 14 | | Settings revision. Older files keep every saved value and only gain missing keys |
 
 All settings apply immediately. Keys from the old combined build (`intensidade`, `raioM`, `visualizar`) are not read.
 
@@ -71,7 +75,8 @@ All settings apply immediately. Keys from the old combined build (`intensidade`,
 - **Game anti-aliasing:** the effect pauses while the back buffer is multisampled. Use Edge Smoothing instead.
 - **Sim Occlusion** adjusts this shade on Sims; see [sim-occlusion.md](sim-occlusion.md).
 - **Hardware:** needs R32F texture filtering and G16R16F render targets. Without them the effect stays off and the card
-  shows a warning.
+  shows a warning. An option whose own shader or textures cannot be made stays off (logged); the default shade still
+  runs. `tools/ao_options_check` checks that the default pass needs none of the options' shaders or textures.
 
 ## Limitations
 
@@ -107,18 +112,70 @@ step reads the pyramid bilinearly at the nearest level to its spacing minus 2 (p
 (far) at strength 0.5 to 0.8, blending between 20 and 40 m. XeGTAO falloff (full to 38.5% of the radius). Exact `acos`.
 Isolated pixels (leaf edges, thin rails) fade out. Off-screen samples count as sky.
 
-**Fewer directions when far** (`zoomSlices`). Every pixel reads the same 1/z (pyramid level 7, bilinear, at the screen
-centre) and picks the same count, so every 4x4 block keeps one direction set and the box still cancels the interleave (a
-per-pixel count broke it and looked blotchy; see [the profile notes](../history/ambient-occlusion.md)). Each count spreads
-its own angles, `(s + b1) pi / count`. Thresholds are 60 m and 120 m along the view axis, without hysteresis: a count
-change moves the image by about 0.1 of a level on average (offline check). Thresholds are not yet tuned in game.
+**Fewer directions when far** (`zoomSlices`). A 1x1 pass picks the frame's tier (0, 1 or 2) from the 1/z at the screen
+centre (pyramid level 7, bilinear). Every pixel reads that tier and picks the same count, so every 4x4 block keeps one
+direction set and the box still cancels the interleave (a per-pixel count broke it and looked blotchy; see
+[the profile notes](../history/ambient-occlusion.md)). Each count spreads its own angles, `(s + b1) pi / count`.
+Thresholds are 60 m and 120 m along the view axis; a count change moves the image by about 0.1 of a level on average
+(offline check). Thresholds are not yet tuned in game.
+
+**Steady direction count** (`zoomHysteresis`). The tier pass also reads the last frame's tier (two 1x1 targets, swapped
+each frame, no read-back): the view leaves a tier 10% past its threshold and returns 10% before it. Without it, a camera
+resting at a threshold can change the count from one frame to the next.
 
 **Smooth flat surfaces** (`blendNormals`). The normal is the sum of the four quadrant normals (left-up, up-right,
 right-down, down-left), each weighted by the product of its two edge weights, `saturate(1.25 - e / (0.011 z))` with the
 slope-adjusted depth step `e` (XeGTAO, Intel, MIT). On a plane all four are parallel, so the result is the plane.
 
-Both options compile as separate GtaoPS variants; their 4-step march is a loop instead of unrolled, to stay within ps_3_0's
-512 instruction slots (default 505, options 348 to 369). With both off the AO pass is the same bytecode as before.
+**Fewer directions in the open** (`blockSlices`). A pass at a quarter of the width and height gives each 4x4
+block of pixels (the blocks of the Bayer interleave) a tier, so a count never changes inside a block and each block
+keeps one direction set. A block keeps the full count where the depth bends within reach: 1/z is linear across the
+screen on a plane, so its second difference over one texel either side is 0 on an open surface. The pass takes it at
+pyramid levels 2 to 8 (texels of 4 to 256 px, up to the large radius on screen) and compares the largest with 0.05%
+of the block's 1/z. Sky and off-screen neighbours bend nothing; a level whose taps would leave the screen is skipped.
+A second pass gives each block the lowest tier of its 3x3 blocks, so the count changes one block away from anything
+that bends, and never below the frame's tier. Open blocks use half the count (ASSAO's importance map decides a sample
+count the same way, from a low-resolution map that is then spread). Each count spreads its own angles. Offline check
+(High, 1080p): 67 to 78% of the blocks at half the count, the image within 0.01 of a level of the default on average,
+contact shade 100.0%, and the shade step across block edges where the count changes equal to the default image's.
+Objects thinner than about a seventh of their distance to a block (in pixels) can be missed at the coarse levels;
+the block then gets the lower Quality's noise, not a different shade. The threshold is not yet tuned in game.
+
+**Edge-aware smoothing** (`edgeBlur`). The option variants of GtaoPS also write two soft edge weights per pixel, towards
+the right and the lower neighbour: `saturate(1.25 - e / (0.011 z))` with the slope-adjusted depth step `e` (XeGTAO's
+`XeGTAO_CalculateEdges`, Intel, MIT). An edge has one weight, read from its left or upper pixel, so both sides agree
+(XeGTAO packs four weights per pixel and multiplies the two sides). The blur keeps the 4x4 box support
+(0.5 1 1 1 0.5 across, then down), which the interleave needs, and weighs each tap by the product of the edge weights
+on the way to it. The tent passes are dropped: two blur passes instead of four. Offline check (High, 1080p): 0.14 to
+0.19 of a level from the default on average, open-floor roughness 0.007 to 0.008 against 0.005 to 0.006 (no interleave
+left), contact shade 100 to 104% of the default, and the shade step at silhouettes 10 to 14% larger.
+
+**Refine while the camera is still** (`temporalStill`, Quality Low). Temporal smoothing was removed in 2.11.1 because
+it breathed and trailed ([history](../history/ambient-occlusion.md)). This option accumulates only while the camera is
+still, so a moving camera always shows the plain deterministic pass:
+
+- The camera counts as still while no point of the view moves more than 0.25 px from the last frame (5 screen points
+  at 2 and 200 m through `last view-projection x inverse(this one)`). The first still frame is the fixed pattern and
+  starts the history. Any movement empties it.
+- Each later frame shifts the slice angle and the step offset by a golden-ratio step and renders the AO as usual. A
+  full-screen pass then blends it with the history, before the blur: a plain average of the first 16 frames, then 1/16
+  per frame.
+- The history is read by reprojecting the pixel with the camera alone, from its 1/z (the game gives no motion vectors).
+  It is dropped where its 1/z is more than 2% from the pixel's (something moved there) or it lies off screen.
+- The history is clamped to this frame's AO before the blur in the 3x3 pixels around. A shade whose object left is cut
+  in one frame; the removed version clamped to an already averaged range and followed the noise.
+
+Offline check (Low, 1080p, 40 m, 32 still frames): 0.08 of a level from Ultra on average against 0.15 for plain Low; a
+removed counter leaves 0.00 levels of its shade after one frame; between two late frames the image changes by 0.015 of
+a level on average, 0.05% of the pixels by more than 1 level and one pixel by up to 9 levels (thin outlines, where the
+clamp moves with the directions). Plain Low does not change at all, so this flicker is the cost to judge in game.
+Unverified in game: whether the camera matrix is bit-stable at rest, moving Sims and leaves, and reprojection under a
+slow drift (the offline check holds the camera exactly still).
+
+The option variants compile separately from the default pass (bit 0: reads the frame's tier, used by every option
+that needs the looped pass; bit 1: Smooth flat surfaces). Their 4-step march is a loop instead of unrolled, to stay
+within ps_3_0's 512 instruction slots (default 505 to 507, options 350 to 367). With every option off the AO pass is
+the same bytecode as before.
 
 **Composite.** `v = 1 - saturate((1 - ao - 0.05) / 0.95)`, then per channel
 `m = MultiBounce(v, min(0.9, colour^2.2))` (Jimenez 2016), then `m = lerp(m, 1, saturate((luma - 0.35) * 2.5) * keep)`.

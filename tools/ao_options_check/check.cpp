@@ -7,6 +7,12 @@
 //  - Fewer directions when far: up close the image equals the default pass; at mid and far views the difference stays
 //    small and the flat floor stays as smooth as with the default (the 4x4 interleave is still cancelled);
 //  - Smooth flat surfaces: stray shade on surfaces where nothing meets (counter top, open floor), contact shade kept;
+//  - Steady direction count: the count does not switch while the view alternates around a threshold, and still
+//    switches past the band;
+//  - Fewer directions in the open: the share of 4x4 blocks at half the count, the contact shade kept, and the shade
+//    step across block edges where the count changes against the same pixels of the default image (blotches raise it);
+//  - Refine while the camera is still (Quality Low): over a run of still frames, the change from one frame to the next
+//    (flicker), the distance to Ultra, and how much of a shade is left one and four frames after its object is gone;
 //  - GPU time of the AO pass at 3840 x 2160 for each variant (timestamp queries).
 #define NOMINMAX
 #include <windows.h>
@@ -44,8 +50,9 @@ constexpr int kVariants = 4; // bit 0 = zoom, bit 1 = blended normals
 constexpr int kLevels = 9;
 constexpr float kNear = 0.25f, kA = 1.00008f, kTanY = 1.0f / 4.293f;
 
-std::string g_source;
-float g_zoomMid = 0, g_zoomFar = 0;
+std::string g_source, g_cpp;
+float g_zoomMid = 0, g_zoomFar = 0, g_zoomHysteresis = 0, g_blockBend = 0, g_accumDepth = 0;
+int g_accumFrames = 0;
 
 std::string Slurp(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
@@ -60,15 +67,42 @@ bool LoadSource(const char* exe) {
     path = path.substr(0, path.find_last_of("\\/") + 1);
     std::string cpp = Slurp(path + "../../patches/ambient_occlusion_patch.cpp");
     if (cpp.empty()) cpp = Slurp("patches/ambient_occlusion_patch.cpp");
-    const size_t a = cpp.find("R\"HLSL("), b = cpp.find(")HLSL\"");
-    if (a == std::string::npos || b == std::string::npos) return false;
-    g_source = cpp.substr(a + 7, b - a - 7);
+    g_cpp = cpp;
+    std::erase(g_cpp, char(13)); // (CRLF checkouts)
+    for (size_t a = 0, b = 0; (a = cpp.find("R\"HLSL(", b)) != std::string::npos && (b = cpp.find(")HLSL\"", a)) != std::string::npos;)
+        g_source += cpp.substr(a + 7, b - a - 7); // the source is several literals in a row
+    if (g_source.empty()) return false;
     g_zoomMid = ConstantOf(cpp, "kZoomMid =");
     g_zoomFar = ConstantOf(cpp, "kZoomFar =");
-    return g_zoomMid > 0 && g_zoomFar > g_zoomMid;
+    g_zoomHysteresis = ConstantOf(cpp, "kZoomHysteresis =");
+    g_blockBend = ConstantOf(cpp, "kBlockBend =");
+    g_accumDepth = ConstantOf(cpp, "kAccumDepth =");
+    g_accumFrames = int(ConstantOf(cpp, "kAccumFrames ="));
+    return g_zoomMid > 0 && g_zoomFar > g_zoomMid && g_zoomHysteresis > 0 && g_blockBend > 0 && g_accumDepth > 0 && g_accumFrames > 0;
 }
 
-std::vector<DWORD> Compile(const char* entry, int q, int v, std::string* err = nullptr) {
+// The default pass does not depend on the options (review 105-1): EnsureShaders makes no option shader, and InitResources
+// stops on a failure of the default pass's own targets only; the options' targets and shaders only turn their option off
+std::string Between(const std::string& s, const std::string& from, const std::string& to) {
+    const size_t a = s.find(from), b = a == std::string::npos ? a : s.find(to, a + from.size());
+    return b == std::string::npos ? std::string() : s.substr(a, b - a);
+}
+bool DefaultPassIndependent(const std::string& cpp, std::string* why) {
+    const std::string ensure = Between(cpp, "bool EnsureShaders(", "\n}\n");
+    const std::string init = Between(cpp, "bool InitResources(", "\n}\n");
+    if (ensure.empty() || init.empty()) return *why = "EnsureShaders or InitResources not found", false;
+    for (const char* opt : {"psZoomTier", "psBlurEdges", "psBlockTier", "psBlockSpread", "psAccum"})
+        if (ensure.find(opt) != std::string::npos) return *why = std::string("EnsureShaders needs ") + opt, false;
+    // every option resource is created after the last 'return false' of InitResources
+    const size_t lastFail = init.rfind("return false;");
+    for (const char* res : {"&g.tier[i]", "&g.block[i]", "&g.hist[i]", "g.psZoomTier", "g.psBlurEdges", "g.psBlockTier", "g.psAccum"}) {
+        const size_t at = init.find(res);
+        if (at != std::string::npos && at < lastFail) return *why = std::string(res) + " made before the default pass's last failure exit", false;
+    }
+    return true;
+}
+
+std::vector<DWORD> Compile(const char* entry, int q, int v, std::string* err = nullptr, const char* define = nullptr) {
     const int s = q >= 0 ? kQualitySlices[q] : 8; // q < 0: a pass without slices
     const std::string sl = std::to_string(s), sMid = std::to_string(std::max(2, s * 3 / 4)), sFar = std::to_string(std::max(2, s / 2));
     std::vector<D3D_SHADER_MACRO> m;
@@ -79,6 +113,7 @@ std::vector<DWORD> Compile(const char* entry, int q, int v, std::string* err = n
         m.push_back({"SLICES_FAR", sFar.c_str()});
     }
     if (v & 2) m.push_back({"BLEND_NORMALS", "1"});
+    if (define) m.push_back({define, "1"});
     m.push_back({nullptr, nullptr});
     ID3DBlob *code = nullptr, *log = nullptr;
     const HRESULT hr = D3DCompile(g_source.data(), g_source.size(), "ambient_occlusion.hlsl", m.data(), nullptr, entry, "ps_3_0",
@@ -136,8 +171,8 @@ struct Frame {
     std::vector<unsigned char> cls; // Surface per screen pixel
 };
 
-// camera looking at the counter from `dist` metres, 35 degrees down
-Frame Render(int W, int H, float dist) {
+// camera looking at the counter from `dist` metres, 35 degrees down (`counter` false: the same view without the counter)
+Frame Render(int W, int H, float dist, bool counter = true) {
     Frame f;
     f.W = W, f.H = H;
     f.padW = (W + 255) / 256 * 256, f.padH = (H + 255) / 256 * 256;
@@ -157,7 +192,7 @@ Frame Render(int W, int H, float dist) {
             int hit = -1;
             for (int i = 0; i < int(std::size(kBoxes)); i++) {
                 float tb;
-                if (HitBox(kBoxes[i], eye, d, tb) && tb < t) t = tb, hit = i;
+                if ((counter || i != 1) && HitBox(kBoxes[i], eye, d, tb) && tb < t) t = tb, hit = i;
             }
             const float tf = d[1] < 0 ? -eye[1] / d[1] : 1e9f; // floor y = 0
             bool floor = tf < t;
@@ -176,6 +211,7 @@ Frame Render(int W, int H, float dist) {
                 // distance on the floor to the nearest box footprint
                 float dmin = 1e9f;
                 for (const Box& b : kBoxes) {
+                    if (!counter && &b == &kBoxes[1]) continue;
                     const float dx = std::max({b.x0 - p[0], 0.0f, p[0] - b.x1}), dz = std::max({b.z0 - p[2], 0.0f, p[2] - b.z1});
                     dmin = std::min(dmin, std::sqrt(dx * dx + dz * dz));
                 }
@@ -187,6 +223,18 @@ Frame Render(int W, int H, float dist) {
             f.w[size_t(y) * f.padW + x] = float(std::max(kA - dev, 1e-7) / (kNear * kA));
             f.cls[size_t(y) * W + x] = static_cast<unsigned char>(s);
         }
+    return f;
+}
+
+// a wall facing the camera at `z` metres (the 1/z at the screen centre is exact at every pyramid level)
+Frame Flat(int W, int H, float z) {
+    Frame f;
+    f.W = W, f.H = H;
+    f.padW = (W + 255) / 256 * 256, f.padH = (H + 255) / 256 * 256;
+    f.tanX = kTanY * W / H;
+    f.w.assign(size_t(f.padW) * f.padH, 0.0f);
+    f.cls.assign(size_t(W) * H, Other);
+    for (int y = 0; y < H; y++) std::fill_n(&f.w[size_t(y) * f.padW], W, 1.0f / z);
     return f;
 }
 
@@ -243,10 +291,10 @@ struct Gpu {
         dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
         dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
         dev->SetRenderState(D3DRS_LIGHTING, FALSE);
-        for (DWORD s = 0; s < 4; s++) { // as SetPassStates
-            const bool march = s == 2;
-            dev->SetSamplerState(s, D3DSAMP_MINFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
-            dev->SetSamplerState(s, D3DSAMP_MAGFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+        for (DWORD s = 0; s < 9; s++) { // as SetPassStates
+            const bool march = s == 2, linear = march || s == 8;
+            dev->SetSamplerState(s, D3DSAMP_MINFILTER, linear ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+            dev->SetSamplerState(s, D3DSAMP_MAGFILTER, linear ? D3DTEXF_LINEAR : D3DTEXF_POINT);
             dev->SetSamplerState(s, D3DSAMP_MIPFILTER, march ? D3DTEXF_POINT : D3DTEXF_NONE);
             dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
             dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
@@ -265,40 +313,103 @@ float Half(unsigned short h) {
     return s ? -v : v;
 }
 
-// One frame of the scene on the GPU: the pyramid, GtaoPS, the four blur passes; the AO (R) read back
+// The options of one frame, as RunAo reads them from the settings
+struct Opt {
+    bool zoom = true;        // Fewer directions when far (a tiered GtaoPS variant without it stays at tier 0)
+    bool hysteresis = false; // Steady direction count
+    bool edges = false;      // Edge-aware smoothing (the scene's targets need 4 channels)
+    bool block = false;      // Fewer directions in the open
+    bool still = false;      // Refine while the camera is still, and the camera has not moved since the last frame
+};
+struct Passes {
+    IDirect3DPixelShader9 *blur = nullptr, *blurEdges = nullptr, *zoomTier = nullptr, *blockTier = nullptr, *blockSpread = nullptr, *accum = nullptr;
+    bool Ok() const { return blur && blurEdges && zoomTier && blockTier && blockSpread && accum; }
+};
+
+// One frame of the scene on the GPU: the pyramid, GtaoPS, the blur passes; the AO (R) read back. What RunAo keeps from
+// frame to frame (the direction-count tier) lives here too: Load swaps the depth under it.
 struct Scene {
     Gpu& gpu;
-    const Frame& f;
-    IDirect3DTexture9 *z = nullptr, *a = nullptr, *b = nullptr;
-    IDirect3DSurface9 *as = nullptr, *bs = nullptr, *read = nullptr;
-    IDirect3DPixelShader9* blur = nullptr;
-    Scene(Gpu& g, const Frame& frame, IDirect3DPixelShader9* blurPs) : gpu(g), f(frame), blur(blurPs) {
-        auto* dev = gpu.dev;
+    Frame f;
+    Passes ps;
+    bool wide; // AO targets with 4 channels (Edge-aware smoothing)
+    IDirect3DTexture9 *z = nullptr, *a = nullptr, *b = nullptr, *tier[2] = {}, *block[2] = {};
+    IDirect3DSurface9 *as = nullptr, *bs = nullptr, *read = nullptr, *tierSurf[2] = {}, *tierRead = nullptr, *blockSurf[2] = {}, *blockRead = nullptr;
+    int tierNow = 0, blockW = 0, blockH = 0;
+    IDirect3DTexture9* hist[2] = {}; // Refine while the camera is still: the accumulated AO before the blur
+    IDirect3DSurface9* histSurf[2] = {};
+    int histNow = 0, stillFrames = 0;
+    bool fromHist = false; // the blur reads the history
+    // another frame of the same size
+    void Load(const Frame& frame) {
+        f = frame;
         const auto lv = Pyramid(f);
-        if (SUCCEEDED(dev->CreateTexture(f.padW, f.padH, kLevels, 0, D3DFMT_R32F, D3DPOOL_MANAGED, &z, nullptr)))
-            for (int i = 0; i < kLevels; i++) {
-                D3DLOCKED_RECT r{};
-                if (FAILED(z->LockRect(i, &r, nullptr, 0))) continue;
-                const int w = f.padW >> i, h = f.padH >> i;
-                for (int y = 0; y < h; y++) std::memcpy(static_cast<char*>(r.pBits) + size_t(y) * r.Pitch, &lv[i][size_t(y) * w], size_t(w) * 4);
-                z->UnlockRect(i);
-            }
-        dev->CreateTexture(f.W, f.H, 1, D3DUSAGE_RENDERTARGET, D3DFMT_G16R16F, D3DPOOL_DEFAULT, &a, nullptr);
-        dev->CreateTexture(f.W, f.H, 1, D3DUSAGE_RENDERTARGET, D3DFMT_G16R16F, D3DPOOL_DEFAULT, &b, nullptr);
+        for (int i = 0; z && i < kLevels; i++) {
+            D3DLOCKED_RECT r{};
+            if (FAILED(z->LockRect(i, &r, nullptr, 0))) continue;
+            const int w = f.padW >> i, h = f.padH >> i;
+            for (int y = 0; y < h; y++) std::memcpy(static_cast<char*>(r.pBits) + size_t(y) * r.Pitch, &lv[i][size_t(y) * w], size_t(w) * 4);
+            z->UnlockRect(i);
+        }
+    }
+    Scene(Gpu& g, const Frame& frame, const Passes& passes, bool wideTargets = false) : gpu(g), ps(passes), wide(wideTargets) {
+        auto* dev = gpu.dev;
+        dev->CreateTexture(frame.padW, frame.padH, kLevels, 0, D3DFMT_R32F, D3DPOOL_MANAGED, &z, nullptr);
+        Load(frame);
+        for (int i = 0; i < 2; i++) {
+            dev->CreateTexture(1, 1, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &tier[i], nullptr);
+            if (tier[i]) tier[i]->GetSurfaceLevel(0, &tierSurf[i]);
+            if (tierSurf[i]) dev->ColorFill(tierSurf[i], nullptr, 0);
+        }
+        blockW = (f.W + 3) / 4, blockH = (f.H + 3) / 4;
+        for (int i = 0; i < 2; i++) {
+            dev->CreateTexture(blockW, blockH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &block[i], nullptr);
+            if (block[i]) block[i]->GetSurfaceLevel(0, &blockSurf[i]);
+        }
+        dev->CreateOffscreenPlainSurface(blockW, blockH, D3DFMT_R32F, D3DPOOL_SYSTEMMEM, &blockRead, nullptr);
+        dev->CreateOffscreenPlainSurface(1, 1, D3DFMT_R32F, D3DPOOL_SYSTEMMEM, &tierRead, nullptr);
+        const D3DFORMAT fmt = wide ? D3DFMT_A16B16G16R16F : D3DFMT_G16R16F;
+        dev->CreateTexture(f.W, f.H, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &a, nullptr);
+        dev->CreateTexture(f.W, f.H, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &b, nullptr);
         if (a) a->GetSurfaceLevel(0, &as);
         if (b) b->GetSurfaceLevel(0, &bs);
-        dev->CreateOffscreenPlainSurface(f.W, f.H, D3DFMT_G16R16F, D3DPOOL_SYSTEMMEM, &read, nullptr);
+        dev->CreateOffscreenPlainSurface(f.W, f.H, fmt, D3DPOOL_SYSTEMMEM, &read, nullptr);
+        for (int i = 0; i < 2; i++) {
+            dev->CreateTexture(f.W, f.H, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &hist[i], nullptr);
+            if (hist[i]) hist[i]->GetSurfaceLevel(0, &histSurf[i]);
+        }
     }
     ~Scene() {
         Release(read), Release(as), Release(bs), Release(a), Release(b), Release(z);
+        for (int i = 0; i < 2; i++) Release(tierSurf[i]), Release(tier[i]), Release(blockSurf[i]), Release(block[i]), Release(histSurf[i]), Release(hist[i]);
+        Release(tierRead), Release(blockRead);
     }
-    bool Ok() const { return z && as && bs && read; }
+    bool Ok() const { return z && as && bs && read && tierSurf[0] && tierSurf[1] && tierRead && blockSurf[0] && blockSurf[1] && blockRead && histSurf[0] && histSurf[1] && ps.Ok(); }
+    // the tier of every 4x4 block (blockW x blockH), as the last AO pass with `block` read it
+    std::vector<float> Blocks() {
+        std::vector<float> out;
+        D3DLOCKED_RECT r{};
+        if (FAILED(gpu.dev->GetRenderTargetData(blockSurf[1], blockRead)) || FAILED(blockRead->LockRect(&r, nullptr, D3DLOCK_READONLY))) return out;
+        out.resize(size_t(blockW) * blockH);
+        for (int y = 0; y < blockH; y++) std::memcpy(&out[size_t(y) * blockW], static_cast<const char*>(r.pBits) + size_t(y) * r.Pitch, size_t(blockW) * 4);
+        blockRead->UnlockRect();
+        return out;
+    }
+    // the frame's direction-count tier (0, 1, 2), as the last AO pass read it
+    float Tier() {
+        D3DLOCKED_RECT r{};
+        if (FAILED(gpu.dev->GetRenderTargetData(tierSurf[tierNow], tierRead)) || FAILED(tierRead->LockRect(&r, nullptr, D3DLOCK_READONLY))) return -1;
+        const float t = *static_cast<const float*>(r.pBits);
+        tierRead->UnlockRect();
+        return t;
+    }
     // the constants of RunAo (default settings: Reach 165.8%, Strength 158.2%, Distance 752 m, High's rotation is per variant)
-    void Constants(int slices) {
+    void Constants(int slices, const Opt& o) {
         const float W = float(f.W), H = float(f.H), tanX = f.tanX, tanY = f.tanY;
         const float reach = 1.658f, s = 1.5822f, distance = 752.35f, fadeStart = distance * (150.0f / 400.0f);
         const float pi = 3.14159265f;
-        const float c[14][4] = {
+        const int n = stillFrames % 1024; // (0 unless the camera is still)
+        const float c[19][4] = {
             {tanX, tanY, H / (2.0f * tanY), 0.30f * H},
             {W, H, float(f.padW), float(f.padH)},
             {2.0f * H / 2160.0f, 2.0f, 1.3f * 1.3f, 1.0f / (distance - fadeStart)},
@@ -312,34 +423,84 @@ struct Scene {
             {kA, 1.0f / (kNear * kA), 0, 0},
             {0, 0, 0, 0},
             {0, 0, 0, 0},
-            {W * 0.5f / f.padW, H * 0.5f / f.padH, 1.0f / g_zoomMid, 1.0f / g_zoomFar}};
-        gpu.dev->SetPixelShaderConstantF(0, &c[0][0], 14);
+            {W * 0.5f / f.padW, H * 0.5f / f.padH, o.zoom ? 1.0f / g_zoomMid : 0.0f, o.zoom ? 1.0f / g_zoomFar : 0.0f},
+            {o.block ? 0.25f / blockW : 0.0f, o.block ? 0.25f / blockH : 0.0f, o.hysteresis ? 1.0f / (1.0f + g_zoomHysteresis) : 1.0f, o.hysteresis ? 1.0f / (1.0f - g_zoomHysteresis) : 1.0f},
+            {std::fmod(n * 0.618034f, 1.0f), std::fmod(n * 0.754878f, 1.0f), 1.0f - 1.0f / std::min(stillFrames + 1, g_accumFrames), g_accumDepth},
+            {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 1}}; // the camera has not moved: the last frame's clip position is this frame's
+        gpu.dev->SetPixelShaderConstantF(0, &c[0][0], 19);
     }
-    void Ao(IDirect3DPixelShader9* gtao, int slices) {
+    // the tier pass and the AO pass, as RunAo's step 3 (`tiered`: a GtaoPS variant that reads the tier)
+    void Ao(IDirect3DPixelShader9* gtao, int slices, bool tiered, const Opt& o = {}) {
         auto* dev = gpu.dev;
         gpu.States();
-        Constants(slices);
-        dev->SetRenderTarget(0, as);
-        dev->SetTexture(1, z);
+        if (!o.still) stillFrames = 0;
+        const int inHistory = stillFrames;
+        Constants(slices, o);
         dev->SetTexture(2, z);
+        if (tiered) {
+            tierNow ^= 1;
+            dev->SetRenderTarget(0, tierSurf[tierNow]);
+            dev->SetTexture(7, tier[tierNow ^ 1]);
+            dev->SetPixelShader(ps.zoomTier);
+            gpu.Quad(1, 1);
+            dev->SetTexture(7, tier[tierNow]);
+            if (o.block) {
+                const float find[4] = {4.0f * blockW, 4.0f * blockH, g_blockBend, 0}, spread[4] = {1.0f / blockW, 1.0f / blockH, 0, 0};
+                dev->SetPixelShaderConstantF(6, find, 1);
+                dev->SetRenderTarget(0, blockSurf[0]);
+                dev->SetPixelShader(ps.blockTier);
+                gpu.Quad(blockW, blockH);
+                dev->SetPixelShaderConstantF(6, spread, 1);
+                dev->SetRenderTarget(0, blockSurf[1]);
+                dev->SetTexture(3, block[0]);
+                dev->SetPixelShader(ps.blockSpread);
+                gpu.Quad(blockW, blockH);
+                dev->SetTexture(3, nullptr);
+                dev->SetTexture(7, block[1]);
+            }
+        }
+        if (o.still) histNow ^= 1;
+        dev->SetRenderTarget(0, o.still && !inHistory ? histSurf[histNow] : as);
+        dev->SetTexture(1, z);
         dev->SetPixelShader(gtao);
         gpu.Quad(f.W, f.H);
+        dev->SetTexture(7, nullptr);
+        if (o.still && inHistory) {
+            const float texel[4] = {1.0f / f.W, 1.0f / f.H, 0, 0};
+            dev->SetPixelShaderConstantF(6, texel, 1);
+            dev->SetRenderTarget(0, histSurf[histNow]);
+            dev->SetTexture(3, a);
+            dev->SetTexture(8, hist[histNow ^ 1]);
+            dev->SetPixelShader(ps.accum);
+            gpu.Quad(f.W, f.H);
+            dev->SetTexture(8, nullptr);
+        }
+        if (o.still) stillFrames = inHistory + 1;
+        fromHist = o.still;
     }
-    std::vector<float> Run(IDirect3DPixelShader9* gtao, int slices) {
+    // every pass up to the blurred AO in `a`, as RunAo's steps 3 and 4
+    void Chain(IDirect3DPixelShader9* gtao, int slices, bool tiered, const Opt& o = {}) {
+        Ao(gtao, slices, tiered, o);
+        Blur(o);
+    }
+    void Blur(const Opt& o) {
+        auto* dev = gpu.dev;
+        dev->SetPixelShader(o.edges ? ps.blurEdges : ps.blur);
+        for (int pass = 0; pass < (o.edges ? 2 : 4); pass++) {
+            const float dir[4] = {pass & 1 ? 0.0f : 1.0f / f.W, pass & 1 ? 1.0f / f.H : 0.0f, o.edges ? float(~pass & 1) : pass < 2 ? 0.0f : 1.0f, float(pass & 1)};
+            dev->SetPixelShaderConstantF(6, dir, 1);
+            dev->SetRenderTarget(0, pass & 1 ? as : bs);
+            dev->SetTexture(3, pass & 1 ? b : pass == 0 && fromHist ? hist[histNow] : a);
+            gpu.Quad(f.W, f.H);
+        }
+        dev->SetTexture(3, nullptr);
+    }
+    std::vector<float> Run(IDirect3DPixelShader9* gtao, int slices, bool tiered, const Opt& o = {}) {
         auto* dev = gpu.dev;
         std::vector<float> out;
         if (FAILED(dev->BeginScene())) return out;
-        Ao(gtao, slices);
-        dev->SetPixelShader(blur);
-        for (int pass = 0; pass < 4; pass++) {
-            const float dir[4] = {pass & 1 ? 0.0f : 1.0f / f.W, pass & 1 ? 1.0f / f.H : 0.0f, pass < 2 ? 0.0f : 1.0f, 0};
-            dev->SetPixelShaderConstantF(6, dir, 1);
-            dev->SetRenderTarget(0, pass & 1 ? as : bs);
-            dev->SetTexture(3, pass & 1 ? b : a);
-            gpu.Quad(f.W, f.H);
-        }
+        Chain(gtao, slices, tiered, o);
         dev->EndScene();
-        dev->SetTexture(3, nullptr);
         IDirect3DSurface9* back = nullptr;
         dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &back);
         dev->SetRenderTarget(0, back);
@@ -349,13 +510,13 @@ struct Scene {
         out.resize(size_t(f.W) * f.H);
         for (int y = 0; y < f.H; y++) {
             const auto* row = reinterpret_cast<const unsigned short*>(static_cast<const char*>(r.pBits) + size_t(y) * r.Pitch);
-            for (int x = 0; x < f.W; x++) out[size_t(y) * f.W + x] = Half(row[2 * x]);
+            for (int x = 0; x < f.W; x++) out[size_t(y) * f.W + x] = Half(row[(wide ? 4 : 2) * x]);
         }
         read->UnlockRect();
         return out;
     }
-    // GPU time of the AO pass alone (ms, median of `n` frames)
-    double TimeAo(IDirect3DPixelShader9* gtao, int slices, int n) {
+    // GPU time of `draw` (ms, median of `n` frames)
+    template <class Draw> double Time(Draw draw, int n) {
         auto* dev = gpu.dev;
         IDirect3DQuery9 *dis = nullptr, *t0 = nullptr, *t1 = nullptr, *fq = nullptr;
         dev->CreateQuery(D3DQUERYTYPE_TIMESTAMPDISJOINT, &dis);
@@ -367,7 +528,7 @@ struct Scene {
             dev->BeginScene();
             dis->Issue(D3DISSUE_BEGIN);
             t0->Issue(D3DISSUE_END);
-            Ao(gtao, slices);
+            draw();
             t1->Issue(D3DISSUE_END);
             fq->Issue(D3DISSUE_END);
             dis->Issue(D3DISSUE_END);
@@ -387,15 +548,20 @@ struct Scene {
     }
 };
 
-struct Stats { double mean = 0, max = 0; long n = 0; };
+double Median(std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    return v.empty() ? -1 : v[v.size() / 2];
+}
+
+struct Stats { double mean = 0, max = 0, over1 = 0; long n = 0; }; // over1: the share of pixels more than 1 level apart
 Stats Diff(const std::vector<float>& a, const std::vector<float>& b, const Frame& f) {
     Stats s;
     for (size_t i = 0; i < a.size(); i++) {
         if (f.cls[i] == Sky) continue;
         const double d = std::fabs(double(a[i]) - b[i]) * 255.0;
-        s.mean += d, s.max = std::max(s.max, d), s.n++;
+        s.mean += d, s.max = std::max(s.max, d), s.over1 += d > 1.0, s.n++;
     }
-    if (s.n) s.mean /= s.n;
+    if (s.n) s.mean /= s.n, s.over1 /= s.n;
     return s;
 }
 // mean shade (levels of 255) on one surface class, and the share of its pixels shaded by more than one level
@@ -408,6 +574,12 @@ void Shade(const std::vector<float>& ao, const Frame& f, Surface c, double& mean
         }
     if (n) mean /= n, over1 /= n;
 }
+double MeanShade(const std::vector<float>& ao, const Frame& f, Surface c) {
+    double mean, over1;
+    long n;
+    Shade(ao, f, c, mean, over1, n);
+    return mean;
+}
 // mean |difference| between horizontal neighbours on the open floor (levels): blotches or a left-over interleave raise it
 double Roughness(const std::vector<float>& ao, const Frame& f) {
     double sum = 0;
@@ -419,21 +591,68 @@ double Roughness(const std::vector<float>& ao, const Frame& f) {
         }
     return n ? sum / n : 0;
 }
+// Mean |difference| of the shade between a floor pixel and a neighbour on another surface nearer to the camera by more
+// than 0.5% (levels): the outlines of the counter and the boxes against the floor behind them. A blur that carries shade
+// across a silhouette lowers it.
+double SilhouetteStep(const std::vector<float>& ao, const Frame& f) {
+    double sum = 0;
+    long n = 0;
+    for (int y = 0; y + 1 < f.H; y++)
+        for (int x = 0; x + 1 < f.W; x++) {
+            const size_t i = size_t(y) * f.W + x;
+            for (size_t j : {i + 1, i + size_t(f.W)}) {
+                const bool fi = f.cls[i] == OpenFloor || f.cls[i] == NearFloor, fj = f.cls[j] == OpenFloor || f.cls[j] == NearFloor;
+                if (fi == fj || f.cls[fi ? j : i] != Other) continue;
+                const float wFloor = f.w[(fi ? i : j) / f.W * f.padW + (fi ? i : j) % f.W], wOther = f.w[(fi ? j : i) / f.W * f.padW + (fi ? j : i) % f.W];
+                if (wOther > wFloor * 1.005f) sum += std::fabs(double(ao[i]) - ao[j]) * 255.0, n++;
+            }
+        }
+    return n ? sum / n : 0;
+}
+// Block edges where the direction count changes: the mean |difference| of the shade between the two pixels either side
+// (levels), in `ao` and in the default image `ref`. Blotches at block edges raise the first over the second.
+void BlockEdges(const std::vector<float>& ao, const std::vector<float>& ref, const std::vector<float>& tiers, const Frame& f, int bw, int bh,
+                double& step, double& refStep, long& n) {
+    step = refStep = 0, n = 0;
+    for (int by = 0; by < bh; by++)
+        for (int bx = 0; bx < bw; bx++)
+            for (int down = 0; down < 2; down++) {
+                const int nx = bx + !down, ny = by + down;
+                if (nx >= bw || ny >= bh || tiers[size_t(by) * bw + bx] == tiers[size_t(ny) * bw + nx]) continue;
+                for (int k = 0; k < 4; k++) {
+                    const int x0 = down ? 4 * bx + k : 4 * bx + 3, y0 = down ? 4 * by + 3 : 4 * by + k, x1 = x0 + !down, y1 = y0 + down;
+                    if (x1 >= f.W || y1 >= f.H) continue;
+                    const size_t i = size_t(y0) * f.W + x0, j = size_t(y1) * f.W + x1;
+                    step += std::fabs(double(ao[i]) - ao[j]) * 255.0, refStep += std::fabs(double(ref[i]) - ref[j]) * 255.0, n++;
+                }
+            }
+    if (n) step /= n, refStep /= n;
+}
 
 } // namespace
 
-int main(int, char** argv) {
+int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0); // a run cut short still shows what it printed
     if (!LoadSource(argv[0])) {
         std::printf("FAIL: patches/ambient_occlusion_patch.cpp not found or its HLSL / kZoomMid / kZoomFar not read\n");
         return 1;
     }
     std::printf("Slices by zoom: 3/4 from %.0f m, 1/2 from %.0f m\n", g_zoomMid, g_zoomFar);
+    {
+        std::string why;
+        const bool independent = DefaultPassIndependent(g_cpp, &why);
+        Check(independent, "the default pass needs no option shader or target " + why);
+        const std::string bad = "bool EnsureShaders(IDirect3DDevice9* dev) {\n    g.psAccum = 0;\n}\nbool InitResources(IDirect3DDevice9* dev) {\n    return false;\n}\n";
+        Check(!DefaultPassIndependent(bad, &why), "the independence check fails a pass that needs an option shader");
+        const std::string late = "bool EnsureShaders(IDirect3DDevice9* dev) {\n}\nbool InitResources(IDirect3DDevice9* dev) {\n    &g.hist[i];\n    return false;\n}\n";
+        Check(!DefaultPassIndependent(late, &why), "the independence check fails an option target made before a failure exit");
+    }
     Gpu gpu;
     Check(gpu.dev != nullptr, "native D3D9 HAL device");
 
     // 1. Every variant compiles within ps_3_0's 512 instruction slots and native D3D9 accepts it; the default pass is the
     //    shipped one (no option macro changes it)
-    std::printf("GtaoPS instruction slots (default / zoom / smooth / both):\n");
+    std::printf("GtaoPS instruction slots (default / tiered / smooth / both):\n");
     std::vector<DWORD> code[kVariants][kQualityCount];
     for (int q = 0; q < kQualityCount; q++) {
         std::printf("  %-8s (%2d slices):", kQualityNames[q], kQualitySlices[q]);
@@ -452,6 +671,19 @@ int main(int, char** argv) {
         }
         std::printf("\n");
     }
+    // the other passes of the options
+    struct Other { const char* entry; const char* define; };
+    const Other kOther[] = {{"BlurPS", nullptr}, {"BlurPS", "EDGES"}, {"ZoomTierPS", nullptr}, {"BlockTierPS", nullptr}, {"BlockSpreadPS", nullptr}, {"AccumPS", nullptr}};
+    std::vector<DWORD> otherCode[std::size(kOther)];
+    std::printf("Other passes, instruction slots:");
+    for (size_t i = 0; i < std::size(kOther); i++) {
+        std::string err;
+        otherCode[i] = Compile(kOther[i].entry, -1, 0, &err, kOther[i].define);
+        const int slots = otherCode[i].empty() ? -1 : Slots(otherCode[i]);
+        std::printf(" %s%s%s %d", kOther[i].entry, kOther[i].define ? " " : "", kOther[i].define ? kOther[i].define : "", slots);
+        Check(slots > 0 && slots <= 512, std::string("compiles within 512 slots: ") + kOther[i].entry + " " + err);
+    }
+    std::printf("\n");
     if (!gpu.dev) {
         std::printf("%d checks, %d failed\n", g_checks, g_failures);
         return g_failures ? 1 : 0;
@@ -459,21 +691,27 @@ int main(int, char** argv) {
 
     // 2. Images: High, 1920 x 1080, views at 40, 80 and 150 m (the counter at the screen centre)
     const int q = 2, slices = kQualitySlices[q];
-    std::string err;
-    IDirect3DPixelShader9* blur = gpu.Ps(Compile("BlurPS", -1, 0, &err));
+    Passes passes;
+    passes.blur = gpu.Ps(otherCode[0]), passes.blurEdges = gpu.Ps(otherCode[1]), passes.zoomTier = gpu.Ps(otherCode[2]);
+    passes.blockTier = gpu.Ps(otherCode[3]), passes.blockSpread = gpu.Ps(otherCode[4]), passes.accum = gpu.Ps(otherCode[5]);
     IDirect3DPixelShader9* ps[kVariants] = {};
     for (int v = 0; v < kVariants; v++) ps[v] = gpu.Ps(code[v][q]);
-    Check(blur && ps[0] && ps[1] && ps[2] && ps[3], "passes created");
+    Check(passes.Ok() && ps[0] && ps[1] && ps[2] && ps[3], "passes created");
+    Opt edgeOpt;
+    edgeOpt.zoom = false, edgeOpt.edges = true;
+    Opt blockOpt;
+    blockOpt.zoom = false, blockOpt.block = true;
     const float views[] = {40.0f, 80.0f, 150.0f};
     std::printf("High, 1920x1080, blurred AO in levels of 255:\n");
     for (float dist : views) {
         const Frame f = Render(1920, 1080, dist);
-        Scene sc(gpu, f, blur);
-        Check(sc.Ok(), "scene resources");
-        if (!sc.Ok()) continue;
+        Scene sc(gpu, f, passes), wide(gpu, f, passes, true);
+        Check(sc.Ok() && wide.Ok(), "scene resources");
+        if (!sc.Ok() || !wide.Ok()) continue;
+        const std::string at = " at " + std::to_string(int(dist)) + " m";
         std::vector<float> img[kVariants];
-        for (int v = 0; v < kVariants; v++) img[v] = sc.Run(ps[v], slices);
-        const std::vector<float> again = sc.Run(ps[1], slices);
+        for (int v = 0; v < kVariants; v++) img[v] = sc.Run(ps[v], slices, v & 1);
+        const std::vector<float> again = sc.Run(ps[1], slices, true);
         Check(again == img[1], "zoom variant deterministic");
         const Stats z = Diff(img[0], img[1], f), n = Diff(img[0], img[2], f);
         const double r0 = Roughness(img[0], f), r1 = Roughness(img[1], f);
@@ -487,33 +725,179 @@ int main(int, char** argv) {
             if (n0 < 50) continue;
             std::printf("         %-11s (%7ld px): shade mean %.3f -> %.3f, pixels > 1 level %.2f%% -> %.2f%% (smooth flat surfaces)\n",
                         kNames[c], n0, m0, m2, 100 * o0, 100 * o2);
-            if (c == Contact) Check(m2 > 0.75 * m0, "Smooth flat surfaces keeps the contact shade at " + std::to_string(int(dist)) + " m");
-            else Check(m2 <= m0 + 0.05, "Smooth flat surfaces adds no stray shade on flat surfaces at " + std::to_string(int(dist)) + " m");
+            if (c == Contact) Check(m2 > 0.75 * m0, "Smooth flat surfaces keeps the contact shade" + at);
+            else Check(m2 <= m0 + 0.05, "Smooth flat surfaces adds no stray shade on flat surfaces" + at);
         }
         std::printf("         smooth vs default mean %.3f max %.2f\n", n.mean, n.max);
         if (dist < g_zoomMid) Check(z.max <= 1.0, "zoom equals the default pass up close (max <= 1 level)");
         else {
-            Check(z.mean <= 1.0, "zoom differs from the default by at most 1 level on average at " + std::to_string(int(dist)) + " m");
-            Check(r1 <= 1.1 * r0 + 0.02, "zoom keeps the open floor as smooth as the default (interleave cancelled) at " + std::to_string(int(dist)) + " m");
+            Check(z.mean <= 1.0, "zoom differs from the default by at most 1 level on average" + at);
+            Check(r1 <= 1.1 * r0 + 0.02, "zoom keeps the open floor as smooth as the default (interleave cancelled)" + at);
+        }
+        // Edge-aware smoothing: the looped pass at tier 0, 4-channel targets, two box passes
+        const std::vector<float> edge = wide.Run(ps[1], slices, true, edgeOpt);
+        const Stats e = Diff(img[0], edge, f);
+        const double re = Roughness(edge, f), c0 = MeanShade(img[0], f, Contact), ce = MeanShade(edge, f, Contact);
+        const double b0 = SilhouetteStep(img[0], f), be = SilhouetteStep(edge, f);
+        std::printf("         edge-aware smoothing vs default: mean %.3f max %.2f; floor roughness %.3f -> %.3f; contact shade kept %.1f%%; shade step at silhouettes %.2f -> %.2f\n",
+                    e.mean, e.max, r0, re, c0 > 0 ? 100 * ce / c0 : 0.0, b0, be);
+        Check(ce > 0.9 * c0, "Edge-aware smoothing keeps the contact shade" + at);
+        Check(be >= b0 - 0.05, "Edge-aware smoothing carries no more shade across silhouettes" + at);
+        Check(re <= r0 + 0.25, "Edge-aware smoothing leaves no interleave pattern on the open floor (within 0.25 of a level)" + at);
+        // Fewer directions in the open: a tier per 4x4 block
+        const std::vector<float> blk = sc.Run(ps[1], slices, true, blockOpt), tiers = sc.Blocks();
+        Check(!tiers.empty(), "block tiers read back");
+        if (!tiers.empty()) {
+            const Stats d = Diff(img[0], blk, f);
+            const double half = double(std::count(tiers.begin(), tiers.end(), 2.0f)) / tiers.size(), rb = Roughness(blk, f), cb = MeanShade(blk, f, Contact);
+            double step, refStep;
+            long pairs;
+            BlockEdges(blk, img[0], tiers, f, sc.blockW, sc.blockH, step, refStep, pairs);
+            std::printf("         fewer directions in the open vs default: mean %.3f max %.2f; %.1f%% of the blocks at half the count; floor roughness %.3f -> %.3f; contact shade kept %.1f%%; shade step at %ld count-change block edges %.3f (default image %.3f)\n",
+                        d.mean, d.max, 100 * half, r0, rb, c0 > 0 ? 100 * cb / c0 : 0.0, pairs, step, refStep);
+            Check(half > 0.2, "open surfaces: at least a fifth of the blocks at half the count" + at);
+            Check(d.mean <= 1.0, "open surfaces: at most 1 level from the default on average" + at);
+            Check(cb > 0.95 * c0 && cb < 1.05 * c0, "open surfaces: contact shade within 5% of the default" + at);
+            Check(rb <= 1.1 * r0 + 0.02, "open surfaces: the open floor as smooth as the default" + at);
+            Check(step <= 1.1 * refStep + 0.05, "open surfaces: no blotches at block edges where the count changes" + at);
         }
     }
 
-    // 3. GPU time of the AO pass at 3840 x 2160: 12 rounds of the four variants in turn (clock drift hits all alike), each
-    //    round the median of 5 frames; the median round
+    // 3. Steady direction count: walls 2% either side of each threshold in turn, then well past the band and back
+    {
+        Scene sc(gpu, Flat(256, 256, 10.0f), passes);
+        Check(sc.Ok(), "tier scene resources");
+        for (int hysteresis = 0; sc.Ok() && hysteresis < 2; hysteresis++) {
+            Opt o;
+            o.hysteresis = hysteresis != 0;
+            auto tierAt = [&](float z) {
+                sc.Load(Flat(256, 256, z));
+                sc.Run(ps[1], slices, true, o);
+                return int(sc.Tier());
+            };
+            int switches = 0;
+            for (float th : {g_zoomMid, g_zoomFar}) {
+                int last = tierAt(th * 0.98f);
+                for (int i = 1; i < 8; i++) {
+                    const int t = tierAt(th * (i & 1 ? 1.02f : 0.98f));
+                    switches += t != last, last = t;
+                }
+            }
+            const int far2 = tierAt(g_zoomFar * 1.3f), mid1 = tierAt(g_zoomFar * 0.75f), near0 = tierAt(g_zoomMid * 0.7f);
+            std::printf("Direction count switches over 2 x 8 frames 2%% either side of a threshold, %s: %d\n",
+                        hysteresis ? "steady direction count" : "as before", switches);
+            if (hysteresis) Check(switches == 0, "steady direction count: no switch within the band");
+            else Check(switches == 14, "without it the count switches every frame");
+            Check(far2 == 2 && mid1 == 1 && near0 == 0, "the count still follows the view past the band");
+        }
+    }
+
+    // 4. Refine while the camera is still: Low (4 slices), 1920 x 1080, 40 m, the camera never moves
+    IDirect3DPixelShader9 *lowPs = gpu.Ps(code[1][0]), *lowDefault = gpu.Ps(code[0][0]), *ultraPs = gpu.Ps(code[0][3]);
+    Opt looped, stillOpt;
+    looped.zoom = false;
+    stillOpt.zoom = false, stillOpt.still = true;
+    Check(lowPs && lowDefault && ultraPs, "Low and Ultra passes created");
+    if (lowPs && lowDefault && ultraPs) {
+        const Frame fa = Render(1920, 1080, 40.0f), fb = Render(1920, 1080, 40.0f, false);
+        Scene sc(gpu, fa, passes);
+        Check(sc.Ok(), "still-camera scene resources");
+        if (sc.Ok()) {
+            const int kFrames = 2 * g_accumFrames;
+            const std::vector<float> low = sc.Run(lowDefault, 4, false), ultra = sc.Run(ultraPs, 12, false);
+            // `frames` still frames from a camera that just stopped; the largest change between two of the later half
+            auto run = [&](int frames, Stats& flicker, std::vector<float>* first = nullptr) {
+                sc.Run(lowPs, 4, true, looped); // a frame while moving empties the history
+                std::vector<float> last, now;
+                flicker = {};
+                for (int k = 0; k < frames; k++) {
+                    now = sc.Run(lowPs, 4, true, stillOpt);
+                    if (k == 0 && first) *first = now;
+                    if (k >= frames / 2) {
+                        const Stats d = Diff(last, now, sc.f);
+                        flicker.mean = std::max(flicker.mean, d.mean), flicker.max = std::max(flicker.max, d.max), flicker.over1 = std::max(flicker.over1, d.over1);
+                    }
+                    last.swap(now);
+                }
+                return last;
+            };
+            Stats flicker, unused;
+            std::vector<float> first;
+            const std::vector<float> a = run(kFrames, flicker, &first);
+            Check(first == sc.Run(lowPs, 4, true, looped), "the first still frame is the fixed pattern");
+            const double dLow = Diff(low, ultra, fa).mean, dStill = Diff(a, ultra, fa).mean;
+            std::printf("Refine while the camera is still, Low, 1920x1080, 40 m, %d still frames:\n", kFrames);
+            std::printf("  from Ultra on average: Low %.3f, refined %.3f levels; open-floor roughness %.3f -> %.3f; contact shade %.1f%% of Low's\n", dLow, dStill,
+                        Roughness(low, fa), Roughness(a, fa), 100 * MeanShade(a, fa, Contact) / std::max(MeanShade(low, fa, Contact), 1e-9));
+            std::printf("  flicker (largest change between two of the last %d frames; plain Low: none): mean %.4f levels, %.4f%% of the pixels by more than 1 level, one pixel %.2f levels\n",
+                        kFrames / 2, flicker.mean, 100 * flicker.over1, flicker.max);
+            Check(dStill < dLow, "refined Low is nearer to Ultra than Low");
+            Check(flicker.mean <= 0.05 && flicker.over1 <= 0.001, "flicker: at most 0.05 of a level on average and 0.1% of the pixels by more than 1 level between frames");
+            // the counter disappears between two frames: what is left of its shade 1 and 4 frames later
+            sc.Load(fb);
+            const std::vector<float> after1 = sc.Run(lowPs, 4, true, stillOpt);
+            for (int k = 0; k < 2; k++) sc.Run(lowPs, 4, true, stillOpt);
+            const std::vector<float> after4 = sc.Run(lowPs, 4, true, stillOpt);
+            const std::vector<float> b = run(kFrames, unused);
+            double gone = 0, left1 = 0, left4 = 0;
+            long n = 0;
+            for (size_t i = 0; i < a.size(); i++)
+                if (fb.cls[i] != Sky && std::fabs(a[i] - b[i]) * 255.0 > 2.0)
+                    gone += std::fabs(a[i] - b[i]) * 255.0, left1 += std::fabs(after1[i] - b[i]) * 255.0, left4 += std::fabs(after4[i] - b[i]) * 255.0, n++;
+            if (n) gone /= n, left1 /= n, left4 /= n;
+            std::printf("  the counter removed between two frames (%ld pixels whose shade changes by more than 2 levels, mean %.2f): left after 1 frame %.2f, after 4 frames %.2f levels\n",
+                        n, gone, left1, left4);
+            Check(n > 1000, "the removed counter changes the shade");
+            Check(left1 <= 0.25 * gone && left4 <= 0.1 * gone, "no trail: at most 25% of a removed shade after 1 frame and 10% after 4");
+        }
+    }
+
+    if (argc > 1 && !std::strcmp(argv[1], "--no-timing")) {
+        std::printf("%d checks, %d failed (GPU time skipped)\n", g_checks, g_failures);
+        return g_failures ? 1 : 0;
+    }
+    // 5. GPU time at 3840 x 2160: 12 rounds of the arms in turn (clock drift hits all alike), each round the median of
+    //    5 frames; the median round
     std::printf("AO pass GPU time, High, 3840x2160 (ms):\n");
     for (float dist : views) {
         const Frame f = Render(3840, 2160, dist);
-        Scene sc(gpu, f, blur);
+        Scene sc(gpu, f, passes);
         if (!sc.Ok()) continue;
-        std::vector<double> t[kVariants];
-        for (int r = 0; r < 12; r++)
-            for (int v = 0; v < kVariants; v++) t[v].push_back(sc.TimeAo(ps[v], slices, 5));
-        double m[kVariants];
-        for (int v = 0; v < kVariants; v++) std::sort(t[v].begin(), t[v].end()), m[v] = t[v][t[v].size() / 2];
-        std::printf("  %3.0f m: default %.3f, zoom %.3f, smooth %.3f, both %.3f\n", dist, m[0], m[1], m[2], m[3]);
+        std::vector<double> t[kVariants + 1];
+        for (int r = 0; r < 12; r++) {
+            for (int v = 0; v < kVariants; v++) t[v].push_back(sc.Time([&] { sc.Ao(ps[v], slices, v & 1); }, 5));
+            t[kVariants].push_back(sc.Time([&] { sc.Ao(ps[1], slices, true, blockOpt); }, 5));
+        }
+        std::printf("  %3.0f m: default %.3f, zoom %.3f, smooth %.3f, both %.3f, open surfaces %.3f\n", dist, Median(t[0]), Median(t[1]), Median(t[2]), Median(t[3]),
+                    Median(t[kVariants]));
+    }
+    // the AO pass and its blur together (what an option that changes the blur or adds a pass costs or saves)
+    std::printf("AO and blur passes GPU time, High, 3840x2160, 40 m (ms):\n");
+    {
+        const Frame f = Render(3840, 2160, 40.0f);
+        Scene sc(gpu, f, passes), wide(gpu, f, passes, true);
+        if (sc.Ok() && wide.Ok()) {
+            std::vector<double> t[7];
+            for (int k = 0; k < 4; k++) sc.Run(lowPs, 4, true, stillOpt); // a history to join
+            for (int r = 0; r < 12; r++) {
+                if (lowPs && lowDefault) {
+                    t[6].push_back(sc.Time([&] { sc.Chain(lowPs, 4, true, stillOpt); }, 5));
+                    t[5].push_back(sc.Time([&] { sc.Chain(lowDefault, 4, false); }, 5));
+                }
+                t[3].push_back(sc.Time([&] { sc.Blur({}); }, 5));
+                t[4].push_back(wide.Time([&] { wide.Blur(edgeOpt); }, 5));
+                t[0].push_back(sc.Time([&] { sc.Chain(ps[0], slices, false); }, 5));
+                t[1].push_back(sc.Time([&] { sc.Chain(ps[1], slices, true, looped); }, 5));
+                t[2].push_back(wide.Time([&] { wide.Chain(ps[1], slices, true, edgeOpt); }, 5));
+            }
+            std::printf("  default %.3f, looped pass alone %.3f, edge-aware smoothing %.3f\n", Median(t[0]), Median(t[1]), Median(t[2]));
+            std::printf("  blur passes alone: default (box and tent) %.3f, edge-aware (box) %.3f\n", Median(t[3]), Median(t[4]));
+            std::printf("  Low %.3f, Low refining while the camera is still %.3f\n", Median(t[5]), Median(t[6]));
+        }
     }
     for (auto*& p : ps) Release(p);
-    Release(blur);
+    Release(lowPs), Release(lowDefault), Release(ultraPs);
+    Release(passes.blur), Release(passes.blurEdges), Release(passes.zoomTier), Release(passes.blockTier), Release(passes.blockSpread);
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }
