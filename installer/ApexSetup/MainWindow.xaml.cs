@@ -47,16 +47,17 @@ public sealed partial class MainWindow : Window
         // the log's context line: the game, its edition and version, the renderer and the loaders Setup found
         App.Context = () => _game is not { } cg ? "no game chosen"
             : $"game {cg.Root} ({cg.Label} {cg.Version}, {cg.Exe}); renderer {_state?.Layer.ToString() ?? "?"}; loaders {(Scan.Loaders(cg.Bin) is { Count: > 0 } ls ? string.Join(", ", ls) : "none")}";
-        _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer };
+        _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer,
+            ScreenHome, ScreenMods, ScreenWorlds, ScreenSaves, ScreenHealth, ScreenNews, ScreenSettings };
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
         void Size(double scale) => AppWindow.Resize(new SizeInt32((int)(980 * scale), (int)(680 * scale)));
         Size(GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0);
         ((FrameworkElement)Content).Loaded += (_, _) => Size(Content.XamlRoot.RasterizationScale); // the monitor's real scale
-        if (AppWindow.Presenter is OverlappedPresenter p) { p.IsResizable = false; p.IsMaximizable = false; }
+        if (AppWindow.Presenter is OverlappedPresenter p) { p.PreferredMinimumWidth = 900; p.PreferredMinimumHeight = 620; }
         var ico = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "apex.ico");
         if (File.Exists(ico)) AppWindow.SetIcon(ico);
-        SetupVersion.Text = "Setup " + Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
+        SetupVersion.Text = "Apex Launcher " + Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
 
         // the player's choice (the title bar's language button), else Windows' display language, as the mod's menu
         Lang = SavedChoice() ?? SystemLanguage(System.Globalization.CultureInfo.CurrentUICulture);
@@ -66,7 +67,7 @@ public sealed partial class MainWindow : Window
         // closing in the middle of an install or a removal would leave the game half changed
         AppWindow.Closing += (w, a) =>
         {
-            if (!_busy) return;
+            if (!_busy) { _tray?.Dispose(); return; }
             a.Cancel = true;
             _ = Message(T("Setup is applying changes"), T("Wait until it finishes before closing."));
         };
@@ -89,16 +90,23 @@ public sealed partial class MainWindow : Window
             _games.Insert(0, item);
         }
         // a game folder on the command line (or a shortcut) comes first
-        if (Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() is { } arg && Games.FromFolder(arg) is { } given
+        if (Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() is { } arg && !arg.StartsWith("--") && Games.FromFolder(arg) is { } given
             && !_games.Any(x => x.Game.Bin.Equals(given.Bin, StringComparison.OrdinalIgnoreCase)))
             _games.Insert(0, Item(given));
+        // the administrator window (--maintain): the game it was opened for
+        if (Elevation.Parse(Environment.GetCommandLineArgs()).Bin is { } mb && Games.FromFolder(mb) is { } mg)
+        {
+            _games.RemoveAll(x => x.Game.Bin.Equals(mg.Bin, StringComparison.OrdinalIgnoreCase));
+            _games.Insert(0, Item(mg));
+        }
         GameList.ItemsSource = _games;
         if (_games.Count > 0) GameList.SelectedIndex = 0;
         NoGames.Visibility = _games.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         _running = Games.IsRunning();
         _timer.Start();
         Localize();
-        Show(Welcome);
+        RefreshGame();
+        Show(Maintenance ? MaintenanceScreen(Elevation.Parse(Environment.GetCommandLineArgs()).Screen) : FirstInstall ? Welcome : Home);
         _ = DetectVulkanAsync();
         await LoadReleasesAsync();
         await CheckSetupUpdateAsync();
@@ -249,6 +257,9 @@ public sealed partial class MainWindow : Window
 
     void Show(int step)
     {
+        // Components and Repair or remove on a protected game folder: opened in the administrator window, before any choice
+        // is made there (choices made here would not carry over)
+        if (step is ComponentsStep or RendererStep or Manage && NeedsAdminWindow) { _ = CanChangeHere(step == Manage ? "manage" : "components"); return; }
         _step = step;
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
         Animate(_screens[step]);
@@ -261,7 +272,7 @@ public sealed partial class MainWindow : Window
     void SyncNav()
     {
         _syncNav = true;
-        var tag = (_step == RendererStep ? ComponentsStep : _step).ToString();
+        var tag = (_step == RendererStep ? ComponentsStep : _step is Welcome or Manage or About or GameStep ? (_step == Welcome ? Home : SettingsScreen) : _step).ToString();
         Nav.SelectedItem = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().FirstOrDefault(n => (string)n.Tag == tag);
         _syncNav = false;
     }
@@ -286,7 +297,7 @@ public sealed partial class MainWindow : Window
         if (_syncNav || args.SelectedItem is not NavigationViewItem item) return;
         var to = int.Parse((string)item.Tag);
         // steps open in order; Install and Done only through the buttons; nothing moves while Setup works
-        bool ok = !_busy && (to is Welcome or About || to == GameStep || (to == ComponentsStep && CanLeaveGame()) || to == Manage);
+        bool ok = !_busy && (to is Welcome or About or >= Home || to == GameStep || (to == ComponentsStep && CanLeaveGame()) || to == Manage);
         if (!ok) { DispatcherQueue.TryEnqueue(SyncNav); return; }
         _backTo = -1;
         Show(to == Manage && _game is null ? GameStep : to);
@@ -301,7 +312,7 @@ public sealed partial class MainWindow : Window
     void OnBack(object sender, RoutedEventArgs e)
     {
         if (_step == RendererStep) { Show(ComponentsStep); return; }
-        var to = _backTo >= 0 ? _backTo : Math.Max(Welcome, _step - 1);
+        var to = _backTo >= 0 ? _backTo : _step == GameStep && !FirstInstall ? SettingsScreen : Math.Max(Welcome, _step - 1);
         _backTo = -1;
         Show(to);
     }
@@ -327,7 +338,7 @@ public sealed partial class MainWindow : Window
                 else if (SettingChanges().Count > 0) await InstallAsync(add, del, settingsOnly: true);
                 break;
             }
-            case DoneStep: Close(); break;
+            case DoneStep: if (Maintenance) Close(); else Show(FirstInstall ? Welcome : Home); break;
         }
     }
 
@@ -543,6 +554,7 @@ public sealed partial class MainWindow : Window
         RefreshComponents();
         RefreshManage();
         RefreshAbout();
+        RefreshLauncher();
         UpdateFooter();
     }
 
@@ -735,6 +747,12 @@ public sealed partial class MainWindow : Window
         _state = _game is null ? null : Scan.Run(_game);
         // once per scan: Compat walks Mods and reads every Bin .asi, and the status and footer read it again
         _found = _state is null ? new() : Compat.Check(_game!, _state);
+        _health = _state is null ? [] : Verify.Files(_game!, _state, _latest.GetValueOrDefault(Releases.Apex)).Concat(_found)
+            .Select(f => new Health.Item(f, Health.AreaOf(f), [])).ToList();
+        if (_modsLoaded && _game is { } mg)
+            try { _health.AddRange(ModChecks.Run(_mods, mg, Docs).Select(m => new Health.Item(m.Finding, HealthArea.Mods, m.Files))); } catch (Exception e) { App.Log(e); }
+        _healthState = Health.StateOf(_health);
+        _checked = DateTime.Now;
         GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;
         FillProblems();
     }
@@ -1389,6 +1407,7 @@ public sealed partial class MainWindow : Window
     {
         if (_game is not { } g || _busy || _running) return;
         if (Preview is not null) { await Message(T("Preview"), T("This is a preview: nothing was installed.")); return; }
+        if (!await CanChangeHere(inline ? "welcome" : "components", drivers: !inline && SettingChanges(remove).Any(c => c.Kind is "nv" or "amd"))) return;
         var from = _step == InstallStep ? ComponentsStep : _step;
         // busy before the checks: a second click (or the Performance Patch watcher) during them starts nothing
         _busy = true;
@@ -1711,6 +1730,7 @@ public sealed partial class MainWindow : Window
     async Task<bool> Guarded(Action work, string done, InfoBar? bar = null, string? label = null, bool keepChoices = false, params string[] args)
     {
         if (_busy || _running || _game is not { } g) return false;
+        if (!await CanChangeHere(_step is HealthScreen or Home ? "health" : "manage")) return false;
         bar ??= ManageInfo;
         _busy = true;
         RefreshAll();

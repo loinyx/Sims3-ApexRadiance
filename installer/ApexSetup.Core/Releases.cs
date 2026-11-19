@@ -14,7 +14,7 @@ public sealed class SetupException(string key, params string[] args) : InvalidOp
     public string Key { get; } = key;
     public string[] Args { get; } = args;
 }
-public sealed record Release(string Repo, string Tag, IReadOnlyList<Asset> Assets)
+public sealed record Release(string Repo, string Tag, IReadOnlyList<Asset> Assets, string? Body = null)
 {
     public string Version => Tag.TrimStart('v', 'V');
     public Asset Find(Func<string, bool> match) =>
@@ -24,6 +24,9 @@ public sealed record Release(string Repo, string Tag, IReadOnlyList<Asset> Asset
 // Every download comes from the latest release of the project's own GitHub repository.
 public static class Releases
 {
+    // the release notes (Markdown), for What's new
+    static string? Body(JsonElement r) => r.TryGetProperty("body", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : null;
+
     public const string Apex = "loinyx/Sims3-ApexRadiance";
     public const string S3ss = "sims3fiend/Sims3SettingsSetter";
     public const string Modernization = "rodneypantonial/sims3-modernization";
@@ -115,7 +118,7 @@ public static class Releases
                 a.GetProperty("name").GetString()!,
                 a.GetProperty("browser_download_url").GetString()!,
                 a.TryGetProperty("digest", out var d) && d.GetString() is { } s && s.StartsWith("sha256:") ? s[7..] : null,
-                a.TryGetProperty("size", out var z) ? z.GetInt64() : 0)).ToList()))
+                a.TryGetProperty("size", out var z) ? z.GetInt64() : 0)).ToList(), Body(r)))
             .ToList();
     }
 
@@ -173,7 +176,7 @@ public static class Releases
             a.GetProperty("browser_download_url").GetString()!,
             a.TryGetProperty("digest", out var d) && d.GetString() is { } s && s.StartsWith("sha256:") ? s[7..] : null,
             a.TryGetProperty("size", out var z) ? z.GetInt64() : 0)).ToList();
-        return new Release(repo, root.GetProperty("tag_name").GetString()!, assets);
+        return new Release(repo, root.GetProperty("tag_name").GetString()!, assets, Body(root));
     }
 
     // Downloads to a temp folder; checks GitHub's SHA-256 digest when the release has one.

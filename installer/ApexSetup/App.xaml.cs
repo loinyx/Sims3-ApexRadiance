@@ -66,11 +66,54 @@ public partial class App : Application
         return $"Apex Launcher {Version}\r\n{ctx}\r\n\r\n{tail}";
     }
 
+    Mutex? _single;
+    EventWaitHandle? _show;
+
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        if (Environment.ProcessPath is { } self) SelfUpdate.CleanUp(self); // (the exe a Setup update replaced)
+        var argv = Environment.GetCommandLineArgs().Skip(1).ToList();
+        var self = Environment.ProcessPath;
+        if (self is not null) SelfUpdate.CleanUp(self); // (the exe an update replaced)
         SelfUpdate.CleanTemp(); // (and the copy it was downloaded to)
-        _window = new MainWindow();
-        _window.Activate();
+        var (maintain, screen) = Elevation.Parse(argv);
+        // the administrator copy of an uninstall: no window, every game, then it closes
+        if (maintain == "*" && screen is "uninstall" or "uninstall-keep" && Elevation.IsElevated)
+        {
+            Environment.Exit(MainWindow.UninstallElevated(screen == "uninstall-keep"));
+            return;
+        }
+        var uninstall = argv.Contains(LauncherInstall.UninstallArg);
+        // (a test or a dry run never installs: APEX_LAUNCHER_PORTABLE=1 runs the exe where it is)
+        var portable = Environment.GetEnvironmentVariable(LauncherInstall.PortableVar) == "1" || Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1";
+        if (maintain is null && !uninstall && !portable && self is not null)
+        {
+            try
+            {
+                // started as administrator and not installed yet (the update an old Setup started): again as the player
+                if (Elevation.IsElevated && !LauncherInstall.IsInstalledCopy(self)) { if (Elevation.RestartAsPlayer(self)) { Exit(); return; } }
+                else if (LauncherInstall.CopyIn(self))
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Paths.InstalledExe, string.Join(" ", argv.Select(SelfUpdate.Quote))) { UseShellExecute = true });
+                    Exit();
+                    return;
+                }
+                else LauncherInstall.Register(self, Version, LauncherSettings.Load().DesktopShortcut);
+            }
+            catch (Exception e) { Log(e); } // (an install that fails leaves this copy running: the launcher still works from here)
+        }
+        // one launcher at a time: a second start brings the first one's window up
+        if (maintain is null && !uninstall)
+        {
+            _single = new Mutex(true, @"Local\ApexLauncher", out var first);
+            _show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ApexLauncher.Show");
+            if (!first) { _show.Set(); Exit(); return; }
+            var show = _show;
+            new Thread(() => { while (show.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => { _window.AppWindow.Show(); _window.Activate(); }); }) { IsBackground = true }.Start();
+        }
+        var w = new MainWindow();
+        _window = w;
+        if (argv.Contains(LauncherInstall.TrayArg)) w.StartInTray();
+        else w.Activate();
+        if (uninstall) w.UninstallWhenShown();
     }
 }

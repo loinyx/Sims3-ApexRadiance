@@ -3,12 +3,75 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:ApexSetup"
-    Title="Apex Radiance Setup">
+    Title="Apex Launcher">
     <Window.SystemBackdrop>
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
     <Grid x:Name="Root">
+        <Grid.Resources>
+            <!-- a mod's row in Mods (list view): on/off, name and folder, kind, size, what needs a look -->
+            <DataTemplate x:Key="ModRowTemplate" x:DataType="local:ModRow">
+                <Grid ColumnSpacing="14" Padding="4,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="80" />
+                        <ColumnDefinition Width="150" />
+                    </Grid.ColumnDefinitions>
+                    <Grid Width="44">
+                        <ToggleSwitch IsOn="{x:Bind IsOn, Mode=OneWay}" Visibility="{x:Bind ToggleVisible}" Toggled="{x:Bind OnToggled}"
+                                      OnContent="" OffContent="" MinWidth="0" AutomationProperties.Name="{x:Bind Name}" />
+                        <FontIcon Glyph="&#xE72E;" FontSize="14" Foreground="{StaticResource ApexMutedBrush}" Visibility="{x:Bind LockVisible}"
+                                  ToolTipService.ToolTip="{x:Bind LockTip}" HorizontalAlignment="Left" />
+                    </Grid>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                        <TextBlock Text="{x:Bind Name}" FontSize="13" Opacity="{x:Bind TextOpacity, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{x:Bind Folder}" Style="{StaticResource ApexMuted}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="{x:Bind Kind}" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="{x:Bind Size}" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="4" Text="{x:Bind Status, Mode=OneWay}" FontSize="12" Foreground="{x:Bind StatusBrush, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </Grid>
+            </DataTemplate>
+            <!-- a package in Mods (gallery view): its thumbnail, loaded when shown -->
+            <DataTemplate x:Key="ThumbTemplate" x:DataType="local:ThumbItem">
+                <StackPanel Width="132" Spacing="6" Padding="0,0,0,6">
+                    <Border Width="132" Height="132" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                        <Grid>
+                            <FontIcon Glyph="{x:Bind Glyph}" FontSize="26" Foreground="#4A4B55" Visibility="{x:Bind Placeholder, Mode=OneWay}" />
+                            <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="UniformToFill" />
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="{x:Bind Name}" FontSize="12" TextTrimming="CharacterEllipsis" Opacity="{x:Bind TextOpacity}" />
+                </StackPanel>
+            </DataTemplate>
+            <!-- a save in Saves: the household photo, its name, when it was played, and what to do with it -->
+            <DataTemplate x:Key="SaveTemplate" x:DataType="local:SaveCard">
+                <Border Width="214" Style="{StaticResource ApexCard}" Padding="0">
+                    <StackPanel>
+                        <Border Height="150" CornerRadius="8,8,0,0" Background="{StaticResource ApexPillBrush}">
+                            <Grid>
+                                <FontIcon Glyph="&#xE716;" FontSize="30" Foreground="#4A4B55" Visibility="{x:Bind Placeholder, Mode=OneWay}" />
+                                <Image Source="{x:Bind Photo, Mode=OneWay}" Stretch="UniformToFill" />
+                            </Grid>
+                        </Border>
+                        <StackPanel Padding="14,10,14,12" Spacing="4">
+                            <TextBlock Text="{x:Bind Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{x:Bind When}" Style="{StaticResource ApexMuted}" />
+                            <Grid Margin="0,6,0,0" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <HyperlinkButton Content="{x:Bind PlayText}" Click="{x:Bind OnPlay}" Padding="0" />
+                                <Button Grid.Column="1" Click="{x:Bind OnBackup}" Padding="8,4" AutomationProperties.Name="{x:Bind BackupText}" ToolTipService.ToolTip="{x:Bind BackupText}">
+                                    <FontIcon Glyph="&#xE896;" FontSize="13" />
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </DataTemplate>
+        </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="40" />
             <RowDefinition Height="*" />
@@ -24,7 +87,7 @@
             <Grid x:Name="DragArea" Background="Transparent">
                 <StackPanel Orientation="Horizontal" Spacing="10" Margin="14,0,0,0" VerticalAlignment="Center">
                     <Image Source="ms-appx:///Assets/apex_logo.png" Width="18" Height="18" />
-                    <TextBlock Text="Apex Radiance Setup" FontSize="12" Foreground="{StaticResource ApexSoftTextBrush}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="WindowTitle" Tag="dyn" Text="Apex Launcher" FontSize="12" Foreground="{StaticResource ApexSoftTextBrush}" VerticalAlignment="Center" />
                 </StackPanel>
             </Grid>
             <Button x:Name="LangButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Padding="10,4" Click="OnLanguage"
@@ -44,13 +107,18 @@
                 <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#1F2025" />
             </NavigationView.Resources>
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="Welcome" Tag="0"><NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="Game" Tag="1"><NavigationViewItem.Icon><FontIcon Glyph="&#xE7FC;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Home" Tag="8"><NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem x:Name="NavComponents" Content="Components" Tag="2"><NavigationViewItem.Icon><FontIcon Glyph="&#xE74C;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Mods" Tag="9"><NavigationViewItem.Icon><FontIcon Glyph="&#xF0E2;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Worlds" Tag="10"><NavigationViewItem.Icon><FontIcon Glyph="&#xE909;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Saves" Tag="11"><NavigationViewItem.Icon><FontIcon Glyph="&#xE74E;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem x:Name="NavHealth" Content="Health" Tag="12"><NavigationViewItem.Icon><FontIcon Glyph="&#xE95E;" /></NavigationViewItem.Icon>
+                    <NavigationViewItem.InfoBadge><InfoBadge x:Name="HealthBadge" Visibility="Collapsed" Background="{StaticResource ApexWarningBrush}" /></NavigationViewItem.InfoBadge>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>
-                <NavigationViewItem Content="Repair or remove" Tag="5"><NavigationViewItem.Icon><FontIcon Glyph="&#xE90F;" /></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="About and licences" Tag="6"><NavigationViewItem.Icon><FontIcon Glyph="&#xE946;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="What's new" Tag="13"><NavigationViewItem.Icon><FontIcon Glyph="&#xE789;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Settings" Tag="14"><NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon></NavigationViewItem>
             </NavigationView.FooterMenuItems>
             <NavigationView.PaneFooter>
                 <TextBlock x:Name="SetupVersion" Tag="dyn" Margin="16,4,0,12" Style="{StaticResource ApexMuted}" />
@@ -443,6 +511,54 @@
                             <TextBlock x:Name="BridgeDetail" Tag="dyn" Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
                             <TextBlock x:Name="RendererResetNote" Text="Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" Foreground="{StaticResource ApexWarningBrush}" />
                         </StackPanel>
+
+                        <!-- 8..14 the launcher's own screens, filled in code (MainWindow.Launcher.cs) -->
+                        <StackPanel x:Name="ScreenHome" Spacing="18" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenMods" Spacing="14" Visibility="Collapsed">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Mods" Style="{StaticResource ApexTitle}" />
+                                    <TextBlock x:Name="ModsSummary" Tag="dyn" Style="{StaticResource ApexMuted}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Button x:Name="ModsOpenFolder" Content="Open Mods folder" Click="OnModsOpenFolder" />
+                                    <SelectorBar x:Name="ModsView" SelectionChanged="OnModsView">
+                                        <SelectorBarItem x:Name="ModsViewList" Text="List" IsSelected="True" />
+                                        <SelectorBarItem x:Name="ModsViewGallery" Text="Gallery" />
+                                    </SelectorBar>
+                                </StackPanel>
+                            </Grid>
+                            <InfoBar x:Name="ModsInfo" IsClosable="True" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="220" /></Grid.ColumnDefinitions>
+                                <AutoSuggestBox x:Name="ModSearch" PlaceholderText="Search mods or folders" QueryIcon="Find" TextChanged="OnModSearch"
+                                                AutomationProperties.Name="Search mods or folders" />
+                                <ComboBox x:Name="ModFolder" Grid.Column="1" HorizontalAlignment="Stretch" SelectionChanged="OnModFilter" AutomationProperties.Name="Folder" />
+                            </Grid>
+                            <StackPanel x:Name="ModKinds" Tag="dyn" Orientation="Horizontal" Spacing="6" />
+                            <Border x:Name="ModListCard" Style="{StaticResource ApexCard}" Padding="8,4">
+                                <ListView x:Name="ModList" ItemTemplate="{StaticResource ModRowTemplate}" SelectionMode="None" MaxHeight="560" />
+                            </Border>
+                            <StackPanel x:Name="ModGallery" Tag="dyn" Spacing="18" Visibility="Collapsed" />
+                            <TextBlock x:Name="ModsNote" Tag="dyn" Style="{StaticResource ApexMuted}" />
+                        </StackPanel>
+                        <StackPanel x:Name="ScreenWorlds" Spacing="14" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenSaves" Spacing="14" Visibility="Collapsed">
+                            <Grid>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Saves" Style="{StaticResource ApexTitle}" />
+                                    <TextBlock Text="Each card shows the household photo stored in the save." Style="{StaticResource ApexMuted}" />
+                                </StackPanel>
+                                <Button x:Name="SavesBackupAll" Content="Back up all" HorizontalAlignment="Right" VerticalAlignment="Center" Click="OnBackupAll" />
+                            </Grid>
+                            <InfoBar x:Name="SavesInfo" IsClosable="True" />
+                            <GridView x:Name="SaveGrid" ItemTemplate="{StaticResource SaveTemplate}" SelectionMode="None" IsItemClickEnabled="False" />
+                            <TextBlock x:Name="SavesEmpty" Tag="dyn" Style="{StaticResource ApexMuted}" Visibility="Collapsed" />
+                        </StackPanel>
+                        <StackPanel x:Name="ScreenHealth" Spacing="22" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenNews" Spacing="16" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenSettings" Spacing="10" Visibility="Collapsed" />
 
                         <!-- 6 About -->
                         <StackPanel x:Name="ScreenAbout" Spacing="14" Visibility="Collapsed">
