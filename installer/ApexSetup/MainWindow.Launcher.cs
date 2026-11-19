@@ -824,6 +824,7 @@ public sealed partial class MainWindow
         host.Children.Add(Toggle(T("Install updates when I press Play"), T("Otherwise the launcher asks first."), _settings.InstallUpdatesOnPlay,
             on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
         host.Children.Add(Row(T("Apex Launcher {0}", App.Version), T("Updates itself from each Apex Radiance release."), null));
+        host.Children.Add(InstallModeRow());
         host.Children.Add(Section(T("General")));
         host.Children.Add(Row(T("Language"), Languages.First(l => l.Code == Lang).Name, Button(T("Change"), () => OnLanguage(LangButton, new RoutedEventArgs()))));
         host.Children.Add(Row(T("Game folder"), _game?.Root ?? T("No game chosen"), Id(Button(T("Change"), () => Show(GameStep)), "SettingsGame")));

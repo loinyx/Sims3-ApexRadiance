@@ -118,6 +118,7 @@ public sealed partial class MainWindow : Window
         _ = DetectVulkanAsync();
         await LoadReleasesAsync();
         if (AuditFile is not null && Environment.GetEnvironmentVariable("APEX_LAUNCHER_AUDIT_TOUR") == "1") _ = AuditTourAsync();
+        else await AskInstallModeAsync();
         // (the launcher's choices, applied as if Apply was clicked: the player already did, before Windows asked)
         if (Maintenance && TakeChoices()) OnNext(NextButton, new RoutedEventArgs());
         await CheckSetupUpdateAsync();
