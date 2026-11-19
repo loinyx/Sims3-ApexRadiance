@@ -6,10 +6,9 @@ public partial class App : Application
 {
     Window? _window;
 
-    // attach this file to a bug report: in the player's own %LOCALAPPDATA% even when Setup runs elevated as another administrator
-    public static readonly string LogDir = Path.Combine(
-        Scan.PlayerShellFolder("Local AppData") ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Apex Radiance Setup");
-    public static readonly string LogPath = Path.Combine(LogDir, "ApexRadianceSetup.log");
+    // attach this file to a bug report: in the player's own %LOCALAPPDATA% even when the helper runs elevated as another administrator
+    public static readonly string LogDir = Paths.Data;
+    public static readonly string LogPath = Path.Combine(LogDir, "ApexLauncher.log");
 
     // what Setup is working on (the game, its edition and version, the renderer, the loaders), written with every entry
     public static Func<string> Context = () => "";
@@ -17,6 +16,7 @@ public partial class App : Application
 
     public App()
     {
+        Paths.MigrateOldData(); // (before anything writes to the new folder)
         InitializeComponent();
         Engine.Log = Log;
         // logged and kept running: a UI error must not end Setup in the middle of an install. A WinUI error reaches here without
@@ -50,7 +50,7 @@ public partial class App : Application
         try
         {
             Directory.CreateDirectory(LogDir);
-            File.AppendAllText(LogPath, $"{DateTime.Now:s} Setup {Version} {ctx}\r\n{e}\r\n");
+            File.AppendAllText(LogPath, $"{DateTime.Now:s} Launcher {Version} {ctx}\r\n{e}\r\n");
         }
         catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
     }
@@ -63,7 +63,7 @@ public partial class App : Application
         catch (IOException) { tail = ""; }
         string ctx;
         try { ctx = Context(); } catch (Exception) { ctx = ""; }
-        return $"Apex Radiance Setup {Version}\r\n{ctx}\r\n\r\n{tail}";
+        return $"Apex Launcher {Version}\r\n{ctx}\r\n\r\n{tail}";
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

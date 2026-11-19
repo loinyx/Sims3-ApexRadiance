@@ -27,9 +27,9 @@ public static class Games
     };
 
     // The folders the player picked with Browse, and the game used last, so the next run (an Apex update) opens on it:
-    // %LOCALAPPDATA%\Apex Radiance Setup\games.txt, one Game\Bin per line, the last used first. A folder that no longer holds
+    // %LOCALAPPDATA%\Apex Launcher\games.txt, one Game\Bin per line, the last used first. A folder that no longer holds
     // the game is left out when read.
-    static string RememberedFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Apex Radiance Setup", "games.txt");
+    static string RememberedFile => Path.Combine(Paths.Data, "games.txt");
 
     public static List<Game> Remembered()
     {
