@@ -97,7 +97,7 @@ public static class Mods
         var under = Path.GetRelativePath("Mods", m.Rel);
         var target = Free(Path.Combine(on ? Path.Combine(docs, "Mods") : Disabled(docs), under));
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        File.Move(m.Path, target);
+        Fs.Retry(() => File.Move(m.Path, target)); // (an antivirus or OneDrive scan holds a file a moment)
         return target;
     }
 

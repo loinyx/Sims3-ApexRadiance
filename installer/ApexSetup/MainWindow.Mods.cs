@@ -23,7 +23,20 @@ public sealed partial class MainWindow
 
     string _modPlace = AllMods;
     List<ModRow> _modRows = [];
-    readonly ObservableCollection<ModRow> _modShown = [];
+    readonly RowCollection _modShown = [];
+
+    // the shown rows: Reset swaps them all with one change event (a list of thousands raised one per row before)
+    sealed class RowCollection : ObservableCollection<ModRow>
+    {
+        public void Reset(IEnumerable<ModRow> rows)
+        {
+            Items.Clear();
+            foreach (var row in rows) Items.Add(row);
+            OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(Count)));
+            OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs("Item[]"));
+            OnCollectionChanged(new System.Collections.Specialized.NotifyCollectionChangedEventArgs(System.Collections.Specialized.NotifyCollectionChangedAction.Reset));
+        }
+    }
     Dictionary<string, List<string>> _modFindings = new(StringComparer.OrdinalIgnoreCase); // by path: the findings' texts
     Func<string, bool>? _modLoadedBy;
     List<string> _modDirs = [];
@@ -201,7 +214,20 @@ public sealed partial class MainWindow
     // the shown list changed: remove and insert rows in place, so the list animates instead of being rebuilt
     void Sync(List<ModRow> shown)
     {
+        if (_modShown.SequenceEqual(shown)) return;
         var keep = shown.ToHashSet();
+        var had = _modShown.ToHashSet();
+        // a big change (a search over thousands of mods, a new sort order) is one reset, the selection put back; animating
+        // it would raise and animate an event per row
+        var changes = _modShown.Count(r => !keep.Contains(r)) + shown.Count(r => !had.Contains(r));
+        if (changes > 200 || shown.Count > 200 && !_modShown.Where(keep.Contains).SequenceEqual(shown.Where(had.Contains)))
+        {
+            var picked = Picked().Where(keep.Contains).ToList();
+            _modShown.Reset(shown);
+            var list = _modsGrid ? (ListViewBase)ModGrid : ModList;
+            foreach (var row in picked) list.SelectedItems.Add(row);
+            return;
+        }
         for (int i = _modShown.Count - 1; i >= 0; i--) if (!keep.Contains(_modShown[i])) _modShown.RemoveAt(i);
         for (int i = 0; i < shown.Count; i++)
         {
@@ -285,12 +311,16 @@ public sealed partial class MainWindow
         var dirs = _modDirs.Concat(_mods.Where(m => m.FileType == "package").Select(DirOf).Where(d => d.Length > 0))
             .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
         int N(string place) => _modRows.Count(r => InPlace(r, place));
+        // each package counted in its folder and every folder above, in one pass (a count per folder walked every mod)
+        var perDir = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in _mods.Where(m => m.FileType == "package"))
+            for (var d = DirOf(m); d.Length > 0; d = Path.GetDirectoryName(d) ?? "") perDir[d] = perDir.GetValueOrDefault(d) + 1;
         var groups = new List<(string Key, string Label, string? Add, List<Place> Items)>
         {
             ("library", T("LIBRARY"), null, new List<Place> { new(AllMods, T("All mods"), "layers", N(AllMods)) }
                 .Concat(new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)), new(NewMods, T("New since last play"), "sparkles", N(NewMods)), new(DefaultMods, T("Default replacements"), "replace", N(DefaultMods)), new(LookMods, T("Needs a look"), "triangle-alert", N(LookMods), Warn: true),
                     new(DupMods, T("Duplicates"), "copy", N(DupMods)), new(OffMods, T("Turned off"), "power-off", N(OffMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace)).ToList()),
-            ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", _mods.Count(m => InDir(m, d)), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
+            ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", perDir.GetValueOrDefault(d), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
             ("tags", T("TAGS"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
         };
         if (!groups.SelectMany(g => g.Items).Any(p => p.Key.Equals(_modPlace, StringComparison.OrdinalIgnoreCase))) _modPlace = AllMods;
@@ -655,13 +685,41 @@ public sealed partial class MainWindow
         }
     }
 
-    void SetMods(List<ModRow> rows, bool on)
+    async void SetMods(List<ModRow> rows, bool on)
     {
-        var changed = new List<ModRow>();
-        foreach (var r in rows.Where(r => !r.File.Locked && r.File.Enabled != on))
-            if (ToggleMod(r, on) is { } moved) { r.Update(moved); changed.Add(r); }
+        var todo = rows.Where(r => !r.File.Locked && r.File.Enabled != on).ToList();
         _dragRows = null;
-        if (changed.Count > 1) ModsResult(on ? T("{0} mods turned on", changed.Count) : T("{0} mods turned off", changed.Count), () => SetMods(changed, !on));
+        if (todo.Count <= 1)
+        {
+            foreach (var r in todo) if (ToggleMod(r, on) is { } one) r.Update(one);
+            return;
+        }
+        // many at once: the moves off the UI thread, then the rows and the list once (a refresh per mod froze it for minutes)
+        var docs = Docs;
+        var done = await Task.Run(() =>
+        {
+            var list = new List<(ModRow Row, string? Path, Exception? Error)>();
+            foreach (var r in todo)
+                try { list.Add((r, Mods.SetEnabled(r.File, on, docs), null)); }
+                catch (Exception e) { list.Add((r, null, e)); if (e is SetupException or InvalidOperationException) break; } // (game running, dry run: so would every other)
+            return list;
+        });
+        var at = _mods.Select((m, i) => (m.Path, i)).ToDictionary(x => x.Path, x => x.i, StringComparer.OrdinalIgnoreCase);
+        var changed = new List<ModRow>();
+        Exception? error = null;
+        foreach (var (r, path, e) in done)
+        {
+            if (path is null) { App.Log(e!); error ??= e; continue; }
+            var moved = r.File with { Path = path, Enabled = on };
+            if (at.TryGetValue(r.File.Path, out var i)) _mods[i] = moved;
+            if (_modFindings.Remove(r.File.Path, out var f)) _modFindings[moved.Path] = f;
+            r.Update(moved);
+            changed.Add(r);
+        }
+        _folderSig = "";
+        FillMods();
+        if (error is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), ErrorText(error));
+        else if (changed.Count > 1) ModsResult(on ? T("{0} mods turned on", changed.Count) : T("{0} mods turned off", changed.Count), () => SetMods(changed, !on));
     }
 
     async void OnModsAdd(object sender, RoutedEventArgs e)
@@ -687,7 +745,21 @@ public sealed partial class MainWindow
         await InstallFilesAsync(items.Select(i => i.Path).Where(p => p is { Length: > 0 }).ToList());
     }
 
-    void OnModSearch(object sender, TextChangedEventArgs e) { if (_modsLoaded && !_fillingMods) FillMods(); }
+    // the list follows the search once typing pauses (each keystroke refiltered every mod before)
+    Microsoft.UI.Dispatching.DispatcherQueueTimer? _searchTimer;
+    void OnModSearch(object sender, TextChangedEventArgs e)
+    {
+        if (!_modsLoaded || _fillingMods) return;
+        if (_searchTimer is null)
+        {
+            _searchTimer = DispatcherQueue.CreateTimer();
+            _searchTimer.Interval = TimeSpan.FromMilliseconds(200);
+            _searchTimer.IsRepeating = false;
+            _searchTimer.Tick += (_, _) => FillMods();
+        }
+        _searchTimer.Stop();
+        _searchTimer.Start();
+    }
 
     // Backspace in an empty search takes away the last filter chip
     void OnModSearchKey(object sender, KeyRoutedEventArgs e)
