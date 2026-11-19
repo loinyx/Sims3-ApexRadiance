@@ -7,4 +7,5 @@ namespace ApexSetup;
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(Manifest))]
 [JsonSerializable(typeof(RestorePoint))]
+[JsonSerializable(typeof(LauncherSettings))]
 public partial class SetupJson : JsonSerializerContext;

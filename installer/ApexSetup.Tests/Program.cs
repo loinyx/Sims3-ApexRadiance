@@ -1258,8 +1258,208 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         && pBack.Entries[1].Dir && pBack.FileCount == 1, "restore points written by older Setups read back");
 }
 
+// Apex Launcher: packages and saves read, mods switched off and on, packs and worlds found, the launcher's own install
+// and uninstall, the play session's end, Health's state
+{
+    var lr = Path.Combine(Path.GetTempPath(), "ApexLauncherTest-" + Guid.NewGuid().ToString("N")[..8]);
+    try
+    {
+        // RefPack: three literals, then a copy that repeats them (overlapping), then the end
+        var packed = new byte[] { 0x10, 0xFB, 0, 0, 12, 0x1B, 0x02, (byte)'a', (byte)'b', (byte)'c', 0xFC };
+        Check(System.Text.Encoding.ASCII.GetString(RefPack.Decode(packed)) == "abcabcabcabc", "RefPack: literals and an overlapping copy decode");
+        var bad = false;
+        try { RefPack.Decode(new byte[] { 0x10, 0xFB, 0, 0, 4, 0x1B, 0x7F, 1, 2, 3 }); } catch (InvalidDataException) { bad = true; }
+        Check(bad, "RefPack: a copy from before the start is refused, not read out of bounds");
+
+        var nhd = Path.Combine(lr, "Docs", "Saves", "Sunset.sims3", "Sunset.nhd");
+        TestPackage(nhd, (0x12345678u, "raw!"u8.ToArray(), false, 4), (Saves.PhotoType, packed, true, 12));
+        var idx = Dbpf.Index(nhd);
+        Check(idx.Count == 2 && idx[1].Compressed && !idx[0].Compressed, "a package's index lists both resources and which one is compressed");
+        Check(Dbpf.First(nhd, [Saves.PhotoType]) is { } photo && System.Text.Encoding.ASCII.GetString(photo) == "abcabcabcabc"
+            && Dbpf.Read(nhd, idx[0]) is { } raw && raw.Length == 4, "a resource reads back, decompressed when it is");
+        File.WriteAllText(Path.Combine(lr, "not.package"), "nothing");
+        Check(Dbpf.Index(Path.Combine(lr, "not.package")).Count == 0, "a file that is no package gives an empty index");
+
+        // saves: the newest file decides, .backup does not count
+        var ldocs = Path.Combine(lr, "Docs");
+        var older = Path.Combine(ldocs, "Saves", "Riverview.sims3");
+        Directory.CreateDirectory(older);
+        File.WriteAllText(Path.Combine(older, "a.nhd"), "x");
+        File.SetLastWriteTime(Path.Combine(older, "a.nhd"), DateTime.Now.AddDays(-2));
+        File.WriteAllText(Path.Combine(older, "b.backup"), "x"); // (newer, but a backup)
+        File.SetLastWriteTime(nhd, DateTime.Now.AddDays(-1));
+        var saves = Saves.List(ldocs);
+        Check(saves.Count == 2 && saves[0].Name == "Sunset" && Saves.Newest(ldocs)!.Name == "Sunset", "saves: the one saved last comes first, a .backup does not count");
+        Check(Saves.Photo(saves[0]) is { Length: 12 } && Saves.Photo(saves[1]) is null, "a save's household photo is read; a save without one has none");
+        Check(Launch.Args("Sunset") == "-worldFile:\"Sunset.sims3\"" && Launch.Args("Sunset.sims3") == "-worldFile:\"Sunset.sims3\"" && Launch.Args(null) == "",
+            "Play into a save passes EA's -worldFile switch");
+        var quoted = false;
+        try { Launch.Args("a\"b"); } catch (ArgumentException) { quoted = true; }
+        Check(quoted, "a save name with a quote is refused");
+        var zip = Saves.Backup(saves[0], ldocs);
+        bool inZip;
+        using (var z = System.IO.Compression.ZipFile.OpenRead(zip)) inZip = z.Entries.Any(e => e.Name == "Sunset.nhd");
+        Check(inZip && File.Exists(nhd), "a save backup is a zip of the folder; the save stays");
+
+        // mods: kinds from the index, off and on to the same place, a locked one refused, all put back
+        var lroot = Path.Combine(lr, "The Sims 3");
+        var lbin = Path.Combine(lroot, "Game", "Bin");
+        Directory.CreateDirectory(lbin);
+        File.WriteAllText(Path.Combine(lbin, "TS3W.exe"), "exe");
+        File.WriteAllText(Path.Combine(lbin, "Other.asi"), "asi");
+        var lg = new Game(lroot, lbin, "TS3W.exe", Edition.Steam, "1.67.2");
+        var hair = Path.Combine(ldocs, "Mods", "Packages", "CC", "hair.package");
+        var script = Path.Combine(ldocs, "Mods", "Packages", "script.package");
+        TestPackage(hair, (0x034AEECBu, "c"u8.ToArray(), false, 1));
+        TestPackage(script, (0x073FAA07u, "s"u8.ToArray(), false, 1));
+        var mods = Mods.List(lg, ldocs);
+        Check(mods.Single(m => m.Name == "hair.package").Kind == ModKind.Cas && mods.Single(m => m.Name == "script.package").Kind == ModKind.Script
+            && mods.Single(m => m.Name == "Other.asi") is { Kind: ModKind.Asi, Locked: true }, "mods: a CAS part, a script mod and a locked ASI are told apart");
+        var h = mods.Single(m => m.Name == "hair.package");
+        Check(h.Folder == Path.Combine("Mods", "Packages", "CC"), "a mod's folder is shown as the game sees it");
+        var offPath = Mods.SetEnabled(h, false, ldocs);
+        Check(!File.Exists(hair) && offPath == Path.Combine(Mods.Disabled(ldocs), "Packages", "CC", "hair.package"), "a mod switched off moves out of Packages");
+        var hOff = Mods.List(lg, ldocs).Single(m => m.Name == "hair.package");
+        Check(!hOff.Enabled && hOff.Rel == h.Rel, "a switched-off mod keeps its place in the list");
+        Check(Mods.SetEnabled(hOff, true, ldocs) == hair && File.Exists(hair), "switched on, it is back where it was");
+        var refused = 0;
+        try { Mods.SetEnabled(h with { Locked = true }, false, ldocs); } catch (SetupException) { refused++; }
+        Games.IsRunning = () => true;
+        try { Mods.SetEnabled(h, false, ldocs); } catch (SetupException) { refused++; }
+        Games.IsRunning = () => false;
+        Check(refused == 2 && File.Exists(hair), "a locked mod, or any mod while the game runs, is not moved");
+        Mods.SetEnabled(Mods.List(lg, ldocs).Single(m => m.Name == "script.package"), false, ldocs);
+        File.WriteAllText(script, "a copy the player put back"); // (the same name back by hand)
+        Check(Mods.EnableAll(lg, ldocs) == 1 && File.Exists(Path.Combine(Path.GetDirectoryName(script)!, "script (2).package"))
+            && !Directory.Exists(Mods.Disabled(ldocs)), "every switched-off mod goes back; a name taken meanwhile gets (2)");
+
+        // the mod checks' place: a finding marks its files, a check that throws does not stop the others
+        ModChecks.All.Add(new FakeModCheck(false));
+        ModChecks.All.Add(new FakeModCheck(true));
+        var mf = ModChecks.Run(Mods.List(lg, ldocs), lg, ldocs);
+        ModChecks.All.Clear();
+        Check(mf.Count == 1 && mf[0].Files.Single().EndsWith("hair.package"), "mod checks: a finding names its mod; a failing check is skipped");
+        Check(Health.StateOf(mf.Select(m => new Health.Item(m.Finding, HealthArea.Mods, m.Files))) == HealthState.NeedsYou
+            && Health.StateOf([]) == HealthState.Ready
+            && Health.StateOf([new Health.Item(new Finding(Severity.Error, "x", []), HealthArea.ApexRadiance, [])]) == HealthState.Blocked
+            && Health.StateOf([new Health.Item(new Finding(Severity.Info, "x", []), HealthArea.Mods, [])]) == HealthState.Ready,
+            "Health: ready, needs you, blocked");
+        Check(Health.AreaOf(new Finding(Severity.Error, "{0} is missing: the RTX Remix bridge does not start.", [])) == HealthArea.Graphics
+            && Health.AreaOf(new Finding(Severity.Error, "Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}.", [])) == HealthArea.Loaders
+            && Health.AreaOf(new Finding(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it.", [])) == HealthArea.GameSettings
+            && Health.AreaOf(new Finding(Severity.Error, "Apex Radiance is not installed in this game.", [])) == HealthArea.ApexRadiance,
+            "Health: findings fall in their area");
+
+        // packs and worlds: Steam's EPn folders, the base game's worlds without its test worlds, store and custom worlds
+        foreach (var w in new[] { @"GameData\Shared\NonPackaged\Worlds\Sunset Valley.world", @"GameData\Shared\NonPackaged\Worlds\SWE7UniversityTest.world",
+                     @"GameData\Shared\NonPackaged\Worlds\GPE8_Future.world", @"EP1\GameData\Shared\NonPackaged\Worlds\France.world",
+                     @"EP10\GameData\Shared\NonPackaged\Worlds\IslaParadiso.world", @"SP1\GameData\Shared\x.package" })
+        { Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(lroot, w))!); File.WriteAllText(Path.Combine(lroot, w), "w"); }
+        Directory.CreateDirectory(Path.Combine(ldocs, "InstalledWorlds"));
+        File.WriteAllText(Path.Combine(ldocs, "InstalledWorlds", "Riverview.world"), "w");
+        File.WriteAllText(Path.Combine(ldocs, "InstalledWorlds", "My Town.world"), "w");
+        Expansions.RegistryDir = name => name == "The Sims 3 Pets" ? Path.Combine(lr, "Pets") : null;
+        Directory.CreateDirectory(Path.Combine(lr, "Pets", "GameData", "Shared", "NonPackaged", "Worlds"));
+        File.WriteAllText(Path.Combine(lr, "Pets", "GameData", "Shared", "NonPackaged", "Worlds", "AppaloosaPlains.world"), "w");
+        var packs = Expansions.Installed(lg).Select(p => p.Pack.Code).ToList();
+        Check(packs.SequenceEqual(["EP1", "EP5", "EP10", "SP1"]), "packs: Steam's folders and the EA app's registry folders are found");
+        var worlds = Worlds.List(lg, ldocs);
+        Check(worlds.Select(w => w.Name).Order().SequenceEqual(["Appaloosa Plains", "Champs Les Sims", "Isla Paradiso", "My Town", "Riverview", "Sunset Valley"])
+            && worlds.Single(w => w.Name == "Riverview").Kind == WorldKind.Store && worlds.Single(w => w.Name == "My Town").Kind == WorldKind.Custom
+            && worlds.Single(w => w.Name == "Isla Paradiso") is { Kind: WorldKind.Expansion, Pack: "IP" }, "worlds: base, pack, store and custom worlds, test worlds left out");
+        Expansions.RegistryDir = _ => null;
+
+        // the session's end and when to offer starting again
+        Check(Session.Classify(0, 1L << 30) == SessionEnd.Normal && Session.Classify(0, 3_500L << 20) == SessionEnd.LowMemory
+            && Session.Classify(unchecked((int)0xC0000005), 1L << 30) == SessionEnd.Crash, "a session ends normally, low on memory or in a crash");
+        var crash = new SessionInfo(DateTime.Now, TimeSpan.FromHours(1), 1L << 30, SessionEnd.Crash, -1);
+        Check(Session.ShouldOffer(crash, false) && !Session.ShouldOffer(crash, true) && !Session.ShouldOffer(crash with { End = SessionEnd.Normal }, false),
+            "start again is offered after a crash, unless the restart host asks itself");
+
+        // the launcher's data moves over from Setup's folder once
+        var oldLocal = Paths.LocalAppData;
+        Paths.LocalAppData = Path.Combine(lr, "Local");
+        Directory.CreateDirectory(Path.Combine(Paths.LocalAppData, "Apex Radiance Setup"));
+        File.WriteAllText(Path.Combine(Paths.LocalAppData, "Apex Radiance Setup", "games.txt"), lbin);
+        Paths.MigrateOldData();
+        Paths.MigrateOldData();
+        Check(File.ReadAllText(Path.Combine(Paths.Data, "games.txt")) == lbin && !Directory.Exists(Path.Combine(Paths.LocalAppData, "Apex Radiance Setup")),
+            "Setup's remembered games move to the launcher's folder, once");
+        var st = new LauncherSettings { FixSafeAutomatically = false, WelcomedBack = true };
+        st.Save();
+        Check(LauncherSettings.Load() is { FixSafeAutomatically: false, WelcomedBack: true, InstallUpdatesOnPlay: true }, "the launcher's settings read back");
+
+        // its own install: shortcuts, the Installed apps entry and the Run value, all removed again
+        LauncherInstall.RegistryBase = @"Software\ApexLauncherTest";
+        LauncherInstall.StartMenuDir = Path.Combine(lr, "Start");
+        LauncherInstall.DesktopDir = Path.Combine(lr, "Desktop");
+        var fakeExe = Path.Combine(lr, "ApexLauncher.exe");
+        File.Copy(Environment.ProcessPath!, fakeExe);
+        Check(LauncherInstall.CopyIn(fakeExe) && File.Exists(Paths.InstalledExe) && !LauncherInstall.CopyIn(Paths.InstalledExe),
+            "the launcher copies itself to its install folder; the installed copy does not copy again");
+        LauncherInstall.Register(Paths.InstalledExe, "2.0.0", desktop: true);
+        LauncherInstall.SetRunAtStartup(Paths.InstalledExe, true);
+        Check(LauncherInstall.Registered() && LauncherInstall.RunsAtStartup() && File.Exists(LauncherInstall.StartMenuLink) && File.Exists(LauncherInstall.DesktopLink),
+            "Installed apps entry, Start menu and desktop shortcuts, start with Windows");
+        LauncherInstall.RemoveTraces();
+        Check(!LauncherInstall.Registered() && !LauncherInstall.RunsAtStartup() && !File.Exists(LauncherInstall.StartMenuLink) && !File.Exists(LauncherInstall.DesktopLink),
+            "uninstall removes the entry, the shortcuts and the Run value");
+        Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(LauncherInstall.RegistryBase, false);
+        Paths.LocalAppData = oldLocal;
+
+        // uninstall on a game: Apex and what came with it gone, files put back, mods back on; the player's things stay
+        var udocs = Path.Combine(lr, "UDocs");
+        var ubin = Path.Combine(lr, "U", "Game", "Bin");
+        Directory.CreateDirectory(ubin); Directory.CreateDirectory(udocs);
+        File.WriteAllText(Path.Combine(ubin, "TS3W.exe"), "exe");
+        File.WriteAllText(Path.Combine(ubin, "Mine.asi"), "a mod of the player's");
+        var ug = new Game(Path.Combine(lr, "U"), ubin, "TS3W.exe", Edition.Steam, "1.67.2");
+        await Engine.InstallAsync(ug, new[] { Components.Apex, Components.Loader }, new FakeSource(Path.Combine(lr, "upayload")), null, udocs);
+        TestPackage(Path.Combine(udocs, "Mods", "Packages", "mine.package"), (0x1u, "m"u8.ToArray(), false, 1));
+        Mods.SetEnabled(Mods.List(ug, udocs).Single(m => m.Name == "mine.package"), false, udocs);
+        Directory.CreateDirectory(Path.Combine(udocs, "Apex Radiance")); File.WriteAllText(Path.Combine(udocs, "Apex Radiance", "ApexRadiance.toml"), "[ui]");
+        Directory.CreateDirectory(Path.Combine(udocs, "Saves", "Home.sims3")); File.WriteAllText(Path.Combine(udocs, "Saves", "Home.sims3", "h.nhd"), "save");
+        File.WriteAllText(Path.Combine(udocs, "Mods", "Resource.cfg"), "Priority 500");
+        var left = Uninstall.FromGame(ug, udocs, keepSettings: false);
+        Check(left.Count == 0 && !File.Exists(Path.Combine(ubin, "ApexRadiance.asi")) && !File.Exists(Path.Combine(ubin, "wininet.dll"))
+            && !Directory.Exists(Manifest.DirOf(ubin)), "uninstall removes Apex, the loader and the backup folder");
+        Check(File.Exists(Path.Combine(ubin, "Mine.asi")) && File.Exists(Path.Combine(udocs, "Saves", "Home.sims3", "h.nhd"))
+            && File.Exists(Path.Combine(udocs, "Mods", "Resource.cfg")) && File.Exists(Path.Combine(udocs, "Mods", "Packages", "mine.package"))
+            && !Directory.Exists(Mods.Disabled(udocs)), "uninstall keeps the player's mods (switched-off ones back on), saves and Resource.cfg");
+        Check(!Directory.Exists(Path.Combine(udocs, "Apex Radiance")), "uninstall removes Apex Radiance's settings unless asked to keep them");
+
+        Check(SelfUpdate.Products.Contains("Apex Radiance Setup") && SelfUpdate.Products.Contains("Apex Launcher") && SelfUpdate.AssetNames[0] == "ApexLauncher.exe",
+            "self-update takes the launcher under either name");
+        Check(Elevation.Parse(["--maintain", @"C:\G\Bin", "--open", "components"]) == (@"C:\G\Bin", "components") && Elevation.Parse([]) == (null, null),
+            "the administrator window opens on the game and screen it was given");
+    }
+    finally { try { Directory.Delete(lr, true); } catch (Exception) { } }
+}
+
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
+
+// a DBPF 2.0 package as the game writes it: each resource with its size, compressed or not
+static void TestPackage(string path, params (uint Type, byte[] Data, bool Compressed, int Mem)[] res)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    using var f = File.Create(path);
+    var w = new BinaryWriter(f);
+    w.Write(0x46504244u); w.Write(2u); w.Write(0u);
+    w.Write(new byte[96 - 12]);
+    var offsets = new List<uint>();
+    foreach (var r in res) { offsets.Add((uint)f.Position); w.Write(r.Data); }
+    var index = (uint)f.Position;
+    w.Write(0u);
+    for (int i = 0; i < res.Length; i++)
+    {
+        w.Write(res[i].Type); w.Write(0u); w.Write(0u); w.Write((uint)i + 1);
+        w.Write(offsets[i]); w.Write((uint)res[i].Data.Length | 0x80000000u); w.Write((uint)res[i].Mem);
+        w.Write(res[i].Compressed ? (ushort)0xFFFF : (ushort)0); w.Write((ushort)1);
+    }
+    f.Position = 0x24; w.Write((uint)res.Length);
+    f.Position = 0x40; w.Write(index);
+}
 
 static string SourceFile([System.Runtime.CompilerServices.CallerFilePath] string path = "") => path;
 
@@ -1361,4 +1561,13 @@ sealed class FakeSource : ISource
         GitHubSource.AddTree(l, dir, b);
         return l;
     }
+}
+
+// a mod check for the tests: one finding on the hair package, or an exception
+sealed class FakeModCheck(bool fails) : IModCheck
+{
+    public string Name => fails ? "failing" : "hair";
+    public IEnumerable<ModFinding> Check(IReadOnlyList<ModFile> mods, Game game, string docs) => fails
+        ? throw new InvalidOperationException("broken check")
+        : mods.Where(m => m.Name == "hair.package").Select(m => new ModFinding(new Finding(Severity.Warning, "{0} needs a look.", [m.Name]), [m.Path]));
 }
