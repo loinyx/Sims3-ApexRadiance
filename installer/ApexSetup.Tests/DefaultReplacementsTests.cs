@@ -154,10 +154,18 @@ static class DefaultReplacementsTests
         // what the game's launcher installed: items read from DCCache\dcdb*.dbc with their English names and thumbnails, the
         // .tmp copies left out
         var docs = Path.Combine(dir, "Docs");
+        // (the cache's record list says the lamp is installed: a record keeps an instance with its 32-bit halves swapped)
+        var lampKey = new byte[16];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(lampKey, ModKinds.Objd);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(lampKey.AsSpan(8), 0x900UL << 32);
+        var lampId = DcCache.StoredId("0x1234abcd00000000000000000000abcd");
+        var records = DcCache.Build([new DcCache.Record { Id = lampId, Flag = 1, Deps = [Convert.FromHexString("050cffe800000000050cffe800000000"), lampId],
+            ContentType = 0x05F8F5D9, Pairs = [.. lampKey, .. lampKey], Name = "Store Lamp" }]);
         Write(Path.Combine(docs, InstalledContent.Folder, "dcdb0.dbc"),
             (ModKinds.Objd, 0, 0x900, ModKindsTests.ObjdBytes(0x16, 0x800, 0, name: 0xDDD)),
             (ModKinds.Stbl, 0, 0x0000000000000002, Stbl((0xDDD, "Store Lamp"))),
-            (Thum, 0, 0x900, Png));
+            (Thum, 0, 0x900, Png),
+            (DcCache.ListType, 0, 0, records));
         Write(Path.Combine(docs, InstalledContent.Folder, "dcdb1.dbc.tmp"), (ModKinds.Objd, 0, 0x901, ModKindsTests.ObjdBytes(0x16, 0x800, 0, name: 0xDDD)));
         var installed = InstalledContent.Read(docs);
         check(installed.Count(i => i.Type == ModKinds.Objd) == 1 && installed[0].Name == "Store Lamp" && InstalledContent.Thumbnail(installed[0]) is { Length: > 0 }
