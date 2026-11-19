@@ -17,6 +17,7 @@
 #include "fast_refpack.h"
 #include "fast_cas.h"
 #include "compositor_readback.h"
+#include "pick_readback.h"
 #include "fast_crc.h"
 #include "fast_memory.h"
 #include "memory_guard.h"
@@ -134,6 +135,29 @@ class WallShadingWhileMovingPatch : public ApexPatch {
 
     void RenderCustomUI() override {} // the Performance card draws the row
     void RenderDeveloperUI() override { LotLightingMotion::RenderWallAoDeveloperUI(); }
+};
+
+// The pick update's hook itself is always installed (apex_main.cpp, after the features): this only turns its skip on
+class PickSkipWhenStillPatch : public ApexPatch {
+  public:
+    PickSkipWhenStillPatch() : ApexPatch(Performance::kPickSkipName, nullptr) {}
+
+    bool Install() override {
+        PickReadback::SetSkipWhenStill(true);
+        isEnabled = true;
+        lastError.clear();
+        return true;
+    }
+
+    bool Uninstall() override {
+        PickReadback::SetSkipWhenStill(false);
+        isEnabled = false;
+        lastError.clear();
+        return true;
+    }
+
+    void RenderCustomUI() override {} // the Performance card draws the row
+    void RenderDeveloperUI() override {}
 };
 
 class LotLightingMotionPatch;
@@ -759,6 +783,24 @@ APEX_REGISTER_FEATURE(WallShadingWhileMovingPatch,
                                             "stores unchanged: the engine's own \"try again next frame\".",
                                             "The synchronous level solve (60 s budget) and the tool mode are never touched."},
                        .gameCodeGroup = "WallShadingWhileMoving"});
+
+APEX_REGISTER_FEATURE(PickSkipWhenStillPatch,
+                      {.displayName = "Fewer Mouse Picks When Still",
+                       .description = "The game checks which object is under the mouse every other frame, even when nothing moves, about 2 ms each under the "
+                                      "RTX Remix bridge. While the camera and the mouse stay still, that check waits (at most 0.25 s), and while the camera "
+                                      "moves it runs every 4th frame. A click made while the check waits is held for a new check (about 3 frames). Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
+                       .category = "Performance",
+                       .experimental = true,
+                       .enabledByDefault = false,
+                       .supportedVersions = VERSION_STEAM,
+                       .technicalDetails = {"The pick manager's update (0x6DFEC0, called by Scene::BeginFrame) re-picks at the last cursor position every other "
+                                            "frame (camera byte +0x6FD, always 1). That re-pick is skipped while the camera (+0x0C..+0x1B, +0x30..+0x6F), the "
+                                            "viewport and the pick modes are as at the last pick and it is under 250 ms old; the last result stays in place.",
+                                            "While the camera moves, a new pick (a mouse-move request too) is rendered at most every 4th update. A button, wheel or key "
+                                            "event always picks at the next update; a pending read-back is never skipped.",
+                                            "A button press made while a pick was skipped and the stored one is over 50 ms old is held in the window procedure; "
+                                            "the next update picks, the pick is read back at once, and the held mouse messages go to the game once ResolvePick "
+                                            "(0x6E01B0) has stored the new result (at most 200 ms)."}});
 
 APEX_REGISTER_FEATURE(LotLightingMotionPatch,
                       {.displayName = "Lot Lighting While Moving",

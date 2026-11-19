@@ -61,6 +61,7 @@ Every switch works at the exact game function behind one measured cost, and foll
 | Faster room lighting (with *Lamp edits all at once*, 2.7.0 as *Lamp switches all at once*) | Camera and lighting | 2.1.0 or earlier | [room-light-queue.md](room-light-queue.md) |
 | Spread lot lighting while moving | Camera and lighting | 2.1.0 or earlier | [lot-lighting-motion.md](lot-lighting-motion.md) |
 | Wall shading waits while moving | Camera and lighting | 2.1.0 or earlier | [wall-shading-while-moving.md](wall-shading-while-moving.md) |
+| Fewer mouse picks when still (Experimental, off; not in the Overview group) | Camera and lighting | In development | [pick-skip-when-still.md](pick-skip-when-still.md) |
 | Spread new objects over frames | Camera and lighting | 2.1.0 or earlier | [scene-node-budget.md](scene-node-budget.md) |
 | Faster game file lookups | Files and objects | 2.1.0 or earlier | [resource-lookup-cache.md](resource-lookup-cache.md) |
 | Remember missing files (shown under the row above) | Files and objects | 2.1.0 or earlier | [remember-missing-files.md](remember-missing-files.md) |

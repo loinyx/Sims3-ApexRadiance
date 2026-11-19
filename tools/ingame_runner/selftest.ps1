@@ -131,6 +131,10 @@ try {
     Check ($null -eq (Get-Measurement (Join-Path $fx 'none') 120 @() @())) 'no profile, no measurement'
 } finally { Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue }
 
+# The bridge server's CPU counts as the game's: per process, a new process from zero, a gone one dropped
+Check ((Get-HelperTicksDelta @{ 1 = 100L; 2 = 50L } @{ 1 = 160L; 3 = 30L }) -eq 90) 'helper CPU: delta per process id'
+Check ((Get-HelperTicksDelta $null @{ 1 = 40L }) -eq 40 -and (Get-HelperTicksDelta @{ 1 = 5L } @{}) -eq 0) 'helper CPU: no previous sample, no process'
+
 # Results page
 $res = @([pscustomobject]@{ Name = 'x-1-off'; JobId = 'x'; Variant = 'off'; Ok = $true; Closed = 'quit'; Frames = $f; Sim = $null; Notes = @() },
          [pscustomobject]@{ Name = 'x-2-on'; JobId = 'x'; Variant = 'on'; Ok = $false; Closed = 'quit'; Frames = $null; Sim = $null; Notes = @('log: a|b') })
@@ -250,6 +254,22 @@ try {
     Check ($null -eq (Step-StartWatch $st $found)) 'a found mailbox never fails the agent rule'
 } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
+Check ((Get-ClickLParam 640 360) -eq 23593600 -and (Get-ClickLParam 5 7) -eq 458757) 'click lParam packs y high, x low'
+$sp = Get-ScreenPoint ([pscustomobject]@{ x = 0.25; y = 0.5 }) 1280 720; $px = Get-ScreenPoint ([pscustomobject]@{ x = 640.4; y = 359.6 }) 1280 720
+Check ($sp[0] -eq 320 -and $sp[1] -eq 360 -and $px[0] -eq 640 -and $px[1] -eq 360) 'screenpos: fractions scaled, pixels kept'
+$simPick = [pscustomobject]@{ type = 'Sim'; name = 'Bella Goth' }; $floorPick = [pscustomobject]@{ type = 'Floor' }
+Check ((Get-PickKey $simPick) -eq 'Sim Bella Goth' -and (Get-PickKey $floorPick) -eq 'Floor') 'pick key: type and name'
+Check ($null -eq (Test-PickExpect $simPick ([pscustomobject]@{ type = 'Sim'; same_target = $true }) ([pscustomobject]@{ name = 'Bella Goth' }))) 'expect_pick: Sim on its target matches'
+Check ((Test-PickExpect $floorPick ([pscustomobject]@{ type = @('Sim') }) $null) -match 'expected type Sim') 'expect_pick: floor is not a Sim'
+Check ($null -eq (Test-PickExpect $floorPick ([pscustomobject]@{ type = @('Floor', 'Terrain') }) $null)) 'expect_pick: one of several types'
+Check ((Test-PickExpect $simPick ([pscustomobject]@{ same_target = $true }) ([pscustomobject]@{ name = 'Mortimer Goth' })) -match 'aimed at Mortimer') 'expect_pick: another Sim than the target'
+Check ((Test-PickExpect $simPick ([pscustomobject]@{ name = '^Mort' }) $null) -match 'name matching') 'expect_pick: name pattern'
+$pl = @{}
+Check ($null -eq (Compare-PickLog $pl 'j|3' 'off' 'Sim A' 'off')) 'pick log: first load has nothing to compare'
+Check ($null -eq (Compare-PickLog $pl 'j|3' 'on' 'Sim A' 'off')) 'pick log: same pick as off'
+Check ((Compare-PickLog $pl 'j|3' 'on' 'Floor' 'off') -eq 'picked Floor, off picked Sim A') 'pick log: different pick than off'
+Check ($null -eq (Compare-PickLog $pl 'j|4' 'on' 'Floor' 'off')) 'pick log: slots are separate'
+
 # Every shipped job: valid JSON, an id equal to its file name, a save, known steps, patterns that compile
 foreach ($file in Get-ChildItem (Join-Path $PSScriptRoot 'jobs') -Filter *.json) {
     $j = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
@@ -330,5 +350,22 @@ $rb = $rbJob.toml.readback_bench
 $rbWaitS = 60 * ($rbJob.steps | Where-Object { $_.do -eq 'wait' } | Measure-Object -Property minutes -Sum).Sum
 $rbNeedS = $rb.iterations * $rbCases * $rb.every_frames / 25 + $rb.delay_s
 Check ($rbCases -gt 0 -and $rbNeedS -le $rbWaitS) "readback-bench wait ($rbWaitS s) holds the benchmark at 25 fps ($rbNeedS s, $rbCases cases)"
+# Held mouse messages go back as Apex's private message with their number, never as themselves (a mouse message posted
+# meanwhile would be taken for a held one): framework/overlay.cpp's Replay takes only that message, ReleaseHeldLocked posts it
+$replayOnly = '(?s)bool Replay\([^)]*\)\s*\{\s*if \([^\n]*msg != ReplayMsg\(\)\) return false;'
+$postsPrivate = '(?s)void ReleaseHeldLocked\(\)\s*\{[^}]*PostMessageW\(h\.hwnd, ReplayMsg\(\)'
+$overlaySrc = Get-Content -Raw (Join-Path $PSScriptRoot '../../framework/overlay.cpp')
+Check ($overlaySrc -match $replayOnly -and $overlaySrc -match $postsPrivate) 'held mouse messages are replayed as a private message by number'
+Check (-not ("bool Replay(HWND hwnd, UINT msg) {`n    if (!IsMouseMessage(msg)) return false;" -match $replayOnly)) 'the replay check fails a Replay that matches mouse messages by value'
+Check (-not ("void ReleaseHeldLocked() {`n    PostMessageW(h.hwnd, h.msg, h.wp, h.lp);`n}" -match $postsPrivate)) 'the replay check fails a release that posts the held message itself'
+# Clicks aim in physical pixels as the DPI-aware game window: run.ps1's Resolve-StepPoint turns this thread per-monitor aware
+# (V2) before it reads the client size, and that call does give a per-monitor aware thread
+$dpiFirst = '(?s)function Resolve-StepPoint\([^)]*\)\s*\{(\s*#[^\n]*)*\s*\$null = \[ApexIngame\.Keys\]::SetThreadDpiAwarenessContext\(\[IntPtr\]\(-4\)\)[^\n]*\s*\$r = New-Object [^\n]*GetClientRect'
+Check ((Get-Content -Raw (Join-Path $PSScriptRoot 'run.ps1')) -match $dpiFirst) 'click points read the client size per-monitor DPI aware'
+Check (-not ("function Resolve-StepPoint(`$Step, [IntPtr]`$H) {`n    `$r = New-Object 'int[]' 4; `$null = [ApexIngame.Keys]::GetClientRect(`$H, `$r)" -match $dpiFirst)) 'the DPI check fails a Resolve-StepPoint without the awareness call'
+Add-Type -Namespace SelfTest -Name Dpi -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c); [DllImport("user32.dll")] public static extern IntPtr GetThreadDpiAwarenessContext(); [DllImport("user32.dll")] public static extern int GetAwarenessFromDpiAwarenessContext(IntPtr c);'
+$oldDpi = [SelfTest.Dpi]::SetThreadDpiAwarenessContext([IntPtr](-4))
+Check ([SelfTest.Dpi]::GetAwarenessFromDpiAwarenessContext([SelfTest.Dpi]::GetThreadDpiAwarenessContext()) -eq 2) 'SetThreadDpiAwarenessContext(PER_MONITOR_AWARE_V2) makes the thread per-monitor aware'
+if ($oldDpi -ne [IntPtr]::Zero) { $null = [SelfTest.Dpi]::SetThreadDpiAwarenessContext($oldDpi) }
 Write-Output "$($script:checks) checks, $($script:failures) failures"
 if ($script:failures) { exit 1 }
