@@ -12,33 +12,51 @@ public sealed class ModRow : INotifyPropertyChanged
 {
     public ModFile File { get; private set; }
     public IReadOnlyList<string> Findings { get; private set; }
+    // every kind it holds, for the filters ("Script", "Hair", "Objects"...); the first is what the row shows
+    public IReadOnlyList<string> Kinds { get; set; }
+    public bool IsNew { get; set; }
+    public string? DuplicateOf { get; set; }
+
     public string Name => File.FileType == "package" ? System.IO.Path.GetFileNameWithoutExtension(File.Name) : File.Name;
+    public string FullName => File.Name + "\n" + Place(File);
     public string Kind => KindName(File.Kind);
+    public string KindIcon => IconOf(File.Kind);
     public string Size => SizeText(File.Size);
-    public string Mono => File.Kind switch
-    {
-        ModKind.Script => "S", ModKind.Cas => "CAS", ModKind.Objects => "OBJ", ModKind.Lighting => "LT", ModKind.Sound => "SND", ModKind.Textures => "TX",
-        ModKind.Tuning => "TN", ModKind.Interface => "UI", ModKind.Asi => "ASI", ModKind.Sims3Pack => "S3P", ModKind.World => "W", ModKind.Lot => "LOT",
-        ModKind.Household => "HH", _ => "PK",
-    };
+    // (a very large package: worth knowing, it slows loading)
+    public Brush SizeBrush => File.Size > 200L << 20 ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
     public Brush TileBrush { get; }
-    // under the name: what needs a look, else where the mod is
-    // under the name: what needs a look, else the player's notes, else where it is (not in one folder: it goes without saying)
     public static bool ShowPlace = true;
     public string Sub => Findings.Count > 0 ? Findings[0]
+        : DuplicateOf is { } d ? T("Same as {0}", d)
         : ModNotes.Get(File.Rel)?.Notes is { } n ? n.Split('\n')[0]
         : ShowPlace ? Place(File) : "";
-    public Visibility SubVisible => Sub.Length > 0 || TagDots.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-    public List<TagDot> TagDots => ModNotes.TagsOf(File.Rel).Select(t => new TagDot(t, TagDot.BrushOf(ModNotes.ColorOf(t)))).ToList();
-    public Brush SubBrush => Findings.Count > 0 ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
-    public string Chip => Findings.Count > 0 ? T("Needs a look") : Kind;
-    public Brush ChipBrush => Findings.Count > 0 ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x2A, 0x21, 0x12)) : Res("ApexPillBrush");
-    public Brush ChipText => Findings.Count > 0 ? Res("ApexWarningBrush") : Res("ApexSoftTextBrush");
+    public Brush SubBrush => Findings.Count > 0 || DuplicateOf is not null ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
+    public Visibility LookVisible => Findings.Count > 0 || DuplicateOf is not null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility SubVisible => Sub.Length > 0 || TagPills.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility NewVisible => IsNew ? Visibility.Visible : Visibility.Collapsed;
+    public string NewText => T("New");
+    // up to two tags as pills, then "+n"
+    public List<TagDot> TagPills
+    {
+        get
+        {
+            var tags = ModNotes.TagsOf(File.Rel);
+            var list = tags.Take(2).Select(t => TagDot.Of(t, ModNotes.ColorOf(t))).ToList();
+            if (tags.Count > 2) list.Add(new TagDot($"+{tags.Count - 2}", Res("ApexMutedBrush"), Res("ApexPillBrush")));
+            return list;
+        }
+    }
     public bool IsOn => File.Enabled;
     public double TextOpacity => File.Enabled ? 1 : 0.5;
     public Visibility ToggleVisible => File.Locked ? Visibility.Collapsed : Visibility.Visible;
     public Visibility LockVisible => File.Locked ? Visibility.Visible : Visibility.Collapsed;
     public string LockTip => LockText(File);
+    public Visibility Placeholder => _image is null ? Visibility.Visible : Visibility.Collapsed;
+
+    // the list's columns, narrowed on a small window (set before the rows are shown)
+    public static GridLength KindColumn { get; set; } = new(140);
+    public static GridLength SizeColumn { get; set; } = new(72);
+    public static double NameMax { get; set; } = 10000;
 
     // the screen's handler: switch the file and return the moved file, or null when it stayed (the reason shown there)
     public static Func<ModRow, bool, ModFile?>? Toggle;
@@ -47,21 +65,30 @@ public sealed class ModRow : INotifyPropertyChanged
     {
         File = f;
         Findings = findings;
+        Kinds = [f.Kind.ToString()];
         TileBrush = new SolidColorBrush(f.Kind switch
         {
             ModKind.Script => Rgb(0x3F, 0x4A, 0x7A), ModKind.Cas => Rgb(0x7A, 0x3F, 0x62), ModKind.Objects => Rgb(0x7A, 0x6A, 0x2E),
             ModKind.Lighting => Rgb(0x8A, 0x6E, 0x2E), ModKind.Sound => Rgb(0x2E, 0x6E, 0x7A), ModKind.Textures => Rgb(0x4E, 0x7A, 0x3F),
             ModKind.Tuning => Rgb(0x3F, 0x7A, 0x5B), ModKind.Interface => Rgb(0x5B, 0x3F, 0x7A), ModKind.World => Rgb(0x2E, 0x5E, 0x7A),
-            ModKind.Lot => Rgb(0x8A, 0x4E, 0x3A), ModKind.Household => Rgb(0x7A, 0x5A, 0x2E), _ => Rgb(0x34, 0x36, 0x40),
+            ModKind.Lot => Rgb(0x8A, 0x4E, 0x3A), ModKind.Household => Rgb(0x7A, 0x5A, 0x2E), ModKind.Asi => Rgb(0x4A, 0x4F, 0x6E),
+            ModKind.Sims3Pack => Rgb(0x3A, 0x5A, 0x6E), _ => Rgb(0x34, 0x36, 0x40),
         });
     }
 
     static Windows.UI.Color Rgb(byte r, byte g, byte b) => Windows.UI.Color.FromArgb(255, r, g, b);
     static Brush Res(string k) => (Brush)Application.Current.Resources[k];
 
+    public static string IconOf(ModKind k) => k switch
+    {
+        ModKind.Script => "code-xml", ModKind.Cas => "shirt", ModKind.Objects => "sofa", ModKind.Lighting => "lamp", ModKind.Sound => "music",
+        ModKind.Textures => "image", ModKind.Tuning => "sliders-vertical", ModKind.Interface => "app-window", ModKind.Asi => "plug",
+        ModKind.Sims3Pack => "package", ModKind.World => "globe", ModKind.Lot => "house", ModKind.Household => "users", _ => "puzzle",
+    };
+
     public static string SizeText(long n) => n >= 1 << 20 ? $"{n / (1024.0 * 1024):0.#} MB" : $"{Math.Max(1, n / 1024)} KB";
 
-    // where a mod is, as the folders pane names it ("Packages \u203A NRaas"); the game folder, Downloads or the Library
+    // where a mod is, as the side pane names it ("Packages › NRaas"); the game folder, Downloads or the Library
     public static string Place(ModFile f) => f.FileType switch
     {
         "asi" => T("Game folder"),
@@ -87,17 +114,18 @@ public sealed class ModRow : INotifyPropertyChanged
 
     ImageSource? _image;
     public ImageSource? Image { get => _image; set { _image = value; Changed(nameof(Image), nameof(Placeholder)); } }
-    public Visibility Placeholder => _image is null ? Visibility.Visible : Visibility.Collapsed;
 
     // the file moved, was renamed or switched (the same row stays in the list)
     public void Update(ModFile f)
     {
         File = f;
-        Changed(nameof(Name), nameof(Sub), nameof(IsOn), nameof(TextOpacity), nameof(ToggleVisible), nameof(LockVisible));
+        Changed(nameof(Name), nameof(FullName), nameof(Sub), nameof(SubVisible), nameof(IsOn), nameof(TextOpacity), nameof(ToggleVisible), nameof(LockVisible), nameof(TagPills));
     }
 
-    // notes or tags changed
-    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(TagDots));
+    public void SetFindings(IReadOnlyList<string> findings) { Findings = findings; Refresh(); }
+
+    // notes, tags, findings or the New mark changed
+    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(NewVisible));
 
     public void OnToggled(object sender, RoutedEventArgs e)
     {
@@ -113,12 +141,14 @@ public sealed class ModRow : INotifyPropertyChanged
     void Changed(params string[] names) { foreach (var n in names) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n)); }
 }
 
-public sealed record TagDot(string Name, Brush Fill)
+public sealed record TagDot(string Name, Brush Fill, Brush Back)
 {
-    public static Brush BrushOf(string hex)
+    public static TagDot Of(string name, string hex) => new(name, BrushOf(hex), BrushOf(hex, 0x26));
+
+    public static Brush BrushOf(string hex, byte alpha = 255)
     {
         var c = Convert.ToUInt32(hex.TrimStart('#'), 16);
-        return new SolidColorBrush(Windows.UI.Color.FromArgb(255, (byte)(c >> 16), (byte)(c >> 8), (byte)c));
+        return new SolidColorBrush(Windows.UI.Color.FromArgb(alpha, (byte)(c >> 16), (byte)(c >> 8), (byte)c));
     }
 }
 

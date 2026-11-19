@@ -759,8 +759,7 @@ public sealed partial class MainWindow : Window
         _found = _state is null ? new() : Compat.Check(_game!, _state);
         _health = _state is null ? [] : Verify.Files(_game!, _state, _latest.GetValueOrDefault(Releases.Apex)).Concat(_found)
             .Select(f => new Health.Item(f, Health.AreaOf(f), [])).ToList();
-        if (_modsLoaded && _game is { } mg)
-            try { _health.AddRange(ModChecks.Run(_mods, mg, Docs).Select(m => new Health.Item(m.Finding, HealthArea.Mods, m.Files))); } catch (Exception e) { App.Log(e); }
+        CheckHealth(); // (the full check, off the window's thread; this quick list shows until it is done)
         _healthState = Health.StateOf(_health);
         _checked = DateTime.Now;
         GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;

@@ -52,13 +52,32 @@ public sealed partial class MainWindow
     }
 
     // Compat, Verify and the mod checks, run again (Check now, after a change, at start)
+    // (off the window's thread: the saves, caches, script error logs and the conflict scan take seconds; the screens are
+    // filled again when it is done, and a newer check replaces an older one still running)
+    ConflictCheck? _conflicts;
+    int _healthRun;
+    bool _healthChecking;
     void CheckHealth()
     {
         if (_game is not { } g || _state is not { } s) { _health = []; _healthState = HealthState.Ready; return; }
-        try { _health = Health.Gather(g, s, Docs, _latest.GetValueOrDefault(Releases.Apex), _modsLoaded ? _mods : null); }
-        catch (Exception e) { App.Log(e); _health = []; }
-        _healthState = Health.StateOf(_health);
-        _checked = DateTime.Now;
+        var run = ++_healthRun;
+        var (docs, apex, mods) = (Docs, _latest.GetValueOrDefault(Releases.Apex), _modsLoaded ? _mods.ToList() : null);
+        if (_conflicts is null || _conflicts.Offline != _offline) _conflicts = new ConflictCheck { Offline = _offline };
+        var conflicts = _conflicts;
+        _healthChecking = true;
+        _ = Task.Run(() =>
+        {
+            try { return Health.Gather(g, s, docs, apex, mods, mods is null ? null : conflicts); }
+            catch (Exception e) { App.Log(e); return []; }
+        }).ContinueWith(t => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (run != _healthRun) return;
+            _healthChecking = false;
+            _health = t.Result;
+            _healthState = Health.StateOf(_health);
+            _checked = DateTime.Now;
+            RefreshLauncher();
+        }));
     }
 
     // ---------- Home ----------
@@ -120,13 +139,19 @@ public sealed partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var left = Col(Eyebrow(g.Label.ToUpperInvariant()), new TextBlock { Text = "The Sims 3", FontSize = 36, FontWeight = FontWeights.SemiBold });
         ((StackPanel)left).Spacing = 8;
-        var versions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        versions.Children.Add(new Image { Source = new BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 16, Height = 16 });
-        versions.Children.Add(Muted("Apex Radiance " + (_state?.ApexVersion ?? "?")
-            + (Known(Components.Modernization) is { Length: > 0 } mv ? "  ·  Sims 3 Modernization " + mv : "")));
+        // (a grid, not a row: the versions line wraps on a narrow window instead of running past the edge)
+        var versions = new Grid { ColumnSpacing = 8 };
+        versions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        versions.ColumnDefinitions.Add(new ColumnDefinition());
+        versions.Children.Add(new Image { Source = new BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 0, 0) });
+        var vtext = Muted("Apex Radiance " + (_state?.ApexVersion ?? "?")
+            + (Known(Components.Modernization) is { Length: > 0 } mv ? "  ·  Sims 3 Modernization " + mv : ""));
+        Grid.SetColumn(vtext, 1);
+        versions.Children.Add(vtext);
         ((StackPanel)left).Children.Add(versions);
         // expansions, then a little apart the stuff packs
-        var badges = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        // (wrapping: twenty packs fit a narrow window on two lines)
+        var badges = new WrapPanel { Spacing = 5 };
         var firstStuff = true;
         foreach (var (p, dir) in Expansions.Installed(g))
         {
@@ -245,8 +270,12 @@ public sealed partial class MainWindow
     // a pack's own icon from the player's install (its game definition file), else its short code on its colour
     static FrameworkElement PackBadge(Pack p, string? dir, double size)
     {
+        // (until the pack's own icon loads, or when it has none: a package icon on the pack's colour, never letters)
         var b = new Border { Width = size, Height = size, CornerRadius = new CornerRadius(size * 0.22), Background = new SolidColorBrush(PackColor(p.Code)) };
-        b.Child = new TextBlock { Text = p.Short, FontSize = size * 0.34, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var ph = Lucide.Icon(p.Expansion ? "package" : "sofa", size * 0.55, new SolidColorBrush(Windows.UI.Color.FromArgb(220, 255, 255, 255)), 1.8);
+        ph.HorizontalAlignment = HorizontalAlignment.Center;
+        ph.VerticalAlignment = VerticalAlignment.Center;
+        b.Child = ph;
         ToolTipService.SetToolTip(b, p.Name);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, p.Name);
         if (dir is not null)
@@ -319,6 +348,8 @@ public sealed partial class MainWindow
             if (_step == Home && Environment.TickCount64 % 30000 < 5000) BuildHome(); // (the playing time on Home, now and then)
         }));
         _lastSession = info;
+        // (kept for Health's last sessions, and for Mods' "new since last play")
+        try { SessionHistory.Add(info); ModViewPrefs.LastPlay = info.Started + info.Played; } catch (Exception e) { App.Log(e); }
         _session = null;
         _running = Games.IsRunning();
         AppWindow.Show();
@@ -596,6 +627,9 @@ public sealed partial class MainWindow
             (HealthArea.Graphics, T("Graphics"), _state?.Layer.ToString() ?? "", ""),
             (HealthArea.GameSettings, T("Game settings"), "Options.ini, Resource.cfg", ""),
             (HealthArea.Mods, T("Mods"), T("conflicts and what they need"), ""),
+            (HealthArea.Stability, T("Stability"), T("crashes, memory, script errors"), ""),
+            (HealthArea.Saves, T("Saves"), T("size, backups, complete"), ""),
+            (HealthArea.Disk, T("Space and caches"), T("free space, OneDrive, game caches"), ""),
         ];
         foreach (var (area, name, detail, glyph) in all)
         {
