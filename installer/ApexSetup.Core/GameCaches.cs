@@ -41,7 +41,9 @@ public static class GameCaches
     }
 
     // the backup of the last Clean, null when none is kept
-    public static string? Backup => Directory.Exists(BackupRoot) ? Directory.EnumerateDirectories(BackupRoot).OrderDescending().FirstOrDefault() : null;
+    // (a backup marked dropped is gone for the player even when Windows still holds a file in it; it is deleted later)
+    public static string? Backup => Directory.Exists(BackupRoot) && !File.Exists(DroppedMark) ? Directory.EnumerateDirectories(BackupRoot).OrderDescending().FirstOrDefault() : null;
+    static string DroppedMark => Path.Combine(BackupRoot, "dropped");
 
     // moves every cache into a new dated backup folder; returns the bytes moved. Refuses while the game runs.
     public static long Clean(string docs)
@@ -51,7 +53,9 @@ public static class GameCaches
         if (files.Count == 0) return 0;
         // one backup at a time: an older one is from a clean whose game start never ended well, its caches are stale anyway
         Forget();
-        var to = Path.Combine(BackupRoot, DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        // (an old backup Windows kept hold of stays until the next Forget; the newest one is the one Restore uses)
+        try { File.Delete(DroppedMark); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        var to = Path.Combine(BackupRoot, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff"));
         Directory.CreateDirectory(to);
         File.WriteAllText(Path.Combine(to, "docs.txt"), docs); // (first: a clean cut off half way can still be restored)
         long moved = 0;
@@ -88,6 +92,11 @@ public static class GameCaches
     {
         if (!Directory.Exists(BackupRoot)) return;
         try { Fs.Retry(() => Directory.Delete(BackupRoot, true)); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // an antivirus or indexer holding a file: marked dropped now, deleted by the next Clean or Forget
+            Engine.Log(e);
+            try { File.WriteAllText(DroppedMark, ""); } catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) { Engine.Log(e2); }
+        }
     }
 }

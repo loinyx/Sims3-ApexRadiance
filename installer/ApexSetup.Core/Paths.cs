@@ -4,7 +4,9 @@ namespace ApexSetup;
 // another administrator. Settable so tests point it at a temporary folder.
 public static class Paths
 {
-    public static string LocalAppData = Scan.PlayerShellFolder("Local AppData") ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    // (APEX_LAUNCHER_LOCALAPPDATA: the UI feature harness keeps its notes, tags and settings away from the player's)
+    public static string LocalAppData = Environment.GetEnvironmentVariable("APEX_LAUNCHER_LOCALAPPDATA")
+        ?? Scan.PlayerShellFolder("Local AppData") ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
     // games.txt, language.txt, settings.json, the log and the helper's plan files
     public static string Data => Path.Combine(LocalAppData, "Apex Launcher");

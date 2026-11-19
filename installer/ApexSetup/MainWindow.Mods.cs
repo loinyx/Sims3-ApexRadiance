@@ -35,7 +35,9 @@ public sealed partial class MainWindow
     Action? _modUndo;
 
     // filters: each a set of chosen values; a mod matches any value of a group and every group in use
-    readonly HashSet<string> _fFiles = [], _fKinds = [], _fStates = [], _fTags = [];
+    readonly HashSet<string> _fFiles = [], _fKinds = [], _fStates = [], _fTags = [], _fCreators = [];
+    Dictionary<string, string> _modCreatorGuess = new(StringComparer.OrdinalIgnoreCase);
+    string? CreatorOf(ModFile m) => ModCreators.Of(m, _modCreatorGuess).Name;
     int _fAddedDays, _fSizeMb, _modSort, _filterGroup = 1;
     bool _modsGrid;
     readonly HashSet<string> _collapsed = [];
@@ -66,6 +68,7 @@ public sealed partial class MainWindow
             _modLooks = _modFindings.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
             _modDirs = dirs;
             _modLoadedBy = loaded;
+            _modCreatorGuess = ModCreators.Guess(mods);
             _modRows = mods.Select(m => new ModRow(m, _modFindings.TryGetValue(m.Path, out var l) ? l : [])
             {
                 IsNew = since is { } s && Added(m) > s,
@@ -217,6 +220,7 @@ public sealed partial class MainWindow
         if (q.Length > 0 && !(m.Rel.Contains(q, StringComparison.OrdinalIgnoreCase)
             || (ModNotes.Get(m.Rel)?.Notes?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
             || ModNotes.TagsOf(m.Rel).Any(t => t.Contains(q, StringComparison.OrdinalIgnoreCase))
+            || (CreatorOf(m)?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
             || r.Kinds.Any(k => KindLabel(k).Contains(q, StringComparison.OrdinalIgnoreCase))
             || _modContents.TryGetValue(m.Path, out var c) && c.Names.Concat(c.PartNames).Any(n => n.Contains(q, StringComparison.OrdinalIgnoreCase))))
             return false;
@@ -227,6 +231,7 @@ public sealed partial class MainWindow
                 "on" => m.Enabled, "off" => !m.Enabled, "look" => r.Findings.Count > 0, "new" => r.IsNew, "dup" => r.DuplicateOf is not null, _ => false,
             })) return false;
         if (_fTags.Count > 0 && !_fTags.Any(t => t == "" ? ModNotes.TagsOf(m.Rel).Count == 0 : ModNotes.TagsOf(m.Rel).Contains(t, StringComparer.OrdinalIgnoreCase))) return false;
+        if (_fCreators.Count > 0 && !_fCreators.Contains(CreatorOf(m) ?? "")) return false;
         if (_fAddedDays > 0 && Added(m) < DateTime.Now.AddDays(-_fAddedDays)) return false;
         if (_fSizeMb > 0 && m.Size < (long)_fSizeMb << 20) return false;
         return true;
@@ -462,6 +467,7 @@ public sealed partial class MainWindow
     {
         if (row.Children.OfType<TextBox>().Any()) return;
         var box = new TextBox { Text = Path.GetFileName(dir), MinWidth = 0, Padding = new Thickness(6, 2, 6, 2), FontSize = 13 };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("New name"));
         Grid.SetColumn(box, 1);
         Grid.SetColumnSpan(box, 2);
         label.Visibility = Visibility.Collapsed;
@@ -663,6 +669,7 @@ public sealed partial class MainWindow
         else if (_fStates.Count > 0) _fStates.Remove(_fStates.Last());
         else if (_fKinds.Count > 0) _fKinds.Remove(_fKinds.Last());
         else if (_fFiles.Count > 0) _fFiles.Remove(_fFiles.Last());
+        else if (_fCreators.Count > 0) _fCreators.Remove(_fCreators.Last());
         else if (_fAddedDays > 0) _fAddedDays = 0;
         else if (_fSizeMb > 0) _fSizeMb = 0;
         else return;
@@ -720,6 +727,7 @@ public sealed partial class MainWindow
         foreach (var k in _fKinds.ToList()) Chip(KindLabel(k), KindIcon(k), null, () => _fKinds.Remove(k));
         foreach (var s in _fStates.ToList()) Chip(StateName(s), StateIcon(s), null, () => _fStates.Remove(s));
         foreach (var t in _fTags.ToList()) Chip(t == "" ? T("Untagged") : t, "tag", t == "" ? null : ModNotes.ColorOf(t), () => _fTags.Remove(t));
+        foreach (var c in _fCreators.ToList()) Chip(c == "" ? T("Unknown creator") : c, "users", null, () => _fCreators.Remove(c));
         if (_fAddedDays > 0) Chip(T("Added in {0} days", _fAddedDays), "calendar-clock", null, () => _fAddedDays = 0);
         if (_fSizeMb > 0) Chip(T("Over {0} MB", _fSizeMb), "hard-drive", null, () => _fSizeMb = 0);
         ModChipsScroll.Visibility = ModChips.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -729,7 +737,7 @@ public sealed partial class MainWindow
         ModSearch.PlaceholderText = n > 0 ? T("Search") : T("Search mods");
     }
 
-    int FilterCount => _fFiles.Count + _fKinds.Count + _fStates.Count + _fTags.Count + (_fAddedDays > 0 ? 1 : 0) + (_fSizeMb > 0 ? 1 : 0);
+    int FilterCount => _fFiles.Count + _fKinds.Count + _fStates.Count + _fTags.Count + _fCreators.Count + (_fAddedDays > 0 ? 1 : 0) + (_fSizeMb > 0 ? 1 : 0);
 
     static string FileTypeName(string f) => f switch { "package" => T("Package"), "sims3pack" => "Sims3Pack", "asi" => T("ASI plugin"), _ => T("Library item") };
     static string FileTypeIcon(string f) => f switch { "package" => "package", "sims3pack" => "package", "asi" => "plug", _ => "library" };
@@ -754,7 +762,7 @@ public sealed partial class MainWindow
         var groups = new (string Label, string Icon, int InUse)[]
         {
             (T("File type"), "package", _fFiles.Count), (T("What it is"), "blocks", _fKinds.Count), (T("State"), "power", _fStates.Count),
-            (T("Tags"), "tag", _fTags.Count), (T("Added"), "calendar-clock", _fAddedDays > 0 ? 1 : 0), (T("Size"), "hard-drive", _fSizeMb > 0 ? 1 : 0),
+            (T("Tags"), "tag", _fTags.Count), (T("Creator"), "users", _fCreators.Count), (T("Added"), "calendar-clock", _fAddedDays > 0 ? 1 : 0), (T("Size"), "hard-drive", _fSizeMb > 0 ? 1 : 0),
         };
         var nav = new StackPanel { Spacing = 2, Padding = new Thickness(8), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
         for (int i = 0; i < groups.Length; i++)
@@ -833,6 +841,10 @@ public sealed partial class MainWindow
                 if (ModNotes.Tags.Count == 0) list.Children.Add(new TextBlock { Text = T("No tags yet: make one from a mod's details or the side pane."), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(8) });
                 break;
             case 4:
+                foreach (var c in inPlace.GroupBy(r => CreatorOf(r.File) ?? "").OrderBy(g => g.Key == "" ? 1 : 0).ThenByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+                    Opt(c.Key == "" ? T("Unknown creator") : c.Key, "users", null, c.Count(), _fCreators.Contains(c.Key), on => Flip(_fCreators, c.Key, on));
+                break;
+            case 5:
                 foreach (var d in new[] { 0, 7, 30, 90 })
                     Opt(d == 0 ? T("Any time") : T("In the last {0} days", d), d == 0 ? "calendar-clock" : null, null, d == 0 ? inPlace.Count : inPlace.Count(r => Added(r.File) >= DateTime.Now.AddDays(-d)), _fAddedDays == d, on => _fAddedDays = on ? d : 0);
                 break;
@@ -851,7 +863,7 @@ public sealed partial class MainWindow
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         foot.Children.Add(new TextBlock { Text = _modShown.Count == 1 ? T("1 mod matches") : T("{0} mods match", _modShown.Count), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
         var clear = new HyperlinkButton { Content = T("Clear all"), FontSize = 12, Padding = new Thickness(0), IsEnabled = FilterCount > 0 };
-        clear.Click += (_, _) => { _fFiles.Clear(); _fKinds.Clear(); _fStates.Clear(); _fTags.Clear(); _fAddedDays = _fSizeMb = 0; FillMods(); FillFilterPanel(); };
+        clear.Click += (_, _) => { _fFiles.Clear(); _fKinds.Clear(); _fStates.Clear(); _fTags.Clear(); _fCreators.Clear(); _fAddedDays = _fSizeMb = 0; FillMods(); FillFilterPanel(); };
         Grid.SetColumn(clear, 1);
         foot.Children.Add(clear);
         var ok = new Button { Content = T("Done"), Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
@@ -1153,6 +1165,7 @@ public sealed partial class MainWindow
             rename.Click += (_, _) =>
             {
                 var box = new TextBox { Text = r.Name, FontSize = 15 };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("New name"));
                 nameRow.Children.Remove(nameText);
                 nameRow.Children.Insert(0, box);
                 rename.Visibility = Visibility.Collapsed;
@@ -1213,6 +1226,17 @@ public sealed partial class MainWindow
         }
         Fact(T("Type"), kinds);
         Fact(T("File"), Val(m.Name));
+        // the creator: the guess shows as the box's hint until the player writes one
+        var (who, guessed) = ModCreators.Of(m, _modCreatorGuess);
+        var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 12, MinWidth = 0, Padding = new Thickness(8, 4, 8, 4) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(creator, T("Creator"));
+        ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name; write the maker's name to set it.") : T("The maker's name."));
+        creator.LostFocus += (_, _) =>
+        {
+            try { ModNotes.SetCreator(r.File.Rel, creator.Text); }
+            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
+        };
+        Fact(T("Creator"), creator);
         if (mine)
         {
             var where = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };

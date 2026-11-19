@@ -1008,6 +1008,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         try { saved.Save(); } catch (Exception) { failed = true; }
         Directory.Delete(sj + ".apex-tmp");
         Check(failed && Manifest.Load(abin).Versions[Components.Apex] == "4.0.3", "setup.json: saved through a temporary file, the old one kept when that fails");
+        Fs.RetryDelay = TimeSpan.FromMilliseconds(500); // (back to the real wait: the tests after this one meet real antivirus locks)
 
         // a damaged setup.json: the record rebuilt from the backups (the bridge's d3d9.dll, the Options.ini copy)
         Directory.CreateDirectory(Path.Combine(abin, ".trex"));
@@ -1048,6 +1049,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         var missingAtOnce = false; tries = 0;
         try { Fs.Retry(() => { tries++; throw new FileNotFoundException("gone"); }); } catch (FileNotFoundException) { missingAtOnce = tries == 1; }
         Check(gaveUp && missingAtOnce, "copy and move: a held file is tried again 3 times, a missing one fails at once");
+        Fs.RetryDelay = TimeSpan.FromMilliseconds(500);
 
         var anow = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
         Check(Releases.RateLimit(System.Net.HttpStatusCode.Forbidden, "0", (1_800_000_000 + 600).ToString(), anow) is { Args: ["10"] }

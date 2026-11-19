@@ -62,7 +62,7 @@ public sealed partial class MainWindow
         body.Children.Add(Muted(T("The originals are kept in Mods\\{0} and Split puts them back exactly.", ModMerge.FolderName)));
         var d = new ContentDialog
         {
-            Title = T("Merge {0} mods", plan.Inputs.Count), Content = new ScrollViewer { Content = body, MaxHeight = 460 },
+            Title = plan.Inputs.Count == plan.Inputs.Count + plan.Skipped.Count ? T("Merge {0} mods", plan.Inputs.Count) : T("Merge {0} of the {1} mods chosen", plan.Inputs.Count, plan.Inputs.Count + plan.Skipped.Count), Content = new ScrollViewer { Content = body, MaxHeight = 460 },
             PrimaryButtonText = plan.CanRun ? T("Merge") : T("Check again"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return null;

@@ -97,6 +97,16 @@ static class ModToolsTests
             check(dups.Count == 4 && dups.Keys.Any(k => k.EndsWith(@"Packages\mod3.package")) && dups.Keys.Any(k => k.EndsWith("new (2).package")) && dups.Keys.Any(k => k.EndsWith("copy-of-mod3.package"))
                 && !dups.Keys.Any(k => k.EndsWith("mod4.package")), "duplicates: the same bytes under two names are found (a copy of mod3, the two new.package), nothing else");
 
+            // creators: a prefix two files share, a known maker's prefix alone, never a lone word; the player's name wins
+            ModFile F(string name) => new(Path.Combine(root, name), Path.Combine("Mods", name), 1, ModKind.Package, true, false);
+            var cmods = new[] { F("ani_BistroStove.package"), F("ani_Merchant.package"), F("NRaas_Career.package"), F("Lonely_Mod.package"), F("BB-SmartSim.package"), F("plain.package") };
+            var guess = ModCreators.Guess(cmods);
+            ModNotes.SetCreator(cmods[3].Rel, "Someone Real");
+            check(guess[cmods[0].Path] == "ani" && guess[cmods[2].Path] == "NRaas" && guess[cmods[4].Path] == "BoringBones"
+                && !guess.ContainsKey(cmods[3].Path) && !guess.ContainsKey(cmods[5].Path)
+                && ModCreators.Of(cmods[3], guess) == ("Someone Real", false) && ModCreators.Of(cmods[0], guess) == ("ani", true),
+                "creators: guessed from shared or known prefixes, set by the player over any guess");
+
             // the remembered view
             ModViewPrefs.Save(new ModViewPrefs.Prefs(Path.Combine("Packages", "B"), true, 4, ["tags", "game"]));
             ModViewPrefs.LastPlay = new DateTime(2026, 11, 18, 22, 0, 0, DateTimeKind.Utc);

@@ -12,6 +12,7 @@ public sealed class ModNote
     public string? Notes { get; set; }
     public string? Picture { get; set; } // a file name in mod-pictures
     public List<string>? Tags { get; set; }
+    public string? Creator { get; set; } // set by the player; else ModCreators guesses it from the file name
 }
 
 public sealed class ModTag
@@ -75,6 +76,14 @@ public static class ModNotes
         }
         Edit(rel, n => n.Picture = name);
         if (old is not null) TryDelete(Path.Combine(PictureDir, old));
+    }
+
+    public static void SetCreator(string rel, string? creator)
+    {
+        creator = string.IsNullOrWhiteSpace(creator) ? null : creator.Trim();
+        if (creator is { Length: > 60 }) throw new SetupException("A creator's name is at most 60 characters.");
+        if (Get(rel)?.Creator == creator) return;
+        Edit(rel, n => n.Creator = creator);
     }
 
     // ---- tags ----
@@ -167,7 +176,7 @@ public static class ModNotes
         var n = Get(rel) ?? new ModNote();
         change(n);
         if (n.Tags is { Count: 0 }) n.Tags = null;
-        if (n.Notes is null && n.Picture is null && n.Tags is null) All.Remove(rel); else All[rel] = n;
+        if (n.Notes is null && n.Picture is null && n.Tags is null && n.Creator is null) All.Remove(rel); else All[rel] = n;
         if (save) Save();
     }
 
