@@ -288,6 +288,29 @@ inline bool OffFloorLine(const Lot& lot, int story, float P[3], const float N[3]
     }
     return false;
 }
+// A floor point (|N.y| >= 0.5) closer than kClear to a wall's line on its story (a tile side) is shadow-tested kClear off that line on
+// its own side. Sharper floors' sub-texels lie 3.1 cm from the line, inside the wall's thickness, where a lamp behind the wall
+// crosses it closer to the point than the shadow's bias: the room beyond took a band of that lamp along the wall, read into the
+// floor's visible texels. Diagonal walls are left as they are. The light law keeps P
+inline bool OffWallLine(const Lot& lot, int story, float P[3], const float N[3]) {
+    constexpr float kClear = 0.07f;
+    if (std::fabs(N[1]) < 0.5f) return false;
+    bool moved = false;
+    for (const Story& s : lot.stories) {
+        if (s.story != story) continue;
+        for (const Edge& e : s.edges) {
+            const bool alongZ = e.x0 == e.x1, alongX = e.z0 == e.z1;
+            if (alongZ == alongX) continue; // (a diagonal, or nothing)
+            const int a = alongZ ? 0 : 2, b = 2 - a; // (a: across the line, b: along it)
+            const float line = alongZ ? e.x0 : e.z0, lo = std::min(alongZ ? e.z0 : e.x0, alongZ ? e.z1 : e.x1), hi = std::max(alongZ ? e.z0 : e.x0, alongZ ? e.z1 : e.x1);
+            const float d = P[a] - line;
+            if (!(P[b] >= lo && P[b] <= hi) || !(std::fabs(d) < kClear) || d == 0.0f) continue;
+            P[a] = line + (d > 0.0f ? kClear : -kClear);
+            moved = true;
+        }
+    }
+    return moved;
+}
 // A room-0 texel of `story` (lot space P, normal N) facing into a room of the story below that the open-top build opened to this
 // story (Mesh::openRooms, sorted): one space two stories tall, so the texel is that room's wall, not an outdoor one (03/11, lot C49C:
 // the upper half of a double-height room's walls took the street lamps through the windows as room 0, the lower half not). Its
