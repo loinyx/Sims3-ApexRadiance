@@ -13,6 +13,7 @@ public sealed class ModNote
     public string? Picture { get; set; } // a file name in mod-pictures
     public List<string>? Tags { get; set; }
     public string? Creator { get; set; } // set by the player; else ModCreators guesses it from the file name
+    public List<string>? Kinds { get; set; } // what it is, chosen by the player; else what the package index says
 }
 
 public sealed class ModTag
@@ -84,6 +85,13 @@ public static class ModNotes
         if (creator is { Length: > 60 }) throw new SetupException("A creator's name is at most 60 characters.");
         if (Get(rel)?.Creator == creator) return;
         Edit(rel, n => n.Creator = creator);
+    }
+
+    // what a mod is, chosen by the player (null or empty: back to what the launcher reads in the package)
+    public static void SetKinds(string rel, IEnumerable<string>? kinds)
+    {
+        var list = kinds?.Where(k => k.Length > 0).Distinct().ToList();
+        Edit(rel, n => n.Kinds = list is { Count: > 0 } ? list : null);
     }
 
     // ---- tags ----
@@ -176,7 +184,8 @@ public static class ModNotes
         var n = Get(rel) ?? new ModNote();
         change(n);
         if (n.Tags is { Count: 0 }) n.Tags = null;
-        if (n.Notes is null && n.Picture is null && n.Tags is null && n.Creator is null) All.Remove(rel); else All[rel] = n;
+        if (n.Kinds is { Count: 0 }) n.Kinds = null;
+        if (n.Notes is null && n.Picture is null && n.Tags is null && n.Creator is null && n.Kinds is null) All.Remove(rel); else All[rel] = n;
         if (save) Save();
     }
 

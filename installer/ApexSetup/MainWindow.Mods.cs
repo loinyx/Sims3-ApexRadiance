@@ -74,9 +74,10 @@ public sealed partial class MainWindow
             {
                 IsNew = since is { } s && Added(m) > s,
                 DuplicateOf = dups.TryGetValue(m.Path, out var d) ? Path.GetFileNameWithoutExtension(d) : null,
-                Kinds = kinds.TryGetValue(m.Path, out var k) && k.Kinds.Any() ? k.Kinds.Select(x => x.ToString()).ToList()
+                DetectedKinds = kinds.TryGetValue(m.Path, out var k) && k.Kinds.Any() ? k.Kinds.Select(x => x.ToString()).ToList()
                     : [m.FileType switch { "asi" => "Asi", "sims3pack" => "Sims3Pack", _ => m.Kind.ToString() }],
             }).ToList();
+            foreach (var r in _modRows) ApplyKinds(r);
             _modsLoaded = true;
             Safe(LoadModPicturesAsync(_modRows));
             Safe(LoadDefaultsAsync(g, _modRows));
@@ -1144,6 +1145,75 @@ public sealed partial class MainWindow
 
     void CloseModDetails() { ModList.SelectedItems.Clear(); ModGrid.SelectedItems.Clear(); FillModDetails(); FillFooter(); }
 
+    // the player's choice of type, else the package's own
+    static void ApplyKinds(ModRow r)
+    {
+        var manual = ModNotes.Get(r.File.Rel)?.Kinds;
+        r.Kinds = manual is { Count: > 0 } ? manual : r.DetectedKinds;
+        r.KindOverride = manual is { Count: > 0 } ? KindLabel(manual[0]) : null;
+        r.KindIconOverride = manual is { Count: > 0 } ? KindIcon(manual[0]) : null;
+    }
+
+    // every type, by group, ticked as the mod is now; Done saves it, Back to detected forgets the choice
+    void PickKinds(ModRow r, FrameworkElement anchor)
+    {
+        var picked = r.Kinds.ToHashSet();
+        var list = new StackPanel { Spacing = 2 };
+        foreach (var group in Enum.GetNames<Kind>().Where(k => k != nameof(Kind.Other)).Concat(["Asi", "Sims3Pack"])
+                     .GroupBy(KindGroup).OrderBy(g => KindGroupOrder(g.Key)))
+        {
+            list.Children.Add(new TextBlock { Text = KindGroupName(group.Key), FontSize = 11, CharacterSpacing = 60, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(4, list.Children.Count == 0 ? 0 : 12, 0, 4) });
+            foreach (var k in group.OrderBy(KindLabel, StringComparer.CurrentCultureIgnoreCase))
+            {
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+                row.Children.Add(Lucide.Icon(KindIcon(k), 14, Res("ApexMutedBrush")));
+                row.Children.Add(new TextBlock { Text = KindLabel(k), FontSize = 13 });
+                var box = new CheckBox { Content = row, IsChecked = picked.Contains(k), MinWidth = 0, Padding = new Thickness(8, 0, 0, 0) };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, KindLabel(k));
+                box.Checked += (_, _) => picked.Add(k);
+                box.Unchecked += (_, _) => picked.Remove(k);
+                list.Children.Add(box);
+            }
+        }
+        var flyout = new Flyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Left };
+        void Save(IEnumerable<string>? kinds)
+        {
+            try
+            {
+                // (ticking exactly what the package says is no choice: it stays automatic)
+                var same = kinds is not null && kinds.ToHashSet().SetEquals(r.DetectedKinds);
+                ModNotes.SetKinds(r.File.Rel, same ? null : kinds?.OrderBy(k => r.Kinds.Contains(k) ? r.Kinds.ToList().IndexOf(k) : int.MaxValue));
+                ApplyKinds(r);
+                r.Refresh();
+                flyout.Hide();
+                FillMods();
+                FillModDetails();
+            }
+            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
+        }
+        var back = new HyperlinkButton { Content = T("Back to detected"), FontSize = 12, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
+            IsEnabled = ModNotes.Get(r.File.Rel)?.Kinds is not null };
+        back.Click += (_, _) => Save(null);
+        var done = new Button { Content = T("Done"), Style = (Style)Application.Current.Resources["AccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Right };
+        done.Click += (_, _) => { if (picked.Count == 0) Save(null); else Save(picked); };
+        var foot = new Grid { Padding = new Thickness(12, 10, 12, 10), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
+        foot.Children.Add(back);
+        foot.Children.Add(done);
+        var body = new Grid { Width = 300 };
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition());
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.Children.Add(new TextBlock { Text = T("What is {0}?", r.Name), FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(16, 14, 16, 8), TextTrimming = TextTrimming.CharacterEllipsis });
+        var scroll = new ScrollViewer { Content = list, MaxHeight = 420, Padding = new Thickness(12, 0, 16, 8) };
+        Grid.SetRow(scroll, 1);
+        body.Children.Add(scroll);
+        Grid.SetRow(foot, 2);
+        body.Children.Add(foot);
+        flyout.Content = body;
+        flyout.FlyoutPresenterStyle = new Style(typeof(FlyoutPresenter)) { Setters = { new Setter(Control.PaddingProperty, new Thickness(0)), new Setter(FrameworkElement.MaxWidthProperty, 360.0) } };
+        flyout.ShowAt(anchor);
+    }
+
     void FillModDetails()
     {
         var host = ModDetails;
@@ -1270,6 +1340,15 @@ public sealed partial class MainWindow
             chip.Children.Add(Lucide.Icon(KindIcon(k), 12, Res("ApexMutedBrush")));
             chip.Children.Add(new TextBlock { Text = KindLabel(k), FontSize = 12, Foreground = Res("ApexSoftTextBrush") });
             kinds.Children.Add(chip);
+        }
+        if (mine)
+        {
+            // the type can be changed by hand: the filters, the icon and the sort follow it
+            var change = new HyperlinkButton { Content = T("Change"), Padding = new Thickness(0), FontSize = 12 };
+            change.Click += (_, _) => PickKinds(r, change);
+            kinds.Children.Add(change);
+            if (ModNotes.Get(m.Rel)?.Kinds is not null)
+                kinds.Children.Add(new TextBlock { Text = T("Chosen by you"), FontSize = 11, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
         }
         Fact(T("Type"), kinds);
         Fact(T("File"), Val(m.Name));

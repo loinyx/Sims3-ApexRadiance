@@ -26,7 +26,7 @@
                                   AutomationProperties.Name="{x:Bind Name, Mode=OneWay}" />
                         <Border Width="32" Height="32" CornerRadius="8" Background="{x:Bind TileBrush}" Opacity="{x:Bind TextOpacity, Mode=OneWay}">
                             <Grid>
-                                <local:LucideIcon Kind="{x:Bind KindIcon}" Size="16" Stroke="{x:Bind GlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                <local:LucideIcon Kind="{x:Bind KindIcon, Mode=OneWay}" Size="16" Stroke="{x:Bind GlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"
                                                   Visibility="{x:Bind Placeholder, Mode=OneWay}" />
                                 <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="UniformToFill" />
                             </Grid>
@@ -64,8 +64,8 @@
                         </Grid>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Opacity="{x:Bind TextOpacity, Mode=OneWay}">
-                        <local:LucideIcon Kind="{x:Bind KindIcon}" Size="14" Stroke="{StaticResource ApexMutedBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="{x:Bind Kind}" FontSize="12" Foreground="{StaticResource ApexSoftTextBrush}" TextTrimming="CharacterEllipsis" />
+                        <local:LucideIcon Kind="{x:Bind KindIcon, Mode=OneWay}" Size="14" Stroke="{StaticResource ApexMutedBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="{x:Bind Kind, Mode=OneWay}" FontSize="12" Foreground="{StaticResource ApexSoftTextBrush}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <TextBlock Grid.Column="3" Text="{x:Bind Size}" FontSize="12" Foreground="{x:Bind SizeBrush}" VerticalAlignment="Center" Opacity="{x:Bind TextOpacity, Mode=OneWay}" />
                     <Grid Grid.Column="4">
@@ -81,7 +81,7 @@
                 <StackPanel Width="148" Spacing="6" Padding="0,0,0,8" Opacity="{x:Bind TextOpacity, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind FullName, Mode=OneWay}">
                     <Border Width="148" Height="148" CornerRadius="10" Background="{x:Bind TileBrush}">
                         <Grid>
-                            <local:LucideIcon Kind="{x:Bind KindIcon}" Size="40" Stroke="{x:Bind GlyphBrush}" StrokeWidth="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            <local:LucideIcon Kind="{x:Bind KindIcon, Mode=OneWay}" Size="40" Stroke="{x:Bind GlyphBrush}" StrokeWidth="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"
                                               Visibility="{x:Bind Placeholder, Mode=OneWay}" />
                             <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="UniformToFill" />
                             <Border Visibility="{x:Bind NewVisible, Mode=OneWay}" Background="#CC1C1B2E" CornerRadius="8" Padding="6,1,7,2" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top">

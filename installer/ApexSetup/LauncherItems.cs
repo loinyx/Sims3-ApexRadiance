@@ -21,8 +21,12 @@ public sealed class ModRow : INotifyPropertyChanged
 
     public string Name => File.FileType == "package" ? System.IO.Path.GetFileNameWithoutExtension(File.Name) : File.Name;
     public string FullName => File.Name + "\n" + Place(File);
-    public string Kind => KindName(File.Kind);
-    public string KindIcon => IconOf(File.Kind);
+    public string Kind => KindOverride ?? KindName(File.Kind);
+    public string KindIcon => KindIconOverride ?? IconOf(File.Kind);
+    // what the package index says, and the row's label and icon when the player chose its type
+    public IReadOnlyList<string> DetectedKinds { get; set; } = [];
+    public string? KindOverride { get; set; }
+    public string? KindIconOverride { get; set; }
     public string Size => SizeText(File.Size);
     // (a very large package: worth knowing, it slows loading)
     public Brush SizeBrush => File.Size > 200L << 20 ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
@@ -139,7 +143,7 @@ public sealed class ModRow : INotifyPropertyChanged
     public void SetFindings(IReadOnlyList<string> findings) { Findings = findings; Refresh(); }
 
     // notes, tags, findings or the New mark changed
-    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(TagsVisible), nameof(NewVisible));
+    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(TagsVisible), nameof(NewVisible), nameof(Kind), nameof(KindIcon));
 
     public void OnToggled(object sender, RoutedEventArgs e)
     {

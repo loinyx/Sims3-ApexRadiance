@@ -147,6 +147,10 @@ static class ModToolsTests
                 && !guess.ContainsKey(cmods[3].Path) && !guess.ContainsKey(cmods[5].Path)
                 && ModCreators.Of(cmods[3], guess) == ("Someone Real", false) && ModCreators.Of(cmods[0], guess) == ("ani", true),
                 "creators: guessed from shared or known prefixes, set by the player over any guess");
+            ModNotes.SetKinds(cmods[1].Rel, ["BuildFence", "BuildFence", "Textures"]);
+            var keptKinds = ModNotes.Get(cmods[1].Rel)?.Kinds is ["BuildFence", "Textures"];
+            ModNotes.SetKinds(cmods[1].Rel, []);
+            check(keptKinds && ModNotes.Get(cmods[1].Rel) is null, "types: the player's choice is kept once each; an empty choice goes back to the package's own");
             var tails = ModCreators.Guess([F("Smart-vehicles-decisions-BoringBones.package"), F("Cooking-Overhaul.package"), F("Job-Overhaul.package"), F("Shop-Overhaul.package"),
                 F("one-SomeMaker.package"), F("two-SomeMaker.package"), F("three-SomeMaker.package")]);
             check(tails.Values.Count(v => v == "BoringBones") == 1 && !tails.Values.Contains("Overhaul") && tails.Values.Count(v => v == "SomeMaker") == 3,
