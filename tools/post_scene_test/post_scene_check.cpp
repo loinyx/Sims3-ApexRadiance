@@ -22,6 +22,7 @@ bool RegisterDrawIndexedPrimitive(const std::string&, DrawIndexedPrimitiveHook, 
 bool RegisterDrawPrimitive(const std::string&, DrawPrimitiveHook, Priority) { return true; }
 void UnregisterAll(const std::string&) {}
 void ObserveReissuedDraws(const std::string&) {}
+std::recursive_mutex& RegistrationLock() { static std::recursive_mutex m; return m; }
 }
 IDirect3DSurface9* expectedDepth = nullptr;
 bool internalPass = false;
