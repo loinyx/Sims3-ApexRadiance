@@ -147,6 +147,7 @@ public sealed partial class MainWindow
         try
         {
             ModRow.Toggle = ToggleMod;
+            ModRow.Check = OnModCheck;
             if (ModList.ItemsSource is null) { ModList.ItemsSource = _modShown; ModGrid.ItemsSource = _modShown; LoadViewPrefs(); }
             FillSide();
             var inPlace = _modRows.Where(r => InPlace(r, _modPlace)).ToList();
@@ -367,10 +368,6 @@ public sealed partial class MainWindow
             DropTarget(g, () => _dragFolder is { } f ? CanNest(f, dir) : _dragRows is not null,
                 () => _dragFolder is { } f ? T("Move {0} into {1}", Path.GetFileName(f), p.Label) : T("Move to {0}", p.Label),
                 () => { if (_dragFolder is { } f) Safe(MoveFolderAsync(f, dir)); else if (_dragRows is { } rows) MoveMods(rows, dir); });
-            // a folder can be dragged into another
-            g.CanDrag = true;
-            g.DragStarting += (_, e) => { _dragFolder = dir; _dragRows = null; e.Data.SetText(dir); e.Data.RequestedOperation = DataPackageOperation.Move; };
-            g.DropCompleted += (_, _) => _dragFolder = null;
             g.DoubleTapped += (_, _) => BeginRename(g, name, dir);
             g.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.F2) { e.Handled = true; BeginRename(g, name, dir); } };
             var menu = new MenuFlyout();
@@ -397,6 +394,22 @@ public sealed partial class MainWindow
         return g;
     }
 
+    // a folder can be dragged into another; the list drags it (a row made draggable itself takes the click, and a click on a
+    // folder then picked nothing)
+    void OnFolderDragStart(object sender, DragItemsStartingEventArgs e)
+    {
+        if (e.Items.FirstOrDefault() is FrameworkElement { Tag: string key } && IsFolder(key))
+        {
+            _dragFolder = key;
+            _dragRows = null;
+            e.Data.SetText(key);
+            e.Data.RequestedOperation = DataPackageOperation.Move;
+        }
+        else e.Cancel = true;
+    }
+
+    void OnFolderDragDone(ListViewBase sender, DragItemsCompletedEventArgs e) => _dragFolder = null;
+
     static bool CanNest(string folder, string into) =>
         !into.Equals(folder, StringComparison.OrdinalIgnoreCase) && !into.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(Path.GetDirectoryName(folder) ?? "", into, StringComparison.OrdinalIgnoreCase);
@@ -406,13 +419,19 @@ public sealed partial class MainWindow
     {
         g.AllowDrop = true;
         var normal = g.Background;
+        g.CornerRadius = new CornerRadius(4);
+        g.BorderThickness = new Thickness(1);
+        g.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        // (the tint fades in and out, the row lifts a touch: a held item sees where it lands without a jump)
+        if (AnimationsOn) g.BackgroundTransition = new BrushTransition { Duration = TimeSpan.FromMilliseconds(120) };
         void Light(bool on)
         {
-            g.Background = on ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x26, 0x24, 0x44)) : normal;
+            g.Background = on ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x38, 0x7F, 0x77, 0xDD)) : normal;
+            g.BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             if (!AnimationsOn) return;
             g.CenterPoint = new System.Numerics.Vector3((float)g.ActualWidth / 2, (float)g.ActualHeight / 2, 0);
-            g.ScaleTransition ??= new Vector3Transition { Duration = TimeSpan.FromMilliseconds(140) };
-            g.Scale = on ? new System.Numerics.Vector3(1.03f, 1.03f, 1) : new System.Numerics.Vector3(1, 1, 1);
+            g.ScaleTransition ??= new Vector3Transition { Duration = TimeSpan.FromMilliseconds(160) };
+            g.Scale = on ? new System.Numerics.Vector3(1.02f, 1.02f, 1) : new System.Numerics.Vector3(1, 1, 1);
         }
         g.DragEnter += (_, _) => { if (can()) Light(true); };
         g.DragLeave += (_, _) => Light(false);
@@ -689,7 +708,20 @@ public sealed partial class MainWindow
 
     void OnModsFind(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs e) { e.Handled = true; ModSearch.Focus(FocusState.Keyboard); }
     void OnModsView(object sender, RoutedEventArgs e) { _modsGrid = sender == ModsViewGallery; SaveViewPrefs(); FillMods(); }
-    void OnModPicked(object sender, SelectionChangedEventArgs e) { if (!_fillingMods) { FillModDetails(); FillFooter(); } }
+    void OnModPicked(object sender, SelectionChangedEventArgs e)
+    {
+        foreach (var r in e.AddedItems.OfType<ModRow>()) r.Picked = true;
+        foreach (var r in e.RemovedItems.OfType<ModRow>()) r.Picked = false;
+        if (!_fillingMods) { FillModDetails(); FillFooter(); }
+    }
+
+    // a row's checkbox: in or out of the selection, the rest stays picked
+    void OnModCheck(ModRow r)
+    {
+        var list = _modsGrid ? (ListViewBase)ModGrid : ModList;
+        if (list.SelectedItems.Contains(r)) list.SelectedItems.Remove(r); else list.SelectedItems.Add(r);
+        r.Picked = list.SelectedItems.Contains(r);
+    }
     void OnModsSelectAll(object sender, RoutedEventArgs e) { if (_modsGrid) ModGrid.SelectAll(); else ModList.SelectAll(); }
     void OnModsSelectNone(object sender, RoutedEventArgs e) => CloseModDetails();
     void OnModsOpenFolder(object sender, RoutedEventArgs e) => OpenFolder(_modPlace switch
@@ -1141,7 +1173,7 @@ public sealed partial class MainWindow
 
         // the picture: the player's own, else the package's; buttons to add or change it
         var pic = new Grid { Height = 180, CornerRadius = new CornerRadius(10), Background = r.TileBrush };
-        var placeholder = Lucide.Icon(r.KindIcon, 44, new SolidColorBrush(Windows.UI.Color.FromArgb(150, 255, 255, 255)), 1.4);
+        var placeholder = Lucide.Icon(r.KindIcon, 44, r.GlyphBrush, 1.4);
         placeholder.HorizontalAlignment = HorizontalAlignment.Center;
         placeholder.VerticalAlignment = VerticalAlignment.Center;
         pic.Children.Add(placeholder);
@@ -1316,7 +1348,7 @@ public sealed partial class MainWindow
         foreach (var r in picked.Take(6))
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            var tile = Lucide.Icon(r.KindIcon, 14, new SolidColorBrush(Windows.UI.Color.FromArgb(230, 255, 255, 255)));
+            var tile = Lucide.Icon(r.KindIcon, 14, r.GlyphBrush);
             tile.HorizontalAlignment = HorizontalAlignment.Center;
             tile.VerticalAlignment = VerticalAlignment.Center;
             row.Children.Add(new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(6), Background = r.TileBrush, Child = tile });

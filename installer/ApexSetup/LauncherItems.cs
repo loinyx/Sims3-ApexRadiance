@@ -69,15 +69,26 @@ public sealed class ModRow : INotifyPropertyChanged
         File = f;
         Findings = findings;
         Kinds = [f.Kind.ToString()];
-        TileBrush = new SolidColorBrush(f.Kind switch
+        // one soft hue per kind: the glyph in it, the tile a faint wash of it (calmer than solid blocks of colour)
+        var hue = f.Kind switch
         {
-            ModKind.Script => Rgb(0x3F, 0x4A, 0x7A), ModKind.Cas => Rgb(0x7A, 0x3F, 0x62), ModKind.Objects => Rgb(0x7A, 0x6A, 0x2E),
-            ModKind.Lighting => Rgb(0x8A, 0x6E, 0x2E), ModKind.Sound => Rgb(0x2E, 0x6E, 0x7A), ModKind.Textures => Rgb(0x4E, 0x7A, 0x3F),
-            ModKind.Tuning => Rgb(0x3F, 0x7A, 0x5B), ModKind.Interface => Rgb(0x5B, 0x3F, 0x7A), ModKind.World => Rgb(0x2E, 0x5E, 0x7A),
-            ModKind.Lot => Rgb(0x8A, 0x4E, 0x3A), ModKind.Household => Rgb(0x7A, 0x5A, 0x2E), ModKind.Asi => Rgb(0x4A, 0x4F, 0x6E),
-            ModKind.Sims3Pack => Rgb(0x3A, 0x5A, 0x6E), _ => Rgb(0x34, 0x36, 0x40),
-        });
+            ModKind.Script => Rgb(0x8E, 0x9C, 0xFF), ModKind.Cas => Rgb(0xF0, 0x8F, 0xC4), ModKind.Objects => Rgb(0xE8, 0xC4, 0x66),
+            ModKind.Lighting => Rgb(0xF2, 0xB2, 0x5C), ModKind.Sound => Rgb(0x62, 0xCB, 0xDD), ModKind.Textures => Rgb(0x93, 0xD2, 0x7C),
+            ModKind.Tuning => Rgb(0x6E, 0xD3, 0xA8), ModKind.Interface => Rgb(0xB5, 0x98, 0xF6), ModKind.World => Rgb(0x6C, 0xB2, 0xEA),
+            ModKind.Lot => Rgb(0xEF, 0x98, 0x72), ModKind.Household => Rgb(0xE9, 0xB4, 0x72), ModKind.Asi => Rgb(0xA6, 0xAC, 0xCC),
+            ModKind.Sims3Pack => Rgb(0x82, 0xB6, 0xD2), _ => Rgb(0xA2, 0xA5, 0xB2),
+        };
+        GlyphBrush = new SolidColorBrush(hue);
+        TileBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x24, hue.R, hue.G, hue.B));
     }
+
+    public Brush GlyphBrush { get; }
+
+    // the row's checkbox mirrors the list's selection; a click on it adds or takes the row out (the screen's handler)
+    bool _picked;
+    public bool Picked { get => _picked; set { if (_picked != value) { _picked = value; Changed(nameof(Picked)); } } }
+    public static Action<ModRow>? Check;
+    public void OnCheck() => Check?.Invoke(this);
 
     static Windows.UI.Color Rgb(byte r, byte g, byte b) => Windows.UI.Color.FromArgb(255, r, g, b);
     static Brush Res(string k) => (Brush)Application.Current.Resources[k];

@@ -479,13 +479,14 @@ public sealed partial class MainWindow
             var list = worlds.Where(w => w.Kind == kind).ToList();
             if (list.Count == 0) continue;
             host.Children.Add(new TextBlock { Text = label, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 0) });
-            var wrap = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, ItemWidth = 248, ItemHeight = 236 };
+            var wrap = new CardGrid { MinItemWidth = 240 };
             var installed = Expansions.Installed(g);
             foreach (var w in list)
             {
-                var card = new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), Margin = new Thickness(0, 0, 16, 16), CornerRadius = new CornerRadius(10) };
+                var card = new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), CornerRadius = new CornerRadius(10) };
                 var col = new StackPanel();
                 var pic = new Grid { Height = 150, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(10, 10, 0, 0) };
+                pic.SizeChanged += (_, e) => { var h = Math.Round(e.NewSize.Width * 0.56); if (Math.Abs(pic.Height - h) > 1) pic.Height = h; }; // (the picture keeps its shape as the card widens)
                 var world = w;
                 var packOf = w.Pack is { } wp ? Expansions.All.First(p => p.Short == wp) : null;
                 var smallBadge = packOf is null ? null : PackBadge(packOf, installed.FirstOrDefault(x => x.Pack == packOf).Dir, 28);

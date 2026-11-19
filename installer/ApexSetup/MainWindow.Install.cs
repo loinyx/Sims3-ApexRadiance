@@ -12,40 +12,66 @@ public sealed partial class MainWindow
 {
     async Task AskInstallModeAsync()
     {
-        if (Maintenance || DryRun || FirstInstall || LauncherInstall.Mode != LauncherMode.NotChosen || Environment.ProcessPath is not { } self) return;
-        var install = new RadioButton { IsChecked = true, GroupName = "mode", HorizontalAlignment = HorizontalAlignment.Stretch };
-        var portable = new RadioButton { GroupName = "mode", HorizontalAlignment = HorizontalAlignment.Stretch };
-        FrameworkElement Option(RadioButton r, string icon, string title, string text)
+        if (Maintenance || FirstInstall || LauncherInstall.Mode != LauncherMode.NotChosen || Environment.ProcessPath is not { } self) return;
+        var install = true;
+        var cards = new List<(Button Button, Border Card, Border Check, bool Value)>();
+        void Pick(bool v)
         {
-            var g = new Grid { ColumnSpacing = 12 };
+            install = v;
+            foreach (var c in cards)
+            {
+                var on = c.Value == v;
+                c.Card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
+                c.Card.Background = on ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x1F, 0x7F, 0x77, 0xDD)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                c.Check.Background = on ? Res("ApexAccentBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                c.Check.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexMutedBrush");
+                c.Check.Child.Opacity = on ? 1 : 0;
+            }
+        }
+        // one choice = one card: the whole card is the target, the chosen one in the accent colour with a check
+        Button Option(bool value, string icon, string title, string text)
+        {
+            var g = new Grid { ColumnSpacing = 14 };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.Children.Add(Lucide.Icon(icon, 20, Res("ApexAccentBrush")));
-            var s = new StackPanel { Spacing = 2 };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.Children.Add(new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(8), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Top,
+                Child = Lucide.Icon(icon, 18, Res("ApexAccentBrush")) });
+            var s = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             s.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
             s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
             Grid.SetColumn(s, 1);
             g.Children.Add(s);
-            r.Content = g;
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(r, title);
-            return new Border { Child = r, Padding = new Thickness(12, 8, 12, 8), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush") };
+            var check = new Border { Width = 20, Height = 20, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1.5), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 8, 0, 0),
+                Child = Lucide.Icon("check", 12, new SolidColorBrush(Microsoft.UI.Colors.White), 3) };
+            Grid.SetColumn(check, 2);
+            g.Children.Add(check);
+            var card = new Border { Child = g, Padding = new Thickness(14), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1) };
+            var b = new Button { Content = card, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            b.Click += (_, _) => Pick(value);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title);
+            cards.Add((b, card, check, value));
+            return b;
         }
-        var body = new StackPanel { Spacing = 10, MaxWidth = 480 };
-        body.Children.Add(new TextBlock { Text = T("Install it for this Windows account, or keep it as a single file you can run from any folder. Your settings and games are kept either way."), TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush") });
-        body.Children.Add(Option(install, "hard-drive", T("Install (recommended)"), T("Adds Apex Launcher to the Start menu and Installed apps, easy to remove. Updates itself in place.")));
-        body.Children.Add(Option(portable, "package", T("Keep portable"), T("Runs from {0}, nothing added to Windows. Updates itself in place.", Path.GetDirectoryName(self) ?? self)));
+        var body = new StackPanel { Spacing = 8, Width = 460 };
+        body.Children.Add(new TextBlock { Text = T("Install it for this Windows account, or keep it as a single file you can run from any folder. Your settings and games are kept either way."), TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush"), Margin = new Thickness(0, 0, 0, 8) });
+        body.Children.Add(Option(true, "hard-drive", T("Install (recommended)"), T("Adds Apex Launcher to the Start menu and Installed apps, easy to remove. Updates itself in place.")));
+        body.Children.Add(Option(false, "package", T("Keep portable"), T("Runs from {0}, nothing added to Windows. Updates itself in place.", ShortPath(Path.GetDirectoryName(self) ?? self))));
+        Pick(true);
         var d = new ContentDialog
         {
             Title = T("How do you want to use Apex Launcher?"), Content = body, PrimaryButtonText = T("Continue"), CloseButtonText = T("Ask me later"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;
-        await ApplyInstallMode(install.IsChecked == true, self, null);
+        await ApplyInstallMode(install, self, null);
     }
 
     // install (this copy starts the installed one and closes) or make it portable (where it is, or in a folder chosen)
     async Task ApplyInstallMode(bool install, string self, string? folder)
     {
+        if (DryRun) return; // (a dry run shows the question, changes nothing)
         try
         {
             if (install)

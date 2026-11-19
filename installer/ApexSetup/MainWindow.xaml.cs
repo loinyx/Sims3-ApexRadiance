@@ -1916,6 +1916,19 @@ public sealed partial class MainWindow : Window
         await ShowDialog(new ContentDialog { Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot })
             == ContentDialogResult.Primary;
 
+    // every dialog in the launcher's near-black instead of Windows' grey: the body a step above the button strip, a quiet
+    // border, a deeper shade behind (the dialog's template reads these from its own resources first)
+    static void DarkDialog(ContentDialog d)
+    {
+        static SolidColorBrush B(uint argb) => new(Windows.UI.Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
+        d.Resources["ContentDialogTopOverlay"] = B(0xFF15161A);
+        d.Resources["ContentDialogBackground"] = B(0xFF0F1013);
+        d.Resources["ContentDialogBorderBrush"] = B(0xFF2A2B33);
+        d.Resources["ContentDialogSmokeFill"] = B(0xB3050507);
+        d.Background = B(0xFF0F1013);
+        d.BorderBrush = B(0xFF2A2B33);
+    }
+
     // WinUI allows one open ContentDialog: a newer one closes the open one (a Confirm closed so reads as Cancel)
     ContentDialog? _dialog;
     Task<ContentDialogResult>? _dialogShown;
@@ -1924,6 +1937,7 @@ public sealed partial class MainWindow : Window
         while (_dialog is { } open) { open.Hide(); await _dialogShown!; }
         _dialog = d;
         d.Language = Root.Language; // (a dialog is a popup: it does not inherit the window's language)
+        DarkDialog(d);
         _dialogShown = d.ShowAsync().AsTask();
         try { return await _dialogShown; }
         finally { if (_dialog == d) _dialog = null; }
