@@ -288,11 +288,10 @@ public sealed partial class MainWindow
         var groups = new List<(string Key, string Label, string? Add, List<Place> Items)>
         {
             ("library", T("LIBRARY"), null, new List<Place> { new(AllMods, T("All mods"), "layers", N(AllMods)) }
-                .Concat(new[] { new Place(NewMods, T("New since last play"), "sparkles", N(NewMods)), new(DefaultMods, T("Default replacements"), "replace", N(DefaultMods)), new(LookMods, T("Needs a look"), "triangle-alert", N(LookMods), Warn: true),
+                .Concat(new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)), new(NewMods, T("New since last play"), "sparkles", N(NewMods)), new(DefaultMods, T("Default replacements"), "replace", N(DefaultMods)), new(LookMods, T("Needs a look"), "triangle-alert", N(LookMods), Warn: true),
                     new(DupMods, T("Duplicates"), "copy", N(DupMods)), new(OffMods, T("Turned off"), "power-off", N(OffMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace)).ToList()),
             ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", _mods.Count(m => InDir(m, d)), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
             ("tags", T("TAGS"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
-            ("game", T("GAME"), null, new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace).ToList()),
         };
         if (!groups.SelectMany(g => g.Items).Any(p => p.Key.Equals(_modPlace, StringComparison.OrdinalIgnoreCase))) _modPlace = AllMods;
 
@@ -496,14 +495,12 @@ public sealed partial class MainWindow
             i.Click += (_, _) => { _modPlace = key; SaveViewPrefs(); _folderSig = ""; FillMods(); };
             menu.Items.Add(i);
         }
-        foreach (var (k, l, i) in new[] { (AllMods, T("All mods"), "layers"), (NewMods, T("New since last play"), "sparkles"), (DefaultMods, T("Default replacements"), "layers"), (LookMods, T("Needs a look"), "triangle-alert"),
+        foreach (var (k, l, i) in new[] { (AllMods, T("All mods"), "layers"), (AsiMods, T("Game plugins (ASI)"), "plug"), (NewMods, T("New since last play"), "sparkles"), (DefaultMods, T("Default replacements"), "replace"), (LookMods, T("Needs a look"), "triangle-alert"),
                      (DupMods, T("Duplicates"), "copy"), (OffMods, T("Turned off"), "power-off") }) Add(k, l, i);
         menu.Items.Add(new MenuFlyoutSeparator());
         foreach (var d in _modDirs) Add(d, new string(' ', 3 * d.Count(c => c == Path.DirectorySeparatorChar)) + Path.GetFileName(d), "folder");
         if (ModNotes.Tags.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
         foreach (var t in ModNotes.Tags) Add("#" + t.Name, t.Name, "tag");
-        menu.Items.Add(new MenuFlyoutSeparator());
-        foreach (var (k, l, i) in new[] { (AsiMods, T("Game plugins (ASI)"), "plug") }) Add(k, l, i);
         menu.ShowAt(ModsPlaces);
     }
 
@@ -858,7 +855,7 @@ public sealed partial class MainWindow
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.Children.Add(color is not null ? new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 9, Height = 9, Fill = TagDot.BrushOf(color), Margin = new Thickness(3, 0, 3, 0), VerticalAlignment = VerticalAlignment.Center }
-                : icon is not null ? Lucide.Icon(icon, 15, Res(on ? "ApexAccentBrush" : "ApexMutedBrush")) : new Border { Width = 15 });
+                : icon is not null ? Lucide.Icon(icon, 15, Res(on ? "ApexAccentBrush" : "ApexMutedBrush")) : new Border { Width = _filterGroup >= 4 ? 0 : 15 }); // (creators, dates, sizes: no icon column at all)
             var t = new TextBlock { Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             Grid.SetColumn(t, 1);
             g.Children.Add(t);
@@ -880,11 +877,14 @@ public sealed partial class MainWindow
                     if (_modRows.Count(r => r.File.FileType == f) is > 0 and var n) Opt(FileTypeName(f), FileTypeIcon(f), null, n, _fFiles.Contains(f), on => Flip(_fFiles, f, on));
                 break;
             case 1:
-                foreach (var grp in inPlace.SelectMany(r => r.Kinds).Concat(_fKinds).GroupBy(KindGroup).OrderBy(x => KindGroupOrder(x.Key)))
+                // (an icon two kinds share tells them apart from nothing: those rows go without)
+                var kinds = inPlace.SelectMany(r => r.Kinds).Concat(_fKinds).Distinct().ToList();
+                var shared = kinds.GroupBy(KindIcon).Where(x => x.Count() > 1).Select(x => x.Key).ToHashSet();
+                foreach (var grp in kinds.GroupBy(KindGroup).OrderBy(x => KindGroupOrder(x.Key)))
                 {
                     Head(KindGroupName(grp.Key));
                     foreach (var k in grp.Distinct().OrderBy(KindLabel))
-                        Opt(KindLabel(k), KindIcon(k), null, inPlace.Count(r => r.Kinds.Contains(k)), _fKinds.Contains(k), on => Flip(_fKinds, k, on));
+                        Opt(KindLabel(k), shared.Contains(KindIcon(k)) ? null : KindIcon(k), null, inPlace.Count(r => r.Kinds.Contains(k)), _fKinds.Contains(k), on => Flip(_fKinds, k, on));
                 }
                 break;
             case 2:
@@ -901,15 +901,15 @@ public sealed partial class MainWindow
                 break;
             case 4:
                 foreach (var c in inPlace.GroupBy(r => CreatorOf(r.File) ?? "").OrderBy(g => g.Key == "" ? 1 : 0).ThenByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
-                    Opt(c.Key == "" ? T("Unknown creator") : c.Key, "users", null, c.Count(), _fCreators.Contains(c.Key), on => Flip(_fCreators, c.Key, on));
+                    Opt(c.Key == "" ? T("Unknown creator") : c.Key, null, null, c.Count(), _fCreators.Contains(c.Key), on => Flip(_fCreators, c.Key, on));
                 break;
             case 5:
                 foreach (var d in new[] { 0, 1, 7, 30, 90, 182, 365, -365 })
-                    Opt(d == 0 ? T("Any time") : AddedOption(d), "calendar-clock", null, d == 0 ? inPlace.Count : inPlace.Count(r => AddedWithin(r.File, d)), _fAddedDays == d, on => _fAddedDays = on ? d : 0);
+                    Opt(d == 0 ? T("Any time") : AddedOption(d), null, null, d == 0 ? inPlace.Count : inPlace.Count(r => AddedWithin(r.File, d)), _fAddedDays == d, on => _fAddedDays = on ? d : 0);
                 break;
             default:
                 foreach (var mb in new[] { 0, 10, 50, 200 })
-                    Opt(mb == 0 ? T("Any size") : T("Over {0} MB", mb), mb == 0 ? "hard-drive" : null, null, mb == 0 ? inPlace.Count : inPlace.Count(r => r.File.Size >= (long)mb << 20), _fSizeMb == mb, on => _fSizeMb = on ? mb : 0);
+                    Opt(mb == 0 ? T("Any size") : T("Over {0} MB", mb), null, null, mb == 0 ? inPlace.Count : inPlace.Count(r => r.File.Size >= (long)mb << 20), _fSizeMb == mb, on => _fSizeMb = on ? mb : 0);
                 break;
         }
         var scroll = new ScrollViewer { Content = list, MaxHeight = 400 };
