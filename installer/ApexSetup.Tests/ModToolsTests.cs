@@ -69,6 +69,23 @@ static class ModToolsTests
                 && Refused(() => ModLibrary.MoveFolder(docs, Path.Combine("Packages", "B"), Path.Combine("Packages", "B", "A"))),
                 "folders: moved into another with its notes; into itself refused");
 
+            // a folder and its switched-off copy move both or neither: a turned-off folder of the new name, or a file held
+            // open in the copy, leaves both where they were
+            Write(Path.Combine(mods, "Packages", "E", "e.package"), "e");
+            Mods.SetEnabled(list().Single(m => m.Name == "e.package"), false, docs);
+            Write(Path.Combine(mods, "Packages", "E", "e2.package"), "e2");
+            var offE = Path.Combine(Mods.Disabled(docs), "Packages", "E", "e.package");
+            Write(Path.Combine(Mods.Disabled(docs), "Packages", "F", "f.package"), "f");
+            var renameRefused = Refused(() => ModLibrary.RenameFolder(docs, Path.Combine("Packages", "E"), "F"));
+            bool heldBack;
+            using (File.Open(offE, FileMode.Open, FileAccess.Read, FileShare.None))
+                try { ModLibrary.MoveFolder(docs, Path.Combine("Packages", "E"), Path.Combine("Packages", "B")); heldBack = false; }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { heldBack = true; }
+            check(renameRefused && heldBack && File.Exists(Path.Combine(mods, "Packages", "E", "e2.package")) && File.Exists(offE)
+                && !Directory.Exists(Path.Combine(mods, "Packages", "F")) && !Directory.Exists(Path.Combine(mods, "Packages", "B", "E")),
+                "folders: a rename onto a turned-off folder's name is refused; a move whose turned-off copy can't follow is undone");
+            foreach (var d in new[] { Path.Combine(mods, "Packages", "E"), Path.Combine(Mods.Disabled(docs), "Packages", "E"), Path.Combine(Mods.Disabled(docs), "Packages", "F") }) Directory.Delete(d, true);
+
             // files added, every one checked first: real packages go in, a zip's by name only; a Sims 4 package, a protected
             // one, a cut-short one, an empty one, text named .package, a Sims3Pack and a file already installed are not added,
             // each with its reason

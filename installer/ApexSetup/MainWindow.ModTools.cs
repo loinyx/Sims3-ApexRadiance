@@ -108,8 +108,9 @@ public sealed partial class MainWindow
         body.Children.Add(time);
         body.Children.Add(log);
         var cts = new CancellationTokenSource();
+        var running = true; // (a failed run leaves the bar short of the end: Close then closes, it does not stop)
         var d = new ContentDialog { Title = T("Merging into {0}", Path.GetFileName(plan.TargetRel)), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
-        d.CloseButtonClick += (_, e) => { if (!cts.IsCancellationRequested && bar.Value < 1) { e.Cancel = true; cts.Cancel(); d.CloseButtonText = T("Stopping…"); } };
+        d.CloseButtonClick += (_, e) => { if (running && !cts.IsCancellationRequested) { e.Cancel = true; cts.Cancel(); d.CloseButtonText = T("Stopping…"); } };
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var current = MergeStep.Check;
         void Mark(MergeStep step, string state)
@@ -151,6 +152,7 @@ public sealed partial class MainWindow
         Exception? error = null;
         try { result = await Task.Run(() => ModMerge.Run(plan, progress, cts.Token)); }
         catch (Exception e) { error = e; App.Log(e); }
+        running = false;
         timer.Stop();
         clock.Stop();
         ReadLog(); // (a merge quicker than the timer still shows its whole log)

@@ -507,10 +507,11 @@ public static partial class ModMerge
         foreach (var o in rec.Originals)
         {
             var from = Path.Combine(rec.Dir, UnderMods(o.Rel));
-            if (!File.Exists(from) || new FileInfo(from).Length != o.Size || Sha(from) != o.Sha256)
-                throw new SetupException("An original of this merge is missing or changed: {0}", o.Rel);
             var to = Path.Combine(home, UnderMods(o.Rel));
             var same = File.Exists(to) && Sha(to) == o.Sha256;
+            // (gone from the store but back in its place, by hash: a split that stopped halfway put it back)
+            if (!(same && !File.Exists(from)) && (!File.Exists(from) || new FileInfo(from).Length != o.Size || Sha(from) != o.Sha256))
+                throw new SetupException("An original of this merge is missing or changed: {0}", o.Rel);
             if (File.Exists(to) && !same) taken.Add(o.Rel);
             todo.Add((o, from, to, same));
         }
@@ -540,7 +541,7 @@ public static partial class ModMerge
         }
         foreach (var t in todo.Where(t => t.Same))
         {
-            Fs.Retry(() => File.Delete(t.From)); // (an identical copy is already in place)
+            if (File.Exists(t.From)) Fs.Retry(() => File.Delete(t.From)); // (an identical copy is already in place)
             log.WriteLine("already in place " + t.O.Rel);
         }
         Fs.Retry(() => File.Delete(Path.Combine(rec.Dir, "merge.json")));
