@@ -295,9 +295,9 @@ function OneRun([int]$run) {
     }
     finally {
         if (-not $script:proc.HasExited) { Stop-Process -Id $script:proc.Id -Force }
-        # (no launcher left behind: the notification area icon and the single-instance lock go with it)
-        Start-Sleep -Seconds 1
-        if (Get-Process ApexLauncher -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq $script:proc.Id }) { $script:failures.Add("run ${run}: the launcher was still running after it was closed") }
+        # (no launcher left behind: the notification area icon and the single-instance lock go with it; Windows can take
+        # more than a second to end it after the kill, so wait for the exit itself)
+        if (-not $script:proc.WaitForExit(15000)) { $script:failures.Add("run ${run}: the launcher was still running after it was closed") }
         CloseExplorer
     }
 }
