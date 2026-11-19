@@ -538,9 +538,7 @@ bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Optio
     if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) { why = "the screen could not be read"; return false; }
     D3DSURFACE_DESC d{};
     bb->GetDesc(&d);
-    bb->Release();
-    if (d.MultiSampleType != D3DMULTISAMPLE_NONE) { why = "the game uses multisampled anti-aliasing; turn it off for videos"; return false; }
-    if (d.Format != D3DFMT_X8R8G8B8 && d.Format != D3DFMT_A8R8G8B8) { why = std::format("the screen format {} cannot be recorded", static_cast<int>(d.Format)); return false; }
+    if (d.MultiSampleType != D3DMULTISAMPLE_NONE) { bb->Release(); why = "the game uses multisampled anti-aliasing; turn it off for videos"; return false; }
     auto s = std::make_shared<Session>();
     s->file = file;
     s->o = o;
@@ -552,10 +550,17 @@ bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Optio
             FAILED(dev->CreateOffscreenPlainSurface(s->w, s->h, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sl.sys, nullptr)) ||
             FAILED(dev->CreateQuery(D3DQUERYTYPE_EVENT, &sl.q))) {
             ReleaseSlots();
+            bb->Release();
             why = "the video surfaces could not be created";
             return false;
         }
     }
+    // The 8-bit slots take the frame through StretchRect, which also converts another screen format (a 10-bit back
+    // buffer set by another mod); one trial copy says whether the GPU can
+    const bool convertible = (d.Format == D3DFMT_X8R8G8B8 || d.Format == D3DFMT_A8R8G8B8) ||
+                             SUCCEEDED(dev->StretchRect(bb, nullptr, g_slots[0].rt, nullptr, D3DTEXF_LINEAR));
+    bb->Release();
+    if (!convertible) { ReleaseSlots(); why = std::format("the screen format {} cannot be recorded", static_cast<int>(d.Format)); return false; }
     s->qpc0 = Qpc();
     g_period = std::max<LONGLONG>(1, QpcFreq() / s->o.fps);
     g_nextDue = s->qpc0;

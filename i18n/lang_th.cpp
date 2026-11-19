@@ -167,6 +167,7 @@ const I18n::Pair kPairs[] = {
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "เชดเดอร์: ใช้ลุคของ ReShade และ GShade ใน Apex ได้โดยไม่ต้องติดตั้ง"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "เชดเดอร์: ลุคในตัวห้าแบบให้เริ่มใช้ และไฟล์ .fx ของคุณเอง"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "เชดเดอร์: ดาวน์โหลดแพ็กเชดเดอร์ของ ReShade จากเมนู เลือกได้ว่าจะเอาอันไหน"},
+    {"Capture: screenshots and videos work when another mod sets a 10-bit screen", "จับภาพ: ภาพหน้าจอและวิดีโอใช้งานได้เมื่อม็อดอื่นตั้งหน้าจอเป็น 10 บิต"},
     {"Capture: screenshots and videos with your effects, on a page of their own", "จับภาพ: ภาพหน้าจอและวิดีโอพร้อมเอฟเฟกต์ของคุณ ในหน้าของตัวเอง"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "ค่าที่ตั้งไว้: ส่วนจับภาพและเชดเดอร์ และค่าที่แชร์จะดาวน์โหลดแพ็กที่ต้องใช้"},
     {"Shaders: every setting of a ReShade shader gets its own control", "เชดเดอร์: ทุกการตั้งค่าของเชดเดอร์ ReShade มีตัวควบคุมของตัวเอง"},

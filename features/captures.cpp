@@ -546,13 +546,17 @@ void TakeShots(IDirect3DDevice9* dev, bool atPresent) {
     D3DSURFACE_DESC d{};
     bb->GetDesc(&d);
     std::vector<BYTE> bgr;
-    if (d.Format == D3DFMT_X8R8G8B8 || d.Format == D3DFMT_A8R8G8B8) {
+    {
+        // Another format (a 10-bit back buffer set by another mod) is converted to 8-bit by StretchRect on the GPU
+        const bool eightBit = d.Format == D3DFMT_X8R8G8B8 || d.Format == D3DFMT_A8R8G8B8;
+        const D3DFORMAT f = eightBit ? d.Format : D3DFMT_X8R8G8B8;
+        const bool direct = eightBit && d.MultiSampleType == D3DMULTISAMPLE_NONE;
         IDirect3DSurface9* src = bb;
-        if (d.MultiSampleType != D3DMULTISAMPLE_NONE && SUCCEEDED(dev->CreateRenderTarget(d.Width, d.Height, d.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &resolved, nullptr)) &&
+        if (!direct && SUCCEEDED(dev->CreateRenderTarget(d.Width, d.Height, f, D3DMULTISAMPLE_NONE, 0, FALSE, &resolved, nullptr)) &&
             SUCCEEDED(dev->StretchRect(bb, nullptr, resolved, nullptr, D3DTEXF_NONE)))
             src = resolved;
-        if ((d.MultiSampleType == D3DMULTISAMPLE_NONE || src == resolved) &&
-            SUCCEEDED(dev->CreateOffscreenPlainSurface(d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr)) && SUCCEEDED(dev->GetRenderTargetData(src, sys))) {
+        if ((direct || src == resolved) &&
+            SUCCEEDED(dev->CreateOffscreenPlainSurface(d.Width, d.Height, f, D3DPOOL_SYSTEMMEM, &sys, nullptr)) && SUCCEEDED(dev->GetRenderTargetData(src, sys))) {
             D3DLOCKED_RECT lr{};
             if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
                 bgr.resize(static_cast<size_t>(d.Width) * d.Height * 3);

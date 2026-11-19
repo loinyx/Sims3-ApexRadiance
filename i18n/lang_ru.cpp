@@ -167,6 +167,7 @@ const I18n::Pair kPairs[] = {
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "Шейдеры: образы ReShade и GShade прямо в Apex, без установки этих программ"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "Шейдеры: пять встроенных образов для начала и ваши собственные файлы .fx"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "Шейдеры: загрузка пакетов шейдеров ReShade из меню, на выбор"},
+    {"Capture: screenshots and videos work when another mod sets a 10-bit screen", "Захват: скриншоты и видео работают, когда другой мод переводит экран в 10 бит"},
     {"Capture: screenshots and videos with your effects, on a page of their own", "Захват: скриншоты и видео с вашими эффектами, на отдельной странице"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "Пресеты: части «Захват» и «Шейдеры», общие пресеты загружают нужные пакеты"},
     {"Shaders: every setting of a ReShade shader gets its own control", "Шейдеры: у каждой настройки шейдера ReShade свой элемент управления"},
