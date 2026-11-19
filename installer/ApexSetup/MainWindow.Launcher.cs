@@ -486,9 +486,11 @@ public sealed partial class MainWindow
                 var pic = new Grid { Height = 150, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(10, 10, 0, 0) };
                 var world = w;
                 var packOf = w.Pack is { } wp ? Expansions.All.First(p => p.Short == wp) : null;
+                var smallBadge = packOf is null ? null : PackBadge(packOf, installed.FirstOrDefault(x => x.Pack == packOf).Dir, 28);
+                if (smallBadge is not null) smallBadge.Visibility = Visibility.Collapsed;
                 _ = Task.Run(() => Worlds.Picture(world)).ContinueWith(async t =>
                 {
-                    if (await SaveCard.ImageOf(t.Result) is { } img) pic.Children.Add(new Image { Source = img, Stretch = Stretch.UniformToFill });
+                    if (await SaveCard.ImageOf(t.Result) is { } img) { pic.Children.Add(new Image { Source = img, Stretch = Stretch.UniformToFill }); if (smallBadge is not null) smallBadge.Visibility = Visibility.Visible; }
                     // a world without its own picture: its pack's icon, large, never a lot's picture
                     else if (packOf is not null) { var big = PackBadge(packOf, installed.FirstOrDefault(x => x.Pack == packOf).Dir, 72); big.HorizontalAlignment = HorizontalAlignment.Center; big.VerticalAlignment = VerticalAlignment.Center; pic.Children.Add(big); }
                     else pic.Children.Add(new FontIcon { Glyph = "\uE909", FontSize = 30, Foreground = new SolidColorBrush(Rgb(0x4A, 0x4B, 0x55)) });
@@ -496,7 +498,7 @@ public sealed partial class MainWindow
                 col.Children.Add(pic);
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(14, 10, 14, 12) };
                 var pack = w.Pack is { } sh ? Expansions.All.First(p => p.Short == sh) : null;
-                if (pack is not null) row.Children.Add(PackBadge(pack, installed.FirstOrDefault(x => x.Pack == pack).Dir, 28));
+                if (pack is not null && smallBadge is not null) row.Children.Add(smallBadge);
                 row.Children.Add(Col(Strong(w.Name), Muted(pack?.Name ?? label)));
                 col.Children.Add(row);
                 card.Child = col;
@@ -835,6 +837,7 @@ public sealed partial class MainWindow
             Id(Button(T("Uninstall…"), async () => await UninstallAsync(), danger: true), "SettingsUninstall")));
         host.Children.Add(Section(T("About and licences")));
         host.Children.Add(Row(T("Credits and licences"), T("Apex Radiance by loinyx, and the authors of every component the launcher installs."), Id(Button(T("Open"), () => Show(About)), "SettingsAbout")));
+        GroupCards(host);
     }
 
     // ---------- uninstall ----------
@@ -907,7 +910,36 @@ public sealed partial class MainWindow
     static TextBlock Body(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexBody"], Foreground = Res("ApexSoftTextBrush") };
     static TextBlock Muted(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexMuted"] };
     static TextBlock Eyebrow(string t) => new() { Text = t, FontSize = 11, CharacterSpacing = 80, Foreground = Res("ApexMutedBrush") };
-    static TextBlock Section(string t) => new() { Text = t, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexSoftTextBrush"), Margin = new Thickness(0, 14, 0, 2) };
+    static TextBlock Section(string t) => new() { Text = t, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 16, 0, 0) };
+
+    // rows of one section in one card, divided by hairlines, instead of a card each (Settings): calmer, and the eye reads
+    // the section as one group
+    static void GroupCards(Panel host)
+    {
+        var kids = host.Children.ToList();
+        host.Children.Clear();
+        StackPanel? group = null;
+        foreach (var k in kids)
+        {
+            if (k is Border { Child: { } inner } card && card.Style == Application.Current.Resources["ApexCard"])
+            {
+                if (group is null)
+                {
+                    group = new StackPanel();
+                    host.Children.Add(new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), Child = group });
+                }
+                card.Child = null;
+                group.Children.Add(new Border
+                {
+                    Child = inner, Padding = new Thickness(18, 14, 18, 14), BorderBrush = Res("ApexCardBorderBrush"),
+                    BorderThickness = new Thickness(0, group.Children.Count == 0 ? 0 : 1, 0, 0),
+                });
+                continue;
+            }
+            group = null;
+            host.Children.Add(k);
+        }
+    }
     static UIElement Col(params UIElement[] items) { var s = new StackPanel { Spacing = 4 }; foreach (var i in items) s.Children.Add(i); return s; }
     static Border Card(UIElement child, bool pad = true) => new() { Style = (Style)Application.Current.Resources["ApexCard"], Child = child, Padding = pad ? new Thickness(18, 14, 18, 14) : new Thickness(0) };
     static Border Card(UIElement a, UIElement b) => Card(Col(a, b));

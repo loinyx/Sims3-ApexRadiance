@@ -66,6 +66,13 @@ public sealed partial class MainWindow
         }
     }
 
+    // a long folder as its drive and last two folders ("C:\…\Downloads\Apex"), so it fits one line
+    static string ShortPath(string p)
+    {
+        var parts = p.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length <= 3 ? p : $"{parts[0]}{Path.DirectorySeparatorChar}\u2026{Path.DirectorySeparatorChar}{parts[^2]}{Path.DirectorySeparatorChar}{parts[^1]}";
+    }
+
     void BuildSettingsIfShown() { if (_step == SettingsScreen) BuildSettings(); }
 
     // Settings: this copy, installed or not, and the way to switch
@@ -82,8 +89,8 @@ public sealed partial class MainWindow
                 if (await Confirm(T("Use without installing?"), T("Apex Launcher moves to {0} and leaves the Start menu, the desktop and Installed apps. Your settings stay.", f.Path), T("Move it")))
                     await ApplyInstallMode(false, self, f.Path);
             })),
-            LauncherMode.Portable => (T("Not installed: running from {0}.", Path.GetDirectoryName(self) ?? self), Button(T("Install it"), () => _ = ApplyInstallMode(true, self, null))),
-            _ => (T("Running from {0}, not installed yet.", Path.GetDirectoryName(self) ?? self), Button(T("Choose…"), () => _ = AskInstallModeAsync())),
+            LauncherMode.Portable => (T("Not installed: running from {0}.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Install it"), () => _ = ApplyInstallMode(true, self, null))),
+            _ => (T("Running from {0}, not installed yet.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Choose…"), () => _ = AskInstallModeAsync())),
         };
         return Row(T("This copy of the launcher"), text, DryRun ? null : action);
     }

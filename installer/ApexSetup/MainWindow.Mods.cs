@@ -1606,12 +1606,12 @@ public sealed partial class MainWindow
             var name = t.Name;
             x.Click += (_, _) => TagMods(rows, name, false);
             chip.Children.Add(x);
-            wrap.Children.Add(new Border { Child = chip, Padding = new Thickness(10, 2, 4, 2), CornerRadius = new CornerRadius(12), Background = TagDot.BrushOf(t.Color, 0x26) });
+            wrap.Children.Add(new Border { Child = chip, Height = 28, Padding = new Thickness(10, 0, 4, 0), CornerRadius = new CornerRadius(14), Background = TagDot.BrushOf(t.Color, 0x26) });
         }
         var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         content.Children.Add(Lucide.Icon("tag", 12));
         content.Children.Add(new TextBlock { Text = T("Add tag"), FontSize = 12 });
-        var add = new Button { Content = content, Padding = new Thickness(10, 3, 10, 4), CornerRadius = new CornerRadius(12) };
+        var add = new Button { Content = content, Height = 28, Padding = new Thickness(10, 0, 12, 0), CornerRadius = new CornerRadius(14), VerticalAlignment = VerticalAlignment.Center };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(add, T("Add tag"));
         add.Click += (_, _) => TagMenu(rows).ShowAt(add);
         wrap.Children.Add(add);

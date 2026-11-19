@@ -618,7 +618,13 @@
                                 <Button x:Name="SavesBackupAll" Content="Back up all" HorizontalAlignment="Right" VerticalAlignment="Center" Click="OnBackupAll" />
                             </Grid>
                             <InfoBar x:Name="SavesInfo" IsClosable="True" />
-                            <GridView x:Name="SaveGrid" ItemTemplate="{StaticResource SaveTemplate}" SelectionMode="None" IsItemClickEnabled="False" />
+                            <GridView x:Name="SaveGrid" ItemTemplate="{StaticResource SaveTemplate}" SelectionMode="None" IsItemClickEnabled="False">
+                                <GridView.ItemContainerStyle>
+                                    <Style TargetType="GridViewItem" BasedOn="{StaticResource DefaultGridViewItemStyle}">
+                                        <Setter Property="Margin" Value="0,0,16,16" />
+                                    </Style>
+                                </GridView.ItemContainerStyle>
+                            </GridView>
                             <TextBlock x:Name="SavesEmpty" Tag="dyn" Style="{StaticResource ApexMuted}" Visibility="Collapsed" />
                         </StackPanel>
                         <StackPanel x:Name="ScreenHealth" Spacing="24" Visibility="Collapsed" />
