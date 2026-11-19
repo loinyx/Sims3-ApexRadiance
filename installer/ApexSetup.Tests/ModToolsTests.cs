@@ -111,6 +111,21 @@ static class ModToolsTests
             check(again.Added.Count == 0 && again.Skipped.Single().Contains("already installed as new.package") && forced.Added.Single().EndsWith("new (2).package"),
                 "install: a file already installed is not added twice unless asked, then it gets \" (2)\"");
 
+            // Sims3Packs: an object set's packages taken out into a folder named after it (a broken one inside refused), a lot
+            // left for the game's launcher in Downloads, a manifest pointing past the file unread
+            var objPack = Sims3PackFile("object", "Pretty Chairs", ("a.package", Dbpf20(2)), ("b.package", "broken"u8.ToArray()), ("thumb.png", [1, 2, 3]));
+            var lotPack = Sims3PackFile("lot", "Cozy Lot", ("lot.package", Dbpf20(3)));
+            File.WriteAllBytes(Path.Combine(drop, "chairs.sims3pack"), objPack);
+            File.WriteAllBytes(Path.Combine(drop, "lot.sims3pack"), lotPack);
+            var badPack = (byte[])objPack.Clone(); Array.Resize(ref badPack, badPack.Length - 10);
+            var info = Sims3Pack.Read(Path.Combine(drop, "chairs.sims3pack"));
+            File.WriteAllBytes(Path.Combine(drop, "bad.sims3pack"), badPack);
+            var s3 = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "chairs.sims3pack"), Path.Combine(drop, "lot.sims3pack")], list());
+            check(info is { Type: "object", DisplayName: "Pretty Chairs", Extractable: true } && info.Files.Count == 3 && Sims3Pack.Read(Path.Combine(drop, "bad.sims3pack")) is null
+                && File.Exists(Path.Combine(mods, "Packages", "Pretty Chairs", "a.package")) && !File.Exists(Path.Combine(mods, "Packages", "Pretty Chairs", "b.package"))
+                && File.Exists(Path.Combine(docs, "Downloads", "lot.sims3pack")) && s3.Skipped.Any(x => x.Contains("b.package")),
+                "sims3pack: an object set taken out into its own folder, a broken package in it refused, a lot left for the game's launcher");
+
             // duplicates by content, whatever the name or folder
             Write(Path.Combine(mods, "Packages", "B", "copy-of-mod3.package"), "content 3");
             var dups = ModLibrary.Duplicates(list());
@@ -162,6 +177,21 @@ static class ModToolsTests
         ms.Position = 0x24; w.Write((uint)n);
         ms.Position = 0x2C; w.Write(end - at);
         ms.Position = 0x40; w.Write(at);
+        return ms.ToArray();
+    }
+
+    // a Sims3Pack as the game writes one: uint32 7, "TS3Pack", uint16 version, uint32 manifest length, the manifest, the files
+    static byte[] Sims3PackFile(string type, string name, params (string Name, byte[] Data)[] files)
+    {
+        var xml = new System.Text.StringBuilder($"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Sims3Package Type=\"{type}\" SubType=\"0x00000000\"><DisplayName>{name}</DisplayName>");
+        long off = 0;
+        foreach (var (n, d) in files) { xml.Append($"<PackagedFile><Name>{n}</Name><Length>{d.Length}</Length><Offset>{off}</Offset><ContentType>{type}</ContentType></PackagedFile>"); off += d.Length; }
+        xml.Append("</Sims3Package>");
+        var x = System.Text.Encoding.UTF8.GetBytes(xml.ToString());
+        using var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        w.Write(7u); w.Write("TS3Pack"u8.ToArray()); w.Write((ushort)0x0501); w.Write((uint)x.Length); w.Write(x);
+        foreach (var (_, d) in files) w.Write(d);
         return ms.ToArray();
     }
 

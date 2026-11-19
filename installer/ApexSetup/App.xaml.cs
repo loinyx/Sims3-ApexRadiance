@@ -112,12 +112,20 @@ public partial class App : Application
             // (started by Install, MakePortable or an update while the copy before it still closes: waits for it)
             if (!first && argv.Contains(LauncherInstall.HandoverArg))
                 try { first = _single.WaitOne(TimeSpan.FromSeconds(20)); } catch (AbandonedMutexException) { first = true; }
-            if (!first) { _show.Set(); Exit(); return; }
+            // (a second start with mod files, "Open with": the files are handed to the first one through the ops folder)
+            if (!first)
+            {
+                if (MainWindow.ModFilesIn(argv) is { Count: > 0 } handed)
+                    try { Directory.CreateDirectory(Paths.Ops); File.WriteAllLines(Path.Combine(Paths.Ops, $"open-{Guid.NewGuid():N}.txt"), handed); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log(e); }
+                _show.Set(); Exit(); return;
+            }
             var show = _show;
-            new Thread(() => { while (show.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => { _window.AppWindow.Show(); _window.Activate(); }); }) { IsBackground = true }.Start();
+            new Thread(() => { while (show.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => { _window.AppWindow.Show(); _window.Activate(); (_window as MainWindow)?.TakeHandedFiles(); }); }) { IsBackground = true }.Start();
         }
         var w = new MainWindow();
         _window = w;
+        w.OpenWhenReady(MainWindow.ModFilesIn(argv));
         if (argv.Contains(LauncherInstall.TrayArg)) w.StartInTray();
         else w.Activate();
         if (uninstall) w.UninstallWhenShown();

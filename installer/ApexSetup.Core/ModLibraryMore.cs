@@ -48,7 +48,37 @@ public static partial class ModLibrary
             if (!item.Ok) { skipped.Add($"{item.Name}: {item.Problems[0]}"); continue; }
             if (item.SameAs is { } same && !duplicates) { skipped.Add($"{item.Name}: already installed as {same}"); continue; }
             if (!SafeFileName(item.Name)) { skipped.Add($"{item.Name}: the name can't be used for a file"); continue; }
-            var into = item.Kind == "sims3pack" ? downloads : dir;
+            // a Sims3Pack of objects, Create a Sim parts or patterns: its packages taken out into a folder named after it
+            if (item.Kind == "sims3pack")
+            {
+                var src = item.Source;
+                string? tmp = null;
+                if (item.ZipEntry is { } ze)
+                {
+                    tmp = Path.Combine(Path.GetTempPath(), "apex-s3p-" + Guid.NewGuid().ToString("N") + ".sims3pack");
+                    using var z = ZipFile.OpenRead(item.Source);
+                    (z.GetEntry(ze) ?? throw new SetupException("The zip changed while it was being added.")).ExtractToFile(tmp);
+                    src = tmp;
+                }
+                try
+                {
+                    if (Sims3Pack.Read(src) is { Extractable: true } info)
+                    {
+                        var folder = Path.Combine(dir, SafeFolder(info.DisplayName) ?? Path.GetFileNameWithoutExtension(item.Name));
+                        var (got, no) = Sims3Pack.Extract(src, info, folder);
+                        added.AddRange(got);
+                        skipped.AddRange(no.Select(x => $"{item.Name} › {x}"));
+                        if (got.Count > 0) continue;
+                    }
+                    Directory.CreateDirectory(downloads);
+                    var dl = Mods.Free(Path.Combine(downloads, item.Name));
+                    File.Copy(src, dl);
+                    added.Add(dl);
+                }
+                finally { if (tmp is not null) try { File.Delete(tmp); } catch (IOException) { } }
+                continue;
+            }
+            var into = dir;
             Directory.CreateDirectory(into);
             var target = Mods.Free(Path.Combine(into, item.Name));
             if (item.ZipEntry is { } entry)
@@ -62,6 +92,14 @@ public static partial class ModLibrary
             added.Add(target);
         }
         return new AddResult(added, skipped);
+    }
+
+    // a folder name from a display name: its letters, digits and spaces, at most 60 characters; null when nothing is left
+    static string? SafeFolder(string name)
+    {
+        var s = new string(name.Select(c => char.IsLetterOrDigit(c) || c is ' ' or '-' or '_' ? c : ' ').ToArray()).Trim();
+        while (s.Contains("  ")) s = s.Replace("  ", " ");
+        return s.Length == 0 ? null : s.Length > 60 ? s[..60].Trim() : s;
     }
 
     static bool SafeFileName(string n) => n.Length is > 0 and < 200 && n.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && n is not ("." or "..");

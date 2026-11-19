@@ -650,22 +650,7 @@ public sealed partial class MainWindow
         foreach (var x in new[] { ".package", ".sims3pack", ".zip" }) picker.FileTypeFilter.Add(x);
         var files = await picker.PickMultipleFilesAsync();
         if (files is null || files.Count == 0) return;
-        await AddFilesAsync(files.Select(f => f.Path).ToList());
-    }
-
-    // files from Explorer or the picker: packages into the folder shown, Sims3Packs to Downloads, a zip's packages unpacked
-    async Task AddFilesAsync(List<string> paths)
-    {
-        var dir = IsFolder(_modPlace) ? _modPlace : NewFolderParent();
-        ModLibrary.AddResult? res = null;
-        try { res = await Task.Run(() => ModLibrary.AddAny(Docs, dir, paths)); }
-        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was added"), ErrorText(e)); return; }
-        _modsLoaded = false;
-        _folderSig = "";
-        await LoadModsAsync();
-        SetInfo(ModsInfo, res.Added.Count > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
-            res.Added.Count == 1 ? T("1 file added") : T("{0} files added", res.Added.Count),
-            res.Skipped.Count > 0 ? T("Not added (not a package, Sims3Pack or zip of them): {0}", string.Join(", ", res.Skipped.Take(5))) : "");
+        await InstallFilesAsync(files.Select(f => f.Path).ToList());
     }
 
     void OnModFilesOver(object sender, DragEventArgs e)
@@ -679,7 +664,7 @@ public sealed partial class MainWindow
     {
         if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
         var items = await e.DataView.GetStorageItemsAsync();
-        await AddFilesAsync(items.Select(i => i.Path).Where(p => p is { Length: > 0 }).ToList());
+        await InstallFilesAsync(items.Select(i => i.Path).Where(p => p is { Length: > 0 }).ToList());
     }
 
     void OnModSearch(object sender, TextChangedEventArgs e) { if (_modsLoaded && !_fillingMods) FillMods(); }
