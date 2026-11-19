@@ -2,6 +2,7 @@
 #include "lot_build_share.h"
 #include "lot_build_share_policy.h"
 #include "lot_lighting_motion.h"
+#include "deadline_slicing.h"
 #include "apex_log.h"
 #include "call_chain.h"
 #include "dev_switches.h"
@@ -111,7 +112,12 @@ uint64_t __fastcall Hook(void* renderer, void* edx) {
     const int stage = *reinterpret_cast<const int*>(r + kOffStage);
     Slot& slot = SlotOf(renderer);
     slot.frame = frame;
-    const auto d = LotBuildSharePolicy::Decide(g_spentMs, LotLightingMotion::CameraMoving(), Priority(r), stage, slot.skips, g_forcedThisFrame, g_longestWait);
+    const bool moving = LotLightingMotion::CameraMoving();
+    const double frameLeft = DeadlineSlicing::FrameLeftMs();
+    const bool priority = Priority(r);
+    const auto d = LotBuildSharePolicy::Decide(g_spentMs, moving, priority, stage, slot.skips, g_forcedThisFrame, g_longestWait, frameLeft);
+    if (!priority && frameLeft < (moving ? LotBuildSharePolicy::kMovingMs : LotBuildSharePolicy::kStillMs) - g_spentMs && stage >= 0 && stage < LotBuildSharePolicy::kFirstWaitStage && !d.forced)
+        DeadlineSlicing::NoteLotCut(!d.run); // the deadline, not the share, set this call's slice
     if (stage < LotBuildSharePolicy::kFirstWaitStage) c_gated.fetch_add(1, std::memory_order_relaxed);
     if (!d.run) {
         slot.skips++;

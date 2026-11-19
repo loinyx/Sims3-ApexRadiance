@@ -18,6 +18,7 @@
 #include "fast_cas.h"
 #include "compositor_readback.h"
 #include "pick_readback.h"
+#include "deadline_slicing.h"
 #include "fast_crc.h"
 #include "fast_memory.h"
 #include "memory_guard.h"
@@ -158,6 +159,31 @@ class PickSkipWhenStillPatch : public ApexPatch {
 
     void RenderCustomUI() override {} // the Performance card draws the row
     void RenderDeveloperUI() override {}
+};
+
+class DeadlineSlicingPatch : public ApexPatch {
+  public:
+    DeadlineSlicingPatch() : ApexPatch(Performance::kDeadlineSlicingName, nullptr) {}
+
+    bool Install() override {
+        if (isEnabled) return true;
+        lastError.clear();
+        std::string error;
+        if (!DeadlineSlicing::Start(&error)) return Fail(error);
+        isEnabled = true;
+        return true;
+    }
+
+    bool Uninstall() override {
+        if (!isEnabled) return true;
+        DeadlineSlicing::Stop();
+        isEnabled = false;
+        lastError.clear();
+        return true;
+    }
+
+    void RenderCustomUI() override {} // the Performance card draws the row
+    void RenderDeveloperUI() override { DeadlineSlicing::RenderDeveloperUI(); }
 };
 
 class LotLightingMotionPatch;
@@ -801,6 +827,20 @@ APEX_REGISTER_FEATURE(PickSkipWhenStillPatch,
                                             "A button press made while a pick was skipped and the stored one is over 50 ms old is held in the window procedure; "
                                             "the next update picks, the pick is read back at once, and the held mouse messages go to the game once ResolvePick "
                                             "(0x6E01B0) has stored the new result (at most 200 ms)."}});
+
+APEX_REGISTER_FEATURE(DeadlineSlicingPatch,
+                      {.displayName = "Frame Deadline While Moving",
+                       .description = "While the camera moves, work that can wait (new objects, lots being built, loaded files being set up) only gets the time "
+                                      "left before a 12 ms point in the frame, so it no longer piles up on a frame that is already slow. Nothing is skipped: it "
+                                      "runs in the next frames. Needs Spread lot lighting while moving. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
+                       .category = "Performance",
+                       .experimental = true,
+                       .enabledByDefault = false,
+                       .supportedVersions = VERSION_STEAM,
+                       .technicalDetails = {"The JobManager update (vtable 0x00FD9810 + 0x1C -> 0x00599A10) marks the frame start and, while moving, runs its main-thread "
+                                            "jobs (the resource finalize job 0x007297C0) with a 2 ms slice instead of [svc+0xCC] = 5; one job always runs.",
+                                            "Spread new objects over frames and the shared lot build time get min(their budget, 12 ms - time since that mark); "
+                                            "past it the scene drain does its 8 minimum nodes and a lot waits (at most 6 frames). Their longest-wait rules stay."}});
 
 APEX_REGISTER_FEATURE(LotLightingMotionPatch,
                       {.displayName = "Lot Lighting While Moving",
