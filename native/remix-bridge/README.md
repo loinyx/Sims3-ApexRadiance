@@ -6,6 +6,8 @@ maintainers handed it over to Apex Radiance. Findings, numbers and next steps: `
 
 - `build.cmd` fetches the pinned upstream commit into `src\`, applies `patches\` in order and builds `out\d3d9.dll`
   (x86 client) and `out\.trex\NvRemixBridge.exe` (x64 server). Needs git, VS 2022 C++ build tools and meson + ninja.
+  It applies `patches\` only when it clones `src\` and skips that step when `src\.git` exists: after pulling a head that
+  changes `patches\`, run `rmdir /s /q src` here before `build.cmd`, or the old patches stay in.
 - `conf\`: `bridge.conf` (next to `d3d9.dll` and in `.trex`) and `dxvk.conf` (in Bin; it repeats DXVK's TS3W profile,
   without which the game resets Options.ini).
 
@@ -22,7 +24,7 @@ Patches. Each applies after the ones before it. "Internal" is the name the #40 r
 | 0007 | 0013 | `client.ts3TextureKeepAliveSec` (TS3W 1.67 only): unforced ResourceCache trims keep a texture for N s | off |
 | 0008 | 0014 | `client.freeIdleBufferCopiesSec`: free a static vertex / index buffer's client copy (64 KB to 4 MB) after N s without a lock. A CRC32C checks each fetch. | conf: 2 |
 | 0009 | 0015 | `client.freeIdleManagedCopiesMs`: 0003's threshold in milliseconds | off |
-| 0010 | 0016 | render target 0 is the implicit swapchain's back buffer 0 object, so `GetRenderTarget(0)` and `GetBackBuffer(0, 0)` return the same surface, as in d3d9 and DXVK (upstream made a separate place-holder; Apex Radiance compares the two by pointer and drew a black picture) | always |
+| 0010 | 0016 | render target 0 is the implicit swapchain's back buffer 0 object, so `GetRenderTarget(0)` and `GetBackBuffer(0, 0)` return the same surface, as in d3d9 and DXVK (upstream made a separate place-holder; Apex Radiance compares the two by pointer and drew a black picture). The back buffer is not counted as an implicit reference to the device, so an AddRef and a Release on a new device (a CreateDevice hook) keep its swapchain | always |
 | 0011 | | render target 0 also resets the viewport and the scissor rectangle, as d3d9 does | always |
 | 0012 | | `SetFVF` and `SetVertexDeclaration` replace each other, as in d3d9 (a stale declaration stayed bound) | always |
 | 0013 | | idle copy fetches: a freed MANAGED level is always fetched, a lock fails when no whole copy came back, texture fetches are CRC32C-checked, only copies of 64 KB and more are freed | with 0003 / 0008 |
