@@ -28,8 +28,9 @@ public static class Mods
         LightFx = 0x1F886EAD, Img = 0x00B2D882, Png = 0x2F7D0004, Xml = 0x0333406C, Itun = 0x03B33DDF, Layout = 0x025C95B6,
         Stbl = 0x220557DA, PackageManifest = 0x0166038C, LotImage = 0xD84E7FC6;
     static readonly uint[] Audio = [0x01A527DB, 0x01EEF63A, 0x8070223D];
-    // the thumbnail types of CAS parts and objects, tried in this order (unverified beyond a few packages)
-    public static readonly uint[] ThumbTypes = [0x0580A2B4, 0x0580A2B5, 0x0580A2B6, 0x0589DC44, 0x0589DC45, 0x0589DC46, 0x0589DC47];
+    // the thumbnail types of CAS parts and objects, tried in this order: an object's 128, 54 then 32 px one (a 32 px picture
+    // stretched over a 148 px tile reads blurred), then the others (unverified beyond a few packages)
+    public static readonly uint[] ThumbTypes = [0x0580A2B6, 0x0580A2B5, 0x0580A2B4, 0x0589DC47, 0x0589DC46, 0x0589DC45, 0x0589DC44];
 
     public static List<ModFile> List(Game g, string docs, bool kinds = true)
     {

@@ -81,7 +81,7 @@
                 <StackPanel Width="148" Spacing="6" Padding="0,0,0,8" Opacity="{x:Bind TextOpacity, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind FullName, Mode=OneWay}">
                     <Border Width="148" Height="148" CornerRadius="10" Background="{x:Bind TileBrush}">
                         <Grid>
-                            <local:LucideIcon Kind="{x:Bind KindIcon}" Size="40" Stroke="#E6E6EC" StrokeWidth="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            <local:LucideIcon Kind="{x:Bind KindIcon}" Size="40" Stroke="{x:Bind GlyphBrush}" StrokeWidth="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"
                                               Visibility="{x:Bind Placeholder, Mode=OneWay}" />
                             <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="UniformToFill" />
                             <Border Visibility="{x:Bind NewVisible, Mode=OneWay}" Background="#CC1C1B2E" CornerRadius="8" Padding="6,1,7,2" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top">
