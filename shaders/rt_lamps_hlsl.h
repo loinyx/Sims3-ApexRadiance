@@ -239,10 +239,13 @@ float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWal
     // The centre ray's surface is taken at the point's own plane's depth along dc (Recv) only when it is that plane (its distance
     // from the lamp the same); another one is in front of the point when it is nearer than the point. Recv put a wall a few cm
     // to 13 cm before a floor texel behind the wall at a grazing angle (a low lamp outside: the floor behind the wall took it).
-    // Such a surface within the stretch the walk leaves out puts the point in its shadow's core
+    // Such a surface within the stretch the walk leaves out puts the point in its shadow's core. The stretch reaches one bias
+    // further back than the walk's last step sees (zEnd - bias), so a disc tap whose crossing lies a few mm nearer than the
+    // centre's is never left between the two: a wall crossed about 7.5 cm before a wall's end texel let 25 to 44% of the lamp
+    // through, a band at the joint
     const float own = abs(dot(N, P - L));
     const bool other = abs(c0.y - own) > 0.01 + 0.002 * own;
-    const bool hidden = other && c0.x >= nearM && c0.y >= R && c0.x < dr - bias && c0.x > zEnd - bias;
+    const bool hidden = other && c0.x >= nearM && c0.y >= R && c0.x < dr - bias && c0.x > zEnd - 2.0 * bias;
     const float lnZ = log(max(zEnd, nearM * 1.01) / nearM);
     float bSum = 0, bN = 0;
     if (c0.x >= nearM && c0.y >= R && c0.x < (other ? dr : Recv(N, dc, planeD, dr)) - bias) {
@@ -764,6 +767,15 @@ float EdgeW(float3 X, float3 p1, float3 p2, float e) {
     return max(e * saturate(sqrt(dot(r, r) / max(dot(d, d), 1e-8))), 1e-3);
 }
 float EdgeOp(float c, float h, float w) { return smoothstep(0.0, 1.0, (h - abs(c)) / (2.0 * w) + 0.5); }
+// A ball of a plant's leaves (kind 3, rt_lamp_blockers.h PuffT): the same operations, the lamp ball's radius gB.x
+float PuffT(float3 C, float tau, float r, float3 p1, float3 p2) {
+    const float3 d = p2 - p1;
+    const float s = saturate(dot(C - p1, d) / max(dot(d, d), 1e-8));
+    const float3 q = p1 + d * s - C;
+    const float w = max(gB.x * (1.0 - s), 0.02), re2 = r * r + w * w;
+    const float x = 1.0 - dot(q, q) / re2;
+    return x > 0.0 ? exp(-tau * (r * r / re2) * x * sqrt(x)) : 1.0;
+}
 // A table's leg (kind 2, rt_lamp_blockers.h PostT): the same operations
 float PostT(float3 A, float3 B, float r, float3 p1, float3 p2) {
     float t = 1.0;
@@ -780,15 +792,16 @@ float PostT(float3 A, float3 B, float r, float3 p1, float3 p2) {
     }
     return t;
 }
-// One blocker (its 7 rows from b) on the segment p1 -> p2: quadT (kind 0) or discT (kind 1), one plane or two (r1.w != 0), or a leg
-// (kind 2). q2: the line's distance^2 from the record's centre; r6.w > 0: the game's sphere, which it must pass where posts enlarged the
+// One blocker (its 7 rows from b) on the segment p1 -> p2: quadT (kind 0) or discT (kind 1), one plane or two (r1.w != 0), a leg
+// (kind 2) or a ball of a plant's leaves (kind 3). q2: the line's distance^2 from the record's centre; r6.w > 0: the game's sphere, which it must pass where posts enlarged the
 // record's; f > 0: the band ends over that sphere's last 1 / f (rt_lamp_blockers.h CutFade)
 float BlockerT(float b, float3 p1, float3 p2, float e, float q2, float f) {
     const float4 r2 = BlkRow(b + 2), r0 = BlkRow(b), r1 = BlkRow(b + 1), r6 = BlkRow(b + 6);
     const float3 d = p2 - p1;
     const float dn = GDot(r2.xyz, d);
     float t = 1.0;
-    [branch] if (r0.w > 1.5) t = PostT(r0.xyz, r1.xyz, r2.w, p1, p2);
+    [branch] if (r0.w > 2.5) t = PuffT(r0.xyz, r1.w, r2.w, p1, p2);
+    else [branch] if (r0.w > 1.5) t = PostT(r0.xyz, r1.xyz, r2.w, p1, p2);
     else [branch] if (!(1e-4 > max(-dn, dn)) && !(r6.w > 0 && !(q2 - r6.w < 0))) {
         const float r = 1.0 / dn;
         const float inv = (2.0 - r * dn) * r;

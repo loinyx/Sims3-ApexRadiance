@@ -571,7 +571,7 @@ void SyncHooks() {
 }
 
 void Add(int order, Effect fn, bool needsDepth) {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    std::scoped_lock lock(D3D9Hooks::RegistrationLock(), g_mutex); // SyncHooks registers; the Present chain holds the first (#90)
     if (!needsDepth && std::find(g_noDepth.begin(), g_noDepth.end(), fn) == g_noDepth.end()) g_noDepth.push_back(fn);
     for (const auto& e : g_effects)
         if (e.second == fn) return;
@@ -581,14 +581,14 @@ void Add(int order, Effect fn, bool needsDepth) {
 }
 
 void Remove(Effect fn) {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    std::scoped_lock lock(D3D9Hooks::RegistrationLock(), g_mutex); // SyncHooks registers; the Present chain holds the first (#90)
     g_effects.erase(std::remove_if(g_effects.begin(), g_effects.end(), [&](const auto& e) { return e.second == fn; }), g_effects.end());
     g_noDepth.erase(std::remove(g_noDepth.begin(), g_noDepth.end(), fn), g_noDepth.end());
     SyncHooks();
 }
 
 void WantCamera(bool on, bool plain) {
-    std::lock_guard<std::mutex> lock(g_mutex);
+    std::scoped_lock lock(D3D9Hooks::RegistrationLock(), g_mutex); // SyncHooks registers; the Present chain holds the first (#90)
     if (on) g_cameraWanted.fetch_add(1);
     else if (g_cameraWanted.fetch_sub(1) <= 0) g_cameraWanted.store(0);
     if (plain) {

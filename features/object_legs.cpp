@@ -1,5 +1,6 @@
 // Table legs: which object is which model (features/object_legs.h).
 #include "object_legs.h"
+#include "plant_scan.h"
 #include "apex_log.h"
 #include "build_flavor.h"
 #include "entry_chain.h"
@@ -16,8 +17,13 @@
 namespace {
 
 constexpr uint32_t kLiteType = 0x03B4C61D;
+// A table or a plant of the tables, a custom content plant, and while PlantScan runs every object with a LITE (custom content's
+// plants are known only once it ends, after most objects attached; then the rest are dropped at their next fill)
 struct Object {
-    const ObjectLegs::Model* model;
+    uint64_t lite;
+    const ObjectLegs::Model* model;   // a legged table, or
+    const ObjectLegs::Puff* puffs;    // a plant's balls (the table's or PlantScan's), or neither yet
+    uint16_t puffCount;
     float m[16];
     bool placed;
 };
@@ -52,14 +58,20 @@ char __fastcall AttachHook(void* manager, void* edx, uint32_t idLo, uint32_t idH
         std::lock_guard<std::mutex> lk(g_mx);
         g_feed.Attach(IdOf(idLo, idHi), lite);
     }
-    if (const ObjectLegs::Model* model = ObjectLegs::Baked(lite)) {
+    const ObjectLegs::Model* model = ObjectLegs::Baked(lite);
+    const ObjectLegs::PlantModel* plant = model ? nullptr : ObjectLegs::BakedPlant(lite);
+    const ObjectLegs::Puff* custom = nullptr;
+    uint16_t customCount = 0;
+    if (!model && !plant && PlantScan::Done() && !PlantScan::Find(lite, custom, customCount)) return made; // nothing of ours
+    {
         std::lock_guard<std::mutex> lk(g_mx);
         if (g_objects.size() >= 65536) g_objects.clear(), g_shapes.clear();
-        g_objects[IdOf(idLo, idHi)] = {model, {}, false};
+        g_objects[IdOf(idLo, idHi)] = {lite, model, plant ? &ObjectLegs::kPuffs[plant->first] : custom, plant ? plant->count : customCount, {}, false};
         g_any.store(true, std::memory_order_relaxed);
-        g_baked.fetch_add(1, std::memory_order_relaxed);
-    } else if (seen == 0)
-        LOG_INFO(std::format("[ObjectLegs] First LITE {:016X} of group {:08X}: not a legged table", lite, key[3]));
+    }
+    if (model || plant) g_baked.fetch_add(1, std::memory_order_relaxed);
+    else if (seen == 0)
+        LOG_INFO(std::format("[ObjectLegs] First LITE {:016X} of group {:08X}: not in the tables", lite, key[3]));
     return made;
 }
 
@@ -91,6 +103,7 @@ namespace ObjectLegs {
 void Install() {
     using GameAddr::Id;
     if (!GameAddr::Have({Id::LightObjectAttach, Id::LightObjectMove})) return;
+    PlantScan::Start();
     std::string err;
     g_on[0] = EntryChain::Install(EntryChain::Site::LightObjectAttach, EntryChain::Layer::LampMarkFilter, reinterpret_cast<void*>(&AttachHook), &err);
     if (g_on[0]) g_on[1] = EntryChain::Install(EntryChain::Site::LightObjectMove, EntryChain::Layer::LampMarkFilter, reinterpret_cast<void*>(&MoveHook), &err);
@@ -103,6 +116,7 @@ void Uninstall() {
 }
 
 uint32_t Gen() { return g_gen.load(std::memory_order_relaxed); }
+void Touch() { g_gen.fetch_add(1, std::memory_order_relaxed); }
 void MoveStats(uint32_t& hook, unsigned long& thread) {
     hook = g_hookMoves.load(std::memory_order_relaxed), thread = g_moveThread.load(std::memory_order_relaxed);
 }
@@ -175,12 +189,21 @@ void Fill(RoomLightTests::Room& room) {
             if (shape == g_shapes.end()) continue;
             const auto object = g_objects.find(shape->second);
             if (object == g_objects.end() || !object->second.placed) continue;
-            Place(*object->second.model, object->second.m, rc.posts);
+            Object& o = object->second;
+            if (!o.model && !o.puffs) {
+                if (!PlantScan::Find(o.lite, o.puffs, o.puffCount)) {
+                    // (custom content: once its scan ended; an object it did not find is nothing of ours)
+                    if (PlantScan::Done()) g_shapes.erase(shape), g_objects.erase(object);
+                    continue;
+                }
+            }
+            if (o.model) Place(*o.model, o.m, rc.posts);
+            else PlacePuffs(o.puffs, o.puffCount, o.m, rc.puffs);
             records++;
         }
     }
     if (records && g_filled.fetch_add(1, std::memory_order_relaxed) == 0)
-        LOG_INFO(std::format("[ObjectLegs] {} of a room's {} records take legs ({} of {} objects read are in the table)", records, room.rec.size(), g_baked.load(), g_lites.load()));
+        LOG_INFO(std::format("[ObjectLegs] {} of a room's {} records take legs or leaves ({} of {} objects read are in the table)", records, room.rec.size(), g_baked.load(), g_lites.load()));
 }
 
 } // namespace ObjectLegs

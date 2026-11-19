@@ -4,7 +4,11 @@
 // LODs (tools/object_legs_table) holds the legs as capsules by LITE instance; two hooks learn each object's LITE and matrix, the occluder
 // marks its first shape, and Fill gives a room's records their object's legs (Record::posts) before BlockerTable::Append.
 // Custom content is not in the table: its tables keep their top alone.
+// Plants the same way (tools/plant_puffs_table): their LITE holds two flat sheets crossed in an X, so a lamp past a plant cast a
+// wedge with straight edges; their shadow LOD baked into a few balls (Record::puffs) stands in for those sheets. Custom content's
+// are baked when the game starts (features/plant_scan.h).
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
@@ -22,11 +26,36 @@ struct Model {
     uint16_t first, count;
 };
 #include "object_legs_data.inc"
+struct Puff {
+    int16_t x, y, z, r; // mm, the model's space
+    uint16_t tau;       // the optical depth through its centre, in thousandths
+};
+struct PlantModel {
+    uint64_t lite;
+    uint16_t first, count;
+};
+#include "plant_puffs_data.inc"
 
 // The model of a LITE instance (0: none)
 inline const Model* Baked(uint64_t lite) {
     const auto at = std::lower_bound(std::begin(kModels), std::end(kModels), lite, [](const Model& m, uint64_t v) { return m.lite < v; });
     return at != std::end(kModels) && at->lite == lite ? at : nullptr;
+}
+// The plant model of a LITE instance (0: none)
+inline const PlantModel* BakedPlant(uint64_t lite) {
+    const auto at = std::lower_bound(std::begin(kPlantModels), std::end(kPlantModels), lite, [](const PlantModel& m, uint64_t v) { return m.lite < v; });
+    return at != std::end(kPlantModels) && at->lite == lite ? at : nullptr;
+}
+// A plant's balls (`count` from `first`: the table's or custom content's, features/plant_scan.h) through the object's matrix
+// (its radius by the matrix's scale along x)
+inline void PlacePuffs(const Puff* first, int count, const float m[16], std::vector<RoomLightTests::Puff>& out) {
+    const float scale = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    for (int i = 0; i < count; i++) {
+        const Puff& p = first[i];
+        const float l[3] = {p.x * 1e-3f, p.y * 1e-3f, p.z * 1e-3f};
+        out.push_back({{l[0] * m[0] + l[1] * m[4] + l[2] * m[8] + m[12], l[0] * m[1] + l[1] * m[5] + l[2] * m[9] + m[13], l[0] * m[2] + l[1] * m[6] + l[2] * m[10] + m[14]},
+                       p.r * 1e-3f * scale, p.tau * 1e-3f});
+    }
 }
 // A model's capsules through the object's matrix as the blockers take it (0x0069AD80: rows x, y, z, translation, four floats each)
 inline void Place(const Model& model, const float m[16], std::vector<RoomLightTests::Post>& out) {
@@ -47,6 +76,7 @@ void NoteShape(uint64_t id, uintptr_t shape); // an occluder entry's object and 
 // tables). The move hook is what paces it: marks wait for the room update, gaps of 0.6 to 2 s in one recording. hook: its moves alone and thread:
 // the last one's (nothing proved yet that it fires on every drag step or how often in Live mode; the [LiveTable] line tells)
 uint32_t Gen();
+void Touch(); // moves Gen once (custom content's plants were baked: kept rooms read their records again)
 void MoveStats(uint32_t& hook, unsigned long& thread);
 void Fill(RoomLightTests::Room& room);        // any thread
 

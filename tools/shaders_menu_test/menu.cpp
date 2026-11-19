@@ -34,25 +34,33 @@ extern bool g_fixtureTwin;
 #include "raster.inc"
 
 namespace {
-struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; bool picks = false; int confirm = 0; };
-// page 0 Shaders (tab 0 Look, 1 Packs, 2 Library), 1 Capture (tab 0 Screenshots, 1 Video)
+struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; int confirm = 0; const char* modal = nullptr; int edge = 0; };
+// page 0 Shaders (tab 0 Look, 1 Installed shaders), 1 Capture (tab 0 Screenshots, 1 Video)
 const State kStates[] = {
     { "look", 0, 0, false, false, true, 0, 0, 0, false, false },
     { "look-open-compiling", 0, 0, true, false, false, 1, 0, 0, false, true },
     { "look-open-edited", 0, 0, false, true, true, 0, 0, 0, false, true },
     { "look-doubled-lut", 0, 0, false, false, false, 0, 0, 0, false, false, true },
-    { "packs-downloading", 0, 1, false, false, false, 1, 0, 0, false, false },
-    { "packs-list", 0, 1, false, false, false, 0, 0, 0, false, true },
-    { "packs-finished", 0, 1, false, false, false, 2, 0, 0, false, false },
-    { "library", 0, 2, false, false, false, 0, 0, 0, false, true },
+    { "look-downloading", 0, 0, false, false, false, 1, 0, 0, false, false },
+    { "look-open", 0, 0, false, false, false, 0, 0, 0, false, true },
+    { "look-finished", 0, 0, false, false, false, 2, 0, 0, false, false },
+    { "installed", 0, 1, false, false, false, 0, 0, 0, false, true },
     { "shots", 1, 0, false, false, false, 0, 0, 0, false, false },
     { "shots-advanced", 1, 0, false, false, false, 0, 0, 1, false, true },
     { "video-idle-advanced", 1, 1, false, false, false, 0, 0, 1, true, true },
     { "video-recording", 1, 1, false, false, false, 0, 1, 0, false, true },
     { "video-saving", 1, 1, false, false, false, 0, 2, 1, false, false },
-    { "packs-choosing", 0, 1, false, false, false, 0, 0, 0, false, false, false, true },
-    { "library-remove-pack", 0, 2, false, false, false, 0, 0, 0, false, false, false, false, 1 },
-    { "library-remove-file", 0, 2, false, false, false, 0, 0, 0, false, false, false, false, 2 },
+    { "look-doubled", 0, 0, false, false, false, 0, 0, 0, false, false, true },
+    { "installed-remove-pack", 0, 1, false, false, false, 0, 0, 0, false, false, false, 1 },
+    { "installed-remove-file", 0, 1, false, false, false, 0, 0, 0, false, false, false, 2 },
+    { "look-add", 0, 0, false, false, false, 1, 0, 0, false, false, false, 0, "##AddShaders" },
+    { "look-none", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, nullptr, 1 },
+    { "look-empty", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, nullptr, 2 },
+    { "look-empty-add", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, "##AddShaders", 2 },
+    { "look-long", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, nullptr, 3 },
+    { "look-bare-add", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, "##AddShaders", 4 },
+    { "installed-bare", 0, 1, false, false, false, 0, 0, 0, false, false, false, 0, nullptr, 4 },
+    { "installed-downloading", 0, 1, false, false, false, 1, 0, 0, false, false, false, 0, nullptr, 0 },
 };
 
 struct Run { ImRect r; std::string text; };
@@ -167,6 +175,7 @@ void Report(const std::string& key, const std::string& example, const std::strin
 }
 
 // Horizontal overflow, controls overlapping each other, text over a control, text over text
+const char* g_checkOnly = nullptr; // CheckLayout looks only at this window and its children (the modal sweep)
 std::string g_dump; // "<state> <lang>/<units>/<scale>%": that case's controls and text runs are printed
 void CheckLayout(const std::string& state, const std::string& where)
 {
@@ -177,7 +186,7 @@ void CheckLayout(const std::string& state, const std::string& where)
     for (const RecItem& it : RecItems()) controls[it.window].push_back(&it);
     for (ImGuiWindow* w : g.Windows)
     {
-        if (!w->WasActive || w->Hidden) continue;
+        if (!w->WasActive || w->Hidden || (g_checkOnly && strncmp(w->Name, g_checkOnly, strlen(g_checkOnly)) != 0)) continue;
         const float right = w->ContentRegionRect.Max.x, bottom = w->InnerClipRect.Max.y;
         const bool scrolls = w->ScrollMax.y > 0.0f; // a list that scrolls inside its card
         const std::string win = ShortName(w->Name);
@@ -235,7 +244,7 @@ void CheckLayout(const std::string& state, const std::string& where)
                     Report(state + " | text over control | " + win + " | " + c->id, buf, where);
                 }
             for (size_t j = i + 1; j < runs.size(); ++j)
-                if (Overlaps(t.r, runs[j].r, std::min(t.r.GetHeight(), runs[j].r.GetHeight()) * 0.25f))
+                if (Overlaps(t.r, runs[j].r, std::max(2.0f, std::min(t.r.GetHeight(), runs[j].r.GetHeight()) * 0.25f))) // 2 px: a flat glyph run such as "_" touches its neighbour
                 {
                     snprintf(buf, sizeof buf, "\"%s\" over \"%s\"", Clip(t.text).c_str(), Clip(runs[j].text).c_str());
                     Report(state + " | text over text | " + win, buf, where);
@@ -303,7 +312,7 @@ int main(int argc, char** argv)
     std::set<std::string> missing;
     const float height = 16000.0f;
     for (int lang = 0; lang < 21; ++lang)
-        for (int units : { 400, 900 })
+        for (int units : { 343, 400, 900 })
             for (float scale : { 1.0f, 2.0f })
                 for (int st = 0; st < (int)IM_COUNTOF(kStates); ++st)
                 {
@@ -313,11 +322,14 @@ int main(int argc, char** argv)
                     VioletTheme::UpdateFonts(io); // the language's script merged, as the menu does between frames
                     ImGui::GetStyle().FontScaleMain = scale;
                     Fixture::LooksState(s.compiling, s.edited, s.offer, s.batch, s.twin);
-                    Fixture::PacksState(s.picks, s.confirm);
+                    Fixture::PacksState(s.confirm);
+                    Fixture::EdgeState(s.edge);
                     g_fixtureTwin = s.twin;
                     Fixture::CaptureState(s.video, s.options);
                     g_menuGameAaOn = s.gameAa;
                     g_recOpenAll = s.openAll;
+                    g_recModal = s.modal;
+                    ImGui::GetCurrentContext()->OpenPopupStack.resize(0); // a modal of the last case closes
                     (s.page ? g_captureTab : g_shadersTab) = s.tab;
                     // no toggle stays open from the case before
                     for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows) w->StateStorage.Clear();
@@ -348,7 +360,7 @@ int main(int argc, char** argv)
                             const float left = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x;
                             const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
                             const float end = ImGui::GetCursorScreenPos().y;
-                            Looks::PacksBar(left, right, end, s.tab == 1);
+                            Looks::PacksBar(left, right, end);
                         }
                         if (g.StyleVarStack.Size != vars || g.ColorStack.Size != cols || g.CurrentWindow->IDStack.Size != ids)
                         {
@@ -385,7 +397,7 @@ int main(int argc, char** argv)
                         {
                             const int before = g_newFindings;
                             CheckLayout(std::string(s.page ? "capture " : "shaders ") + s.name, where);
-                            const bool preview = g_newFindings != before || ((lang == 0 || lang == 1) && (st == 1 || st == 3 || st == 4 || st == 7 || st == 9 || st >= 13) && (scale == 1.0f || (lang == 1 && units == 400)));
+                            const bool preview = g_newFindings != before || ((lang == 0 || lang == 1) && (st == 0 || st == 1 || st == 3 || st == 4 || st == 7 || st == 9 || st >= 13) && (scale == 1.0f || (lang == 1 && units <= 400)));
                             if (preview)
                             {
                                 const auto file = out / (std::string(kCodes[lang]) + "-" + std::to_string(units) + "-" + std::to_string((int)(scale * 100)) + "-" + s.name + ".ppm");
@@ -402,7 +414,7 @@ int main(int argc, char** argv)
                         static const std::set<std::string_view> kFixtureText = { "Film print colors", "Exposure and saturation", "Black and white points",
                             "Where the effect is centred on the screen", "Screen", "Overlay", "Multiply", "Linear dodge (add)", "Off also shades the sky and far mountains",
                             "Multiplied into the highlights", "More samples look smoother", "Made by the author of this shader. Higher values of the radius cost more speed.",
-                            "How strongly the shader mixes into the picture", "Each sample costs a little speed; most looks use between 8 and 32 samples.", "Any whole number",
+                            "How strongly the shader mixes into the picture", "Each sample costs a little speed; most looks use between 8 and 32 samples.", "Any whole number", "Everything.fx", "MyFilmGrain.fx",
                             "A long tooltip from the .fx file that explains every detail of what this value changes in the picture", "Apex", "HEVC", "H.264" };
                         std::string list, line;
                         std::istringstream lines(I18n::MissingList(4000));
@@ -411,6 +423,72 @@ int main(int argc, char** argv)
                         if (!list.empty()) missing.insert(std::string(kCodes[lang]) + ":\n" + list);
                     }
                     ++cases;
+                }
+    // The modals on real screens: each language, screens from 800x600 to 4K, text 100%, 150% and 200%. A modal must
+    // fit on the screen (its window inside the display) besides the layout checks above.
+    int modalCases = 0;
+    for (int lang = 0; lang < 21; ++lang)
+        for (ImVec2 display : { ImVec2(800, 600), ImVec2(1280, 720), ImVec2(1366, 768), ImVec2(1920, 1080), ImVec2(3840, 2160) })
+            for (float scale : { 1.0f, 1.5f, 2.0f })
+                for (const char* modal : { "##AddShaders", "##NewLook", "##SaveLook" })
+                {
+                    I18n::SetChoice(lang);
+                    VioletTheme::UpdateFonts(io);
+                    ImGui::GetStyle().FontScaleMain = scale;
+                    Fixture::LooksState(false, false, false, 1, false);
+                    Fixture::PacksState(0);
+                    Fixture::EdgeState(0);
+                    g_recOpenAll = false;
+                    g_recModal = modal;
+                    ImGui::GetCurrentContext()->OpenPopupStack.resize(0);
+                    g_shadersTab = 0;
+                    for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows) w->StateStorage.Clear();
+                    io.DisplaySize = display;
+                    io.MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
+                    char where[96];
+                    snprintf(where, sizeof where, "%s/%.0fx%.0f/%.0f%%", kCodes[lang], display.x, display.y, scale * 100.0f);
+                    for (int frame = 0; frame < 4; ++frame)
+                    {
+                        RecItems().clear();
+                        ImGui::NewFrame();
+                        // the page at the menu's default width at the left, the modal centred on the screen as in game
+                        ImGui::SetNextWindowPos(ImVec2(0, 0));
+                        ImGui::SetNextWindowSize(ImVec2(std::min(display.x, 343.0f * scale + 2.0f * ImGui::GetStyle().WindowPadding.x), height)); // the page as tall as its content (it scrolls in game)
+                        ImGui::Begin("Apex", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings);
+                        ShadersPage();
+                        ImGui::End();
+                        ImGui::Render();
+                        if (ImVector<ImTextureData*>* textures = ImGui::GetDrawData()->Textures)
+                            for (ImTextureData* t : *textures)
+                                if (t->Status == ImTextureStatus_WantCreate || t->Status == ImTextureStatus_WantUpdates) { t->SetTexID((ImTextureID)1); t->SetStatus(ImTextureStatus_OK); }
+                                else if (t->Status == ImTextureStatus_WantDestroy && t->UnusedFrames > 0) { t->SetTexID(ImTextureID_Invalid); t->SetStatus(ImTextureStatus_Destroyed); }
+                        if (ImGui::GetCurrentContext()->ErrorCountCurrentFrame)
+                        {
+                            printf("FAIL ImGui error recovery modal %s %s frame %d\n", modal, where, frame);
+                            return 11;
+                        }
+                        if (frame != 3) continue;
+                        ImGuiWindow* w = ImGui::FindWindowByName(modal);
+                        if (!w || !w->WasActive) { Report(std::string("modal ") + modal + " | did not open", "-", where); continue; }
+                        g_checkOnly = modal; // the page behind is clipped by the screen here (it scrolls in game)
+                        CheckLayout(std::string("modal ") + (modal + 2), where);
+                        g_checkOnly = nullptr;
+                        if (w->Pos.x < -0.5f || w->Pos.y < -0.5f || w->Pos.x + w->Size.x > display.x + 0.5f || w->Pos.y + w->Size.y > display.y + 0.5f)
+                        {
+                            char buf[160];
+                            snprintf(buf, sizeof buf, "window %.0f,%.0f %.0fx%.0f on a %.0fx%.0f screen", w->Pos.x, w->Pos.y, w->Size.x, w->Size.y, display.x, display.y);
+                            Report(std::string("modal ") + modal + " | off the screen", buf, where);
+                        }
+                        if (w->ScrollMax.y > 0.5f) // its buttons below the screen's edge
+                        {
+                            char buf[160];
+                            snprintf(buf, sizeof buf, "%.0f px to scroll in a %.0f px window", w->ScrollMax.y, w->Size.y);
+                            Report(std::string("modal ") + modal + " | taller than the screen", buf, where);
+                        }
+                        if (lang == 1 && scale == 2.0f && display.y == 720.0f)
+                            Rasterize(out / (std::string("pt-720p-200-") + (modal + 2) + ".ppm"), (int)display.x, (int)display.y);
+                    }
+                    ++modalCases;
                 }
     for (const std::string& m : missing) printf("Missing translations:\n%s\n", m.c_str());
     for (const auto& [key, f] : g_findings)
@@ -421,8 +499,8 @@ int main(int argc, char** argv)
         for (const std::string& x : f.where) { if (n++ < 6) w += (w.empty() ? "" : ", ") + x; }
         printf("%s\n    %d cases (%s%s)\n    e.g. %s\n", key.c_str(), f.count, w.c_str(), f.where.size() > 6 ? ", ..." : "", f.example.c_str());
     }
-    printf("%d cases (21 languages, widths 400 and 900 units, text 100%% and 200%%, %d states), four frames each; %lld controls and %lld text runs checked: %d layout findings, %d missing-translation sets\n",
-           cases, (int)IM_COUNTOF(kStates), g_controls, g_runs, failures, (int)missing.size());
+    printf("%d cases (21 languages, widths 343 (the default window), 400 and 900 units, text 100%% and 200%%, %d states) and %d modal cases (3 modals, 5 screens, text 100%%, 150%% and 200%%), four frames each; %lld controls and %lld text runs checked: %d layout findings, %d missing-translation sets\n",
+           cases, (int)IM_COUNTOF(kStates), modalCases, g_controls, g_runs, failures, (int)missing.size());
     ImGui::DestroyContext();
     return failures || !missing.empty() ? 1 : 0;
 }

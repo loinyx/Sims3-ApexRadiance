@@ -5,6 +5,7 @@
 #include "rec.h"
 #include "patches/looks_patch.cpp"
 #include "fixture.h"
+#include "features/looks_packs_index.h"
 
 namespace {
 const LooksParam kEvery[] = {
@@ -52,11 +53,30 @@ const std::vector<Looks::Packs::Pack>& FakePacks()
         MakePack("SweetFX", "CeeJay.dk", "SweetFX", 900, 30), MakePack("AstrayFX", "BlueSkyDefender", "AstrayFX", 25000, 22),
         MakePack("Insane Shaders", "Lord of Lunacy", "Insane-Shaders", 800, 9), MakePack("Daodan's shaders", "Daodan317081", "Daodan", 150, 4),
         MakePack("An old pack with a rather long name", "Somebody", "OldPack", 0, 0, false), MakePack("Gone pack", "Nobody", "GonePack", 50, 2),
-        MakePack("ReShade standard effects", "crosire", kStandardPack, 600, 50),
+        MakePack("ReShade standard effects", "crosire", "ReShade standard effects", 600, 50),
     };
-    return v;
+    // then the rest of ReShade's list from the built-in index (names only), so Get more packs and Add shaders show it whole
+    static const std::vector<Looks::Packs::Pack> all = [] {
+        std::vector<Looks::Packs::Pack> out = v;
+        for (const Looks::Packs::IndexPack& x : Looks::Packs::kIndex)
+        {
+            auto same = std::find_if(out.begin(), out.end(), [&](const Looks::Packs::Pack& p) { return _stricmp(p.folder.c_str(), x.folder) == 0; });
+            if (same != out.end()) { same->index = &x; continue; }
+            Looks::Packs::Pack p = MakePack(x.name, x.author, x.folder, x.downloadKB, x.techniques);
+            p.repo = x.repo; p.rank = x.rank; p.index = &x;
+            out.push_back(std::move(p));
+        }
+        return out;
+    }();
+    return all;
 }
-bool IsDownloaded(const std::string& f) { return f == "prod80" || f == "OldPack" || (g_batch && f == "SweetFX"); }
+// The live viewer (live.cpp): downloads that take about two seconds a pack, one at a time
+bool g_live = false;
+std::vector<Looks::Packs::Row> g_liveRows;
+std::set<std::string> g_liveDone;
+double g_liveStarted = 0.0;
+int g_edge = 0; // Fixture::EdgeState: 4 = nothing installed (no pack, no file of the player's)
+bool IsDownloaded(const std::string& f) { return g_edge != 4 && (f == "prod80" || f == "OldPack" || (g_batch && f == "SweetFX") || g_liveDone.count(f)); }
 } // namespace
 
 namespace Looks::Fx {
@@ -73,15 +93,16 @@ bool HasFile(const std::string& f) { return FindUser("Everything", f) >= 0 || Fi
 bool Pending(const std::string&) { return false; }
 std::vector<Listed> List()
 {
+    if (g_edge == 4) return {};
     std::vector<Listed> v(2);
     v[0].index = 0; v[0].technique = "Everything"; v[0].file = "Everything.fx"; v[0].pack = "prod80"; v[0].checked = true;
     v[1].index = 1; v[1].technique = "FilmGrain"; v[1].file = "MyFilmGrain.fx"; v[1].checked = true;
     return v;
 }
-std::vector<std::string> PackFolders() { return { "prod80", "OldPack" }; }
-std::vector<std::wstring> OwnFiles() { return { L"C:\\Shaders\\Shaders\\MyFilmGrain.fx" }; }
+std::vector<std::string> PackFolders() { return g_edge == 4 ? std::vector<std::string>() : std::vector<std::string>{ "prod80", "OldPack" }; }
+std::vector<std::wstring> OwnFiles() { return g_edge == 4 ? std::vector<std::wstring>() : std::vector<std::wstring>{ L"C:\\Shaders\\Shaders\\MyFilmGrain.fx" }; }
 PackCount CountPack(const std::string&) { return { 31, 40, true }; }
-int Generation() { return 1; }
+int Generation() { return 1 + g_edge; } // an edge state lists other sources
 bool Scanned() { return true; }
 bool Scanning() { return false; }
 void RequestScan(bool) {}
@@ -121,11 +142,40 @@ const Pack* Find(const std::string& folder)
 const Pack* PackForFile(const std::string& file, const std::string&) { return _stricmp(file.c_str(), "qUINT_mxao.fx") == 0 ? Find("qUINT") : nullptr; }
 std::string FileForTechnique(const std::string& file, const std::string& technique) { return technique == "MXAO" && _stricmp(file.c_str(), "qUINT_mxao.fx") != 0 ? "qUINT_mxao.fx" : ""; }
 std::string GitHubUrl(const Pack& p) { return "https://github.com/" + p.repo; }
-void Download(const std::vector<std::string>&) {}
-void StopRest() {}
+void Download(const std::vector<std::string>& folders)
+{
+    if (!g_live) return;
+    for (const std::string& f : folders)
+        if (!IsDownloaded(f) && std::none_of(g_liveRows.begin(), g_liveRows.end(), [&](const Row& r) { return r.folder == f && r.state != RowState::Failed; }))
+            g_liveRows.push_back({ f, RowState::Waiting, 0.0f });
+}
+void StopRest()
+{
+    for (Row& r : g_liveRows) if (r.state == RowState::Waiting || r.state == RowState::Downloading) { r.state = RowState::Failed; r.failure = Failure::Stopped; }
+}
 Batch Status()
 {
     Batch b;
+    if (g_live)
+    {
+        const double now = ImGui::GetTime();
+        for (Row& r : g_liveRows)
+        {
+            if (r.state == RowState::Done || r.state == RowState::Failed) continue;
+            if (r.state == RowState::Waiting) { r.state = RowState::Downloading; g_liveStarted = now; }
+            r.progress = (float)std::min(1.0, (now - g_liveStarted) / 2.0);
+            if (r.progress >= 1.0f)
+            {
+                r.state = RowState::Done;
+                g_liveDone.insert(r.folder);
+                if (r.folder == "qUINT") { g_twinState = true; ResolveShaders(); } // its MXAO runs now
+            }
+            break; // one at a time
+        }
+        b.rows = g_liveRows;
+        b.running = std::any_of(b.rows.begin(), b.rows.end(), [](const Row& r) { return r.state == RowState::Waiting || r.state == RowState::Downloading; });
+        return b;
+    }
     if (!g_batch) return b;
     b.running = g_batch == 1;
     b.rows = { { "SweetFX", RowState::Done, 1.0f }, { "AstrayFX", RowState::Downloading, 0.45f }, { "Insane-Shaders", b.running ? RowState::Waiting : RowState::Failed, 0.0f, b.running ? Failure::None : Failure::Stopped },
@@ -133,7 +183,7 @@ Batch Status()
     if (!b.running) b.rows[1].state = RowState::Done;
     return b;
 }
-void ClearFinished() {}
+void ClearFinished() { if (g_live) g_liveRows.clear(); }
 bool Unavailable(const std::string& folder) { return folder == "GonePack"; }
 bool Downloaded(const std::string& folder) { return IsDownloaded(folder); }
 void Remove(const std::string&) {}
@@ -191,6 +241,44 @@ void LooksState(bool compiling, bool edited, bool offer, int batch, bool twin)
     g_fxMessage.clear();
 }
 
+void EdgeState(int edge)
+{
+    g_edge = edge;
+    if (edge == 1) // no look chosen
+    {
+        g.preset.clear();
+        g.loaded = false;
+        g.iniOrder.clear();
+        g.extra.clear();
+        g.removed.clear();
+        RebuildOrder();
+    }
+    else if (edge == 2) // a new, empty look
+    {
+        g.preset = "looks:My look.ini";
+        g.iniOrder.clear();
+        g.iniKeys.clear();
+        g.extra.clear();
+        g.removed.clear();
+        g.off.clear();
+        RebuildOrder();
+    }
+    else if (edge == 3) // every built-in shader, a long look name and a long missing shader of a pack not on the list
+    {
+        g.preset = "looks:A look with a very long name that goes on and on past any width the menu has.ini";
+        g.iniOrder.clear();
+        for (int s = 0; s < Looks::ShaderCount(); ++s) g.iniOrder.push_back({ Looks::Shader(s).technique, Looks::Shader(s).file, s });
+        g.iniOrder.push_back({ "AVeryLongTechniqueNameFromAShaderThatNobodyEverShortened", "SomeoneElsesShaderWithALongFileName_v2_final.fx", -1 });
+        g.iniKeys.clear();
+        for (auto& e : g.iniOrder) g.iniKeys.insert(Lower(EntryKey(e)));
+        g.extra.clear();
+        g.removed.clear();
+        g.off.clear();
+        RebuildOrder();
+    }
+    else if (edge == 4) g_fxMessage.clear(); // nothing installed: the look as LooksState left it
+}
+
 bool SaveRoundTrip()
 {
     LooksState(false, false, false, 0);
@@ -231,10 +319,10 @@ bool SaveRoundTrip()
     return ok;
 }
 
-void PacksState(bool picks, int confirm)
+void Live() { g_live = true; }
+
+void PacksState(int confirm)
 {
-    g_packPicks.clear();
-    if (picks) g_packPicks = { "qUINT", "SweetFX", "AstrayFX" }; // with the For this look pack; Download adds the standard effects
     g_libraryConfirm = confirm == 1 ? "p:prod80" : confirm == 2 ? "f:C:\\Shaders\\Shaders\\MyFilmGrain.fx" : "";
 }
 } // namespace Fixture

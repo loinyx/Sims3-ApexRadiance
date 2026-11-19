@@ -115,6 +115,20 @@ if (-not $AsiLoader -and -not $loaders) { Say 'warning: no ASI loader found in B
 Add-Type -Path (Join-Path $PSScriptRoot 'MailboxClient.cs')
 Add-Type -Namespace ApexIngame -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'
 Add-Type -Namespace ApexIngame -Name SystemTimes -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetSystemTimes(out long idle, out long kernel, out long user);'
+Add-Type -Namespace ApexIngame -Name Dump -MemberDefinition '[DllImport("dbghelp.dll", SetLastError = true)] public static extern bool MiniDumpWriteDump(IntPtr proc, uint pid, Microsoft.Win32.SafeHandles.SafeFileHandle file, uint type, IntPtr e, IntPtr u, IntPtr c);'
+# A game that does not close: a small dump (thread stacks, handles, thread times) of it and of a running bridge server,
+# so the wait it hangs in can be read afterwards (WinDbg: .effmach x86 for the 32-bit game's threads).
+function Save-HangDumps([string]$Dir) {
+    foreach ($p in @($script:proc) + @(Get-Process -Name 'NvRemixBridge' -ErrorAction SilentlyContinue)) {
+        if ($p.HasExited) { continue }
+        try {
+            $path = Join-Path $Dir "hang-$($p.ProcessName)-$($p.Id).dmp"
+            $fs = [IO.File]::Create($path)
+            try { $ok = [ApexIngame.Dump]::MiniDumpWriteDump($p.Handle, [uint32]$p.Id, $fs.SafeFileHandle, 0x1964, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero) } finally { $fs.Dispose() }
+            Say "  $(if ($ok) { "hang dump: $path" } else { "hang dump of $($p.ProcessName) failed" })"
+        } catch { Say "  hang dump of $($p.ProcessName): $($_.Exception.Message)" }
+    }
+}
 $runId = Get-Date -Format 'yyMMdd-HHmmss' # in the runner's save names, so no run meets another run's saves
 if (-not $OutDir) { $OutDir = Join-Path $stateDir "20$runId" }
 New-Item -ItemType Directory -Path (Join-Path $OutDir 'backup') -Force | Out-Null
@@ -647,7 +661,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
         try { Call-Agent 'quit_game' $null | Out-Null } catch { $notes.Add("quit_game: $($_.Exception.Message)") }
         if ($script:proc.WaitForExit(120000)) { $result.Closed = 'quit' }
         elseif ($script:proc.CloseMainWindow() -and $script:proc.WaitForExit(60000)) { $result.Closed = 'window closed' }
-        else { Stop-Process -Id $script:proc.Id -Force; $result.Closed = 'ended'; $notes.Add('the game did not close and was ended') }
+        else { Save-HangDumps $dir; Stop-Process -Id $script:proc.Id -Force; $result.Closed = 'ended'; $notes.Add('the game did not close and was ended (hang-*.dmp)') }
     } catch {
         $notes.Add($_.Exception.Message)
         if ($script:proc.HasExited) { $result.Closed = "exited $($script:proc.ExitCode)" }

@@ -18,6 +18,9 @@
 //     6 (miss 2 +0xF0 | +0x90 .xyz, its record's sphere r^2 as the game's, whatever posts made of the record's row)
 //   then each of the record's posts (Record::posts), the same stride, after its blockers:
 //     0 (one end .xyz, kind: 2), 1 (other end .xyz, 0), 2 (0, 0, 0, radius), the rest 0
+//   a plant's record (Record::puffs) has its balls instead of its upright blockers (the game's two crossed sheets; a level one stays),
+//   the same stride:
+//     0 (centre .xyz, kind: 3), 1 (0, 0, 0, optical depth through the centre), 2 (0, 0, 0, radius), the rest 0
 // The "miss" offsets are what the two-plane form leaves for a plane its segment never reaches (hit2), read as the game does.
 // A blocker of another vtable is left out: its share is 1 (occlude counts it and multiplies by 1), so T and the 0.01 stop
 // are unchanged.
@@ -70,6 +73,21 @@ inline float EdgeOp(float c, float h, float w) { // (an S: a straight ramp leave
 // a lamp above). The widest edge, 1.75 x (kPostFloorW + kPostHighW), stays within kPostReach. UNVERIFIED in game: the heights and the
 // streak's strength (offline against the shadow mesh: 0.52 mean light where the mesh gives 0.55)
 constexpr float kPostHighM = 1.5f, kPostGateM = 3.0f, kPostFloorW = 0.075f, kPostHighW = 0.125f, kPostReach = 0.35f; // kPostReach: past a leg's radius, the sphere that must still reach it
+// (physical) a ball of a plant's leaves (Record::puffs): exp(-tau x (1 - (d / r)^2)^1.5) at the line's distance d from its centre (a
+// soft edge, no ring), with the ball widened by the lamp ball of radius lampR seen past it (as EdgeW: lampR at the lamp, none at the
+// receiver) and its depth spread over the wider ball, so a lamp's size softens the shadow and keeps its total. p1 is the lamp's end.
+// No leaf texture inside a ball: a 3D value noise went past ps_3_0's 32 temporaries in the lamp shader, and crossed waves drew a
+// grid. UNVERIFIED in game: the density (tools/plant_puffs_table DENSITY)
+inline float PuffT(const RoomLightTests::Blocker& k, RoomLightTests::V p1, RoomLightTests::V p2, float lampR) {
+    using namespace RoomLightTests;
+    const V C = k.v(0x20), d = sub(p2, p1), o = sub(C, p1);
+    const float r = k.f[0x70 / 4], tau = k.f[0x74 / 4];
+    const float s = clamp01(dot(o, d) / std::max(dot(d, d), 1e-8f));
+    const V q = {p1.x + d.x * s - C.x, p1.y + d.y * s - C.y, p1.z + d.z * s - C.z};
+    const float w = std::max(lampR * (1.0f - s), 0.02f), re2 = r * r + w * w;
+    const float x = 1.0f - dot(q, q) / re2;
+    return x > 0.0f ? std::exp(-tau * (r * r / re2) * x * std::sqrt(x)) : 1.0f;
+}
 inline float PostT(const RoomLightTests::Blocker& k, RoomLightTests::V p1, RoomLightTests::V p2, float lampR) {
     using namespace RoomLightTests;
     const V A = k.v(0x20), B = k.v(0x30);
@@ -209,6 +227,11 @@ struct BlockerTable {
             int n = 0;
             // (posts: the sphere reaches its feet, and its blockers keep the game's: a line it let pass was never tested against them)
             float r2 = rc.r2;
+            for (const Puff& p : rc.puffs) { // (a lamp ball's width past the leaves, kPostReach, still reaches them)
+                const V d = sub(p.c, rc.c);
+                const float reach = std::sqrt(dot(d, d)) + p.r + kPostReach;
+                r2 = std::max(r2, reach * reach);
+            }
             for (const Post& p : rc.posts)
                 for (const V e : {p.a, p.b}) {
                     const V d = sub(e, rc.c);
@@ -218,6 +241,8 @@ struct BlockerTable {
             static const std::vector<Blocker> kNone;
             for (const Blocker& k : rc.meshed ? kNone : rc.b) {
                 const bool quad = k.vt == kQuadVt;
+                // a plant: its balls stand in for its upright sheets; a level blocker (a pot's or a planter's top) stays
+                if (!rc.puffs.empty() && std::fabs(k.v(quad ? 0x90 : 0x40).y) < 0.5f) continue;
                 if (!quad && k.vt != kDiscVt) {
                     skipped++;
                     continue;
@@ -234,6 +259,11 @@ struct BlockerTable {
                     rows.push_back({}), rows.push_back({});
                     put(0x80, 0.0f), put(0x90, rc.r2);
                 }
+                n++;
+            }
+            for (const Puff& p : rc.puffs) {
+                rows.push_back({{p.c.x, p.c.y, p.c.z, 3.0f}}), rows.push_back({{0.0f, 0.0f, 0.0f, p.tau}}), rows.push_back({{0.0f, 0.0f, 0.0f, p.r}});
+                rows.resize(rows.size() + kBlockerRows - 3);
                 n++;
             }
             for (const Post& p : rc.posts) {
@@ -350,6 +380,10 @@ struct BlockerTable {
             k.vt = RoomLightTests::kDiscVt;
             get(0x20, 0), get(0x30, 1), get(0x40, 2), get(0x80, 5), get(0x90, 6);
             k.f[0x70 / 4] = b[2].v[3];
+        } else if (b[0].v[3] == 3.0f) {
+            k.vt = RoomLightTests::kPuffVt;
+            get(0x20, 0);
+            k.f[0x70 / 4] = b[2].v[3], k.f[0x74 / 4] = b[1].v[3];
         } else {
             k.vt = RoomLightTests::kPostVt;
             get(0x20, 0), get(0x30, 1);
@@ -387,10 +421,11 @@ struct BlockerTable {
                 const float cull = rows[static_cast<size_t>(first + i * kBlockerRows + 6)].v[3];
                 if (cull > 0.0f && !(q2 - cull < 0.0f)) continue; // (the game's sphere, where posts enlarged the record's)
                 const Blocker k = BlockerAt(first + i * kBlockerRows);
-                float t = k.vt == kPostVt ? PostT(k, ra, rb, lampR)
+                float t = k.vt == kPuffVt ? PuffT(k, ra, rb, lampR)
+                          : k.vt == kPostVt ? PostT(k, ra, rb, lampR)
                           : edgeR > 0.0f  ? (k.vt == kQuadVt ? QuadEdgeT(k, ra, rb, edgeR) : DiscEdgeT(k, ra, rb, edgeR))
                                           : (k.vt == kQuadVt ? quadT(k, ra, rb) : discT(k, ra, rb));
-                if (h.v[3] > 0.0f && k.vt != kPostVt && !(edgeR > 0.0f)) t = CutFade(t, cull, q2, h.v[3]);
+                if (h.v[3] > 0.0f && k.vt != kPostVt && k.vt != kPuffVt && !(edgeR > 0.0f)) t = CutFade(t, cull, q2, h.v[3]);
                 T = T * t;
                 if (K_STOP >= T) return T;
             }

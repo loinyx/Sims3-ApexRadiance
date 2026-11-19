@@ -99,8 +99,7 @@ enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, Sett
 int g_page = PageOverview;
 int g_lightingTab = LightingLamps;
 int g_colorTab = Picture::TabOverview;
-enum ShadersTab : int { ShadersLook, ShadersPacks, ShadersLibrary };
-int g_shadersTab = ShadersLook;
+int g_shadersTab = Looks::kTabLook; // the Shaders page's tab (Looks::Tab)
 int g_settingsTab = SettingsMenu;
 enum CaptureTab : int { CaptureShots, CaptureVideo };
 int g_captureTab = CaptureShots;
@@ -636,7 +635,7 @@ const OverviewTile* OverviewTiles(int& count) {
         {"Lighting", IconId::MoonStar, "Lighting", "Lamps light up your neighborhood at night", PageLighting, &g_lightingTab, LightingLamps, LightsOn, LightsSet, LightsSwitchable, LightsDetail, true},
         {"WaterSnow", IconId::WavesHorizontal, "Water & Snow", "Ponds mirror their shore", PageWaterSnow, nullptr, 0, ShoreOn, SetShore, WaterSwitchable, WaterDetail, true},
         {"Color", IconId::Palette, "Color", "Adjustments, filters and LUTs", PageColor, nullptr, 0, ColorOn, ColorSet, AlwaysSwitchable, ColorDetail, true},
-        {"Shaders", IconId::SwatchBook, "Shaders", "Off", PageShaders, &g_shadersTab, ShadersLook, ShadersOn, ShadersSet, ShadersSwitchable, ShadersLookDetail, true},
+        {"Shaders", IconId::SwatchBook, "Shaders", "Off", PageShaders, &g_shadersTab, Looks::kTabLook, ShadersOn, ShadersSet, ShadersSwitchable, ShadersLookDetail, true},
         {"Banding", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding, nullptr, 0, BandingOn, BandingSet, BandingSwitchable, BandingDetail, true},
         {"Occlusion", IconId::Contrast, "Ambient Occlusion", "Soft shade where things meet", PageAmbientOcclusion, nullptr, 0, OcclusionOn, OcclusionSet, OcclusionSwitchable, OcclusionDetail, true},
         {"Blur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur, nullptr, 0, BlurOn, BlurSet, BlurSwitchable, BlurDetail, true},
@@ -1305,11 +1304,8 @@ void ShadersLookContent() {
     if (patch->IsEnabled() || search) Looks::ShadersCard();
 }
 
-// Tab Library: Installed packs and Your shaders (where shaders come from)
+// Tab Installed: Installed packs, Your shaders and Get more packs (ReShade's packs to download)
 void ShadersLibraryContent() { Looks::LibraryCards(); }
-
-// Tab Packs: ReShade's packs to pick; the download bar floats over the page's end (MainWindow)
-void ShadersPacksContent() { Looks::PacksTab(); }
 
 // A look's shader that does what an Apex effect also does (MXAO and Apex's Ambient Occlusion): twice the shade or blur and
 // twice the cost. Its row in the look's list gets the amber line and the button that turns the Apex effect off
@@ -1358,11 +1354,9 @@ void ShadersPage() {
         ApexUi::Tooltip(Description(patch));
         ImGui::SetCursorPosY(after);
     }
-    if (Looks::WantsPacks()) g_shadersTab = ShadersPacks; // Get shader packs, Get <pack>: the list is on Packs
-    static const char* const kTabs[] = {"Look", "Packs", "Library"};
+    static const char* const kTabs[] = {"Look", "Installed shaders"};
     ApexUi::TabBar("##ShadersTabs", &g_shadersTab, kTabs, IM_COUNTOF(kTabs));
-    if (g_shadersTab == ShadersLibrary) ShadersLibraryContent();
-    else if (g_shadersTab == ShadersPacks) ShadersPacksContent();
+    if (g_shadersTab == Looks::kTabInstalled) ShadersLibraryContent();
     else ShadersLookContent();
 }
 
@@ -3636,9 +3630,8 @@ const SearchPart* SearchParts(int& count) {
         {"Color", "Tones", PageColor, &g_colorTab, Picture::TabTones, [] { PictureRows(Picture::TabTones); }},
         {"Color", "Color", PageColor, &g_colorTab, Picture::TabColor, [] { PictureRows(Picture::TabColor); }},
         {"Color", "Detail", PageColor, &g_colorTab, Picture::TabDetail, [] { PictureRows(Picture::TabDetail); }},
-        {"Shaders", "Look", PageShaders, &g_shadersTab, ShadersLook, ShadersLookContent},
-        {"Shaders", "Packs", PageShaders, &g_shadersTab, ShadersPacks, ShadersPacksContent},
-        {"Shaders", "Library", PageShaders, &g_shadersTab, ShadersLibrary, ShadersLibraryContent},
+        {"Shaders", "Look", PageShaders, &g_shadersTab, Looks::kTabLook, ShadersLookContent},
+        {"Shaders", "Installed shaders", PageShaders, &g_shadersTab, Looks::kTabInstalled, ShadersLibraryContent},
         {"Ambient Occlusion", nullptr, PageAmbientOcclusion, nullptr, 0, AmbientOcclusionContent},
         {"Depth Blur", nullptr, PageDepthBlur, nullptr, 0, DepthBlurContent},
         {"Edge Smoothing", nullptr, PageEdgeSmoothing, nullptr, 0, AntiAliasingContent},
@@ -3754,11 +3747,13 @@ void SearchBox(float x, float y, float width, float h) {
 }
 
 // A status pill of the header at the header's control height (the shared Pill is shorter). Screen position.
-void HeaderPill(const char* text, bool highlighted, IconId icon, float x, float y, float h, const char* tooltip) {
+// id: stable while the text changes (the frame time); width: 0 = the text's own, else the text is centred in it
+void HeaderPill(const char* id, const char* text, bool highlighted, IconId icon, float x, float y, float h, const char* tooltip, float width = 0.0f) {
     const float u = ApexUi::Unit();
-    const ImVec2 size(ApexUi::PillSize(text, icon != IconId::None).x, h);
+    const float own = ApexUi::PillSize(text, icon != IconId::None).x;
+    const ImVec2 size(std::fmax(own, width), h);
     ImGui::SetCursorScreenPos(ImVec2(x, y));
-    ImGui::PushID(text);
+    ImGui::PushID(id);
     ImGui::InvisibleButton("##HeaderPill", size);
     ImGui::PopID();
     if (tooltip) ApexUi::Tooltip(tooltip);
@@ -3766,7 +3761,7 @@ void HeaderPill(const char* text, bool highlighted, IconId icon, float x, float 
     dl->AddRectFilled(ImVec2(x, y), ImVec2(x + size.x, y + h), ImGui::GetColorU32(Col(highlighted ? VioletTheme::kAccentDark : VioletTheme::kSelectedBg)), h * 0.5f);
     const ImU32 col = ImGui::GetColorU32(Col(highlighted ? VioletTheme::kAccentLight : VioletTheme::kTextMuted));
     ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
-    float tx = x + 9.0f * u;
+    float tx = x + 9.0f * u + std::floor((size.x - own) * 0.5f);
     if (icon != IconId::None) {
         const float s = ApexUi::kIconSmall * u;
         ApexUi::DrawIcon(dl, icon, ImVec2(tx, std::floor(y + (h - s) * 0.5f)), s, col);
@@ -3810,7 +3805,8 @@ bool Header(ImVec2 origin, float w, float h) {
     char perf[48];
     const float fps = io.Framerate;
     std::snprintf(perf, sizeof perf, "%.1f ms \xC2\xB7 %.0f fps", fps > 0.0f ? 1000.0f / fps : 0.0f, fps);
-    const float perfW = ApexUi::PillSize(perf, false).x;
+    // as wide as the widest usual reading, so the frame rate changing never moves the search field and the pills
+    const float perfW = std::fmax(ApexUi::PillSize(perf, false).x, ApexUi::PillSize("88.8 ms \xC2\xB7 888 fps", false).x);
     const float perfX = std::floor(closeX - gap - perfW);
     float level = 0.0f;
     const bool haveLevel = NightLighting::MenuNightLevel(level);
@@ -3828,9 +3824,9 @@ bool Header(ImVec2 origin, float w, float h) {
     const float searchW = std::floor(std::fmin(leftEdge() - gap - nameRight, maxSearch));
 
     if (showDay)
-        HeaderPill(dayText, night, night ? IconId::Moon : IconId::Sun, dayX, top, c,
+        HeaderPill("##Day", dayText, night, night ? IconId::Moon : IconId::Sun, dayX, top, c,
                    I18n::Trf("How dark the game thinks it is: {:.2f} (0 is day, 1 is night)", level).c_str());
-    if (showPerf) HeaderPill(perf, false, IconId::None, perfX, top, c, I18n::Tr("Frame time and frame rate, averaged over recent frames"));
+    if (showPerf) HeaderPill("##Perf", perf, false, IconId::None, perfX, top, c, I18n::Tr("Frame time and frame rate, averaged over recent frames"), perfW);
     if (searchW >= 60.0f * u) SearchBox(std::floor(leftEdge() - gap - searchW), top, searchW, c);
     bool keepOpen = true;
     ImGui::SetCursorScreenPos(ImVec2(closeX, top));
@@ -4872,12 +4868,11 @@ void MainWindow() {
         // Leave the cursor at the window's end so ImGui does not grow the window
         ImGui::SetCursorScreenPos(ImVec2(wp.x, wp.y + ws.y - 1.0f));
         ImGui::Dummy(ImVec2(0.0f, 0.0f));
-        // The download bar floats over the content just above the footer (on the Packs tab, or while a download runs or
-        // has just finished); the undo toast goes above it
-        const bool packsTab = !g_search[0] && !WelcomeActive() && g_page == PageShaders && g_shadersTab == ShadersPacks;
+        // The download bar floats over the content just above the footer (while a download runs or has just finished);
+        // the undo toast goes above it
         const float barLeft = wp.x + sidebarW + 1.0f + ApexUi::kSpace4 * u;
         const float barRight = wp.x + ws.x - ImGui::GetStyle().ScrollbarSize - ApexUi::kSpace4 * u;
-        const float barTop = Looks::PacksBar(barLeft, barRight, footerTop, packsTab);
+        const float barTop = Looks::PacksBar(barLeft, barRight, footerTop);
         DrawToast(barTop, barTop < footerTop ? barRight : 0.0f);
         DeveloperConfirmation();
         ImGui::EndDisabled();

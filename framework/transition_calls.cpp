@@ -74,7 +74,9 @@ void Start() {
         {0x8B,0x0D}};
     unsigned attached = 0;
     const auto observe = [&](const GameAddress& entry, uintptr_t expected, void** original, void* hook) {
-        const auto address = entry.Resolve();
+        // A jump at the known entry is another module's hook (sims3-modernization's routing gate hooks BuildRoutingData):
+        // stand down with the warning below instead of the pattern scan's error.
+        const auto address = *reinterpret_cast<const unsigned char*>(expected) == 0xE9 ? std::nullopt : entry.Resolve();
         if (!address || *address != expected) {
             LOG_WARNING(std::format("[TransitionCalls] {} unavailable or already changed; other observers remain independent.", entry.name));
             return;

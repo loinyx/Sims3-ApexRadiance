@@ -71,6 +71,9 @@ Shipped in the package; players do not need to change them.
 | `bridge.conf` | `client.freeIdleBufferCopiesSec` | `2` | The same for static vertex and index buffers of 64 KB to 4 MB (patch 0008) |
 | `bridge.conf` | `perfLogIntervalFrames` | `0` | Diagnostics off: with them on, their tables fragment the process heap |
 | `bridge.conf` | `serverChannelMemSize` | `72MB` | The server's channel |
+| `bridge.conf` | `rewindMode` | not set | Rewind mode for test harnesses (patch 0015); off for play |
+| `bridge.conf` | `rewindMaxKeptMB` | not set (1024) | With rewind mode: megabytes a snapshot may keep alive on the server before it is given up |
+| `bridge.conf` | `rewindParkTimeoutSec` | not set (120) | With rewind mode: seconds a parked client waits without an Op from its host before it logs the host as gone and runs on |
 | `dxvk.conf` | `d3d9.customVendorId`, `d3d9.customDeviceId`, `d3d9.customDeviceDesc` | `10de`, `1080`, `Geforce GTX 580` | DXVK's TS3W profile, so `Options.ini` is kept |
 | `dxvk.conf` | `d3d9.countLosableResources` | `False` | A Reset succeeds although one losable resource is still alive |
 
@@ -139,6 +142,7 @@ zip takes the stock 3.1.1 release.
 | 0012 | `SetFVF` and `SetVertexDeclaration` replace each other in the client's copy: `SetFVF` kept the previous declaration, so `GetVertexDeclaration` returned it while an FVF was in use. The High-precision scene's resolve saves the vertex input and restores "declaration if any, else FVF": on loading screens it put a game shader's declaration (`POSITION` float2) back, and the game drew its fixed-function UI (FVF `0x142`) with it, a black top-right quarter (248 of 249 no-scene frames STALE in the trace). Now `SetFVF` clears the declaration and `SetVertexDeclaration` sets the FVF to 0, under the device lock. d3d9 returns a declaration made for the FVF after `SetFVF`; the client returns none, and restoring the FVF gives the same result. The FVF also moved into the client's state, so a state block captures and applies it with the declaration (before, `Apply` put the declaration back and left the FVF of the last call). Apex 3.1.1 also handles the old client (below) |
 | 0013 | Idle copy fetches: under the bridge, small parts of the picture (a lamp's sprite, pieces of objects or pillars) blinked now and then with the lot left still, and stopped with `freeIdle*Sec = 0`. The fetch of a freed copy now fails the lock when the server sends no whole copy (before, the lock went on and the next `Unlock` uploaded an unfetched copy over the server's); a freed MANAGED level is always fetched (`DISCARD`, which MANAGED ignores, skipped the fetch and left the rest of the copy undefined); a texture fetch is checked by a CRC32C like a buffer's; and only copies of 64 KB and more, which come from `VirtualAlloc`, are freed (a heap copy gives back almost no address space). Which of these caused the blinking is unverified |
 | 0014 | A new client copy starts zeroed: the client made a texture level's CPU copy under 64 KB with `new[]` and left it uninitialized, while a new d3d9 or DXVK texture starts zeroed. The game writes part of a lot's terrain overlay weights (64x64 A8R8G8B8) and uploads the rest as it is, so the rest held heap leftovers and some lots drew their ground black on some loads (painting the terrain there painted black). Measured with the in-game runner on the save that opens on such a lot: black on 4 of 4 loads before, right on 4 of 4 after |
+| 0015 | `rewindMode` (off): rewind mode for test harnesses, see below |
 
 ### Diagnostics
 
@@ -185,6 +189,80 @@ zip takes the stock 3.1.1 release.
 | `0x732E90` | `ResourceCache_Trim` (via `ResourceManager_Update`): destroys about 2,300 textures per 600 frames; about 70% come back within minutes |
 | `0x619DB0` | `Texture_CacheSizeBytes`: counts a MANAGED texture's pixels in full against `CacheBudget` |
 | `0x5FBCE0` | The CAS compositor's 256 x 256 readback (`GetRenderTargetData`), called only from `0x5FDBF0` |
+
+### Rewind mode (patch 0015)
+
+A test harness can snapshot the game process after a world load and later put its memory back, so one load serves many
+test runs that start from the same state. The game then holds the D3D9 state of the snapshot again, and the server has
+to return to it too. `rewindMode = True` in both copies of `bridge.conf` adds that. Without the option nothing changes:
+the client makes no cooperation block, the server takes no snapshot, and each added hook is one test of a flag that is
+never set.
+
+A rewind is exact or it does not happen. What the server cannot put back makes it give the snapshot up, free what it
+kept and refuse every rewind to it, before anything changes.
+
+- **Quiet point.** The client publishes a cooperation block, the named mapping `Local\rewind-coop-<client pid>`. When
+  the host sets `request` there, the client stops at the end of the next `Present`, on every way out of it, and also
+  while a `Present` waits for the server's present semaphore, one check each time the wait times out (1 s). Other
+  threads of the game can send
+  commands too (a command only takes its channel's send lock, and `Present` does not take the device lock), so the
+  parked client holds the send locks of both channels. For each `op` the host writes (1 snapshot, 2 rewind, 3 report
+  only, 4 let the snapshot go) it sends one synchronous `Bridge_Rewind` command, then checks that no other thread sent
+  in between and that every answer was read. If not, the Op is refused.
+- **Snapshot.** The server copies its handle tables and takes each device's state block, bound render targets, gamma
+  ramp and query results. It copies every render target and depth surface on the device (a scene left open is closed
+  for the copies and opened again) and records the data queue positions of both bridges. Two kinds are not copied,
+  because D3D9 leaves their contents undefined after a `Present`: the back buffers of a swap chain that discards, and
+  the depth surfaces made with Discard, which `StretchRect` refuses to copy in d3d9 and in DXVK. The game makes its
+  depth surfaces that way (`CreateDepthStencilSurface` with Discard at `0x617C5F`).
+- **Depth surfaces made with Discard.** Instead of a copy, the server lets the command stream show that the game does
+  not need one. It follows each such surface until a `Clear` without rectangles has covered it. A draw with the depth
+  test on outside the cleared part, or with the stencil test on before a whole `Clear` of the stencil, could read
+  what the snapshot does not hold, so it gives the snapshot up. After a rewind the surfaces count as undefined again.
+- **While a snapshot is held.** A destroy of an object alive at the snapshot is deferred. Before the first write into
+  such a vertex buffer, index buffer or surface (an upload, `UpdateSurface`, `UpdateTexture`, `StretchRect`,
+  `ColorFill`, `GetRenderTargetData`, `GetFrontBufferData`) the server keeps the old contents, and before the first
+  `SetLOD` or `SetAutoGenFilterType` the old value. A buffer or a lockable surface is read through a lock. A level of
+  a default pool texture cannot be locked, so the server copies it on the device into a render target of its format,
+  reads that into system memory, and puts it back with `UpdateSurface`. `UpdateTexture` copies only what is marked
+  dirty in its source and clears the marks, so a rewind marks the sources used since the snapshot dirty as a whole.
+  Kept contents and deferred objects together stay under `rewindMaxKeptMB` (1024). The log reports them every 128 MB;
+  past the limit the snapshot is given up.
+- **Rewind.** The server puts the kept contents back, releases the objects made since the snapshot (each to zero, as a
+  destroy command does; a texture level, a volume or a back buffer goes with its texture or swap chain, never on its
+  own, since its table entry may or may not hold a reference), and restores the
+  handle tables, render targets, device state and data queue positions. A query issued again since the snapshot answers
+  with its result at the snapshot until the game issues it once more. The server then reads no command until the
+  client's process is back at the snapshot, so a command of the abandoned run is never executed. It learns that from
+  shared memory: it sets a spare word in the head of the client's channel mapping, which is 0 in every snapshot, and
+  the host's restore of that mapping clears it. A kernel object cannot carry this, because a host also sets events
+  and semaphores back to their state at the snapshot. After 60 s without the restore the server gives the snapshot up
+  and stops the bridge: its queues are at the snapshot and the client is not, so no command can be read safely. The
+  host then gets no answer to its next Op, which it treats as `E_ABORT`.
+- **A host that dies.** A parked client that gets no Op for `rewindParkTimeoutSec` (120 s) logs that the host is gone
+  and runs on, and parks no more until `request` was clear once. Idle time is summed in steps of at most 100 ms, so a
+  process put back to a snapshot does not count the time since as idle.
+- **What the host puts back.** The memory of the game process, with the client's views of the bridge's shared
+  memory: the four channel mappings (`...Channel_<guid>`) and the query results block (`QueryResults_<guid>`, 4096
+  slots). The server writes neither while the client is parked, nor between a rewind and the client's signal, and it
+  keeps no state of its own about the query results block, so the client's views are all of it. The block has to come
+  back: a query whose answer was in its slot at the snapshot is not asked again by the client, which would wait for
+  that answer forever once a later answer has taken the slot.
+- **Answer.** `S_OK`, or `E_FAIL` (refused, nothing was changed; the reason is in the log), or `E_ABORT` (a rewind
+  failed part-way: the D3D9 state is undefined, the host ends the game, and every later Op answers the same). Each
+  answer carries eight numbers: objects kept, to revive, to drop, buffers and surfaces with kept contents, the memory
+  kept alive in KB, cursor commands since the snapshot, and whether the server refuses a rewind.
+
+Refused by design, with the reason in `bridge64.log`: a multisampled render target or depth surface (a copy may
+resolve its samples), a depth surface the D3D9 library does not copy, a draw that reads a depth surface made with
+Discard before the game cleared it, a write into a volume texture from before the
+snapshot, a query whose result was not ready at the snapshot and is issued again, a device reset, creation or
+destruction, `SetDialogBoxMode`, Remix API and shared heap commands, and an upload in progress.
+Cursor commands are not undone; they are counted for the host.
+
+`native\remix-bridge\test-rewind.cmd` runs the offline tests after `build.cmd`: the server side on a D3D9 device
+(system d3d9 and DXVK), and a 32-bit test app through the built bridge pair with the mode on and off. The rewind of a
+whole game process needs the host tool and is validated in game ([validation](../validation/rtx-remix-bridge.md)).
 
 ## Rejected approaches
 

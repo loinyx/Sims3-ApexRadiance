@@ -40,3 +40,13 @@ jobs:
             outputs/build/cache/*/*.log
           if-no-files-found: warn
           retention-days: 14
+      - name: Build developer ASI
+        shell: pwsh
+        run: ./tools/development/build.ps1 -Flavor Developer -DevelopmentVersion
+      - name: Preserve developer build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ApexRadiance-dev-${{ github.sha }}
+          path: Release/ApexRadiance.asi
+          if-no-files-found: error
+          retention-days: 14

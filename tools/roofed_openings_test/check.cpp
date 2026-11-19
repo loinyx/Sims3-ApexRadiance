@@ -292,7 +292,7 @@ void BakedMaskChecks() {
     const auto plain = placed(0, 0);
     Check(plain->b.g.openings[0].shaped == 0 && plain->b.g.openings[0].u1 == 1.0f, "unmasked neighbours lose the jamb as before");
 }
-// A window cut on a diagonal wall opens that diagonal (it once opened the edge along x at its low corner instead), and two
+// A window cut on a diagonal wall opens that diagonal (before the fix it opened the edge along x at its low corner instead), and two
 // windows side by side along the diagonal lose their shared jamb
 void DiagonalCutChecks() {
     Builder b(12, 12);
