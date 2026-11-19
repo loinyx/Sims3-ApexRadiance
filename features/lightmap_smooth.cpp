@@ -30,6 +30,7 @@
 #define NOMINMAX
 #endif
 #include "lightmap_smooth.h"
+#include "d3d9_hooks.h"
 #include "apex_log.h"
 #include "hook_guard.h"
 #include "build_flavor.h"
@@ -1341,6 +1342,7 @@ struct PassState {
         for (DWORD i = 0; i < kMaxRts; i++)
             if (FAILED(dev->GetRenderTarget(i, &rt[i]))) rt[i] = nullptr;
         if (FAILED(ExtraHooks::RawGetDepthStencilSurface(dev, &ds))) ds = nullptr;
+        D3D9Hooks::SettleDeferredShaders(dev);
         dev->GetPixelShader(&ps);
         dev->GetVertexShader(&vs);
         dev->GetVertexDeclaration(&decl);

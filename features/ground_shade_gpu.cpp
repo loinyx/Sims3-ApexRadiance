@@ -1,6 +1,7 @@
 // Walls shade lamp light near the ground, on the GPU (ground_shade_gpu.h). No game access: the offline harness
 // (tools/ground_shade_gpu_test) compiles this file and the shaders of shaders/ground_shade_hlsl.h against GroundShadow.
 #include "ground_shade_gpu.h"
+#include "d3d9_hooks.h"
 #include <d3dcompiler.h>
 #include <algorithm>
 #include <cstring>
@@ -199,6 +200,7 @@ void Engine::ReleaseAll() {
 }
 
 bool Engine::Begin(IDirect3DDevice9* dev) {
+    D3D9Hooks::SettleDeferredShaders(dev);
     if (!saved_ && (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &saved_)) || !saved_)) return saved_ = nullptr, false; // (nothing to restore: nothing is touched)
     saved_->Capture();
     savedInput_ = ExtraHooks::MarkVertexInput();

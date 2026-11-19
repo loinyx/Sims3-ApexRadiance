@@ -681,6 +681,7 @@ struct SavedState {
     }
 
     bool Capture(IDirect3DDevice9* dev) {
+        D3D9Hooks::SettleDeferredShaders(dev);
         bool ok = SUCCEEDED(dev->GetRenderTarget(0, &rt0)) && rt0;
         const HRESULT depthResult = ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
         ok &= SUCCEEDED(depthResult) || (depthResult == D3DERR_NOTFOUND && !ds);

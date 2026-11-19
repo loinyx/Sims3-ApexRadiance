@@ -207,6 +207,7 @@ void OnDraw(IDirect3DDevice9* dev, const char* kind, D3DPRIMITIVETYPE type, UINT
     dev->GetRenderTarget(0, &rt0);
     dev->GetRenderTarget(1, &rt1);
     dev->GetDepthStencilSurface(&ds);
+    D3D9Hooks::SettleDeferredShaders(dev);
     dev->GetPixelShader(&ps);
     dev->GetVertexShader(&vs);
     dev->GetTexture(0, &t0);

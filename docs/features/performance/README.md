@@ -74,6 +74,7 @@ Every switch works at the exact game function behind one measured cost, and foll
 | Restart host (no menu option, `[ui] restart_host`, off) | None | In development | [restart-host.md](restart-host.md) |
 | Lighter window updates | Game and scripts | 2.7.0 | [lighter-window-updates.md](lighter-window-updates.md) |
 | Faster scripts | Game and scripts | 2.7.0 | [faster-scripts.md](faster-scripts.md) |
+| Per-draw light cache (no menu option, `[dev_build]` switches, off) | None | In development | [per-draw-light-cache.md](per-draw-light-cache.md) |
 
 The System > Lot Streaming page holds three more switches, off by default (Extended lot detail, Keep lot visibility
 stable, Pause lot streaming in map view; Experimental, 2.7.0, research and code by idavidveiga):

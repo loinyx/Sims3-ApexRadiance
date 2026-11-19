@@ -107,6 +107,7 @@ void Resolve(IDirect3DDevice9* dev, Cause cause) {
     float c0[4] = {};
     D3DVIEWPORT9 vp{};
     RECT scissor{};
+    D3D9Hooks::SettleDeferredShaders(dev);
     dev->GetPixelShader(&ps);
     dev->GetVertexShader(&vs);
     dev->GetVertexDeclaration(&decl);
