@@ -1353,20 +1353,15 @@ public sealed partial class MainWindow
     // ---------- a default replacement ----------
 
     // the game items it replaces: objects and CAS parts by name, each with the game's picture and the mod's (when it brings
-    // one), then textures and the rest; the first few here, every one of them in See all
+    // one); the first few here, every one of them in See all
     UIElement ReplacesPanel(ModRow r, GameIndex gi)
     {
         var d = r.Defaults;
         var panel = new StackPanel { Spacing = 8 };
         var all = d.Objects.Concat(d.CasParts).ToList();
-        var wrap = new WrapPanel { Spacing = 6 };
-        if (d.Objects.Count > 0) wrap.Children.Add(Pill(d.Objects.Count == 1 ? T("1 object") : T("{0} objects", d.Objects.Count), "ApexSoftTextBrush"));
-        if (d.CasParts.Count > 0) wrap.Children.Add(Pill(d.CasParts.Count == 1 ? T("1 Create a Sim part") : T("{0} Create a Sim parts", d.CasParts.Count), "ApexSoftTextBrush"));
-        if (d.Images > 0) wrap.Children.Add(Pill(d.Images == 1 ? T("1 texture") : T("{0} textures", d.Images), "ApexSoftTextBrush"));
-        foreach (var (type, n) in d.Other.Take(4)) wrap.Children.Add(Pill($"{n} {type}", "ApexSoftTextBrush"));
-        panel.Children.Add(wrap);
-        if (all.Count == 0) return panel;
-        var head = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        // (a mod of textures only has no items to show: one line says what it changes)
+        if (all.Count == 0) { panel.Children.Add(Muted(ReplacesSummary(d))); return panel; }
+        var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });

@@ -324,28 +324,10 @@ public sealed partial class MainWindow
 
     // ---------- Replaces ----------
 
+    // what it replaces: the pills, then the game's items with the mod's pictures (See all for every one)
     UIElement ReplacesTab(ModRow r)
     {
-        var d = r.Defaults;
         var s = new StackPanel { Spacing = 16 };
-        var card = new StackPanel { Spacing = 10 };
-        var share = d.Resources > 0 ? (double)d.Replaced / d.Resources : 0;
-        var head = new Grid();
-        head.Children.Add(new TextBlock { Text = ReplacesSummary(d), FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 48, 0) });
-        head.Children.Add(new TextBlock { Text = $"{share:P0}", FontSize = 12, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Right });
-        card.Children.Add(head);
-        var bar = new Grid { Height = 8, CornerRadius = new CornerRadius(4), Background = Res("ApexPillBrush") };
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(share, 0.001), GridUnitType.Star) });
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(1 - share, 0.001), GridUnitType.Star) });
-        bar.Children.Add(new Border { Background = TagDot.BrushOf("#6CB2EA") });
-        card.Children.Add(bar);
-        card.Children.Add(new TextBlock
-        {
-            Text = d.Share >= 0.999 ? T("Everything in it changes something the game already has. Turned off, the game's originals come back.")
-                : T("{0} of its {1} resources replace the game's own; the rest is new. Turned off, the game's originals come back.", d.Replaced, d.Resources),
-            FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap,
-        });
-        s.Children.Add(new Border { Child = card, Padding = new Thickness(14), CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) });
         if (_gameIndex is { } gi) s.Children.Add(ReplacesPanel(r, gi));
         return s;
     }
