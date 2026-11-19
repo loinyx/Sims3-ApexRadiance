@@ -8967,6 +8967,7 @@ IDirect3DVertexShader9* TerrainUvVs(IDirect3DDevice9* dev) {
 // OnDraw may have bound its own)
 template <typename DrawFn> void WithTerrainUv(IDirect3DDevice9* dev, IDirect3DVertexShader9* copy, DrawFn draw) {
     IDirect3DVertexShader9* now = nullptr;
+    if (copy) D3D9Hooks::SettleDeferredShaders(dev);
     if (copy && SUCCEEDED(dev->GetVertexShader(&now)) && now) now->Release();
     const bool swap = copy && now == g_curVs;
     if (swap) SetVs(dev, copy);
