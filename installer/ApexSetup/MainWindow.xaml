@@ -675,7 +675,7 @@
                                             <Setter Property="Template">
                                                 <Setter.Value>
                                                     <ControlTemplate TargetType="ListViewItem">
-                                                        <ContentPresenter Padding="10,0,10,0" HorizontalContentAlignment="Stretch" />
+                                                        <ContentPresenter HorizontalContentAlignment="Stretch" />
                                                     </ControlTemplate>
                                                 </Setter.Value>
                                             </Setter>

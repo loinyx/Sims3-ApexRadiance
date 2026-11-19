@@ -317,11 +317,13 @@ public sealed partial class MainWindow
 
     FrameworkElement GroupHeader(string key, string label, string? add)
     {
-        var g = new Grid { Tag = "-", Margin = new Thickness(0, 12, 0, 2), Height = 26 };
+        // the whole row is the heading's button (hover and click across it); the + sits on its right end
+        var g = new Grid { Tag = "-", Margin = new Thickness(0, 12, 0, 2), Height = 30 };
         var head = new Button
         {
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(0, 0, 8, 0),
-            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(10, 0, 8, 0),
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch,
+            CornerRadius = new CornerRadius(4),
         };
         var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         s.Children.Add(Lucide.Icon(_collapsed.Contains(key) ? "chevron-right" : "chevron-down", 12, Res("ApexMutedBrush")));
@@ -336,6 +338,7 @@ public sealed partial class MainWindow
             var plus = IconButton("plus", tip);
             plus.Width = plus.Height = 26;
             plus.HorizontalAlignment = HorizontalAlignment.Right;
+            plus.Margin = new Thickness(0, 0, 2, 0);
             plus.Click += (_, _) => { if (add == "tag") Safe(NewTagAsync(null)); else Safe(NewFolderAsync(NewFolderParent())); };
             g.Children.Add(plus);
         }
@@ -1008,7 +1011,7 @@ public sealed partial class MainWindow
         a.Children.Add(new TextBlock { Text = T("{0} selected", picked.Count), FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
         Button Act(string icon, string tip, Action? run, bool enabled = true, string? brush = null)
         {
-            var b = new Button { Content = Lucide.Icon(icon, 16, brush is null ? null : Res(brush)), Width = 34, Height = 34, Padding = new Thickness(0), IsEnabled = enabled };
+            var b = Dims(new Button { Content = Lucide.Icon(icon, 16, brush is null ? null : Res(brush)), Width = 34, Height = 34, Padding = new Thickness(0), IsEnabled = enabled });
             ToolTipService.SetToolTip(b, tip);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
             if (run is not null) b.Click += (_, _) => run();
@@ -1453,10 +1456,17 @@ public sealed partial class MainWindow
         move.Click += (_, _) => MoveMenu(mine).ShowAt(move);
         acts.Children.Add(move);
         if (mine.Count > 1) acts.Children.Add(WideButton("merge", T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null))));
-        var remove = WideButton("trash-2", T("Remove to the Recycle Bin"), () => RemoveMods(mine));
-        remove.Foreground = Res("ApexErrorBrush");
-        acts.Children.Add(remove);
+        acts.Children.Add(WideButton("trash-2", T("Remove to the Recycle Bin"), () => RemoveMods(mine), "ApexErrorBrush"));
         host.Children.Add(acts);
+    }
+
+    // an icon button that is off reads as off: its icon keeps a fixed colour, so the whole button fades
+    static T Dims<T>(T b) where T : Control
+    {
+        void Show() => b.Opacity = b.IsEnabled ? 1 : 0.35;
+        b.IsEnabledChanged += (_, _) => Show();
+        Show();
+        return b;
     }
 
     static Button IconButton(string icon, string tip, string? brush = null)
@@ -1465,18 +1475,21 @@ public sealed partial class MainWindow
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
         ToolTipService.SetToolTip(b, tip);
-        return b;
+        return Dims(b);
     }
 
-    static Button WideButton(string icon, string text, Action click)
+    // (brush: the icon and the text in that colour, as the red of Remove)
+    static Button WideButton(string icon, string text, Action click, string? brush = null)
     {
         var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        s.Children.Add(Lucide.Icon(icon, 15));
-        s.Children.Add(new TextBlock { Text = text, TextTrimming = TextTrimming.CharacterEllipsis });
+        s.Children.Add(Lucide.Icon(icon, 15, brush is null ? null : Res(brush)));
+        var label = new TextBlock { Text = text, TextTrimming = TextTrimming.CharacterEllipsis };
+        if (brush is not null) label.Foreground = Res(brush);
+        s.Children.Add(label);
         var b = new Button { Content = s, HorizontalAlignment = HorizontalAlignment.Stretch, Height = 34 };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
         b.Click += (_, _) => click();
-        return b;
+        return Dims(b);
     }
 
     static Button SmallButton(string text, string icon, Action click)
@@ -1487,7 +1500,7 @@ public sealed partial class MainWindow
         var b = new Button { Content = s, Padding = new Thickness(10, 4, 10, 5), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(210, 0x13, 0x14, 0x17)) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
         b.Click += (_, _) => click();
-        return b;
+        return Dims(b);
     }
 
     static Border Warn(string title, string? text, string? action = null, Action? run = null)
