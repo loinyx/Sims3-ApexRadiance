@@ -74,7 +74,10 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    lamp's own object, which the game marks as an occluder at every drag step (`0x006C7939`), marks no room while the GPU
    draws the lamp. Every 2 s a GPU lamp that is on is checked against the room-0 lists of the stories that listed it and,
    once any story lists it, of every story where it can be drawn: a story whose list misses it at two checks in a row is
-   sent to gather again, once. A lamp switched on takes the usual path.
+   sent to gather again, once. A lamp switched on takes the usual path (its stories gather it again), but it is drawn at
+   once: a lit lamp of the lot's table (`OutdoorDelta::LotLamps`) that no room-0 list holds is drawn on every story where
+   it is drawable, as a listed lamp's missing stories are. During a lamp edit a map whose own lamps changed goes past the
+   2 ms CPU budget (within the GPU's), so a story with room 0 alone (a roof's half walls) follows a drag in the same frame.
 6. **Drags.** While a lamp keeps changing (within 300 ms of its last change) its maps are relit at every move with a
    cheaper shadow estimate (`AccFastPS`), as the ground past the lot follows it
    ([terrain relight](terrain-relight.md#dragged-lamps-on-the-gpu)); no map is uploaded, and the floor mask's under-floor
