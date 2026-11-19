@@ -290,16 +290,16 @@ HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3
     // Turbo Simulation Engine (Turbo.asi) makes a throwaway device after the game's, to read the device functions'
     // addresses, then releases it. A second device stops the RTX Remix bridge's server and the game hangs at its next
     // Present, so under the bridge Turbo's request gets the game's device (the same functions; the AddRef balances the
-    // Release). Its request: HAL, a 0x0 back buffer, its own hidden window. The caller is not checked:
-    // Sims3SettingsSetter's CreateDevice hook can sit between Turbo and this one. The device given is the one whose
-    // EndScene Apex draws on: the first HAL device can be a 0x0 probe that is released before Turbo asks.
+    // Release). Its request: HAL, a 0x0 back buffer, its own hidden window. Neither the caller nor Turbo's file name is
+    // checked: Sims3SettingsSetter's CreateDevice hook can sit between Turbo and this one, and players rename the file
+    // (a second device stops the bridge whoever asks). The device given is the one whose EndScene Apex draws on: the
+    // first HAL device can be a 0x0 probe that is released before Turbo asks.
     const HWND asking = pp && pp->hDeviceWindow ? pp->hDeviceWindow : focus;
     if (IDirect3DDevice9* game = g_device.load(); game && out && pp && type == D3DDEVTYPE_HAL && pp->BackBufferWidth == 0 &&
-                                                      pp->BackBufferHeight == 0 && asking != g_window.load() &&
-                                                      GetModuleHandleW(L"Turbo.asi") && Platform::RemixBridge()) {
+                                                      pp->BackBufferHeight == 0 && asking != g_window.load() && Platform::RemixBridge()) {
         game->AddRef();
         *out = game;
-        LOG_INFO("[D3D] Second device asked with Turbo.asi loaded: the game's is given (a second one would stop the RTX Remix bridge)");
+        LOG_INFO("[D3D] Second device asked (0x0 back buffer, another window): the game's is given (a second one would stop the RTX Remix bridge)");
         return D3D_OK;
     }
     const bool hal = type == D3DDEVTYPE_HAL;

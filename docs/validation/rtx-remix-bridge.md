@@ -128,6 +128,7 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 | 2026-11-13 | release/3.2.2 c2697794, standard flavour | Without Turbo, same route | pass, no error, one device as before |
 | 2026-11-19 | 4.0.7 (published), a player's crash report | Turbo and the bridge; a 0x0 HAL device created first, then the game's 1920x1080 one | crash at the start of the world load: access violation at `AddRef` in `Hooked_CreateDevice` on the released 0x0 device |
 | 2026-11-19 | release/4.0.8 fix, standard flavour, without Turbo | Start and world load under the bridge | pass, one device, no error |
+| 2026-11-19 | release/4.0.8 b6b15079 on the player's machine | Turbo loaded as a renamed file (`$RI76P92.asi`, Turbo's size) | hang at start: the name check missed it and Turbo's 0x0 request after the first frame became a real second device; the check was removed |
 
 ### Rewind mode (patch 0015)
 

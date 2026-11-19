@@ -89,11 +89,12 @@ Shipped in the package; players do not need to change them.
 - **Turbo Simulation Engine (`Turbo.asi`):** after the game's device it creates a second one (HAL, a 0x0 back buffer, its
   own hidden window) to read the device functions for its menu, then releases it. Under the bridge a second device stops
   the server (the client logs `no response from server`, then `Still waiting on the Present semaphore`) and the game
-  hangs at start. With `Turbo.asi` loaded and the bridge running, Apex answers exactly that request with the game's
+  hangs at start. With the bridge running, Apex answers exactly that request with the game's
   device and one more reference, which Turbo's release gives back (`Hooked_CreateDevice`); the log says
-  `Second device asked with Turbo.asi loaded`. The device given is the one Apex draws on (set at its first `EndScene`),
-  not the first HAL device created: that one can be a 0x0 probe released before Turbo asks (a crash in 4.0.7). Before
-  the game's first frame the request goes to the bridge. Any other request, and every setup without the bridge, goes to the
+  `Second device asked (0x0 back buffer, another window)`. Since 4.0.8 the file name is not checked (a player's Turbo
+  loaded as a renamed file and got a real second device), and the device given is the one Apex draws on (set at its
+  first `EndScene`), not the first HAL device created: that one can be a 0x0 probe released before Turbo asks (a crash
+  in 4.0.7). Before the game's first frame the request goes to the bridge. Any other request, and every setup without the bridge, goes to the
   client as before. Turbo's split game packages need `Turbo.asi`; its menu key, F7, also fires on Apex's Ctrl+Shift+F7.
 - **EA app 1.69.47:** works with `client.targetProcess = TS3.exe` in both `bridge.conf` files.
 - **DXVK in the game:** the bridge replaces it; the package's `d3d9.dll` takes its place.
