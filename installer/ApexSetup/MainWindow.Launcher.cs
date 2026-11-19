@@ -29,6 +29,7 @@ public sealed partial class MainWindow
     Tray? _tray;
     Crystal? _homeCrystal, _healthCrystal;
     readonly HashSet<int> _openArea = [];
+    bool _showNotes;
 
     string Docs => _game is { } g ? Scan.DocumentsFor(g) : "";
     public static bool Maintenance => Elevation.IsElevated && Elevation.Parse(Environment.GetCommandLineArgs()).Bin is not null;
@@ -665,9 +666,32 @@ public sealed partial class MainWindow
         if (needs.Count > 0)
         {
             body.Children.Add(Eyebrow(T("NEEDS YOU")));
-            var list = new StackPanel();
-            foreach (var it in needs) list.Children.Add(FindingRow(it, list.Children.Count > 0));
-            body.Children.Add(Card(list, pad: false));
+            var list = new StackPanel { Spacing = 10 };
+            foreach (var it in needs) list.Children.Add(IssueCard(it));
+            // the notes that ask nothing (one crash, a save without backup): one quiet line, opened on demand. The possible
+            // overlaps (two mods in one behaviour area, unproven, often a dozen) stay in Checks > Mods only.
+            var notes = _health.Where(i => i.Finding.Severity == Severity.Info && i.Finding.Text != "{0} may overlap in {1}: {2}").ToList();
+            if (notes.Count > 0)
+            {
+                var strip = new Grid { ColumnSpacing = 12, Padding = new Thickness(18, 12, 14, 12), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush") };
+                strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                strip.ColumnDefinitions.Add(new ColumnDefinition());
+                strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var info = Lucide.Icon("info", 16, Res("ApexMutedBrush"));
+                info.VerticalAlignment = VerticalAlignment.Center;
+                strip.Children.Add(info);
+                var what = new TextBlock { Text = notes.Count == 1 ? T("1 note that needs nothing from you") : T("{0} notes that need nothing from you", notes.Count), FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(what, 1);
+                strip.Children.Add(what);
+                var lines = new StackPanel { Spacing = 6, Padding = new Thickness(46, 0, 18, 4), Visibility = _showNotes ? Visibility.Visible : Visibility.Collapsed };
+                foreach (var n in notes) lines.Children.Add(new TextBlock { Text = T(n.Finding.Text, n.Finding.Args), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap });
+                var see = new HyperlinkButton { Content = _showNotes ? T("Hide notes") : T("See notes"), FontSize = 13, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+                see.Click += (_, _) => { _showNotes = !_showNotes; lines.Visibility = _showNotes ? Visibility.Visible : Visibility.Collapsed; see.Content = _showNotes ? T("Hide notes") : T("See notes"); };
+                Grid.SetColumn(see, 2);
+                strip.Children.Add(see);
+                list.Children.Add(Col(strip, lines));
+            }
+            body.Children.Add(list);
         }
         body.Children.Add(Eyebrow(T("CHECKS")));
         // one card, a row per area: its icon, what it covers, how it is; a click opens what it found
@@ -758,6 +782,51 @@ public sealed partial class MainWindow
         body.Children.Add(Card(g));
     }
 
+    // Needs you: one card per finding, its area's icon on the severity's tint, the first sentence as the title and the rest
+    // as the detail line, the action on the right
+    UIElement IssueCard(Health.Item it)
+    {
+        var f = it.Finding;
+        var tint = ((SolidColorBrush)Res(f.Severity == Severity.Error ? "ApexErrorBrush" : "ApexWarningBrush")).Color;
+        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(18, 16, 18, 16) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(10), VerticalAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x2E, tint.R, tint.G, tint.B)), Child = Lucide.Icon(AreaIcon(it.Area), 20, new SolidColorBrush(tint)) });
+        var (title, detail) = Sentences(T(f.Text, f.Args));
+        var text = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        if (detail.Length > 0) text.Children.Add(new TextBlock { Text = detail, FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        Grid.SetColumn(text, 1);
+        g.Children.Add(text);
+        if (FindingAction(it) is { } act) { Grid.SetColumn(act, 2); act.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(act); }
+        return new Border { Style = (Style)Application.Current.Resources["ApexCard"], Child = g, Padding = new Thickness(0) };
+    }
+
+    // a finding's first sentence, and the rest ("" when it is one sentence)
+    static (string Title, string Detail) Sentences(string text)
+    {
+        var i = text.IndexOfAny(['.', '。']);
+        while (i >= 0 && i + 1 < text.Length && text[i] == '.' && text[i + 1] != ' ') i = text.IndexOfAny(['.', '。'], i + 1); // "d3d9.dll", "17.11"
+        return i < 0 || i + 1 >= text.Length ? (text.TrimEnd('.', '。'), "") : (text[..i], text[(i + 1)..].Trim());
+    }
+
+    static string AreaIcon(HealthArea a) => a switch
+    {
+        HealthArea.ApexRadiance => "sparkles", HealthArea.Loaders => "plug", HealthArea.Graphics => "cpu", HealthArea.GameSettings => "sliders-horizontal",
+        HealthArea.Mods => "layout-grid", HealthArea.Stability => "heart-pulse", HealthArea.Saves => "folder", _ => "hard-drive",
+    };
+
+    Button? FindingAction(Health.Item it)
+    {
+        var f = it.Finding;
+        if (f.CanFix) return Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); CheckHealth(); BuildHealth(); } }, accent: true);
+        if (ModsFor(it.Files) is { Count: > 0 } hits) return Button(T("Show in Mods"), () => ShowInMods(hits));
+        if (f.Link is { } link) return Button(T("Read more"), () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }));
+        return null;
+    }
+
     UIElement FindingRow(Health.Item it, bool line)
     {
         var f = it.Finding;
@@ -770,11 +839,7 @@ public sealed partial class MainWindow
         var text = Body(T(f.Text, f.Args));
         Grid.SetColumn(text, 1);
         g.Children.Add(text);
-        Button? act = null;
-        if (f.CanFix) act = Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); CheckHealth(); BuildHealth(); } }, accent: true);
-        else if (ModsFor(it.Files) is { Count: > 0 } hits) act = Button(T("Show in Mods"), () => ShowInMods(hits));
-        else if (f.Link is { } link) act = Button(T("Read more"), () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }));
-        if (act is not null) { Grid.SetColumn(act, 2); act.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(act); }
+        if (FindingAction(it) is { } act) { Grid.SetColumn(act, 2); act.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(act); }
         return g;
     }
 

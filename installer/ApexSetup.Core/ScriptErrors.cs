@@ -211,7 +211,7 @@ public static partial class ScriptErrors
                 var last = r.Errors.Where(e => e.Crash && e.Mod == m.Mod).Max(e => e.When).ToString("g");
                 f.Add(new(new(m.Crashes >= CrashPattern ? Severity.Warning : Severity.Info, m.Crashes == 1
                         ? m.Mod is null ? "The game crashed once in its own code, on {1}." : "The game crashed once in {1}, on {2}."
-                        : m.Mod is null ? "The game crashed {0} times in its own code this past week, last on {1}." : "The game crashed {0} times in {1} this past week, last on {2}.",
+                        : m.Mod is null ? "The game crashed {0} times in its own code. This past week, last on {1}." : "{1} crashed the game {0} times. This past week, last on {2}.",
                     m.Mod is null ? [m.Crashes.ToString(), last] : [m.Crashes.ToString(), m.Mod, last]), m.Files));
             }
             if (m.Count - m.Crashes is var n and > 0)

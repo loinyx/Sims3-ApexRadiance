@@ -74,7 +74,7 @@ public sealed class ConflictCheck : IModCheck
         static bool Ccmerged(string party) => party.Equals("ccmerged", StringComparison.OrdinalIgnoreCase);
         foreach (var c in r.Conflicts.Where(c => !c.Parties.Any(Ccmerged)))
             f.Add(new(c.Winner is { } w
-                ? new Finding(Severity.Warning, "{0} change the same game data; {1} likely wins and the others' changes are lost.", [string.Join(", ", c.Parties), w])
+                ? new Finding(Severity.Warning, "{0} change the same game data. {1} likely wins and the others' changes are lost.", [string.Join(", ", c.Parties), w])
                 : new Finding(Severity.Warning, "{0} conflict: {1}", [string.Join(", ", c.Parties), c.Text]), FilesOf(c.Parties)));
         foreach (var o in r.Overlaps)
             f.Add(new(new Finding(Severity.Info, "{0} may overlap in {1}: {2}", [string.Join(", ", o.Parties), o.Label, o.Risk]), []));
