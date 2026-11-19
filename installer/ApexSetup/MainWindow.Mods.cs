@@ -1228,52 +1228,6 @@ public sealed partial class MainWindow
 
     void OnInstalledPicked(object sender, SelectionChangedEventArgs e) { if (!_fillingMods) FillModDetails(); }
 
-    // an installed item: its picture, what it is, the lots and worlds in Downloads that use it, and the way to remove it
-    void FillInstalledDetails(InstalledRow r)
-    {
-        var host = ModDetails;
-        var pic = new Grid { Height = 180, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush") };
-        var ph = Lucide.Icon(r.KindIcon, 44, Res("ApexMutedBrush"), 1.4);
-        ph.HorizontalAlignment = HorizontalAlignment.Center;
-        ph.VerticalAlignment = VerticalAlignment.Center;
-        pic.Children.Add(ph);
-        if (r.Image is { } img) pic.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, MaxWidth = 128, MaxHeight = 128 });
-        host.Children.Add(pic);
-        host.Children.Add(new TextBlock { Text = r.Name, FontSize = 18, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        var facts = new Grid { ColumnSpacing = 14, RowSpacing = 8 };
-        facts.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        facts.ColumnDefinitions.Add(new ColumnDefinition());
-        void Fact(string k, string v, Brush? brush = null)
-        {
-            facts.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var key = Muted(k);
-            var val = new TextBlock { Text = v, FontSize = 12, Foreground = brush ?? Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap };
-            Grid.SetRow(key, facts.RowDefinitions.Count - 1);
-            Grid.SetRow(val, facts.RowDefinitions.Count - 1);
-            Grid.SetColumn(val, 1);
-            facts.Children.Add(key);
-            facts.Children.Add(val);
-        }
-        Fact(T("Type"), r.Kind);
-        Fact(T("Installed by"), T("The game's own launcher"));
-        // (which pack it came from is not kept by the game: the lots and worlds waiting in Downloads that use it are)
-        var users = _modRows.Where(x => x.File.FileType == "sims3pack" && r.Item.Id != 0 && Sims3Pack.Read(x.File.Path)?.StoreDependencies.Contains(r.Item.Id) == true)
-            .Select(x => x.Name).ToList();
-        Fact(T("Used by"), users.Count == 0 ? T("No lot or world in Downloads") : string.Join(", ", users));
-        Fact(T("Kept in"), "DCCache › " + Path.GetFileName(r.Item.File));
-        host.Children.Add(facts);
-        host.Children.Add(Muted(T("The game's own launcher installs and removes these: Apex Launcher only reads its cache, so it never breaks the store content your saves use.")));
-        var exe = _game is { } g ? Path.Combine(g.Bin, "Sims3Launcher.exe") : null;
-        var open = WideButton("trash-2", T("Remove in the game's launcher…"), () =>
-        {
-            if (Games.IsRunning()) { SetInfo(ModsInfo, InfoBarSeverity.Warning, T("Close The Sims 3 first"), ""); return; }
-            try { Process.Start(new ProcessStartInfo(exe!) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! }); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The game's launcher did not open"), ErrorText(e)); }
-        }, "ApexErrorBrush");
-        open.IsEnabled = exe is not null && File.Exists(exe);
-        host.Children.Add(open);
-    }
-
     void OnInstalledTile(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
         if (args.InRecycleQueue || args.Item is not InstalledRow r || r.Image is not null || r.Loading) return;
@@ -1370,14 +1324,6 @@ public sealed partial class MainWindow
         }
         var picked = Picked();
         ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        if (_modsNarrow && picked.Count > 1)
-        {
-            var close = IconButton("x", T("Close"));
-            close.HorizontalAlignment = HorizontalAlignment.Right;
-            close.Margin = new Thickness(0, -6, 0, -10);
-            close.Click += (_, _) => CloseModDetails();
-            host.Children.Add(close);
-        }
         if (picked.Count == 0)
         {
             var empty = new StackPanel { Spacing = 12, Margin = new Thickness(0, 56, 0, 0), HorizontalAlignment = HorizontalAlignment.Center };
@@ -1393,42 +1339,6 @@ public sealed partial class MainWindow
         }
         if (picked.Count > 1) { FillManyDetails(picked); return; }
         FillOneModDetails(picked[0]);
-    }
-
-    void FillManyDetails(List<ModRow> picked)
-    {
-        var host = ModDetails;
-        var mine = picked.Where(Mine).ToList();
-        host.Children.Add(new TextBlock { Text = T("{0} mods selected", picked.Count), FontSize = 18, FontWeight = FontWeights.SemiBold });
-        host.Children.Add(Muted(ModRow.SizeText(picked.Sum(r => r.File.Size))
-            + (mine.Count < picked.Count ? " · " + T("{0} of them can't be changed here", picked.Count - mine.Count) : "")));
-        var list = new StackPanel { Spacing = 6 };
-        foreach (var r in picked.Take(6))
-        {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            var tile = Lucide.Icon(r.KindIcon, 14, r.GlyphBrush);
-            tile.HorizontalAlignment = HorizontalAlignment.Center;
-            tile.VerticalAlignment = VerticalAlignment.Center;
-            row.Children.Add(new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(6), Background = r.TileBrush, Child = tile });
-            row.Children.Add(new TextBlock { Text = r.Name, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 240 });
-            list.Children.Add(row);
-        }
-        if (picked.Count > 6) list.Children.Add(Muted(T("and {0} more", picked.Count - 6)));
-        host.Children.Add(list);
-        // what they share: findings that name more than one of them
-        foreach (var f in picked.SelectMany(r => r.Findings).GroupBy(f => f).Where(g => g.Count() > 1).Select(g => g.Key))
-            host.Children.Add(Warn(f, null, T("See in Health"), () => Show(HealthScreen)));
-        host.Children.Add(TagsRow(picked));
-        if (mine.Count == 0) return;
-        var acts = new StackPanel { Spacing = 8 };
-        var allOn = mine.All(r => r.File.Enabled);
-        acts.Children.Add(WideButton(allOn ? "power-off" : "power", allOn ? T("Turn them off") : T("Turn them on"), () => SetMods(mine, !allOn)));
-        var move = WideButton("folder-input", T("Move to…"), () => { });
-        move.Click += (_, _) => MoveMenu(mine).ShowAt(move);
-        acts.Children.Add(move);
-        if (mine.Count > 1) acts.Children.Add(WideButton("merge", T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null))));
-        acts.Children.Add(WideButton("trash-2", T("Remove to the Recycle Bin"), () => RemoveMods(mine), "ApexErrorBrush"));
-        host.Children.Add(acts);
     }
 
     // an icon button that is off reads as off: its icon keeps a fixed colour, so the whole button fades
