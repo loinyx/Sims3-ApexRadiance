@@ -86,7 +86,9 @@ std::string FullSource(int shader)
                  "    bool hair = m.y >= 0 && m.y < 1 && abs(m.y - d) <= 2.4e-7, body = m.x >= 0 && m.x < 1 && abs(m.x - d) <= 2.4e-7;\n"
                  "    if (hair && !body) w = 1; }\n"
                  "  if (gs_masks.y > 0) { float2 t = tex2D(gs_blend, uv).rg;\n"
-                 "    if (t.x < 0 && -t.x <= d + 2.4e-7) w = max(w, saturate(t.y)); }\n"
+                 // the mask keeps only the last blended layer's alpha: a faint strand over more hair reads as little
+                 // coverage, so 1/16 or more counts as all hair (only the faintest fringe stays in between)
+                 "    if (t.x < 0 && -t.x <= d + 2.4e-7) w = max(w, saturate(t.y * 16)); }\n"
                  "  return float4(lerp(fx.rgb, tex2D(gs_keep, uv).rgb, w * gs_masks.z), fx.a); }\n";
         return s;
     }
