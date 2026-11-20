@@ -18,6 +18,7 @@ public sealed partial class MainWindow
 
     void BuildHome()
     {
+        WarmThumbs();
         var host = ScreenHome;
         host.Children.Clear();
         if (_game is not { } g)

@@ -28,16 +28,16 @@ public sealed class StickyNote
 public sealed class AlbumLook
 {
     public string Background { get; set; } = "desk";     // (the first boards had names; a colour now wins when set)
-    public string? Color { get; set; }                    // the board's one colour, "#RRGGBB", fading softly darker
-    public string Frame { get; set; } = "polaroid";      // polaroid, rounded, stamp, film, circle
+    public string? Color { get; set; } = "#07070A";       // the board's one colour, "#RRGGBB", fading softly darker
+    public string Frame { get; set; } = "rounded";       // polaroid, print, washi, clip, rounded, kraft, deckle, doodle, stamp, film
     public string Font { get; set; } = "Ink Free";
     public double Height { get; set; }                     // the board's height its places were laid on
     public int Layout { get; set; }                        // 4: laid along the timeline, newest first, a little apart
-    public string Light { get; set; } = "soft";          // soft, spot (a lit middle, darker edges) or flat
+    public string Light { get; set; } = "flat";          // soft, spot (a lit middle, darker edges) or flat
     public string Tape { get; set; } = "colour";         // colour, match (the board's own hue) or none
     public double Size { get; set; } = 1;                 // the pictures' size, 0.75 to 1.3
     public double Tilt { get; set; } = 1;                 // 0 lies them straight, 1.6 throws them about
-    public double Spacing { get; set; } = 1;              // how far apart the pictures lie along the timeline, 0.6 to 1.7
+    public double Spacing { get; set; } = 1.25;            // how far apart the pictures lie along the timeline, 0.6 to 1.7
     public Dictionary<string, Placed> Places { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<StickyNote> Notes { get; set; } = [];
     public string Pattern { get; set; } = "none";        // none, lines, grid or dots: the paper under the pictures

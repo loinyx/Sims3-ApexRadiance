@@ -397,18 +397,23 @@ public sealed partial class MainWindow
     // (the width must be set before the file, or the whole picture is read)
     // The picture comes from a small JPEG made once and kept under the launcher's data (a 4K PNG read by an Image keeps its
     // whole file in memory, half a gigabyte for a board); until it is made the image is empty and fills in when ready.
-    static readonly SemaphoreSlim ThumbMakers = new(3);
-    static BitmapImage Thumb(string path, double width)
+    // (one size serves the grid, the board and Home, so each picture is read once; the viewer has its own, larger one)
+    static readonly SemaphoreSlim ThumbMakers = new(Math.Clamp(Environment.ProcessorCount - 2, 2, 8));
+    static string? ThumbFile(string path, int px)
     {
-        var px = width * 1.5 <= 560 ? 560 : width * 1.5 <= 1100 ? 1100 : 2200;
-        var b = new BitmapImage { DecodePixelType = DecodePixelType.Logical, DecodePixelWidth = (int)Math.Ceiling(Math.Max(64, width)) };
-        string file;
         try
         {
             var info = new FileInfo(path);
-            file = Path.Combine(Paths.Data, "thumbs", $"{Stable(path.ToLowerInvariant()) & 0x7fffffff:x8}-{info.Length:x}-{info.LastWriteTimeUtc.Ticks:x}-{px}.jpg");
+            return Path.Combine(Paths.Data, "thumbs", $"{Stable(path.ToLowerInvariant()) & 0x7fffffff:x8}-{info.Length:x}-{info.LastWriteTimeUtc.Ticks:x}-{px}.jpg");
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { b.UriSource = new Uri(path); return b; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    static BitmapImage Thumb(string path, double width)
+    {
+        var px = width * 1.5 <= 1100 ? 1100 : 2200;
+        var b = new BitmapImage { DecodePixelType = DecodePixelType.Logical, DecodePixelWidth = (int)Math.Ceiling(Math.Max(64, width)) };
+        if (ThumbFile(path, px) is not { } file) { b.UriSource = new Uri(path); return b; }
         if (File.Exists(file)) { b.UriSource = new Uri(file); return b; }
         var queue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _ = Task.Run(async () =>
@@ -417,6 +422,21 @@ public sealed partial class MainWindow
             queue.TryEnqueue(() => b.UriSource = new Uri(made));
         });
         return b;
+    }
+
+    // the pictures' small copies made in the background once the launcher is up, newest first, so the Gallery opens ready
+    static bool _thumbsWarmed;
+    void WarmThumbs()
+    {
+        if (_thumbsWarmed || _game is null) return;
+        _thumbsWarmed = true;
+        var docs = Docs;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2500);
+            var todo = Gallery.List(docs).Select(p => (p.Path, File: ThumbFile(p.Path, 1100))).Where(t => t.File is not null && !File.Exists(t.File)).ToList();
+            await Parallel.ForEachAsync(todo, new ParallelOptions { MaxDegreeOfParallelism = 2 }, async (t, _) => await MakeThumb(t.Path, t.File!, 1100));
+        });
     }
 
     static async Task<bool> MakeThumb(string path, string file, int px)
