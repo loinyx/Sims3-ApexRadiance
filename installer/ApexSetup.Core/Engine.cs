@@ -586,6 +586,8 @@ public static class Engine
         var docsRoot = docs ?? Scan.DocumentsFor(g);
         foreach (var f in m.Files.Where(f => f.Component == c).ToList())
         {
+            // (a file already gone with nothing to put back needs no work wherever it was, as after Documents moved)
+            if (f.Backup is null && !File.Exists(f.Path)) { m.Files.Remove(f); continue; }
             if (!Within(f.Path, g.Bin, docsRoot) || f.Backup is not null && !Within(f.Backup, Manifest.DirOf(g.Bin)))
             {
                 Engine.Log(new InvalidOperationException("Manifest entry outside the game left alone: " + f.Path + " <- " + f.Backup));

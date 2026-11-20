@@ -95,7 +95,7 @@ public partial class App : Application
         // the administrator copy of an uninstall: no window, every game, then it closes
         if (maintain == "*" && screen is "uninstall" or "uninstall-keep" && Elevation.IsElevated)
         {
-            Environment.Exit(MainWindow.UninstallElevated(screen == "uninstall-keep"));
+            Environment.Exit(MainWindow.UninstallElevated());
             return;
         }
         var uninstall = argv.Contains(LauncherInstall.UninstallArg);

@@ -2,28 +2,43 @@ namespace ApexSetup;
 
 // Uninstall Apex Launcher: everything it put on the PC goes, and what it changed is put back. Per game (as administrator
 // when the game folder needs it): Apex Radiance and every component the launcher installed are removed and the files they
-// replaced restored (Engine.RemoveAll), the mods the player switched off are put back in place, and the backup folder
-// goes once nothing in it is still needed. Then, as the player: the shortcuts, the Installed apps entry, the Run value,
-// the launcher's data and its exe. Never touched: saves, save backups, mods the player installed, Mods\Resource.cfg and
+// replaced restored (Engine.RemoveAll), and the backup folder goes once nothing in it is still needed. Then, as the
+// player: the mods the player switched off are put back in place, Apex Radiance's settings go unless kept, then the
+// shortcuts, the Installed apps entry, the Run value, the launcher's data and its exe. Never touched: saves, save backups, mods the player installed, Mods\Resource.cfg and
 // the .apex-backup copies of the player's own settings files.
 public static class Uninstall
 {
-    // what stayed and why, empty when the game is clean
-    public static List<string> FromGame(Game g, string docs, bool keepSettings)
+    // The game folder's part (as administrator when the folder needs it): what stayed and why, empty when the game is clean.
+    // The backup folder goes once nothing in it is needed; the player's own files a fix set aside there (an old ASI
+    // loader, a second copy of a plugin) go to the Recycle Bin, never deleted for good.
+    public static List<string> FromGame(Game g, string docs)
     {
         var left = new List<string>();
-        // (the switched-off mods come back first: they are the player's, whatever happens to the rest)
-        try { Mods.EnableAll(g, docs); }
-        finally { Engine.RemoveAll(g, docs); }
+        Engine.RemoveAll(g, docs);
         var dir = Manifest.DirOf(g.Bin);
-        if (Manifest.Load(g.Bin).Files.Count == 0)
+        if (Manifest.Load(g.Bin).Files.Count > 0) { left.Add(dir); return left; } // (a file could not be put back: its backup stays where Repair can find it)
+        if (!Directory.Exists(dir)) return left;
+        var restore = RestorePoints.RootOf(g.Bin) + Path.DirectorySeparatorChar;
+        var all = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
+        foreach (var f in Directory.EnumerateFiles(dir, "*", all).ToList())
         {
-            try { if (Directory.Exists(dir)) Fs.Retry(() => Directory.Delete(dir, true)); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(dir); }
+            if (Path.GetFileName(f).Equals("setup.json", StringComparison.OrdinalIgnoreCase) && Path.GetDirectoryName(f)!.Equals(dir, StringComparison.OrdinalIgnoreCase)) continue;
+            if (f.StartsWith(restore, StringComparison.OrdinalIgnoreCase)) continue;
+            try { ModLibrary.Recycle(f); }
+            catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { left.Add(f); }
         }
-        else left.Add(dir); // (a file could not be put back: its backup stays where Repair can find it)
-        if (!keepSettings) left.AddRange(ApexSettings(docs));
+        if (left.Count > 0) return left;
+        try { Fs.Retry(() => Directory.Delete(dir, true)); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(dir); }
         return left;
+    }
+
+    // The Documents part, always as the player (never the administrator copy: the player's folders can hold links that
+    // point anywhere): the switched-off mods come back on and, unless kept, Apex Radiance's settings go
+    public static List<string> FromDocuments(Game g, string docs, bool keepSettings)
+    {
+        Mods.EnableAll(g, docs);
+        return keepSettings ? [] : ApexSettings(docs);
     }
 
     // Apex Radiance's settings, logs and caches in Documents go; the pictures and videos it saved there stay (its
@@ -32,21 +47,24 @@ public static class Uninstall
     {
         var left = new List<string>();
         var apex = Path.Combine(docs, "Apex Radiance");
-        if (!Directory.Exists(apex)) return left;
+        if (!Directory.Exists(apex) || File.GetAttributes(apex).HasFlag(FileAttributes.ReparsePoint)) return left;
         var keep = Gallery.PictureFolders(docs).Concat(Gallery.VideoFolders(docs))
             .Append(Path.Combine(apex, "Screenshots")).Append(Path.Combine(apex, "Videos"))
             .Select(f => Path.GetFullPath(f).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar).ToList();
         bool Holds(string entry)
         {
             var e = Path.GetFullPath(entry).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            return keep.Any(k => k.StartsWith(e, StringComparison.OrdinalIgnoreCase));
+            // (a capture folder inside this entry, or this entry inside a capture folder: the Apex folder itself can be one)
+            return keep.Any(k => k.StartsWith(e, StringComparison.OrdinalIgnoreCase) || e.StartsWith(k, StringComparison.OrdinalIgnoreCase));
         }
         foreach (var entry in Directory.EnumerateFileSystemEntries(apex).ToList())
         {
             if (Holds(entry)) continue;
             try
             {
-                if (Directory.Exists(entry)) Fs.Retry(() => Directory.Delete(entry, true));
+                // (a link goes alone, never what it points to)
+                if (Directory.Exists(entry) && File.GetAttributes(entry).HasFlag(FileAttributes.ReparsePoint)) Directory.Delete(entry);
+                else if (Directory.Exists(entry)) Fs.Retry(() => Directory.Delete(entry, true));
                 else Fs.Retry(() => File.Delete(entry));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(entry); }

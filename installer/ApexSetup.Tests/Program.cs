@@ -1437,12 +1437,16 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         var um = Manifest.Load(ubin); um.Files.Add(new ManifestFile { Component = Components.Apex, Path = outsider }); um.Save();
         Directory.CreateDirectory(Path.Combine(udocs, "Saves", "Home.sims3")); File.WriteAllText(Path.Combine(udocs, "Saves", "Home.sims3", "h.nhd"), "save");
         File.WriteAllText(Path.Combine(udocs, "Mods", "Resource.cfg"), "Priority 500");
-        var left = Uninstall.FromGame(ug, udocs, keepSettings: false);
+        var left = Uninstall.FromGame(ug, udocs);
         Check(File.Exists(outsider) && left.Count == 1 && left[0] == Manifest.DirOf(ubin), "uninstall leaves a manifest entry outside the game alone, and says the backup folder stayed");
         um = Manifest.Load(ubin); um.Files.RemoveAll(f => f.Path == outsider); um.Save();
-        left = Uninstall.FromGame(ug, udocs, keepSettings: false);
+        // (a file of the player's a fix set aside in the backup folder goes to the Recycle Bin, not deleted for good)
+        var aside = Path.Combine(Manifest.DirOf(ubin), "TS3Patch.asi.bak");
+        File.WriteAllText(aside, "the player's old patch");
+        left = Uninstall.FromGame(ug, udocs);
+        left.AddRange(Uninstall.FromDocuments(ug, udocs, keepSettings: false));
         Check(left.Count == 0 && !File.Exists(Path.Combine(ubin, "ApexRadiance.asi")) && !File.Exists(Path.Combine(ubin, "wininet.dll"))
-            && !Directory.Exists(Manifest.DirOf(ubin)), "uninstall removes Apex, the loader and the backup folder");
+            && !Directory.Exists(Manifest.DirOf(ubin)), "uninstall removes Apex, the loader and the backup folder, a set-aside file to the Recycle Bin");
         Check(File.Exists(Path.Combine(ubin, "Mine.asi")) && File.Exists(Path.Combine(udocs, "Saves", "Home.sims3", "h.nhd"))
             && File.Exists(Path.Combine(udocs, "Mods", "Resource.cfg")) && File.Exists(Path.Combine(udocs, "Mods", "Packages", "mine.package"))
             && !Directory.Exists(Mods.Disabled(udocs)), "uninstall keeps the player's mods (switched-off ones back on), saves and Resource.cfg");

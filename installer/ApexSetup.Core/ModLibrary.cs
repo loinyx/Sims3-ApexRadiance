@@ -43,19 +43,26 @@ public static class ModNotes
         {
             if (_file is not null) return _file;
             ModNotesFile? f = null;
+            var readable = true;
             try { if (File.Exists(FilePath)) f = JsonSerializer.Deserialize(File.ReadAllText(FilePath), SetupJson.Default.ModNotesFile); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { Engine.Log(e); }
+            // (a damaged file is kept beside as .corrupt before anything is written over it)
+            catch (JsonException e) { Engine.Log(e); try { File.Copy(FilePath, FilePath + ".corrupt", overwrite: true); } catch (Exception c) when (c is IOException or UnauthorizedAccessException) { readable = false; } }
+            // (a file locked for a moment: read again next time, and nothing is saved over it meanwhile)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); readable = false; }
             f ??= new();
             f.Mods = new Dictionary<string, ModNote>(f.Mods ?? [], StringComparer.OrdinalIgnoreCase);
             f.Tags ??= [];
-            return _file = f;
+            return readable ? _file = f : f;
         }
     }
     static Dictionary<string, ModNote> All => Data.Mods;
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static ModNote? Get(string rel) => All.TryGetValue(rel, out var n) ? n : null;
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static string? PicturePath(string rel) => Get(rel)?.Picture is { } p && File.Exists(Path.Combine(PictureDir, p)) ? Path.Combine(PictureDir, p) : null;
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void SetNotes(string rel, string? notes)
     {
         notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
@@ -64,6 +71,7 @@ public static class ModNotes
     }
 
     // a copy of the picture the player chose (the original may move or go); null removes it
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void SetPicture(string rel, string? source)
     {
         var old = Get(rel)?.Picture;
@@ -79,6 +87,7 @@ public static class ModNotes
         if (old is not null) TryDelete(Path.Combine(PictureDir, old));
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void SetCreator(string rel, string? creator)
     {
         creator = string.IsNullOrWhiteSpace(creator) ? null : creator.Trim();
@@ -88,6 +97,7 @@ public static class ModNotes
     }
 
     // what a mod is, chosen by the player (null or empty: back to what the launcher reads in the package)
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void SetKinds(string rel, IEnumerable<string>? kinds)
     {
         var list = kinds?.Where(k => k.Length > 0).Distinct().ToList();
@@ -97,9 +107,12 @@ public static class ModNotes
     // ---- tags ----
 
     public static IReadOnlyList<ModTag> Tags => Data.Tags;
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static IReadOnlyList<string> TagsOf(string rel) => Get(rel)?.Tags ?? [];
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static string ColorOf(string tag) => Data.Tags.FirstOrDefault(t => t.Name.Equals(tag, StringComparison.OrdinalIgnoreCase))?.Color ?? Colors[0];
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void CreateTag(string name, string color)
     {
         name = TagName(name);
@@ -108,6 +121,7 @@ public static class ModNotes
         Save();
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void EditTag(string name, string newName, string color)
     {
         newName = TagName(newName);
@@ -121,6 +135,7 @@ public static class ModNotes
         Save();
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void DeleteTag(string name)
     {
         Data.Tags.RemoveAll(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
@@ -129,6 +144,7 @@ public static class ModNotes
         Save();
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void SetTag(string rel, string tag, bool on)
     {
         if (TagsOf(rel).Contains(tag, StringComparer.OrdinalIgnoreCase) == on) return;
@@ -143,6 +159,7 @@ public static class ModNotes
     }
 
     // the mod moved or was renamed (a folder: every mod under it); its notes follow
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void Move(string oldRel, string newRel, bool folder = false)
     {
         var moves = All.Keys.Where(k => folder ? k.StartsWith(oldRel + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) : k.Equals(oldRel, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -157,6 +174,7 @@ public static class ModNotes
     }
 
     // a mod leaves the list (merged into another): its note without deleting its picture, for Put to bring back
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static ModNote? Take(string rel)
     {
         if (Get(rel) is not { } n) return null;
@@ -165,12 +183,14 @@ public static class ModNotes
         return n;
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void Put(string rel, ModNote n)
     {
         All[rel] = n;
         Save();
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void Forget(string rel)
     {
         if (Get(rel) is not { } n) return;
@@ -191,6 +211,7 @@ public static class ModNotes
 
     static void Save()
     {
+        if (_file is null) return; // (the file could not be read: never write it over with nothing)
         Directory.CreateDirectory(Paths.Data);
         var tmp = FilePath + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(Data, SetupJson.Default.ModNotesFile));

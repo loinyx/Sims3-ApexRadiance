@@ -873,19 +873,23 @@ public sealed partial class MainWindow
             var needAdmin = !Elevation.IsElevated && games.Any(g => !Elevation.CanWrite(g.Bin));
             if (needAdmin && Environment.ProcessPath is { } exe)
             {
-                var p = Elevation.StartMaintenance(exe, "*", keepSettings ? "uninstall-keep" : "uninstall");
+                var p = Elevation.StartMaintenance(exe, "*", "uninstall");
                 if (p is null) { _busy = false; await Message(T("Nothing was changed"), T("Windows did not allow the change.")); return; }
                 await p.WaitForExitAsync();
                 if (p.ExitCode != 0) left.Add(T("Some files could not be put back: see the log."));
             }
-            else left.AddRange(await Task.Run(() =>
+            left.AddRange(await Task.Run(() =>
             {
                 var stayed = new List<string>();
                 foreach (var g in games)
                 {
-                    try { stayed.AddRange(Uninstall.FromGame(g, Scan.DocumentsFor(g), keepSettings)); }
+                    try { if (!needAdmin) stayed.AddRange(Uninstall.FromGame(g, Scan.DocumentsFor(g))); }
                     catch (Exception e) { App.Log(e); stayed.Add(g.Root + ": " + ErrorText(e)); }
+                    // (the player's own folders, as the player, whatever happened in the game folder)
+                    try { stayed.AddRange(Uninstall.FromDocuments(g, Scan.DocumentsFor(g), keepSettings)); }
+                    catch (Exception e) { App.Log(e); stayed.Add(Scan.DocumentsFor(g) + ": " + ErrorText(e)); }
                 }
+                if (!needAdmin) Uninstall.MachineData();
                 return stayed;
             }));
         }
@@ -910,12 +914,13 @@ public sealed partial class MainWindow
     public void UninstallWhenShown() => ((FrameworkElement)Content).Loaded += async (_, _) => await UninstallAsync(fromWindows: true);
 
     // the administrator copy's uninstall (no window): every game, then the machine-wide markers
-    public static int UninstallElevated(bool keepSettings)
+    // (the Documents part runs afterwards in the player's copy)
+    public static int UninstallElevated()
     {
         var failed = false;
         foreach (var g in Uninstall.Games())
         {
-            try { if (Uninstall.FromGame(g, Scan.DocumentsFor(g), keepSettings).Count > 0) failed = true; }
+            try { if (Uninstall.FromGame(g, Scan.DocumentsFor(g)).Count > 0) failed = true; }
             catch (Exception e) { App.Log(e); failed = true; }
         }
         Uninstall.MachineData();

@@ -51,7 +51,14 @@ public static class Saves
     {
         Directory.CreateDirectory(BackupDir(docs));
         var zip = Path.Combine(BackupDir(docs), $"{s.Name} {DateTime.Now:yyyy-MM-dd HH.mm.ss}.zip");
-        ZipFile.CreateFromDirectory(s.Dir, zip, CompressionLevel.Fastest, includeBaseDirectory: true);
+        // (written beside and moved in when whole: a zip cut short by a locked file or a full disk never counts as a backup)
+        var part = zip + ".part";
+        try
+        {
+            ZipFile.CreateFromDirectory(s.Dir, part, CompressionLevel.Fastest, includeBaseDirectory: true);
+            File.Move(part, zip);
+        }
+        catch { try { File.Delete(part); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } throw; }
         return zip;
     }
 }
