@@ -263,5 +263,11 @@ struct RunFrame
 bool Run(const RunFrame& f, int index, const float* values, std::string* why);
 void ReleaseGpu();
 uint64_t GpuBytes();
+// Whether one more effect may make its render targets and textures: running = what the live effects hold, more = what
+// it needs. DefaultRoom: the two together under 384 MB (the game's own process is 32-bit). The game sets its own
+// (patches/looks_patch.cpp). An effect held back is asked again every 300 frames while it stays in the look.
+typedef bool (*RoomFn)(uint64_t running, uint64_t more, std::string* why);
+bool DefaultRoom(uint64_t running, uint64_t more, std::string* why);
+void SetRoomCheck(RoomFn room);
 
 } // namespace Looks::Fx

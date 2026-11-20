@@ -30,6 +30,7 @@
 #include "overlay.h"
 #include "apex_capture.h"
 #include "apex_version.h"
+#include "platform.h"
 
 #include <d3d9.h>
 #include <d3dcompiler.h>
@@ -764,6 +765,10 @@ void SetOrder()
 }
 
 void OnPreReset(IDirect3DDevice9*) { ReleaseGpu(); }
+
+// Room for one more of the player's effects: under the RTX Remix bridge their render targets and textures live in the
+// bridge's 64-bit process, so no total limit; in the game's own process the 384 MB of DefaultRoom
+bool LooksRoom(uint64_t running, uint64_t more, std::string* why) { return Platform::RemixBridge() || Looks::Fx::DefaultRoom(running, more, why); }
 void RestartEffects(IDirect3DDevice9*) { ReleaseGpu(); }
 
 // ---------------------------------------------------------------------------------------------- changes
@@ -3225,6 +3230,7 @@ public:
         g.runner.SetFactory(CreatePs);
         g.runner.SetRenderTargetFn(D3D9Hooks::CallOriginalSetRenderTarget);
         Looks::Fx::SetBindFunctions(D3D9Hooks::CallOriginalSetRenderTarget, ExtraHooks::RawSetDepthStencilSurface);
+        Looks::Fx::SetRoomCheck(LooksRoom);
         Looks::Fx::RequestScan(); // the player's .fx files compile in the background (unchanged ones are kept)
         LoadPreset();
         PostScene::WantCamera(true, /*plain*/ false);

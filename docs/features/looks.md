@@ -224,7 +224,8 @@ refused; the same file is reused and a different file of that name gets a number
   contents; `mousewheel` (step, min, max) and `overlay_open` (the Apex menu); `__VENDOR__` / `__DEVICE__` of the game's
   graphics card. Not taken: `pooled` textures (each effect keeps its own: more memory, the same pictures).
 - Limits: 2 MB per .fx or included file, 64 includes, 16 MB of preprocessed code, 64 MB per texture file, 64 textures and
-  256 MB of textures per effect, 384 MB for every user effect running, 64 passes per technique, 256 user passes per frame,
+  256 MB of textures per effect, 384 MB for every user effect running (none under the RTX Remix bridge: see GPU memory),
+  64 passes per technique, 256 user passes per frame,
   two minutes of compile time per file. Includes and textures must stay inside the Shaders folder (`..` and absolute
   paths are refused). A file that crashes or hangs the compiler is refused, not the game.
 
@@ -237,6 +238,15 @@ SweetFX), every one of the 219 techniques both run gives the same pixels to the 
 screenshots at 1920x1080 (time sources pinned to the same values; no depth on either side, so depth effects are compared
 on an empty depth buffer only). Not compared: 5 that need integer bitwise operations or fail in ReShade's compiler too,
 and GShade's MotionFocus, which ReShade 6.7.3 cannot compile on Direct3D 9 (Apex runs it with flow control kept).
+
+Loops shader model 3.0 cannot run (`X3511`, cannot unroll; `X4014` / `X4121`, gradients in a loop): a `tex2D` in a loop
+needs gradients, so the compiler must unroll the loop, and a loop whose count comes from a slider (`-size..size`,
+`ceil(Radius)`) cannot be unrolled. When every flag set fails that way, the last resort reads every texture at level 0
+(`tex2D` to `tex2Dlod(..., float4(coords, 0, 0))` in the generated code), which needs no gradients, and compiles again.
+Only when every texture of the effect has one level and its samplers the same minify and magnify filter (not
+anisotropic): then level 0 is the texel `tex2D` reads. GShade made the same change by hand in its SlowSharp; since 4.0.12
+the original SlowSharp and Hybred's MicrocontrastReducer run. A cached result is checked against the effect's levels
+and filters again (the cache key is the generated code, which has neither).
 Texture images are resized as ReShade resizes them (`third_party/stb`, stb_image_resize2 at ReShade's pinned commit).
 
 ## Parameters and quality settings
@@ -467,7 +477,11 @@ the copy gets a numbered name, which the look then does not use); names with a f
   794 MB after the first check of six packs). The process heap grows by 40 MB once before the first compile, which keeps
   them at the bottom (1202 MB to 1154 MB, the same bytecode). Background checks pause while less than 512 MB is free.
 - **GPU memory:** an effect instance not run for 120 frames (switched off, out of the look) gives its render targets
-  back; the 384 MB cap counts only the ones in use. The scene depth (DepthBlur's INTZ copy) is asked for only while a
+  back; the 384 MB cap counts only the ones in use. The cap protects the game's 32-bit process; under the RTX Remix
+  bridge the render targets and textures live in the bridge's 64-bit process and there is no total cap since 4.0.12
+  (`LooksRoom` in `patches/looks_patch.cpp`; the offline checker keeps the 384 MB). An effect left out for memory is
+  asked again every 300 frames while it stays in the look (before 4.0.12 it stayed out until the look was loaded
+  again, even after other effects were switched off) and logs `running now (room for it again)` when it starts. The scene depth (DepthBlur's INTZ copy) is asked for only while a
   shader that is on reads it.
 - **Menu:** *Add shaders* works out its filtered list only when the search, Kind, the sources or the language
   change, and lays out only the rows in view (the others take their measured height).
