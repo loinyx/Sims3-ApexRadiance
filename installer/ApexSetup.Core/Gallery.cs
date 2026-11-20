@@ -74,6 +74,8 @@ public sealed class GalleryData
     public Dictionary<string, PictureInfo> Pictures { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, AlbumLook> Albums { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? HomePicture { get; set; }    // the picture Home opens on; null: the newest
+    public bool Book { get; set; }               // the Gallery last showed the scrapbook
+    public string? LastAlbum { get; set; }       // and this album
 }
 
 // The game's pictures (Documents\...\Screenshots), the household each belongs to and what the player set on them, kept in

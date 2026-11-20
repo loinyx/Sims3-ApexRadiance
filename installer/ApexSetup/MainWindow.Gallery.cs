@@ -22,6 +22,7 @@ public sealed partial class MainWindow
     GalleryData? _gal;
     string _galAlbum = Gallery.All;
     bool _galBook;
+    bool _galRestored;
     bool _galByHome;
     int _galLimit = 60;
     List<Picture> _galPics = [];
@@ -51,6 +52,17 @@ public sealed partial class MainWindow
         host.Children.Clear();
         if (_game is null) { host.Children.Add(Heading(T("Gallery"))); host.Children.Add(Muted(T("Choose the game first."))); return; }
         _gal ??= Gallery.Load();
+        if (!_galRestored)
+        {
+            // (Home may have read the gallery already; the view and album come back once, on the first visit)
+            _galRestored = true;
+            _galBook = _gal.Book;
+            if (_gal.LastAlbum is { Length: > 0 } last) _galAlbum = last;
+        }
+        // (an album since deleted opens All pictures instead; the album shown is remembered for next time)
+        if (_galAlbum.StartsWith(Gallery.Mine, StringComparison.Ordinal) && Gallery.CustomOf(_gal, _galAlbum) is null) _galAlbum = Gallery.All;
+        if (_gal.LastAlbum != _galAlbum) { _gal.LastAlbum = _galAlbum; _lastKept = null; _undoSteps.Clear(); _redoSteps.Clear(); Gallery.Save(_gal); }
+        _lastKept ??= System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         _galPics = Gallery.List(Docs);
         _galSaves = Saves.List(Docs);
         var page = new Grid { ColumnSpacing = 28 };
@@ -121,9 +133,7 @@ public sealed partial class MainWindow
             RefreshBoard(settle: 260);
         };
         var book = new Grid { Background = BoardBrush(look) };
-        var ctrlZ = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Z, Modifiers = Windows.System.VirtualKeyModifiers.Control };
-        ctrlZ.Invoked += (_, e) => { if (_undo is { } u) { _undo = null; u(); e.Handled = true; } };
-        book.KeyboardAccelerators.Add(ctrlZ);
+        HistoryKeys();
         _boardFrame = book;
         _boardLight = new Border { IsHitTestVisible = false, Background = LightBrush(look) };
         book.Children.Add(_boardLight);
@@ -203,7 +213,7 @@ public sealed partial class MainWindow
                 if (!await Confirm(T("Delete {0}?", one.Name), T("Only the album goes: its pictures stay in your Screenshots folder and the other albums."), T("Delete"))) return;
                 _gal.Custom.Remove(one);
                 _gal.Albums.Remove(one.Key);
-                Gallery.Save(_gal);
+                Keep();
                 if (_galAlbum == one.Key) _galAlbum = Gallery.All;
                 BuildGallery();
             };
@@ -345,7 +355,7 @@ public sealed partial class MainWindow
             b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
-            b.Click += (_, _) => { if (_galBook == book) return; _galBook = book; pill.Translation = new Vector3(book ? 118 : 0, 0, 0); DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, BuildGallery); };
+            b.Click += (_, _) => { if (_galBook == book) return; _galBook = book; if (_gal is not null) { _gal.Book = book; KeepQuiet(); } pill.Translation = new Vector3(book ? 118 : 0, 0, 0); DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, BuildGallery); };
             return b;
         }
         var albums = Side("", T("Albums"), false);
@@ -889,7 +899,7 @@ public sealed partial class MainWindow
                     look.Places.Remove(path);
                 }
                 _spread.Remove(into.Key);
-                Gallery.Save(_gal!);
+                Keep();
                 if (_galSide is not null) _galSide.Content = GalleryAlbums();
                 FlipBoard();
                 return;
@@ -901,7 +911,7 @@ public sealed partial class MainWindow
         place.Y = Canvas.GetTop(me);
         place.Moved = true;
         look.Places[p.Path] = new Placed { X = place.X - _boardAnchor.GetValueOrDefault(p.Path), Y = place.Y, Angle = place.Angle, Moved = true };
-        Gallery.Save(_gal!);
+        Keep();
     }
 
     // the pictures on the board turned to the tilt and scaled to the size being chosen, without laying the board again
@@ -948,7 +958,7 @@ public sealed partial class MainWindow
         if (show) FillCustomize();
         else if (_gal is not null)
         {
-            Gallery.Save(_gal);
+            Keep();
             if (_custChanged) { _custChanged = false; RefreshBoard(page: true); }
         }
     }
@@ -1034,7 +1044,7 @@ public sealed partial class MainWindow
     {
         if (_custDrawer is null || _gal is null) return;
         var look = Gallery.Look(_gal, _galAlbum);
-        void Changed() { _custChanged = true; RefreshBoard(); }
+        void Changed() { _custChanged = true; Keep(); RefreshBoard(); }
         var root = new Grid();
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -1272,7 +1282,7 @@ public sealed partial class MainWindow
                 {
                     look.Entrance = key;
                     _custChanged = true;
-                    Gallery.Save(_gal);
+                    Keep();
                     FillCustomize();
                     // (played straight away, the board kept where it is)
                     if (_boardHost is not null) { _boardKeep = _boardScroll is { ScrollableWidth: > 0 } sv ? sv.HorizontalOffset / sv.ScrollableWidth : null; _boardHost.Child = GalleryBoard(); }
@@ -1445,7 +1455,7 @@ public sealed partial class MainWindow
         var left = (_boardScroll?.HorizontalOffset ?? 0) + (_boardScroll?.ViewportWidth ?? 800) * (0.25 + rnd.NextDouble() * 0.4);
         var s = new Sticker { Text = glyph, X = left, Y = BoardHeight * (0.15 + rnd.NextDouble() * 0.55), Angle = rnd.Next(-14, 15) };
         look.Stickers.Add(s);
-        Gallery.Save(_gal);
+        Keep();
         _boardCanvas?.Children.Add(StickerOn(s, look, 0));
     }
 
@@ -1459,15 +1469,15 @@ public sealed partial class MainWindow
         Canvas.SetTop(outer, s.Y);
         Canvas.SetZIndex(outer, 3000 + order);   // (stickers over everything, a picture lifted under the pointer included)
         Land(tilt, s.Angle, 200 + order * 90, 0, look.Entrance);
-        Draggable(outer, () => { s.X = Canvas.GetLeft(outer); s.Y = Canvas.GetTop(outer); Gallery.Save(_gal!); });
+        Draggable(outer, () => { s.X = Canvas.GetLeft(outer); s.Y = Canvas.GetTop(outer); Keep(); });
         var menu = new MenuFlyout();
-        void Resize(double by) { s.Size = Math.Clamp(s.Size * by, 0.5, 3); text.FontSize = 64 * s.Size * _boardScale; Gallery.Save(_gal!); }
+        void Resize(double by) { s.Size = Math.Clamp(s.Size * by, 0.5, 3); text.FontSize = 64 * s.Size * _boardScale; Keep(); }
         var bigger = new MenuFlyoutItem { Text = T("Bigger"), Icon = new FontIcon { Glyph = "\uE8A3" } };
         bigger.Click += (_, _) => Resize(1.25);
         var smaller = new MenuFlyoutItem { Text = T("Smaller"), Icon = new FontIcon { Glyph = "\uE71F" } };
         smaller.Click += (_, _) => Resize(0.8);
         var off = new MenuFlyoutItem { Text = T("Take it off"), Icon = new FontIcon { Glyph = "\uE74D" } };
-        off.Click += (_, _) => { look.Stickers.Remove(s); Gallery.Save(_gal!); _boardCanvas?.Children.Remove(outer); };
+        off.Click += (_, _) => { look.Stickers.Remove(s); Keep(); _boardCanvas?.Children.Remove(outer); };
         menu.Items.Add(bigger);
         menu.Items.Add(smaller);
         menu.Items.Add(off);
@@ -1779,7 +1789,7 @@ public sealed partial class MainWindow
                     _dragging = false;
                     foreach (var cc in cards) cc.Scale = Vector3.One;
                     look.Places[c.Key] = new Placed { X = Canvas.GetLeft(cards[0]) - _boardAnchor.GetValueOrDefault(c.Key), Y = Canvas.GetTop(cards[0]), Moved = true };
-                    Gallery.Save(_gal!);
+                    Keep();
                 };
                 card.Tapped += (_, e) => { e.Handled = true; Spotlight(c, members, cards); };
             }
@@ -1895,7 +1905,7 @@ public sealed partial class MainWindow
         var all = new StackPanel();
         all.Children.Add(frame);
         if (pics.Count > 0) all.Children.Add(strip);
-        Gallery.Save(_gal!);
+        KeepQuiet();
         return all;
     }
 
@@ -2079,11 +2089,12 @@ public sealed partial class MainWindow
         }
         if (_boardCalm) caption.Text = text; else After(delay + 820, () => Write(caption, text));
         var blank = info.Caption is not { Length: > 0 };
+        var editing = false;
         // (an empty caption, and its tag on a rounded frame, shows only while the picture is under the pointer)
         var capHost = capBox ?? caption;
         capHost.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
         if (blank) capHost.Opacity = 0;
-        if (blank && !bare && !shut) { outer.PointerEntered += (_, _) => capHost.Opacity = 1; outer.PointerExited += (_, _) => capHost.Opacity = 0; }
+        if (blank && !bare && !shut) { outer.PointerEntered += (_, _) => capHost.Opacity = 1; outer.PointerExited += (_, _) => { if (!editing && Gallery.Peek(_gal!, p.Path).Caption is not { Length: > 0 }) capHost.Opacity = 0; }; }
 
         // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
         outer.PointerEntered += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
@@ -2093,22 +2104,38 @@ public sealed partial class MainWindow
         caption.Tapped += (_, e) =>
         {
             e.Handled = true;
-            if (caption.Parent is not Panel host) return;
+            if (shut || editing) return;
+            void Put(UIElement was, UIElement now)
+            {
+                switch (was is FrameworkElement { Parent: var parent } ? parent : null)
+                {
+                    case Panel panel: panel.Children[panel.Children.IndexOf(was)] = now; break;
+                    case Border border: border.Child = now; break;
+                }
+            }
+            if (caption.Parent is not (Panel or Border)) return;
+            editing = true;
             var box = new TextBox { Text = info.Caption ?? "", FontFamily = caption.FontFamily, FontSize = caption.FontSize, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0, 0, 0, 1),
                 Foreground = caption.Foreground, PlaceholderText = T("write something"), MinWidth = 160, Margin = caption.Margin };
             box.Resources["TextControlBackgroundFocused"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             box.Resources["TextControlForegroundFocused"] = caption.Foreground;
-            var at = host.Children.IndexOf(caption);
-            host.Children[at] = box;
+            var line = caption.Foreground is SolidColorBrush cf ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x66, cf.Color.R, cf.Color.G, cf.Color.B)) : caption.Foreground;
+            foreach (var key in new[] { "TextControlBorderBrush", "TextControlBorderBrushPointerOver", "TextControlBorderBrushFocused" }) box.Resources[key] = line;
+            box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0, 0, 0, 1);
+            box.Resources["TextControlBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            box.Padding = new Thickness(0, 0, 0, 2);
+            Put(caption, box);
             box.Focus(FocusState.Programmatic);
             void Done()
             {
+                if (!editing) return;
+                editing = false;
                 var keep = Gallery.Info(_gal!, p.Path);
                 keep.Caption = box.Text.Trim();
                 info = keep;
-                Gallery.Save(_gal!);
+                Keep();
                 caption.Text = keep.Caption.Length > 0 ? keep.Caption : T("+ write something");
-                if (host.Children.Contains(box)) host.Children[host.Children.IndexOf(box)] = caption;
+                Put(box, caption);
             }
             box.LostFocus += (_, _) => Done();
             box.KeyDown += (_, k) => { if (k.Key == Windows.System.VirtualKey.Enter) { k.Handled = true; Done(); } };
@@ -2128,7 +2155,7 @@ public sealed partial class MainWindow
         box.Resources["TextControlBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         box.Resources["TextControlForegroundFocused"] = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
         box.Resources["TextControlBorderBrushFocused"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        box.LostFocus += (_, _) => { note.Text = box.Text; Gallery.Save(_gal!); };
+        box.LostFocus += (_, _) => { note.Text = box.Text; Keep(); };
         var close = new Button { Content = new FontIcon { Glyph = "", FontSize = 10 }, Width = 24, Height = 24, Padding = new Thickness(0), BorderThickness = new Thickness(0), Opacity = 0,
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 0, 0, 0)), Foreground = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26)),
             OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(150) } };
@@ -2149,7 +2176,7 @@ public sealed partial class MainWindow
         close.Click += (_, _) =>
         {
             look.Notes.Remove(note);
-            Gallery.Save(_gal!);
+            Keep();
             var away = new Storyboard();
             Tween(away, outer, "Opacity", 0, 260);
             Tween(away, tilt.RenderTransform, "TranslateY", 60, 300, new CubicEase { EasingMode = EasingMode.EaseIn });
@@ -2157,7 +2184,7 @@ public sealed partial class MainWindow
             away.Completed += (_, _) => _boardCanvas?.Children.Remove(outer);
             Play(away);
         };
-        Draggable(outer, () => { note.X = Canvas.GetLeft(outer); note.Y = Canvas.GetTop(outer); Gallery.Save(_gal!); });
+        Draggable(outer, () => { note.X = Canvas.GetLeft(outer); note.Y = Canvas.GetTop(outer); Keep(); });
         return outer;
     }
 
@@ -2208,33 +2235,98 @@ public sealed partial class MainWindow
     {
         if (_boardCanvas is null || _gal is null) return;
         var look = Gallery.Look(_gal, _galAlbum);
-        var places = look.Places.ToDictionary(kv => kv.Key, kv => new Placed { X = kv.Value.X, Y = kv.Value.Y, Angle = kv.Value.Angle, Moved = kv.Value.Moved }, StringComparer.OrdinalIgnoreCase);
-        var seed = look.Seed;
         look.Seed = Random.Shared.Next(1, 10000);
         look.Places.Clear();
-        Gallery.Save(_gal);
+        Keep();
         FlipBoard();
-        ShowUndo(T("Board rearranged"), () =>
+        ShowUndo(T("Board rearranged"), () => StepBack(true));
+    }
+
+    // The gallery's history: each save remembers how things were before it (saves within a moment of each other count as
+    // one step, so dragging a slider is one), and Ctrl+Z / Ctrl+Y walk back and forth through it.
+    readonly Stack<string> _undoSteps = new();
+    readonly Stack<string> _redoSteps = new();
+    string? _lastKept;
+    long _lastKeptAt;
+    void Keep()
+    {
+        if (_gal is null) return;
+        var now = System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
+        if (_lastKept is not null && now != _lastKept)
         {
-            look.Seed = seed;
-            look.Places.Clear();
-            foreach (var (k, v) in places) look.Places[k] = v;
-            Gallery.Save(_gal);
-            FlipBoard();
-        });
+            if (Environment.TickCount64 - _lastKeptAt > 700 || _undoSteps.Count == 0) _undoSteps.Push(_lastKept);
+            _redoSteps.Clear();
+            while (_undoSteps.Count > 60) { var keep = _undoSteps.ToArray()[..60]; _undoSteps.Clear(); foreach (var k in keep.Reverse()) _undoSteps.Push(k); }
+        }
+        if (now != _lastKept) _lastKeptAt = Environment.TickCount64;
+        _lastKept = now;
+        Gallery.Save(_gal);
+    }
+
+    // Ctrl+Z back, Ctrl+Y and Ctrl+Shift+Z forward, wherever the focus is while the Gallery shows; a text being typed
+    // keeps its own Ctrl+Z
+    bool _historyKeys;
+    void HistoryKeys()
+    {
+        if (_historyKeys || Content is not UIElement window) return;
+        _historyKeys = true;
+        void Shortcut(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers mods, bool undo)
+        {
+            var k = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = key, Modifiers = mods };
+            k.Invoked += (_, e) =>
+            {
+                if (ScreenGallery.Visibility != Visibility.Visible || FocusManager.GetFocusedElement(window.XamlRoot) is TextBox) return;
+                e.Handled = true;
+                StepBack(undo);
+            };
+            window.KeyboardAccelerators.Add(k);
+        }
+        Shortcut(Windows.System.VirtualKey.Z, Windows.System.VirtualKeyModifiers.Control, true);
+        Shortcut(Windows.System.VirtualKey.Y, Windows.System.VirtualKeyModifiers.Control, false);
+        Shortcut(Windows.System.VirtualKey.Z, Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift, false);
+        window.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
+    }
+
+    // saved without becoming a step (the board laying itself out again)
+    void KeepQuiet()
+    {
+        if (_gal is null) return;
+        _lastKept = System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
+        Gallery.Save(_gal);
+    }
+
+    void StepBack(bool undo)
+    {
+        var from = undo ? _undoSteps : _redoSteps;
+        var to = undo ? _redoSteps : _undoSteps;
+        if (_gal is null || from.Count == 0) return;
+        to.Push(_lastKept ?? System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData));
+        var state = from.Pop();
+        if (System.Text.Json.JsonSerializer.Deserialize(state, SetupJson.Default.GalleryData) is not { } back) return;
+        _gal = back;
+        _lastKept = state;
+        _lastKeptAt = 0;
+        Gallery.Save(_gal);
+        var look = Gallery.Look(_gal, _galAlbum);
+        if (_boardFrame is not null) _boardFrame.Background = BoardBrush(look);
+        foreach (var t in _boardTools) InkTool(t, look);
+        if (_galSide is not null) _galSide.Content = GalleryAlbums();
+        if (_custDrawer is { Opacity: > 0.5 }) FillCustomize();
+        FlipBoard();
+        ShowUndo(undo ? T("Undone") : T("Redone"), () => StepBack(!undo), undo ? T("Redo") : T("Undo"));
     }
 
     // a note at the foot of the board with an Undo (Ctrl+Z too), gone after a few seconds
     Action? _undo;
     int _undoShown;
-    void ShowUndo(string what, Action undo)
+    void ShowUndo(string what, Action undo, string? action = null)
     {
         if (_boardFrame is not Grid stage) return;
         _undo = undo;
         var mine = ++_undoShown;
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
         row.Children.Add(new TextBlock { Text = what, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Rgb(0xEC, 0xE7, 0xDA)) });
-        var back = new HyperlinkButton { Content = T("Undo"), Padding = new Thickness(8, 2, 8, 3), FontWeight = FontWeights.SemiBold };
+        var back = new HyperlinkButton { Content = action ?? T("Undo"), Padding = new Thickness(8, 2, 8, 3), FontWeight = FontWeights.SemiBold };
         row.Children.Add(back);
         var note = new Border
         {
@@ -2261,7 +2353,7 @@ public sealed partial class MainWindow
         var left = (_boardScroll?.HorizontalOffset ?? 0) + (_boardScroll?.ViewportWidth ?? 800) / 2 - 90;
         var note = new StickyNote { Color = color, X = left + rnd.Next(-80, 80), Y = BoardHeight / 2 - 85 + rnd.Next(-60, 60), Angle = rnd.Next(-6, 7) };
         look.Notes.Add(note);
-        Gallery.Save(_gal);
+        Keep();
         _boardCanvas.Children.Add(Sticky(note, look, 0));
     }
 
@@ -2303,7 +2395,7 @@ public sealed partial class MainWindow
         made.Icon = AlbumIcons[Math.Max(0, grid.SelectedIndex)].Glyph;
         made.Household = house.SelectedItem as string;
         if (album is null) _gal!.Custom.Add(made);
-        Gallery.Save(_gal!);
+        Keep();
         return made;
     }
 
@@ -2512,6 +2604,27 @@ public sealed partial class MainWindow
             if (zoomer.ZoomFactor > 1.01f) zoomer.ChangeView(0, 0, 1, true);
             var look = Gallery.Look(_gal!, _galAlbum);
             var pic = pics[at];
+            if (wide)
+            {
+                // (full screen: the picture alone, as large as the screen, the cached copy first and the sharp one over it)
+                var alone = new Grid();
+                var quick = new Image { Source = Thumb(path, 900), Stretch = Stretch.Uniform };
+                var crisp = new Image { Source = Thumb(path, root.Size.Width), Stretch = Stretch.Uniform, Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(200) } };
+                crisp.ImageOpened += (_, _) => crisp.Opacity = 1;
+                alone.Children.Add(quick);
+                alone.Children.Add(crisp);
+                var before = shown;
+                photo.Children.Add(alone);
+                shown = alone;
+                alone.Opacity = 0;
+                var fade = new Storyboard();
+                Tween(fade, alone, "Opacity", 1, 220);
+                if (before is not null) { Tween(fade, before, "Opacity", 0, 200); fade.Completed += (_, _) => photo.Children.Remove(before); }
+                Play(fade);
+                photo.Opacity = 1;
+                grow = false;
+                return;
+            }
             var light = new SolidColorBrush(Rgb(0xEC, 0xE7, 0xDA));
             var keepScale = _boardScale;
             var keepCalm = _boardCalm;
@@ -2644,7 +2757,7 @@ public sealed partial class MainWindow
             {
                 var item = new ToggleMenuFlyoutItem { Text = n, IsChecked = string.Equals(n, house, StringComparison.OrdinalIgnoreCase) };
                 var chosen = n;
-                item.Click += (_, _) => { info.Household = chosen == guess ? null : chosen; Gallery.Save(_gal!); Fill(); };
+                item.Click += (_, _) => { info.Household = chosen == guess ? null : chosen; Keep(); Fill(); };
                 homeMenu.Items.Add(item);
             }
             var whoButton = new DropDownButton { Content = who, Flyout = homeMenu, CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 2, 8, 3), MinHeight = 0, FontSize = 12 };
@@ -2658,7 +2771,7 @@ public sealed partial class MainWindow
             var cap = new TextBox { Text = info.Caption ?? "", PlaceholderText = T("Write something about this moment…"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
                 FontFamily = new FontFamily(look.Font), FontSize = 20, MinHeight = 96, Padding = new Thickness(14, 10, 14, 10), CornerRadius = new CornerRadius(12) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cap, T("Caption"));
-            cap.LostFocus += (_, _) => { info.Caption = cap.Text.Trim(); Gallery.Save(_gal!); };
+            cap.LostFocus += (_, _) => { info.Caption = cap.Text.Trim(); Keep(); };
             side.Children.Add(cap);
 
             // what to do with it, as tiles
@@ -2668,7 +2781,7 @@ public sealed partial class MainWindow
             grid.RowDefinitions.Add(new RowDefinition());
             grid.RowDefinitions.Add(new RowDefinition());
             var fav = Action(info.Favourite ? "" : "", info.Favourite ? T("In Favourites") : T("Favourite"), info.Favourite);
-            fav.Click += (_, _) => { info.Favourite = !info.Favourite; Gallery.Save(_gal!); Fill(); };
+            fav.Click += (_, _) => { info.Favourite = !info.Favourite; Keep(); Fill(); };
             var inAlbums = _gal!.Custom.Where(c => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)).ToList();
             var album = Action("", T("Add to an album"), inAlbums.Count > 0);
             var albums = new MenuFlyout();
@@ -2690,7 +2803,7 @@ public sealed partial class MainWindow
             album.Flyout = albums;
             var cover = _gal.HomePicture == p.Path;
             var home = Action("", cover ? T("Home picture") : T("Use on Home"), cover);
-            home.Click += (_, _) => { _gal.HomePicture = p.Path; Gallery.Save(_gal); Fill(); };
+            home.Click += (_, _) => { _gal.HomePicture = p.Path; Keep(); Fill(); };
             var folder = Action("", T("Show in folder"));
             folder.Click += (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{p.Path}\"") { UseShellExecute = true });
             Grid.SetColumn(album, 1);
@@ -2760,11 +2873,25 @@ public sealed partial class MainWindow
             wide = on;
             shell.ColumnDefinitions[1].Width = new GridLength(on ? 0 : 372);
             panel.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+            stage.Padding = on ? new Thickness(0) : new Thickness(56, 48, 56, 48);
+            shell.Background = new SolidColorBrush(on ? Microsoft.UI.Colors.Black : Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08));
+            close.Margin = on ? new Thickness(0, 16, 16, 0) : new Thickness(0, -32, -40, 0);
+            prev.Margin = on ? new Thickness(16, 0, 0, 0) : new Thickness(-36, 0, 0, 0);
+            next.Margin = on ? new Thickness(0, 0, 16, 0) : new Thickness(0, 0, -36, 0);
+            islandFrame.Margin = on ? new Thickness(0, 0, 0, 24) : new Thickness(0, 0, 0, -30);
+            Refit();
             ((FontIcon)full.Content).Glyph = on ? "\uE73F" : "\uE740";
             ToolTipService.SetToolTip(full, on ? T("Leave full screen") : T("Full screen"));
-            AppWindow.SetPresenter(on ? Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen : Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
         }
         full.Click += (_, _) => Wide(!wide);
+        void Refit() { DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (closing) return; grow = false; dir = 0; Show(pics[at].Path); }); }
+        var fitting = 0;
+        zoomer.SizeChanged += (_, e) =>
+        {
+            if (e.PreviousSize.Width <= 0 || Math.Abs(e.NewSize.Width - e.PreviousSize.Width) + Math.Abs(e.NewSize.Height - e.PreviousSize.Height) < 24) return;
+            var mine = ++fitting;
+            After(180, () => { if (mine == fitting) Refit(); });
+        };
         photos.Click += (_, _) => { try { Process.Start(new ProcessStartInfo(pics[at].Path) { UseShellExecute = true }); } catch (Exception e) { App.Log(e); } };
         prev.Click += (_, _) => { dir = -1; at = (at - 1 + pics.Count) % pics.Count; Fill(); };
         next.Click += (_, _) => { dir = 1; at = (at + 1) % pics.Count; Fill(); };
