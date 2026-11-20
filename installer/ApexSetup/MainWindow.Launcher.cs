@@ -91,19 +91,38 @@ public sealed partial class MainWindow
 
     // ---------- Home ----------
 
-    // Components: Apex Radiance and Sims 3 Modernization side by side, one above the other on a narrow window (so neither
-    // name is cut)
+    // Components: Apex Radiance large on the left with its four parts in two rows beside it; one column on a narrow
+    // window; with no frame generation on this PC the restart host takes the whole second row
+    bool _coreHooked;
     void OnCoreSized(object sender, SizeChangedEventArgs e)
     {
-        var narrow = e.NewSize.Width < 620;
-        CoreGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
-        CoreGrid.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 1);
-        CoreGrid.ColumnDefinitions[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-        Grid.SetColumn(CoreModernization, narrow ? 0 : 2);
-        Grid.SetRow(CoreModernization, narrow ? 2 : 0);
-        Grid.SetColumn(CoreDivider, narrow ? 0 : 1);
-        Grid.SetRow(CoreDivider, narrow ? 1 : 0);
-        CoreDivider.Height = narrow ? 1 : double.NaN;
+        if (!_coreHooked)
+        {
+            _coreHooked = true;
+            var crystal = new Crystal(92);
+            crystal.SetColor(new System.Numerics.Vector3(0.62f, 0.42f, 0.95f));
+            ApexCrystalHost.Child = crystal;
+            SmoothSection.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => LayCore());
+            GraphicsInfo.RegisterPropertyChangedCallback(InfoBar.IsOpenProperty, (_, _) => ShowCoreNotes());
+        }
+        LayCore();
+    }
+
+    void LayCore()
+    {
+        var narrow = CoreGrid.ActualWidth is > 0 and < 760;
+        var cols = CoreGrid.ColumnDefinitions;
+        cols[1].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        cols[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        CoreGrid.ColumnSpacing = narrow ? 0 : 14;
+        static void At(FrameworkElement el, int row, int col, int rows = 1, int span = 1) { Grid.SetRow(el, row); Grid.SetColumn(el, col); Grid.SetRowSpan(el, rows); Grid.SetColumnSpan(el, span); }
+        if (narrow)
+        {
+            At(CoreApex, 0, 0); At(CoreModernization, 1, 0); At(CoreRenderer, 2, 0); At(SmoothSection, 3, 0); At(CoreRestart, 4, 0);
+            return;
+        }
+        At(CoreApex, 0, 0, 2); At(CoreModernization, 0, 1); At(CoreRenderer, 0, 2); At(SmoothSection, 1, 1);
+        if (SmoothSection.Visibility == Visibility.Visible) At(CoreRestart, 1, 2); else At(CoreRestart, 1, 1, 1, 2);
     }
 
     // how much needs attention, for the crystal's colour: nothing is 0, a blocked game 1; warnings fill the way between

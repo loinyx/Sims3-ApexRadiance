@@ -84,9 +84,12 @@ public sealed class Crystal : Grid
         return Ramp[^1].Rgb;
     }
 
-    public void SetLevel(double level, bool animate = true)
+    public void SetLevel(double level, bool animate = true) => SetColor(ColorAt(level), animate);
+
+    // any colour, for a crystal that does not show health (Apex Radiance in Components)
+    public void SetColor(Vector3 rgb, bool animate = false)
     {
-        _target = ColorAt(level);
+        _target = rgb;
         if (!animate) _color = _target;
         _glow.Fill = new RadialGradientBrush
         {

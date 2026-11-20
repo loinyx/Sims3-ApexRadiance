@@ -854,6 +854,7 @@ public sealed partial class MainWindow : Window
         SuggestList.Children.Clear();
         FillSuggestions(SuggestList, GraphicsInfo, onStatus: false);
         SuggestList.Visibility = SuggestList.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed; // (an empty one still takes a gap)
+        ShowCoreNotes();
     }
 
     // "Suggested for Apex Radiance": what Apex recommends in game, each applied only by its own click (or Apply all
@@ -938,6 +939,9 @@ public sealed partial class MainWindow : Window
 
     // NVIDIA Smooth Motion, AMD Fluid Motion Frames and Apex's frame limit: their switches and picker only plan a change (pending,
     // like the components); Apply writes them as task rows (SettingChanges). Switching back to the state now drops the change.
+    // the notes under the Apex cards take no gap while empty
+    void ShowCoreNotes() => CoreNotes.Visibility = GraphicsInfo.IsOpen || SuggestList.Visibility == Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
+
     SmoothMotion.Status? _smooth;
     string? _smoothFor, _smoothError;
     bool _smoothFps; // the last apply set Apex's frame limit to 60 when it turned Smooth Motion on
@@ -1306,6 +1310,7 @@ public sealed partial class MainWindow : Window
                 T("Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back."));
         else GraphicsInfo.IsOpen = false;
         RendererResetNote.Visibility = GraphicsInfo.IsOpen ? Visibility.Visible : Visibility.Collapsed;
+        ShowCoreNotes();
 
         // An installed component shows a Remove button (Keep once marked: Apply removes it, and its pill says so); a missing one
         // its switch, which means Install. A switch that meant "keep" on an installed component, off meaning uninstall, read
