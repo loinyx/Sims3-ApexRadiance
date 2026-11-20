@@ -57,6 +57,7 @@ public sealed partial class MainWindow
         page.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
         page.ColumnDefinitions.Add(new ColumnDefinition());
         var albums = new ScrollViewer { Content = GalleryAlbums(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        _galSide = albums;
         page.Children.Add(albums);
         var side = 220.0;
         var main = new StackPanel { Spacing = 18 };
@@ -563,12 +564,225 @@ public sealed partial class MainWindow
 
     Border? _custDrawer;
     double _boardBuiltSize = 1;
+    readonly HashSet<string> _spread = [];
+    readonly Dictionary<string, CustomAlbum> _boardPiled = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, Placed> _boardPlaces = new(StringComparer.OrdinalIgnoreCase);
+    Dictionary<string, (double X, double Y)>? _boardFlip;
+    double? _boardKeepAt;
+    FrameworkElement? _dropTarget;
+    ScrollViewer? _galSide;
+    static readonly double[] PileTurns = [-3, 7, -8, 4, -5, 9];
+    static readonly (double X, double Y)[] PileShift = [(0, 0), (-14, -12), (16, -16), (-8, -24), (12, -6), (-16, -4)];
+
+    // a number from a text that stays the same from one run to the next (string hashes don't)
+    static int Stable(string text) { unchecked { var h = 17; foreach (var ch in text) h = h * 31 + ch; return h; } }
+
+    // An album opened from its pile: the board dims and the album's pictures fly out of the pile to the middle, large;
+    // a picture opens in the viewer, a click on the dim, the close button or Esc sends them back to the pile.
+    void Spotlight(CustomAlbum album, List<Picture> members, List<FrameworkElement> from)
+    {
+        if (_boardFrame is not Grid stage || _gal is null || members.Count == 0) return;
+        var look = Gallery.Look(_gal, _galAlbum);
+        var w = stage.ActualWidth;
+        var h = stage.ActualHeight;
+        var veil = new Grid { Background = new AcrylicBrush { TintColor = Rgb(0x0A, 0x0A, 0x0D), TintOpacity = 0.55, TintLuminosityOpacity = 0.62, FallbackColor = Windows.UI.Color.FromArgb(0xE6, 0x0A, 0x0A, 0x0D) }, Opacity = 0 };
+        var room = new Canvas();
+        var roomScroll = new ScrollViewer { Content = room, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        veil.Children.Add(roomScroll);
+        // the head: the album's name, how many, open it, close
+        var head = new Grid { VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(40, 28, 28, 0) };
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+        title.Children.Add(new FontIcon { Glyph = album.Icon, FontSize = 26, Foreground = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4)), VerticalAlignment = VerticalAlignment.Center });
+        title.Children.Add(new TextBlock { Text = album.Name, FontFamily = new FontFamily(look.Font), FontSize = 44, Foreground = new SolidColorBrush(Rgb(0xF4, 0xF0, 0xE6)) });
+        title.Children.Add(new TextBlock { Text = members.Count == 1 ? T("1 picture") : T("{0} pictures", members.Count), FontSize = 14, Opacity = 0.65, Foreground = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 10, 0, 0) });
+        head.Children.Add(title);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
+        var whole = new Button { Content = T("Open the album"), CornerRadius = new CornerRadius(18), Padding = new Thickness(16, 6, 16, 7) };
+        var shut = new Button { Content = new FontIcon { Glyph = "\uE711", FontSize = 12 }, Width = 38, Height = 38, Padding = new Thickness(0), CornerRadius = new CornerRadius(19) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(shut, T("Close"));
+        actions.Children.Add(whole);
+        actions.Children.Add(shut);
+        Grid.SetColumn(actions, 1);
+        head.Children.Add(actions);
+        veil.Children.Add(head);
+
+        // the pictures in the board's own frames, large: up to three to a row (four as two by two); the room scrolls if they need it
+        var cols = members.Count <= 3 ? members.Count : members.Count == 4 ? 2 : 3;
+        var rows = (int)Math.Ceiling(members.Count / (double)cols);
+        var gap = 48.0;
+        var cw = Math.Clamp((w - 160 - gap * (cols - 1)) / cols, 220, 600);
+        var keepScale = _boardScale;
+        var keepCalm = _boardCalm;
+        var light = new SolidColorBrush(Rgb(0xEC, 0xE7, 0xDA));
+        var shown = new List<(FrameworkElement Card, CompositeTransform T, double X, double Y)>();
+        var cards = new List<FrameworkElement>();
+        double ch = 0;
+        try
+        {
+            _boardScale = cw / 280 / look.Size;
+            _boardCalm = true;
+            var rnd = new Random(Stable(album.Id));
+            for (int i = 0; i < members.Count; i++)
+            {
+                var card = Framed(members[i], new Placed { Angle = rnd.NextDouble() * 5 - 2.5 }, look, light, 1, 0, members, null, still: true);
+                card.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+                ch = Math.Max(ch, card.DesiredSize.Height);
+                cards.Add(card);
+            }
+        }
+        finally { _boardScale = keepScale; _boardCalm = keepCalm; }
+        var top0 = 128.0;
+        var left0 = (w - (cols * cw + (cols - 1) * gap)) / 2;
+        var tall = top0 + rows * ch + (rows - 1) * gap + 60;
+        if (tall < h) top0 += (h - tall) / 2;
+        room.Height = Math.Max(h, top0 + rows * ch + (rows - 1) * gap + 60);
+        room.Width = w;
+        for (int i = 0; i < cards.Count; i++)
+        {
+            var card = cards[i];
+            var x = left0 + (i % cols) * (cw + gap) + (cw - card.DesiredSize.Width) / 2;
+            var y = top0 + (i / cols) * (ch + gap);
+            Canvas.SetLeft(card, x);
+            Canvas.SetTop(card, y);
+            room.Children.Add(card);
+            if (card is Border { Child: FrameworkElement { RenderTransform: CompositeTransform t } }) shown.Add((card, t, x, y));
+        }
+        stage.Children.Add(veil);
+        Grid.SetColumnSpan(veil, 1);
+
+        // out of the pile: each picture starts where its card lies on the board, small, and flies to its place
+        var rise = new Storyboard();
+        Tween(rise, veil, "Opacity", 1, 220);
+        for (int i = 0; i < shown.Count; i++)
+        {
+            var (card, t, x, y) = shown[i];
+            var settle = t.Rotation;
+            var size = card.DesiredSize;
+            if (i < from.Count && from[i].ActualWidth > 0)
+            {
+                var b0 = from[i].TransformToVisual(stage).TransformBounds(new Windows.Foundation.Rect(0, 0, from[i].ActualWidth, from[i].ActualHeight));
+                var k = b0.Width / Math.Max(1, size.Width);
+                t.ScaleX = t.ScaleY = k;
+                t.TranslateX = b0.X + b0.Width / 2 - (x + size.Width / 2);
+                t.TranslateY = b0.Y + b0.Height / 2 - (y + size.Height / 2);
+                if (from[i] is Border { Child: FrameworkElement { RenderTransform: CompositeTransform was } }) t.Rotation = was.Rotation;
+            }
+            var pop = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
+            var glide = new CubicEase { EasingMode = EasingMode.EaseOut };
+            Tween(rise, t, "ScaleX", 1, 640, pop, i * 70);
+            Tween(rise, t, "ScaleY", 1, 640, pop, i * 70);
+            Tween(rise, t, "TranslateX", 0, 600, glide, i * 70);
+            Tween(rise, t, "TranslateY", 0, 600, glide, i * 70);
+            Tween(rise, t, "Rotation", settle, 800, new ElasticEase { EasingMode = EasingMode.EaseOut, Oscillations = 1, Springiness = 5 }, i * 70);
+        }
+        foreach (var f in from) f.Opacity = 0.25;
+        Play(rise);
+
+        var closing = false;
+        void Close(bool open)
+        {
+            if (closing) return;
+            closing = true;
+            var fall = new Storyboard();
+            Tween(fall, veil, "Opacity", 0, 300, null, 120);
+            for (int i = 0; i < shown.Count; i++)
+            {
+                var (card, t, x, y) = shown[i];
+                if (open || i >= from.Count) { Tween(fall, card, "Opacity", 0, 200); continue; }
+                var b = from[i].TransformToVisual(stage).TransformBounds(new Windows.Foundation.Rect(0, 0, from[i].ActualWidth, from[i].ActualHeight));
+                var size = card.DesiredSize;
+                var sy = roomScroll.VerticalOffset;
+                var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+                Tween(fall, t, "ScaleX", b.Width / Math.Max(1, size.Width), 360, ease);
+                Tween(fall, t, "ScaleY", b.Width / Math.Max(1, size.Width), 360, ease);
+                Tween(fall, t, "TranslateX", b.X + b.Width / 2 - (x + size.Width / 2), 360, ease);
+                Tween(fall, t, "TranslateY", b.Y + b.Height / 2 - (y - sy + size.Height / 2), 360, ease);
+            }
+            fall.Completed += (_, _) =>
+            {
+                stage.Children.Remove(veil);
+                foreach (var f in from) f.Opacity = 1;
+                if (open) { _galAlbum = album.Key; BuildGallery(); }
+            };
+            Play(fall);
+        }
+        veil.Tapped += (_, _) => Close(false);
+        shut.Click += (_, _) => Close(false);
+        whole.Click += (_, _) => Close(true);
+        veil.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Escape) { e.Handled = true; Close(false); } };
+        DispatcherQueue.TryEnqueue(() => shut.Focus(FocusState.Programmatic));
+    }
+
+    // the board laid again where it is, each picture sliding from where it lay to its new place
+    void FlipBoard()
+    {
+        _boardFlip = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var (pic, card, _) in _boardCards) _boardFlip.TryAdd(pic.Path, (Canvas.GetLeft(card), Canvas.GetTop(card)));
+        _boardKeepAt = _boardScroll?.HorizontalOffset;
+        RefreshBoard();
+    }
+
+    // while a picture is dragged: the picture whose middle it is over grows a little, ready to make an album with it
+    void MarkUnder(FrameworkElement? me)
+    {
+        FrameworkElement? hit = null;
+        if (me is not null)
+        {
+            var cx = Canvas.GetLeft(me) + me.ActualWidth / 2;
+            var cy = Canvas.GetTop(me) + me.ActualHeight / 2;
+            foreach (var (_, card, _) in _boardCards)
+            {
+                if (card == me) continue;
+                var l = Canvas.GetLeft(card);
+                var t = Canvas.GetTop(card);
+                if (Math.Abs(cx - (l + card.ActualWidth / 2)) < card.ActualWidth * 0.22 && Math.Abs(cy - (t + card.ActualHeight / 2)) < card.ActualHeight * 0.22) { hit = card; break; }
+            }
+        }
+        if (hit == _dropTarget) return;
+        if (_dropTarget is not null) _dropTarget.Scale = Vector3.One;
+        _dropTarget = hit;
+        if (hit is not null) hit.Scale = new Vector3(1.08f, 1.08f, 1);
+    }
+
+    // a picture let go: on another's middle it joins that picture's album (or makes one with it); else it stays where it was put
+    async void CardDropped(Picture p, Placed place, FrameworkElement me, CustomAlbum? pile)
+    {
+        var look = Gallery.Look(_gal!, _galAlbum);
+        var target = _dropTarget;
+        MarkUnder(null);
+        if (target is not null && _boardCards.FirstOrDefault(c => c.Card == target) is { Pic: not null } hit)
+        {
+            var into = _boardPiled.GetValueOrDefault(hit.Pic.Path) ?? await AlbumDialog(null, Gallery.HouseholdOf(hit.Pic, _gal!, _galSaves));
+            if (into is not null)
+            {
+                foreach (var path in new[] { hit.Pic.Path, p.Path })
+                {
+                    if (!into.Pictures.Contains(path, StringComparer.OrdinalIgnoreCase)) into.Pictures.Add(path);
+                    look.Places.Remove(path);
+                }
+                _spread.Remove(into.Key);
+                Gallery.Save(_gal!);
+                if (_galSide is not null) _galSide.Content = GalleryAlbums();
+                FlipBoard();
+                return;
+            }
+        }
+        // (a picture taken off a pile slides back onto it)
+        if (pile is not null) { FlipBoard(); return; }
+        place.X = Canvas.GetLeft(me);
+        place.Y = Canvas.GetTop(me);
+        place.Moved = true;
+        look.Places[p.Path] = place;
+        Gallery.Save(_gal!);
+    }
 
     // the pictures on the board turned to the tilt and scaled to the size being chosen, without laying the board again
     void LiveCards(AlbumLook look)
     {
         foreach (var (pic, card, _) in _boardCards)
-            if (card is Border { Child: FrameworkElement { RenderTransform: CompositeTransform t } } && look.Places.TryGetValue(pic.Path, out var at))
+            if (card is Border { Child: FrameworkElement { RenderTransform: CompositeTransform t } } && _boardPlaces.TryGetValue(pic.Path, out var at))
             {
                 t.Rotation = at.Angle * look.Tilt;
                 t.ScaleX = t.ScaleY = look.Size / _boardBuiltSize;
@@ -899,7 +1113,7 @@ public sealed partial class MainWindow
             }
             body.Children.Add(tapes);
 
-            Grid Range(string name, string left, string right, double min, double max, double value, Action<double> set)
+            Grid Range(string name, string left, string right, double min, double max, double value, Action<double> set, Action? live = null)
             {
                 var g = new Grid { ColumnSpacing = 10, Margin = new Thickness(0, 2, 0, 0) };
                 g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -908,7 +1122,7 @@ public sealed partial class MainWindow
                 g.Children.Add(new TextBlock { Text = left, FontSize = 12, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
                 var s = new Slider { Minimum = min, Maximum = max, StepFrequency = 0.05, Value = value };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(s, name);
-                s.ValueChanged += (_, e) => { set(e.NewValue); _custChanged = true; LiveCards(look); };
+                s.ValueChanged += (_, e) => { set(e.NewValue); _custChanged = true; if (live is not null) live(); else LiveCards(look); };
                 Grid.SetColumn(s, 1);
                 g.Children.Add(s);
                 var r = new TextBlock { Text = right, FontSize = 12, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center };
@@ -920,6 +1134,8 @@ public sealed partial class MainWindow
             body.Children.Add(Range(T("Picture size"), T("Small"), T("Large"), 0.75, 1.3, look.Size, v => look.Size = v));
             body.Children.Add(Caption(T("LAYOUT")));
             body.Children.Add(Range(T("Tilt: tidy to messy"), T("Tidy"), T("Messy"), 0, 1.6, look.Tilt, v => look.Tilt = v));
+            body.Children.Add(Caption(T("SPACING")));
+            body.Children.Add(Range(T("Spacing: close to apart"), T("Close"), T("Apart"), 0.6, 1.7, look.Spacing, v => look.Spacing = v, FlipBoard));
         }
         else
         {
@@ -1185,7 +1401,7 @@ public sealed partial class MainWindow
     {
         var look = Gallery.Look(_gal!, _galAlbum);
         // (boards laid out before the timeline get the timeline's layout once)
-        if (look.Layout < 4) { look.Places.Clear(); look.Layout = 4; }
+        if (look.Layout < 5) { look.Places.Clear(); look.Layout = 5; }
         var ink = Ink(look);
         // as tall as the window allows, the pictures sized with it
         BoardHeight = BoardFits();
@@ -1201,20 +1417,35 @@ public sealed partial class MainWindow
         var s = _boardScale = BoardHeight / 660;
         _boardBuiltSize = look.Size;
         var mid = BoardHeight / 2;
-        // the newest sixty, laid newest first along a gentle wave around the line, a breath of room where a day begins
+        // the newest sixty, laid newest first along a gentle wave around the line, a breath of room where a day begins;
+        // an album gathered into a pile takes one place, where its newest picture would lie
         var pics = InAlbum().Take(60).ToList();
+        var chapters = _galAlbum.StartsWith(Gallery.Mine, StringComparison.Ordinal) ? []
+            : _gal!.Custom.Where(c => pics.Any(pc => c.Pictures.Contains(pc.Path, StringComparer.OrdinalIgnoreCase))).ToList();
+        _boardPiled.Clear();
+        foreach (var c in chapters)
+            if (!_spread.Contains(c.Key))
+                foreach (var path in c.Pictures) _boardPiled.TryAdd(path, c);
+        var firstOf = new Dictionary<CustomAlbum, int>();
         var xs = new double[pics.Count];
+        var slotOf = new int[pics.Count];
         var days = new List<(double X, DateTime Day)>();
         var x = 110 * s;
         double last = 0;
+        var slot = 0;
         for (int i = 0; i < pics.Count; i++)
         {
-            if (i == 0 || pics[i].Taken.Date != pics[i - 1].Taken.Date) { if (i > 0) x += 90 * s; days.Add((x, pics[i].Taken.Date)); }
+            var heap = _boardPiled.GetValueOrDefault(pics[i].Path);
+            if (heap is not null && firstOf.TryGetValue(heap, out var head)) { xs[i] = xs[head]; slotOf[i] = slotOf[head]; continue; }
+            if (heap is not null) firstOf[heap] = i;
+            if (heap is not null && look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved) { xs[i] = parked.X; slotOf[i] = slot; continue; }
+            if (i == 0 || pics[i].Taken.Date != pics[i - 1].Taken.Date) { if (i > 0) x += 90 * s * look.Spacing; days.Add((x, pics[i].Taken.Date)); }
             xs[i] = x;
+            slotOf[i] = slot++;
             last = ((i % 4 == 0 ? 290 : 230) * s * look.Size + 24);
-            x += last * 0.95;
+            x += last * (heap is null ? 0.95 : 1.2) * look.Spacing;
         }
-        var width = Math.Max(1100, pics.Count == 0 ? 0 : xs[^1] + last + 110 * s);
+        var width = Math.Max(1100, pics.Count == 0 ? 0 : x + 110 * s);
         var canvas = new Canvas { Width = width, Height = BoardHeight, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
         _boardCanvas = canvas;
         _boardCards.Clear();
@@ -1242,72 +1473,148 @@ public sealed partial class MainWindow
             Canvas.SetLeft(empty, 140); Canvas.SetTop(empty, mid - 90);
             canvas.Children.Add(empty);
         }
-        var chapters = _galAlbum.StartsWith(Gallery.Mine, StringComparison.Ordinal) ? []
-            : _gal!.Custom.Where(c => pics.Any(pc => c.Pictures.Contains(pc.Path, StringComparer.OrdinalIgnoreCase))).ToList();
-        var roof = 14 + Math.Min(2, chapters.Count) * 40;
-        var rnd = new Random(_galAlbum.GetHashCode());
+        var roof = 14.0;
+        _boardPlaces.Clear();
+        var inPile = new Dictionary<CustomAlbum, int>();
+        var pileBase = new Dictionary<CustomAlbum, Placed>();
         for (int i = 0; i < pics.Count; i++)
         {
-            if (!look.Places.TryGetValue(pics[i].Path, out var place))
+            var path = pics[i].Path;
+            var jitter = new Random(Stable(path));
+            var phase = slotOf[i] * 1.1;
+            var h = ((i % 4 == 0 ? 194 : 154) * s * look.Size) + 70;
+            var heap = _boardPiled.GetValueOrDefault(path);
+            var auto = new Placed
             {
-                var phase = i * 1.1;
-                var h = ((i % 4 == 0 ? 194 : 154) * s * look.Size) + 70;
-                place = new Placed
-                {
-                    X = xs[i] + rnd.Next(-12, 12),
-                    Y = Math.Clamp(mid - h / 2 + Math.Sin(phase) * mid * 0.5, roof, Math.Max(roof, BoardHeight - h - 14)),
-                    Angle = Math.Round(-Math.Cos(phase) * 5 + rnd.NextDouble() * 3 - 1.5, 1),
-                };
-                look.Places[pics[i].Path] = place;
+                X = xs[i] + jitter.Next(-12, 12),
+                Y = Math.Clamp(mid - h / 2 + Math.Sin(phase) * mid * 0.5, roof, Math.Max(roof, BoardHeight - h - (heap is null ? 14 : 70))),
+                Angle = Math.Round(-Math.Cos(phase) * 5 + jitter.NextDouble() * 3 - 1.5, 1),
+            };
+            Placed place;
+            if (heap is not null)
+            {
+                var k = inPile.GetValueOrDefault(heap);
+                inPile[heap] = k + 1;
+                if (k == 0) pileBase[heap] = look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved ? new Placed { X = parked.X, Y = parked.Y - 24 * s } : auto;
+                var under = pileBase[heap];
+                var shift = PileShift[k % PileShift.Length];
+                place = new Placed { X = under.X + shift.X * s, Y = under.Y + shift.Y * s + 24 * s, Angle = PileTurns[k % PileTurns.Length] };
             }
+            else place = look.Places.TryGetValue(path, out var own) && own.Moved ? own : auto;
+            _boardPlaces[path] = place;
             // (the newest fall in first, the ones further back already lie there when scrolled to)
-            var delay = 120 + Math.Min(i, 10) * 130;
-            var card = Framed(pics[i], place, look, ink, i, delay, pics);
+            var delay = 120 + Math.Min(slotOf[i], 10) * 130;
+            var card = Framed(pics[i], place, look, ink, i, delay, pics, heap);
+            if (heap is not null) Canvas.SetZIndex(card, firstOf[heap] * 10 + 9 - inPile[heap]);
             canvas.Children.Add(card);
             _boardCards.Add((pics[i], card, i));
+            // (laid again after an album was spread or gathered: each picture slides over from where it was)
+            if (_boardFlip is not null && _boardFlip.TryGetValue(path, out var was) && card is Border { Child: FrameworkElement { RenderTransform: CompositeTransform moved } })
+            {
+                moved.TranslateX = was.X - place.X;
+                moved.TranslateY = was.Y - place.Y;
+                var slide = new Storyboard();
+                var glide = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.3 };
+                Tween(slide, moved, "TranslateX", 0, 640, glide);
+                Tween(slide, moved, "TranslateY", 0, 640, glide);
+                Play(slide);
+            }
         }
-        var lanes = new List<double>();
+        _boardFlip = null;
+
+        // each album's tag: under its pile (fanned by the pointer, spread with a click), or over its first picture once spread
         foreach (var c in chapters)
         {
-            var spots = pics.Select((pc, k) => (pc, k)).Where(t => c.Pictures.Contains(t.pc.Path, StringComparer.OrdinalIgnoreCase))
-                .Select(t => (X: look.Places[t.pc.Path].X, W: (t.k % 4 == 0 ? 290 : 230) * s * look.Size + 24)).ToList();
-            var from = spots.Min(t => t.X);
-            var to = Math.Max(spots.Max(t => t.X + t.W), from + 200);
-            var lane = lanes.FindIndex(end => end < from - 16);
-            if (lane < 0) { lane = lanes.Count; lanes.Add(0); }
-            lanes[lane] = to;
-            // (a bracket drawn in the board's ink over the album's pictures, its name on a tag that opens it)
-            var chapter = new Grid { Width = to - from, Height = 30 };
-            chapter.Children.Add(new Border { Height = 12, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 14, 0, 0), BorderBrush = ink, BorderThickness = new Thickness(1.5, 1.5, 1.5, 0),
-                CornerRadius = new CornerRadius(6, 6, 0, 0), Opacity = 0.5, IsHitTestVisible = false });
-            var tagRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            tagRow.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 14, Foreground = ink, VerticalAlignment = VerticalAlignment.Center });
+            var members = pics.Where(pc => c.Pictures.Contains(pc.Path, StringComparer.OrdinalIgnoreCase)).ToList();
+            var gathered = members.Any(m => _boardPiled.GetValueOrDefault(m.Path) == c);
+            var anchor = _boardPlaces[members[0].Path];
+            var at = pics.IndexOf(members[0]);
+            var cardH = ((at % 4 == 0 ? 194 : 154) * s * look.Size) + 70;
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            row.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 14, Foreground = ink, VerticalAlignment = VerticalAlignment.Center });
             var tagName = new TextBlock { Text = c.Name, FontFamily = new FontFamily(look.Font), FontSize = 20, Foreground = ink, VerticalAlignment = VerticalAlignment.Center };
-            tagRow.Children.Add(tagName);
-            tagRow.Children.Add(new TextBlock { Text = spots.Count.ToString(), FontSize = 12, Foreground = ink, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 0) });
-            var tag = new HyperlinkButton { Content = tagRow, Padding = new Thickness(12, 0, 14, 2), Margin = new Thickness(18, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
-                Background = pill, CornerRadius = new CornerRadius(14), Height = 30 };
-            tag.Resources["HyperlinkButtonBackgroundPointerOver"] = pill;
-            tag.Resources["HyperlinkButtonBackgroundPressed"] = pill;
-            tag.Resources["HyperlinkButtonForegroundPointerOver"] = ink;
-            tag.Resources["HyperlinkButtonForegroundPressed"] = ink;
-            tag.PointerEntered += (_, _) => tagName.TextDecorations = Windows.UI.Text.TextDecorations.Underline;
-            tag.PointerExited += (_, _) => tagName.TextDecorations = Windows.UI.Text.TextDecorations.None;
-            ToolTipService.SetToolTip(tag, T("Open the album {0}", c.Name));
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(tag, T("Open the album {0}", c.Name));
+            row.Children.Add(tagName);
+            row.Children.Add(new TextBlock { Text = members.Count.ToString(), FontSize = 12, Foreground = ink, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 0) });
+            row.Children.Add(new FontIcon { Glyph = "\uE8B9", FontSize = 11, Foreground = ink, Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
+            HyperlinkButton TagButton(UIElement content, Thickness pad)
+            {
+                var b = new HyperlinkButton { Content = content, Padding = pad, Background = pill, CornerRadius = new CornerRadius(15), Height = 30 };
+                b.Resources["HyperlinkButtonBackgroundPointerOver"] = pill;
+                b.Resources["HyperlinkButtonBackgroundPressed"] = pill;
+                b.Resources["HyperlinkButtonForegroundPointerOver"] = ink;
+                b.Resources["HyperlinkButtonForegroundPressed"] = ink;
+                return b;
+            }
+            var toggle = TagButton(row, new Thickness(12, 0, 12, 2));
+            var say = T("Look through {0}", c.Name);
+            ToolTipService.SetToolTip(toggle, say);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, say);
+            toggle.PointerEntered += (_, _) => tagName.TextDecorations = Windows.UI.Text.TextDecorations.Underline;
+            toggle.PointerExited += (_, _) => tagName.TextDecorations = Windows.UI.Text.TextDecorations.None;
             var key = c.Key;
-            tag.Click += (_, _) => { _galAlbum = key; BuildGallery(); };
-            chapter.Children.Add(tag);
-            Canvas.SetLeft(chapter, from);
-            Canvas.SetTop(chapter, 10 + lane * 40);
-            Canvas.SetZIndex(chapter, 950);
-            canvas.Children.Add(chapter);
+            var albumCards = members.Select(m => _boardCards.First(cc => cc.Pic.Path == m.Path).Card).ToList();
+            toggle.Click += (_, _) => Spotlight(c, members, albumCards);
+            var open = TagButton(new FontIcon { Glyph = "\uE8A7", FontSize = 12, Foreground = ink }, new Thickness(0));
+            open.Width = 30;
+            ToolTipService.SetToolTip(open, T("Open the album {0}", c.Name));
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(open, T("Open the album {0}", c.Name));
+            open.Click += (_, _) => { _galAlbum = key; BuildGallery(); };
+            var tags = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            tags.Children.Add(toggle);
+            tags.Children.Add(open);
+            Canvas.SetLeft(tags, anchor.X + 8);
+            Canvas.SetTop(tags, gathered ? Math.Min(anchor.Y + cardH + 34 * s, BoardHeight - 38) : Math.Max(6, anchor.Y - 42));
+            Canvas.SetZIndex(tags, 950);
+            canvas.Children.Add(tags);
             if (!_boardCalm)
             {
-                chapter.Opacity = 0;
+                tags.Opacity = 0;
                 var show = new Storyboard { BeginTime = TimeSpan.FromMilliseconds(700) };
-                Tween(show, chapter, "Opacity", 1, 400);
+                Tween(show, tags, "Opacity", 1, 400);
                 Play(show);
+            }
+            if (!gathered) continue;
+            // (the pointer over the pile or its tag fans the pictures out a little)
+            var cards = members.Select(m => _boardCards.First(cc => cc.Pic.Path == m.Path).Card).ToList();
+            var over = 0;
+            void Fan(bool wide)
+            {
+                for (int k = 0; k < cards.Count; k++)
+                    if (cards[k] is Border { Child: FrameworkElement { RenderTransform: CompositeTransform t } })
+                    {
+                        var sb = new Storyboard();
+                        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                        Tween(sb, t, "TranslateX", wide ? k * 54 * s : 0, 320, ease);
+                        Tween(sb, t, "Rotation", wide ? -8 + k * 6 : PileTurns[k % PileTurns.Length] * look.Tilt, 320, ease);
+                        Play(sb);
+                    }
+            }
+            void Enter() { if (over++ == 0) Fan(true); }
+            void Leave() { over = Math.Max(0, over - 1); After(140, () => { if (over == 0) Fan(false); }); }
+            foreach (var card in cards) { card.PointerEntered += (_, _) => Enter(); card.PointerExited += (_, _) => Leave(); }
+            tags.PointerEntered += (_, _) => Enter();
+            tags.PointerExited += (_, _) => Leave();
+            // (dragged by any of its pictures, the whole pile and its tag move together and stay where they are let go)
+            foreach (var card in cards)
+            {
+                card.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY;
+                card.ManipulationStarted += (_, _) => { _dragging = true; Fan(false); foreach (var cc in cards) cc.Scale = new Vector3(1.04f, 1.04f, 1); };
+                card.ManipulationDelta += (_, e) =>
+                {
+                    var dx = e.Delta.Translation.X;
+                    var dy = Math.Clamp(e.Delta.Translation.Y, -Canvas.GetTop(cards[0]) - 10, BoardHeight - 120 - Canvas.GetTop(cards[0]));
+                    foreach (var cc in cards) { Canvas.SetLeft(cc, Canvas.GetLeft(cc) + dx); Canvas.SetTop(cc, Canvas.GetTop(cc) + dy); }
+                    Canvas.SetLeft(tags, Canvas.GetLeft(tags) + dx);
+                    Canvas.SetTop(tags, Canvas.GetTop(tags) + dy);
+                };
+                card.ManipulationCompleted += (_, _) =>
+                {
+                    _dragging = false;
+                    foreach (var cc in cards) cc.Scale = Vector3.One;
+                    look.Places[c.Key] = new Placed { X = Canvas.GetLeft(cards[0]), Y = Canvas.GetTop(cards[0]), Moved = true };
+                    Gallery.Save(_gal!);
+                };
+                card.Tapped += (_, e) => { e.Handled = true; Spotlight(c, members, cards); };
             }
         }
         var n = 0;
@@ -1331,14 +1638,16 @@ public sealed partial class MainWindow
         }), true);
         var opened = false;
         var keep = _boardKeep;
+        var keepAt = _boardKeepAt;
         _boardKeep = null;
+        _boardKeepAt = null;
         var zoom = _boardCalm && _boardFrom > 0 ? _boardFrom / BoardHeight : 1;
         _boardFrom = 0;
         scroll.LayoutUpdated += (_, _) =>
         {
             if (opened || scroll.ScrollableWidth <= 0) return;
             opened = true;
-            scroll.ChangeView((keep ?? 0) * scroll.ScrollableWidth, null, null, true);
+            scroll.ChangeView(Math.Min(keepAt ?? (keep ?? 0) * scroll.ScrollableWidth, scroll.ScrollableWidth), null, null, true);
             if (Math.Abs(zoom - 1) < 0.01) return;
             var z = new CompositeTransform { ScaleX = zoom, ScaleY = zoom, CenterX = (keep ?? 0) * scroll.ScrollableWidth + scroll.ViewportWidth / 2, CenterY = mid };
             canvas.RenderTransform = z;
@@ -1423,7 +1732,7 @@ public sealed partial class MainWindow
 
     // a picture in the album's frame: it falls in turning and bounces, its tape sticks, its caption writes itself; dragged
     // to move, lifted under the pointer, its caption written on with a click, opened with a double-click
-    FrameworkElement Framed(Picture p, Placed place, AlbumLook look, Brush ink, int order, int delay, List<Picture> pics)
+    FrameworkElement Framed(Picture p, Placed place, AlbumLook look, Brush ink, int order, int delay, List<Picture> pics, CustomAlbum? pile = null, bool still = false)
     {
         var info = Gallery.Peek(_gal!, p.Path);
         var big = order % 4 == 0;
@@ -1583,7 +1892,7 @@ public sealed partial class MainWindow
         var outer = new Border { Child = holder };
         Canvas.SetLeft(outer, place.X);
         Canvas.SetTop(outer, place.Y);
-        Canvas.SetZIndex(outer, order);
+        Canvas.SetZIndex(outer, order * 10);
         outer.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(220) };
         outer.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(240) };
         outer.Translation = new Vector3(0, 0, 32);
@@ -1600,10 +1909,10 @@ public sealed partial class MainWindow
         if (_boardCalm) caption.Text = text; else After(delay + 820, () => Write(caption, text));
 
         // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
-        outer.PointerEntered += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
-        outer.PointerExited += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, order); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
-        Draggable(outer, () => { place.X = Canvas.GetLeft(outer); place.Y = Canvas.GetTop(outer); Gallery.Save(_gal!); });
-        outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
+        outer.PointerEntered += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
+        outer.PointerExited += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, order * 10); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
+        if (pile is null && !still) Draggable(outer, () => CardDropped(p, place, outer, pile), () => MarkUnder(outer));
+        if (pile is null) outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
         caption.Tapped += (_, e) =>
         {
             e.Handled = true;
@@ -1677,7 +1986,7 @@ public sealed partial class MainWindow
 
     bool _dragging;
     // moved with the pointer (or a finger), lifted while it moves, kept where it is let go
-    void Draggable(FrameworkElement el, Action dropped)
+    void Draggable(FrameworkElement el, Action dropped, Action? moving = null)
     {
         el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY;
         el.ManipulationStarted += (_, _) => { _dragging = true; Canvas.SetZIndex(el, 1000); el.Scale = new Vector3(1.06f, 1.06f, 1); };
@@ -1686,6 +1995,7 @@ public sealed partial class MainWindow
             var w = _boardCanvas?.Width ?? 2000;
             Canvas.SetLeft(el, Math.Clamp(Canvas.GetLeft(el) + e.Delta.Translation.X, -40, Math.Max(0, w - 120)));
             Canvas.SetTop(el, Math.Clamp(Canvas.GetTop(el) + e.Delta.Translation.Y, -20, BoardHeight - 120));
+            moving?.Invoke();
         };
         el.ManipulationCompleted += (_, _) => { _dragging = false; el.Scale = Vector3.One; dropped(); };
     }
@@ -1725,7 +2035,9 @@ public sealed partial class MainWindow
         var sb = new Storyboard();
         foreach (var (pic, card, i) in _boardCards)
         {
-            var place = look.Places[pic.Path];
+            if (_boardPiled.ContainsKey(pic.Path)) continue;
+            var place = new Placed { Moved = true };
+            look.Places[pic.Path] = _boardPlaces[pic.Path] = place;
             place.X = 90 + i * Step + rnd.Next(-40, 40);
             place.Y = rnd.Next(2) == 0 ? rnd.Next(10, 70) : mid + rnd.Next(20, 80);
             place.Angle = rnd.Next(-10, 11);
@@ -1738,7 +2050,7 @@ public sealed partial class MainWindow
             }
             Tween(sb, ((Border)card).Child.RenderTransform, "Rotation", place.Angle * look.Tilt, 1100, new ElasticEase { EasingMode = EasingMode.EaseOut, Oscillations = 1, Springiness = 4 });
         }
-        sb.Completed += (_, _) => { foreach (var (pic, card, _) in _boardCards) { Canvas.SetLeft(card, look.Places[pic.Path].X); Canvas.SetTop(card, look.Places[pic.Path].Y); } };
+        sb.Completed += (_, _) => { foreach (var (pic, card, _) in _boardCards) { Canvas.SetLeft(card, _boardPlaces[pic.Path].X); Canvas.SetTop(card, _boardPlaces[pic.Path].Y); } };
         Play(sb);
         Gallery.Save(_gal);
     }

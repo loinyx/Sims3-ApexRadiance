@@ -13,7 +13,7 @@ public sealed class PictureInfo
 }
 
 // a picture's place on an album's scrapbook board, and a sticky note there
-public sealed class Placed { public double X { get; set; } public double Y { get; set; } public double Angle { get; set; } }
+public sealed class Placed { public double X { get; set; } public double Y { get; set; } public double Angle { get; set; } public bool Moved { get; set; } }   // Moved: put there by the player
 public sealed class StickyNote
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -37,6 +37,7 @@ public sealed class AlbumLook
     public string Tape { get; set; } = "colour";         // colour, match (the board's own hue) or none
     public double Size { get; set; } = 1;                 // the pictures' size, 0.75 to 1.3
     public double Tilt { get; set; } = 1;                 // 0 lies them straight, 1.6 throws them about
+    public double Spacing { get; set; } = 1;              // how far apart the pictures lie along the timeline, 0.6 to 1.7
     public Dictionary<string, Placed> Places { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<StickyNote> Notes { get; set; } = [];
     public string Pattern { get; set; } = "none";        // none, lines, grid or dots: the paper under the pictures
