@@ -2508,6 +2508,8 @@ public sealed partial class MainWindow
     void OpenViewer(List<Picture> pics, int at, FrameworkElement? from = null)
     {
         if (pics.Count == 0 || Content.XamlRoot is not { } root) return;
+        // (the board is laid again on closing only when something was changed here, so an open album stays open)
+        var opened = _gal is null ? null : System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         var culture = LangCulture();
         var popup = new Popup { XamlRoot = root, IsLightDismissEnabled = false };
         var shell = new Grid { Width = root.Size.Width, Height = root.Size.Height, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08)), OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) }, Opacity = 0 };
@@ -2674,6 +2676,7 @@ public sealed partial class MainWindow
             {
                 if (from is not null) from.Opacity = 1;
                 popup.IsOpen = false;
+                if (_gal is not null && opened == System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData)) return;
                 if (stay && _galBook) RefreshBoard(page: true); else BuildGallery();
             };
             Play(away);
