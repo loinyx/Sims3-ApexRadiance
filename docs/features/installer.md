@@ -163,7 +163,10 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 
 ## The launcher (2.0.0)
 
-Apex Launcher keeps everything above as its *Components* screen and adds the screens a player uses every day. It runs
+Apex Launcher keeps everything above as its *Components* screen and adds the screens a player uses every day. On
+*Components*, Apex Radiance sits large on the left with its parts beside it (Sims 3 Modernization with its channel, the
+renderer, frame generation and the frame limit, the restart host); the mods by other modders (Sims3SettingsSetter, the
+Sims 3 Performance Patch, MonoPatcher) are a list under them. It runs
 as the signed-in user, not as administrator: a change to the game folder or to a driver setting is written as a plan
 (`%LOCALAPPDATA%\Apex Launcher\ops`) and applied by the same exe started once with administrator rights
 (`Elevation.cs`), one prompt per change. A game folder the user can write to needs no prompt.
@@ -171,16 +174,22 @@ as the signed-in user, not as administrator: a change to the game folder or to a
 - **Install and uninstall.** The first run copies the exe to `%LOCALAPPDATA%\Programs\Apex Launcher`, adds Start menu
   and desktop shortcuts and an *Installed apps* entry. *Uninstall* there (or in Settings) removes what the launcher
   installed in every game it knows and its own files; saves, mods put in by hand and `Resource.cfg`
-  stay. Settings from Apex Radiance Setup's data folder move to the launcher's on first start.
-- **Home and Play.** The game, its newest save, the installed versions and the expansion packs. *Play* starts the
-  game's exe directly (`TS3W.exe` or `TS3.exe`), installs downloaded updates first when *Install updates when I press
-  Play* is on, and follows the session; a crash or low memory offers *Start again into this save*. *Hide while
-  playing* sends the launcher to the notification area until the game closes.
+  stay. Only the game-folder part runs as administrator; the Documents part (switched-off mods back on, Apex Radiance's
+  settings unless kept) runs as the player. Files of the player's that a fix set aside in the backup folder go to the
+  Recycle Bin. Settings from Apex Radiance Setup's data folder move to the launcher's on first start.
+- **Home and Play.** A picture of the newest save with its name and *Play* on it, the game's health with its crystal,
+  the last session, and counts of mods, packs, saves and pictures; this top fills the window, and the households,
+  updates and newest pictures follow as the page scrolls. *Play* installs the ready updates first (*Play without
+  updating* skips them), waits for the health check, and starts the game's exe directly (`TS3W.exe` or `TS3.exe`);
+  each household card has its own play button into that save. The session is followed; a crash or low memory offers
+  *Start again into this save*. *Hide while playing* sends the launcher to the notification area until the game
+  closes.
 - **Health.** A crystal in the state's colour and the checks grouped by area (Apex Radiance, loaders, graphics, game
   settings, mods), with *Automatic fixes*, *Restore points* and *Last session* tabs. *Fix safe things without asking*
   applies the fixes that keep a copy of each file.
 - **Mods.** Every package and script mod with its kind, folder, size and an on/off switch (off moves it to
-  `Mods\Disabled (Apex Launcher)`), a gallery view, tags, notes, merge and split, a finder for the mod behind a
+  `Mods\Disabled (Apex Launcher)`), a grid view whose tiles fill the row and mark the mods that are off, tags, notes,
+  merge and split, a finder for the mod behind a
   problem, and the mod checks contributed through `ModChecks.cs` (`IModCheck`). Files the launcher installed are
   locked.
 - **Worlds and Saves.** The worlds the player can start a game in, by pack, and every save with its household photo

@@ -2623,6 +2623,7 @@ public sealed partial class MainWindow
             editing = true;
             var box = new TextBox { Text = info.Caption ?? "", FontFamily = caption.FontFamily, FontSize = caption.FontSize, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0, 0, 0, 1),
                 Foreground = caption.Foreground, PlaceholderText = T("write something"), MinWidth = 160, Margin = caption.Margin };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Caption"));
             box.Resources["TextControlBackgroundFocused"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             box.Resources["TextControlForegroundFocused"] = caption.Foreground;
             var line = caption.Foreground is SolidColorBrush cf ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x66, cf.Color.R, cf.Color.G, cf.Color.B)) : caption.Foreground;
@@ -2657,6 +2658,7 @@ public sealed partial class MainWindow
         if (color.A == 0) color = NoteColors[0].Color;
         var box = new TextBox { Text = note.Text, FontFamily = new FontFamily(look.Font), FontSize = 20, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, PlaceholderText = T("write here"),
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Foreground = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26)), Padding = new Thickness(0) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Add a note"));
         box.Resources["TextControlBackgroundFocused"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         box.Resources["TextControlBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         box.Resources["TextControlForegroundFocused"] = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));

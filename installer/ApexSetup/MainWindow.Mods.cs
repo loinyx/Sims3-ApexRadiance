@@ -599,6 +599,7 @@ public sealed partial class MainWindow
     async Task<string?> AskName(string title, string initial, string yes)
     {
         var box = new TextBox { Text = initial, MinWidth = 320 };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, title);
         box.Loaded += (_, _) => box.SelectAll();
         var d = new ContentDialog { Title = title, Content = box, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         return await ShowDialog(d) == ContentDialogResult.Primary && box.Text.Trim().Length > 0 ? box.Text : null;

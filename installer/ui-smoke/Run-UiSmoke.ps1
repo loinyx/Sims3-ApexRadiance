@@ -202,7 +202,7 @@ function OneRun([int]$run) {
         Step "play" { $p = ById 'PlayButton'; if ($p -and $p.Current.IsEnabled) { Invoke $p; Start-Sleep -Seconds 2; Dialogs } }
         Nav 'Mods'
         Step "mods search" { $box = (ById 'ModSearch').FindFirst($TS::Descendants, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::Edit))); if ($box) { $box.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Packages'); Start-Sleep -Seconds 1; $box.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('') } }
-        Step "mods gallery" { $g = ByName 'Gallery'; if ($g) { Sel $g; Start-Sleep -Seconds 2; Shot 'mods-gallery'; Sel (ByName 'List') } }
+        Step "mods grid" { $g = ByName 'Grid'; if ($g) { Sel $g; Start-Sleep -Seconds 2; Shot 'mods-grid'; Sel (ByName 'List') } }
         Nav 'Health'
         Step "health check now" { Invoke (ById 'HealthCheckNow'); Start-Sleep -Seconds 2 }
         foreach ($t in 'Automatic fixes', 'Restore points', 'Last session', 'Overview') { Step "health tab $t" { $x = ByName $t; if ($x) { Sel $x; Start-Sleep -Milliseconds 800 } } }
