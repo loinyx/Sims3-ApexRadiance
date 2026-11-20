@@ -910,7 +910,10 @@ public sealed partial class MainWindow
         place.X = Canvas.GetLeft(me);
         place.Y = Canvas.GetTop(me);
         place.Moved = true;
-        look.Places[p.Path] = new Placed { X = place.X - _boardAnchor.GetValueOrDefault(p.Path), Y = place.Y, Angle = place.Angle, Moved = true };
+        look.TopZ++;
+        look.Places[p.Path] = new Placed { X = place.X - _boardAnchor.GetValueOrDefault(p.Path), Y = place.Y, Angle = place.Angle, Moved = true, Z = look.TopZ };
+        _restZ[me] = 799;
+        Canvas.SetZIndex(me, 799);
         Keep();
     }
 
@@ -1570,7 +1573,7 @@ public sealed partial class MainWindow
     {
         var look = Gallery.Look(_gal!, _galAlbum);
         // (boards laid out before the timeline get the timeline's layout once)
-        if (look.Layout < 6) { look.Places.Clear(); look.Layout = 6; }
+        if (look.Layout < 6) { look.Places.Clear(); look.Gaps.Clear(); look.Layout = 6; }
         _boardAnchor.Clear();
         var ink = Ink(look);
         // as tall as the window allows, the pictures sized with it
@@ -1582,6 +1585,8 @@ public sealed partial class MainWindow
             foreach (var pl in look.Places.Values) { pl.X *= k; pl.Y *= k; }
             foreach (var nt in look.Notes) { nt.X *= k; nt.Y *= k; }
             foreach (var sk in look.Stickers) { sk.X *= k; sk.Y *= k; }
+            foreach (var g in look.Gaps) g.Width *= k;
+            look.SeenX *= k;
         }
         look.Height = BoardHeight;
         var s = _boardScale = BoardHeight / 660;
@@ -1596,25 +1601,77 @@ public sealed partial class MainWindow
         foreach (var c in chapters)
             if (!_spread.Contains(c.Key))
                 foreach (var path in c.Pictures) _boardPiled.TryAdd(path, c);
+        // (pictures taken since the board was last laid; each one's look is counted from the oldest picture, so they
+        // change no other picture's size or place on the wave)
+        var fresh = look.Seen == default ? 0 : pics.TakeWhile(pc => pc.Taken > look.Seen).Count();
+        var lead = look.Lead + fresh;
         var firstOf = new Dictionary<CustomAlbum, int>();
         var xs = new double[pics.Count];
+        var rawX = new double[pics.Count];
         var slotOf = new int[pics.Count];
         var days = new List<(double X, DateTime Day)>();
-        var x = 40 * s;
-        double last = 0;
+        double x = 0;
         var slot = 0;
-        for (int i = 0; i < pics.Count; i++)
+        var freshSlots = 0;
+        double Wide(int i) => (Kind(i) % 4 == 0 ? 290 : 230) * s * look.Size + 24;
+        void LayTimeline()
         {
-            var heap = _boardPiled.GetValueOrDefault(pics[i].Path);
-            if (heap is not null && firstOf.TryGetValue(heap, out var head)) { xs[i] = xs[head]; slotOf[i] = slotOf[head]; continue; }
-            if (heap is not null) firstOf[heap] = i;
-            if (heap is not null) _boardAnchor[heap.Key] = x;
-            if (heap is not null && look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved) { xs[i] = x + parked.X; slotOf[i] = slot; continue; }
-            if (i == 0 || pics[i].Taken.Date != pics[i - 1].Taken.Date) { if (i > 0) x += 40 * s * look.Spacing; days.Add((x, pics[i].Taken.Date)); x += 150 * s; }
-            xs[i] = x;
-            slotOf[i] = slot++;
-            last = ((i % 4 == 0 ? 290 : 230) * s * look.Size + 24);
-            x += last * (heap is null ? 0.95 : 1.2) * look.Spacing;
+            firstOf.Clear();
+            days.Clear();
+            x = 40 * s;
+            slot = 0;
+            for (int i = 0; i < pics.Count; i++)
+            {
+                // (room the player's arrangement needed when newer pictures arrived)
+                foreach (var g in look.Gaps)
+                    if (pics[i].Taken <= g.At && (i == 0 || pics[i - 1].Taken > g.At)) x += g.Width;
+                var heap = _boardPiled.GetValueOrDefault(pics[i].Path);
+                if (heap is not null && firstOf.TryGetValue(heap, out var head)) { xs[i] = xs[head]; rawX[i] = rawX[head]; slotOf[i] = slotOf[head]; continue; }
+                if (heap is not null) firstOf[heap] = i;
+                if (heap is not null) _boardAnchor[heap.Key] = x;
+                rawX[i] = x;
+                if (heap is not null && look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved) { xs[i] = x + parked.X; slotOf[i] = slot; continue; }
+                if (i == 0 || pics[i].Taken.Date != pics[i - 1].Taken.Date) { if (i > 0) x += 40 * s * look.Spacing; days.Add((x, pics[i].Taken.Date)); x += 150 * s; }
+                xs[i] = rawX[i] = x;
+                if (i < fresh) freshSlots = slot + 1;
+                slotOf[i] = slot++;
+                x += Wide(i) * (heap is null ? 0.95 : 1.2) * look.Spacing;
+            }
+        }
+        int Kind(int i) => ((i - lead) % 4 + 4) % 4;
+        LayTimeline();
+        if (fresh > 0 && fresh < pics.Count)
+        {
+            // everything already on the board moved along with its pictures: the notes and stickers go with them
+            var along = look.SeenX > 0 ? rawX[fresh] - look.SeenX : 0;
+            foreach (var nt in look.Notes) nt.X += along;
+            foreach (var sk in look.Stickers) sk.X += along;
+            // and when something the player put there lies where the new pictures go, room opens for them in front of it
+            // (the room ends where the next picture would lie on its own, so the new ones sit as far apart as any others)
+            var newRight = Enumerable.Range(0, fresh).Max(i => xs[i] + Wide(i) * (_boardPiled.ContainsKey(pics[i].Path) ? 1.2 : 0.95) * look.Spacing + 12);
+            var oldLeft = double.MaxValue;
+            for (int i = fresh; i < pics.Count; i++)
+            {
+                var heap = _boardPiled.GetValueOrDefault(pics[i].Path);
+                if (heap is not null ? look.Places.TryGetValue(heap.Key, out var pl) && pl.Moved : look.Places.TryGetValue(pics[i].Path, out pl) && pl.Moved)
+                    oldLeft = Math.Min(oldLeft, heap is not null ? xs[i] : rawX[i] + pl.X);
+            }
+            foreach (var nt in look.Notes) oldLeft = Math.Min(oldLeft, nt.X);
+            var need = newRight - oldLeft;
+            if (need > 0)
+            {
+                look.Gaps.Add(new TimeGap { At = pics[fresh].Taken, Width = need });
+                foreach (var nt in look.Notes) nt.X += need;
+                foreach (var sk in look.Stickers) sk.X += need;
+                LayTimeline();
+            }
+        }
+        if (pics.Count > 0)
+        {
+            look.Seen = pics.Max(pc => pc.Taken);
+            look.SeenX = rawX[0];
+            look.Lead += fresh;
+            look.SlotLead += freshSlots;
         }
         var width = Math.Max(1100, pics.Count == 0 ? 0 : x + 110 * s);
         var canvas = new Canvas { Width = width, Height = BoardHeight, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
@@ -1646,14 +1703,15 @@ public sealed partial class MainWindow
         }
         var roof = 14.0;
         _boardPlaces.Clear();
+        _restZ.Clear();
         var inPile = new Dictionary<CustomAlbum, int>();
         var pileBase = new Dictionary<CustomAlbum, Placed>();
         for (int i = 0; i < pics.Count; i++)
         {
             var path = pics[i].Path;
             var jitter = new Random(Stable(path) + look.Seed);
-            var phase = slotOf[i] * 1.1 + look.Seed % 7;
-            var h = ((i % 4 == 0 ? 194 : 154) * s * look.Size) + 70;
+            var phase = (slotOf[i] - look.SlotLead) * 1.1 + look.Seed % 7;
+            var h = ((Kind(i) == 0 ? 194 : 154) * s * look.Size) + 70;
             var heap = _boardPiled.GetValueOrDefault(path);
             var auto = new Placed
             {
@@ -1676,8 +1734,11 @@ public sealed partial class MainWindow
             _boardPlaces[path] = place;
             // (the newest fall in first, the ones further back already lie there when scrolled to)
             var delay = 120 + Math.Min(slotOf[i], 10) * 130;
-            var card = Framed(pics[i], place, look, ink, i, delay, pics, heap, bare: heap is not null && inPile[heap] > 1);
+            var card = Framed(pics[i], place, look, ink, i, delay, pics, heap, bare: heap is not null && inPile[heap] > 1, kind: Kind(i));
             if (heap is not null) Canvas.SetZIndex(card, firstOf[heap] * 10 + 9 - inPile[heap]);
+            // (a picture the player put down lies over the ones it was put on, the last one put down on top)
+            else if (place.Moved && look.Places.TryGetValue(path, out var put) && put.Z > 0) _restZ[card] = 600 + look.Places.Values.Count(o => o.Moved && o.Z > 0 && o.Z < put.Z);
+            if (_restZ.TryGetValue(card, out var z)) Canvas.SetZIndex(card, z);
             canvas.Children.Add(card);
             _boardCards.Add((pics[i], card, i));
             // (laid again after an album was spread or gathered: each picture slides over from where it was)
@@ -1911,10 +1972,11 @@ public sealed partial class MainWindow
 
     // a picture in the album's frame: it falls in turning and bounces, its tape sticks, its caption writes itself; dragged
     // to move, lifted under the pointer, its caption written on with a click, opened with a double-click
-    FrameworkElement Framed(Picture p, Placed place, AlbumLook look, Brush ink, int order, int delay, List<Picture> pics, CustomAlbum? pile = null, bool still = false, bool bare = false, double? read = null, bool shut = false, double captionMax = double.MaxValue)
+    FrameworkElement Framed(Picture p, Placed place, AlbumLook look, Brush ink, int order, int delay, List<Picture> pics, CustomAlbum? pile = null, bool still = false, bool bare = false, double? read = null, bool shut = false, double captionMax = double.MaxValue, int? kind = null)
     {
         var info = Gallery.Peek(_gal!, p.Path);
-        var big = order % 4 == 0;
+        var big = (kind ?? order) % 4 == 0;
+        var style = kind ?? order;
         double w = (big ? 290 : 230) * _boardScale * look.Size, h = (big ? 194 : 154) * _boardScale * look.Size;
         var source = Thumb(p.Path, read ?? w);
         var dark = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
@@ -1986,7 +2048,7 @@ public sealed partial class MainWindow
                 var washPaper = new Border { Background = new SolidColorBrush(Microsoft.UI.Colors.White), Padding = new Thickness(8), Child = new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h } };
                 washPaper.Shadow = new ThemeShadow();
                 wash.Children.Add(washPaper);
-                if (!bare) for (int q = 0; q < 4; q++) wash.Children.Add(WashiStrip(q, order, _boardScale));
+                if (!bare) for (int q = 0; q < 4; q++) wash.Children.Add(WashiStrip(q, style, _boardScale));
                 stack.Children.Add(wash);
                 caption.Foreground = ink;
                 caption.Margin = new Thickness(4, 12, 0, 0);
@@ -2066,8 +2128,8 @@ public sealed partial class MainWindow
         Border? strip = null;
         if (tape && look.Tape != "none" && !bare)
         {
-            strip = new Border { Width = 96, Height = 22, Background = TapeBrush(look, order), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -22, 0, 0),
-                RenderTransform = new CompositeTransform { Rotation = (order % 3 - 1) * 4, ScaleX = _boardCalm ? 1 : 0 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
+            strip = new Border { Width = 96, Height = 22, Background = TapeBrush(look, style), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -22, 0, 0),
+                RenderTransform = new CompositeTransform { Rotation = (style % 3 - 1) * 4, ScaleX = _boardCalm ? 1 : 0 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
             holder.Children.Add(strip);
         }
         var outer = new Border { Child = holder };
@@ -2079,7 +2141,7 @@ public sealed partial class MainWindow
         outer.Translation = new Vector3(0, 0, 32);
         outer.SizeChanged += (_, e) => outer.CenterPoint = new Vector3((float)e.NewSize.Width / 2, (float)e.NewSize.Height / 2, 0);
         var angle = place.Angle * look.Tilt;
-        var turn = Land(holder, angle, delay, order % 2 == 0 ? -50 : 50, look.Entrance);
+        var turn = Land(holder, angle, delay, style % 2 == 0 ? -50 : 50, look.Entrance);
         var text = info.Caption is { Length: > 0 } c ? c : T("+ write something");
         if (strip is not null && !_boardCalm)
         {
@@ -2098,7 +2160,7 @@ public sealed partial class MainWindow
 
         // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
         outer.PointerEntered += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
-        outer.PointerExited += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, order * 10); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
+        outer.PointerExited += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, _restZ.GetValueOrDefault(outer, order * 10)); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
         if (pile is null && !still) Draggable(outer, () => CardDropped(p, place, outer, pile), () => MarkUnder(outer));
         if (pile is null && !shut) outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
         caption.Tapped += (_, e) =>
@@ -2189,11 +2251,35 @@ public sealed partial class MainWindow
     }
 
     bool _dragging;
+    readonly Dictionary<FrameworkElement, int> _restZ = [];
     // moved with the pointer (or a finger), lifted while it moves, kept where it is let go
     void Draggable(FrameworkElement el, Action dropped, Action? moving = null)
     {
         el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY;
-        el.ManipulationStarted += (_, _) => { _dragging = true; Canvas.SetZIndex(el, Math.Max(Canvas.GetZIndex(el), 1000)); el.Scale = new Vector3(1.06f, 1.06f, 1); };
+        Microsoft.UI.Dispatching.DispatcherQueueTimer? edge = null;
+        el.ManipulationStarted += (_, _) =>
+        {
+            _dragging = true;
+            Canvas.SetZIndex(el, Math.Max(Canvas.GetZIndex(el), 1000));
+            el.Scale = new Vector3(1.06f, 1.06f, 1);
+            if (_boardScroll is not { } sv) return;
+            edge = DispatcherQueue.CreateTimer();
+            edge.Interval = TimeSpan.FromMilliseconds(16);
+            edge.Tick += (_, _) =>
+            {
+                var left = Canvas.GetLeft(el) - sv.HorizontalOffset;
+                var right = left + el.ActualWidth - sv.ViewportWidth;
+                // (faster the nearer the edge)
+                var step = left < 70 ? -Math.Clamp((70 - left) / 4, 2, 22) : right > -70 ? Math.Clamp((right + 70) / 4, 2, 22) : 0;
+                var to = Math.Clamp(sv.HorizontalOffset + step, 0, sv.ScrollableWidth);
+                if (Math.Abs(to - sv.HorizontalOffset) < 0.5) return;
+                Canvas.SetLeft(el, Canvas.GetLeft(el) + (to - sv.HorizontalOffset));
+                sv.ChangeView(to, null, null, true);
+                moving?.Invoke();
+            };
+            _timers.Add(edge);
+            edge.Start();
+        };
         el.ManipulationDelta += (_, e) =>
         {
             var w = _boardCanvas?.Width ?? 2000;
@@ -2201,7 +2287,7 @@ public sealed partial class MainWindow
             Canvas.SetTop(el, Math.Clamp(Canvas.GetTop(el) + e.Delta.Translation.Y, -20, BoardHeight - 120));
             moving?.Invoke();
         };
-        el.ManipulationCompleted += (_, _) => { _dragging = false; el.Scale = Vector3.One; dropped(); };
+        el.ManipulationCompleted += (_, _) => { _dragging = false; el.Scale = Vector3.One; if (edge is not null) { edge.Stop(); _timers.Remove(edge); edge = null; } dropped(); };
     }
 
     // the caption written a letter at a time
@@ -2237,6 +2323,8 @@ public sealed partial class MainWindow
         var look = Gallery.Look(_gal, _galAlbum);
         look.Seed = Random.Shared.Next(1, 10000);
         look.Places.Clear();
+        look.Gaps.Clear();
+        look.Lead = look.SlotLead = 0;
         Keep();
         FlipBoard();
         ShowUndo(T("Board rearranged"), () => StepBack(true));
@@ -2875,7 +2963,7 @@ public sealed partial class MainWindow
             panel.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
             stage.Padding = on ? new Thickness(0) : new Thickness(56, 48, 56, 48);
             shell.Background = new SolidColorBrush(on ? Microsoft.UI.Colors.Black : Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08));
-            close.Margin = on ? new Thickness(0, 16, 16, 0) : new Thickness(0, -32, -40, 0);
+            close.Margin = on ? new Thickness(0, 64, 24, 0) : new Thickness(0, -32, -40, 0);
             prev.Margin = on ? new Thickness(16, 0, 0, 0) : new Thickness(-36, 0, 0, 0);
             next.Margin = on ? new Thickness(0, 0, 16, 0) : new Thickness(0, 0, -36, 0);
             islandFrame.Margin = on ? new Thickness(0, 0, 0, 24) : new Thickness(0, 0, 0, -30);

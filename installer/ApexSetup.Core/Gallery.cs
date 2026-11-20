@@ -13,7 +13,7 @@ public sealed class PictureInfo
 }
 
 // a picture's place on an album's scrapbook board, and a sticky note there
-public sealed class Placed { public double X { get; set; } public double Y { get; set; } public double Angle { get; set; } public bool Moved { get; set; } }   // Moved: put there by the player
+public sealed class Placed { public double X { get; set; } public double Y { get; set; } public double Angle { get; set; } public bool Moved { get; set; } public int Z { get; set; } }   // Moved: put there by the player; Z: the order it was put down in
 public sealed class StickyNote
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -44,6 +44,19 @@ public sealed class AlbumLook
     public int Seed { get; set; }                          // varies the timeline's wave; Rearrange picks another
     public string Pattern { get; set; } = "none";        // none, lines, grid or dots: the paper under the pictures
     public List<Sticker> Stickers { get; set; } = [];
+    public DateTime Seen { get; set; }                     // the newest picture when the board was last laid
+    public double SeenX { get; set; }                      // and where it lay
+    public int Lead { get; set; }                          // pictures (and their places on the wave) added in front since
+    public int SlotLead { get; set; }                      // the board was arranged, so the older ones keep their look
+    public List<TimeGap> Gaps { get; set; } = [];          // room opened in front of an arrangement for newer pictures
+    public int TopZ { get; set; }                          // the last picture put down
+}
+
+// room on a timeline just newer than a moment: pictures taken at or before At lie Width further along
+public sealed class TimeGap
+{
+    public DateTime At { get; set; }
+    public double Width { get; set; }
 }
 
 // a sticker on a board: an emoji, where it lies, its turn and its size
