@@ -78,7 +78,10 @@ function Dialog($part, $secs = 10) {
 function Pick($name, [switch]$Add) { $e = Wait-Find $name; if (-not $e) { throw "not found: $name" }
   $sp = $e.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern); if ($Add) { $sp.AddToSelection() } else { $sp.Select() }; Start-Sleep -Milliseconds 900 }
 function Type-Into($name, $text) { $e = Wait-Find $name; if (-not $e) { throw "not found: $name" }
-  $edit = if ($e.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit) { $e } else { $e.FindFirst($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit))) }
+  $isEdit = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
+  # (a text box of that name first: a tab can have the same name, as Notes has)
+  $named = $root.FindFirst($TS::Descendants, (New-Object System.Windows.Automation.AndCondition($isEdit, (New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, $name)))))
+  $edit = if ($named) { $named } elseif ($e.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit) { $e } else { $e.FindFirst($TS::Descendants, $isEdit) }
   $edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($text); Start-Sleep -Milliseconds 400 }
 function Step($what, [scriptblock]$do, [scriptblock]$ok) {
   $script:step++
@@ -94,7 +97,7 @@ Step "open Mods and the Set folder" { Click 'Mods'; Start-Sleep 3; Pick "Set $($
 Step "turn a mod off from its details" { Pick $first; Click 'Turn off' } { (Test-Path (Join-Path $off "$first.package")) -and -not (Test-Path (Join-Path $set "$first.package")) }
 Step "turn it back on" { Pick $first; Click 'Turn on' } { (Test-Path (Join-Path $set "$first.package")) -and -not (Test-Path (Join-Path $off "$first.package")) }
 Step "make a tag and give it to a mod" { Pick $second; Click 'Add tag'; Click 'New tag…'; Type-Into 'Tag name' 'Harness'; Dialog 'PrimaryButton' } { (Get-Content (Join-Path $data 'Apex Launcher\mod-notes.json') -Raw) -match '"Harness"' }
-Step "notes are kept" { Pick $second; Type-Into 'Notes' 'from the harness'; Pick $third; Pick $second } { (Get-Content (Join-Path $data 'Apex Launcher\mod-notes.json') -Raw) -match 'from the harness' }
+Step "notes are kept" { Pick $second; Click 'Notes'; Type-Into 'Notes' 'from the harness'; Pick $third; Pick $second; Click 'Overview' } { (Get-Content (Join-Path $data 'Apex Launcher\mod-notes.json') -Raw) -match 'from the harness' }
 Step "rename a mod in place" { Pick $third; Click 'Rename'; Type-Into 'New name' 'Renamed by harness'; [System.Windows.Forms.SendKeys]::SendWait('{ENTER}') } { (Get-ChildItem $set -Filter '*Renamed by harness.package').Count -eq 1 }
 Step "undo the rename" { Click 'Undo' } { Test-Path (Join-Path $set "$third.package") }
 Step "merge three mods, verified, with a log" {
@@ -102,7 +105,7 @@ Step "merge three mods, verified, with a log" {
   Click 'Merge into one package…'; Start-Sleep 2; Dialog 'PrimaryButton'; Start-Sleep 6; Dialog 'CloseButton' } {
   (Get-ChildItem $set -Filter '*merged*.package').Count -eq 1 -and (Get-ChildItem (Join-Path $docs 'Mods\Merged (Apex Launcher)') -Recurse -Filter merge.json).Count -eq 1 }
 Step "split the merge back" {
-  $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split…'; Dialog 'PrimaryButton'; Start-Sleep 4 } {
+  $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split it back into its 3 mods'; Dialog 'PrimaryButton'; Start-Sleep 4 } {
   (Get-ChildItem $set -Filter '*merged*.package').Count -eq 0 -and (Test-Path (Join-Path $set "$($names[4]).package")) }
 Step "start a problem-mod hunt" { Click 'Find a problem mod'; Dialog 'PrimaryButton'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -ge 2 }
 Step "stop it: every mod back" { Click 'Stop and put every mod back'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -eq 0 -and (Get-ChildItem $set -Filter *.package).Count -eq $src.Count }
