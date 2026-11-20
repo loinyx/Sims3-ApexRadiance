@@ -58,17 +58,23 @@ public sealed partial class MainWindow
 
     // ---------- loading ----------
 
+    bool _mergesRecovered;
+
     async Task LoadModsAsync()
     {
         if (_game is not { } g || _modsLoading) return;
         _modsLoading = true;
         ModsSummary.Text = T("Reading your mods…");
         var docs = Docs;
+        // (only at the first read: no merge of this launcher runs yet, and a merge that fails later rolls itself back)
+        var recover = !_mergesRecovered;
+        _mergesRecovered = true;
         try
         {
             var since = ModViewPrefs.LastPlay;
             var (mods, found, dirs, loaded, dups, kinds) = await Task.Run(() =>
             {
+                if (recover) ModMerge.Recover(docs); // (a merge stopped during the move: its originals back first)
                 var m = Mods.List(g, docs);
                 // every kind each package holds (read once per file; ModKinds never throws)
                 var k = m.Where(x => x.FileType == "package").ToDictionary(x => x.Path, x => ModKinds.Read(x.Path), StringComparer.OrdinalIgnoreCase);

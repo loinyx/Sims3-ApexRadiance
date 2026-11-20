@@ -240,6 +240,35 @@ static class ModMergeTests
                 "edit: an added mod goes into the merge under the same name");
             ModMerge.Split(docs, added.Remerged!.Merged);
             check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "edit: splitting after an add restores every file identical");
+
+            // a split that stopped halfway (the launcher closed with one original back): the next split finishes it
+            var half = ModMerge.Run(ModMerge.Plan(docs, [M(A), M(B)], "Half", "Packages", false), null, default).Merged;
+            File.Move(Path.Combine(ModMerge.Folder(docs), "Half", A), Path.Combine(mods, A));
+            ModMerge.Split(docs, half);
+            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "split: one that stopped halfway is finished by the next, every file identical");
+
+            // a merge that is off: taking a mod out is refused before anything moves (its originals would come back off,
+            // and a merge leaves out mods that are off)
+            var offMerge = ModMerge.Run(ModMerge.Plan(docs, [M(A), M(B)], "Off", "Packages", false), null, default).Merged;
+            var offMerged = offMerge with { Path = Mods.SetEnabled(offMerge, false, docs), Enabled = false };
+            var offRefused = false;
+            try { ModMerge.TakeOut(docs, offMerged, [Path.Combine("Mods", A)]); } catch (SetupException) { offRefused = true; }
+            check(offRefused && File.Exists(offMerged.Path) && ModMerge.Info(offMerged)?.Originals.Count == 2 && !File.Exists(Path.Combine(mods, A))
+                && !File.Exists(Path.Combine(Mods.Disabled(docs), A)), "take out: refused on a merge that is off, nothing moved");
+            foreach (var m in ModMerge.Split(docs, offMerged)) Mods.SetEnabled(m, true, docs);
+            check(Same(before3, Snap(docs)), "take out: the merge that is off still splits, every file identical");
+
+            // a merge stopped during the move (the launcher ended with A kept aside, B not yet, the merged file still under its
+            // temporary name): the next read puts it right; a merged file the player removed keeps its originals kept
+            var stopped = ModMerge.Run(ModMerge.Plan(docs, [M(A), M(B)], "Stopped", "Packages", false), null, default).Merged;
+            File.Move(stopped.Path, stopped.Path + ".tmp-" + Guid.NewGuid().ToString("N"));
+            File.Move(Path.Combine(ModMerge.Folder(docs), "Stopped", B), Path.Combine(mods, B));
+            ModMerge.Recover(docs);
+            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "merge: one stopped during the move is undone at the next read, every file identical");
+            var removed = ModMerge.Run(ModMerge.Plan(docs, [M(A), M(B)], "Removed", "Packages", false), null, default).Merged;
+            File.Delete(removed.Path);
+            ModMerge.Recover(docs);
+            check(File.Exists(Path.Combine(ModMerge.Folder(docs), "Removed", A)) && !File.Exists(Path.Combine(mods, A)), "merge: a merged file the player removed keeps its originals kept");
         }
         catch (Exception e) { check(false, "merge: exception " + e); }
         finally

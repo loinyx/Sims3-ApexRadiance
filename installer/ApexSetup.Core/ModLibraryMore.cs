@@ -13,20 +13,7 @@ public static partial class ModLibrary
         if (to.Equals(rel, StringComparison.OrdinalIgnoreCase)) return rel;
         if (intoRel.Equals(rel, StringComparison.OrdinalIgnoreCase) || intoRel.StartsWith(rel + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new SetupException("A folder can't go inside itself.");
-        var from = Under(docs, rel);
-        var target = Under(docs, to);
-        if (Directory.Exists(target)) throw new SetupException("A folder with that name is already there.");
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        Directory.Move(from, target);
-        var offFrom = Path.Combine(Mods.Disabled(docs), rel);
-        if (Directory.Exists(offFrom))
-        {
-            var offTo = Path.Combine(Mods.Disabled(docs), to);
-            Directory.CreateDirectory(Path.GetDirectoryName(offTo)!);
-            Directory.Move(offFrom, offTo);
-        }
-        ModNotes.Move(Path.Combine("Mods", rel), Path.Combine("Mods", to), folder: true);
-        ModMerge.Moved(docs, Path.Combine("Mods", rel), Path.Combine("Mods", to), folder: true);
+        MoveWithOffCopy(docs, rel, to);
         return to;
     }
 

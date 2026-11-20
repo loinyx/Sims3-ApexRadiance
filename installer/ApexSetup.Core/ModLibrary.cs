@@ -259,15 +259,31 @@ public static partial class ModLibrary
         Engine.CheckWritable();
         var to = Path.Combine(Path.GetDirectoryName(rel) ?? "", CleanName(name));
         if (to.Equals(rel, StringComparison.Ordinal)) return rel;
+        MoveWithOffCopy(docs, rel, to, caseOnly: to.Equals(rel, StringComparison.OrdinalIgnoreCase));
+        return to;
+    }
+
+    // a folder and its switched-off copy to another place under Mods, both or neither (else the mods in the copy left behind
+    // come back under the old name when turned on); its notes and merges follow
+    static void MoveWithOffCopy(string docs, string rel, string to, bool caseOnly = false)
+    {
         var from = Under(docs, rel);
         var target = Under(docs, to);
-        if (Directory.Exists(target) && !to.Equals(rel, StringComparison.OrdinalIgnoreCase)) throw new SetupException("A folder with that name is already there.");
-        Directory.Move(from, target);
         var offFrom = Path.Combine(Mods.Disabled(docs), rel);
-        if (Directory.Exists(offFrom)) Directory.Move(offFrom, Path.Combine(Mods.Disabled(docs), to));
+        var offTo = Path.Combine(Mods.Disabled(docs), to);
+        var off = Directory.Exists(offFrom);
+        if (!caseOnly && (Directory.Exists(target) || off && Directory.Exists(offTo))) throw new SetupException("A folder with that name is already there.");
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        Directory.Move(from, target);
+        if (off)
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(offTo)!);
+                Directory.Move(offFrom, offTo);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Directory.Move(target, from); throw; }
         ModNotes.Move(Path.Combine("Mods", rel), Path.Combine("Mods", to), folder: true);
         ModMerge.Moved(docs, Path.Combine("Mods", rel), Path.Combine("Mods", to), folder: true);
-        return to;
     }
 
     // only an empty folder (no file in it or in its switched-off copy): a mod is never deleted with its folder
@@ -354,13 +370,14 @@ public static partial class ModLibrary
     public static void Recycle(string path)
     {
         if (!File.Exists(path)) return;
-        var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = Path.GetFullPath(path) + "\0\0", fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT };
+        // (Windows asks before it deletes for good a file the Recycle Bin can't take: a network folder, a file too big)
+        var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = Path.GetFullPath(path) + "\0\0", fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_WANTNUKEWARNING };
         var r = SHFileOperation(ref op);
         if (r != 0 || op.fAnyOperationsAborted || File.Exists(path)) throw new SetupException("Windows did not move the file to the Recycle Bin.");
     }
 
     const uint FO_DELETE = 3;
-    const ushort FOF_SILENT = 0x4, FOF_NOCONFIRMATION = 0x10, FOF_ALLOWUNDO = 0x40, FOF_NOERRORUI = 0x400;
+    const ushort FOF_SILENT = 0x4, FOF_NOCONFIRMATION = 0x10, FOF_ALLOWUNDO = 0x40, FOF_NOERRORUI = 0x400, FOF_WANTNUKEWARNING = 0x4000;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct SHFILEOPSTRUCT

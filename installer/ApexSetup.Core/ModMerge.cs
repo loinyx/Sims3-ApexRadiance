@@ -416,6 +416,38 @@ public static partial class ModMerge
         return Convert.ToHexString(SHA256.HashData(f)).ToLowerInvariant();
     }
 
+    // A merge stopped during the move (the launcher closed or was ended): the merged file is not in place and its temporary
+    // file is still next to the target. The originals go back and the record and the temporary file go, as a failed merge
+    // leaves it. A merged file the player removed leaves no temporary file: its originals stay kept, as Remove says.
+    public static void Recover(string docs)
+    {
+        try { Engine.CheckWritable(); } catch (InvalidOperationException) { return; } // (a dry run, the game running: next time)
+        foreach (var r in Records(docs).ToList())
+            try
+            {
+                var dir = Path.GetDirectoryName(Path.Combine(docs, r.Merged))!;
+                if (File.Exists(Path.Combine(docs, r.Merged)) || File.Exists(Path.Combine(Mods.Disabled(docs), UnderMods(r.Merged))) || !Directory.Exists(dir)) continue;
+                var tmps = Directory.GetFiles(dir, r.Name + ".package.tmp-*");
+                if (tmps.Length == 0) continue;
+                var taken = false;
+                foreach (var o in r.Originals)
+                {
+                    var from = Path.Combine(r.Dir, UnderMods(o.Rel));
+                    var to = Path.Combine(docs, o.Rel);
+                    if (!File.Exists(from)) continue;
+                    if (File.Exists(to)) { taken = true; continue; }
+                    Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                    Fs.Retry(() => File.Move(from, to));
+                }
+                if (taken) continue;
+                Fs.Retry(() => File.Delete(Path.Combine(r.Dir, "merge.json")));
+                DeleteStore(r.Dir);
+                foreach (var t in tmps) Fs.Retry(() => File.Delete(t));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        Forget(docs);
+    }
+
     // the merge folder once its originals are gone: merge.json and empty folders only
     static void DeleteStore(string dir)
     {
@@ -507,10 +539,11 @@ public static partial class ModMerge
         foreach (var o in rec.Originals)
         {
             var from = Path.Combine(rec.Dir, UnderMods(o.Rel));
-            if (!File.Exists(from) || new FileInfo(from).Length != o.Size || Sha(from) != o.Sha256)
-                throw new SetupException("An original of this merge is missing or changed: {0}", o.Rel);
             var to = Path.Combine(home, UnderMods(o.Rel));
             var same = File.Exists(to) && Sha(to) == o.Sha256;
+            // (gone from the store but back in its place, by hash: a split that stopped halfway put it back)
+            if (!(same && !File.Exists(from)) && (!File.Exists(from) || new FileInfo(from).Length != o.Size || Sha(from) != o.Sha256))
+                throw new SetupException("An original of this merge is missing or changed: {0}", o.Rel);
             if (File.Exists(to) && !same) taken.Add(o.Rel);
             todo.Add((o, from, to, same));
         }
@@ -540,7 +573,7 @@ public static partial class ModMerge
         }
         foreach (var t in todo.Where(t => t.Same))
         {
-            Fs.Retry(() => File.Delete(t.From)); // (an identical copy is already in place)
+            if (File.Exists(t.From)) Fs.Retry(() => File.Delete(t.From)); // (an identical copy is already in place)
             log.WriteLine("already in place " + t.O.Rel);
         }
         Fs.Retry(() => File.Delete(Path.Combine(rec.Dir, "merge.json")));
