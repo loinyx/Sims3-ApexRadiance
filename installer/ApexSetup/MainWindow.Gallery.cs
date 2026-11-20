@@ -115,9 +115,10 @@ public sealed partial class MainWindow
         room.SizeChanged += (_, e) =>
         {
             _boardRoom = e.NewSize.Height;
-            if (Math.Abs(BoardFits() - BoardHeight) <= 8) return;
-            if (_boardFrom == 0) _boardFrom = BoardHeight;
-            RefreshBoard();
+            var want = BoardFits();
+            if (Math.Abs(want - BoardHeight) <= 8) { LiveScale(BoardHeight); return; }
+            LiveScale(want);
+            RefreshBoard(settle: 260);
         };
         var book = new Grid { Background = BoardBrush(look) };
         var ctrlZ = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Z, Modifiers = Windows.System.VirtualKeyModifiers.Control };
@@ -1419,10 +1420,21 @@ public sealed partial class MainWindow
     static bool _boardCalm;
     double? _boardKeep;
     int _boardRedraw;
-    void RefreshBoard(bool page = false)
+    // the board scaled to a height straight away, the layout left as it is until it is laid again
+    Border? _boardSheet;
+    double _boardBuiltHeight = 1;
+    void LiveScale(double height)
+    {
+        if (_boardSheet is null || _boardCanvas is null) return;
+        var k = height / _boardBuiltHeight;
+        _boardSheet.Height = height;
+        _boardCanvas.RenderTransform = Math.Abs(k - 1) < 0.001 ? null : new ScaleTransform { ScaleX = k, ScaleY = k, CenterX = _boardScroll?.HorizontalOffset ?? 0 };
+    }
+
+    void RefreshBoard(bool page = false, int settle = 120)
     {
         var mine = ++_boardRedraw;
-        After(page ? 0 : 120, () =>
+        After(page ? 0 : settle, () =>
         {
             if (mine != _boardRedraw || !_galBook) return;
             _boardKeep = _boardScroll is { ScrollableWidth: > 0 } sv ? sv.HorizontalOffset / sv.ScrollableWidth : null;
@@ -1480,7 +1492,7 @@ public sealed partial class MainWindow
         {
             if (!_galBook || ScreenGallery.Visibility != Visibility.Visible || _galPage is null) return;
             var mine = ++_boardResize;
-            After(200, () => { if (mine == _boardResize && _galPage is not null) _galPage.Height = Math.Max(420, Scroller.ActualHeight); });
+            _galPage.Height = Math.Max(420, Scroller.ActualHeight);
         };
     }
 
@@ -1764,6 +1776,8 @@ public sealed partial class MainWindow
         var inside = new Grid();
         inside.Children.Add(scroll);
         var frame = new Border { Height = BoardHeight, Child = inside };
+        _boardSheet = frame;
+        _boardBuiltHeight = BoardHeight;
 
         // the strip of dates under the board: each day where it lies, the part in view lit; a click goes there
         var strip = new Grid { Height = 40, Margin = new Thickness(32, 4, 32, 18), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
