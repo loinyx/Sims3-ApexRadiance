@@ -283,6 +283,7 @@ public static partial class Strings
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Remove o ts3wrap.exe e desativa o reinício do jogo no ApexRadiance.toml.",
         // NVIDIA Smooth Motion
         ["Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps."] = "Sua placa NVIDIA desenha uma imagem extra entre cada duas que o jogo faz, então o jogo fica cerca de duas vezes mais fluido. Só em placas RTX série 40 e 50; funciona melhor com o limite de FPS entre 60 e 90.",
+        ["While it is on, recording with the NVIDIA app freezes the game. To record, use OBS or Apex's recorder."] = "Enquanto estiver ligado, gravar com o app da NVIDIA congela o jogo. Para gravar, use o OBS ou o gravador do Apex.",
         ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "Ativado para The Sims 3 no driver da NVIDIA. Funciona melhor com o limite de FPS do Apex entre 60 e 90.",
         ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "Ligado para The Sims 3 no driver da NVIDIA. O limite de FPS do Apex agora é 60, o ritmo em que funciona melhor.",
         ["Off for The Sims 3."] = "Desativado para The Sims 3.",

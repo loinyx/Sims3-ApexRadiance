@@ -275,6 +275,7 @@ public static partial class Strings
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "请先用 Apex Radiance 启动一次游戏，然后在这里打开重新启动游戏。",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "删除 ts3wrap.exe，并在 ApexRadiance.toml 中关闭重新启动游戏。",
         ["Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps."] = "你的 NVIDIA 显卡会在游戏每两帧画面之间多画一帧，让游戏看起来流畅约一倍。仅限 RTX 40 和 50 系列显卡；帧率限制设为 60 到 90 fps 效果最佳。",
+        ["While it is on, recording with the NVIDIA app freezes the game. To record, use OBS or Apex's recorder."] = "开启时，用 NVIDIA 应用录制会让游戏卡死。要录制，请使用 OBS 或 Apex 的录制器。",
         ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "已在 NVIDIA 驱动中为《模拟人生3》开启。 将 Apex 的帧率限制设为 60 到 90 fps 效果最佳。",
         ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "已在 NVIDIA 驱动中为模拟人生 3 开启。Apex 的帧率限制已设为效果最佳的 60 fps。",
         ["Off for The Sims 3."] = "已为《模拟人生3》关闭。",

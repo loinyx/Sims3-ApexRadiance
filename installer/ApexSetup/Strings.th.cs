@@ -247,6 +247,7 @@ public static partial class Strings
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "เปิดเกมหนึ่งครั้งพร้อม Apex Radiance แล้วจึงเปิดการเริ่มเกมใหม่ที่นี่",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ลบ ts3wrap.exe และปิดการเริ่มเกมใหม่ใน ApexRadiance.toml",
         ["Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps."] = "การ์ดจอ NVIDIA จะวาดภาพเพิ่มหนึ่งภาพระหว่างทุกสองภาพที่เกมสร้าง ทำให้เกมดูลื่นขึ้นประมาณสองเท่า ใช้ได้เฉพาะการ์ด RTX ซีรีส์ 40 และ 50 และได้ผลดีที่สุดเมื่อจำกัดเฟรมไว้ที่ 60 ถึง 90 fps",
+        ["While it is on, recording with the NVIDIA app freezes the game. To record, use OBS or Apex's recorder."] = "ขณะที่เปิดอยู่ การบันทึกด้วยแอป NVIDIA จะทำให้เกมค้าง หากต้องการบันทึก ให้ใช้ OBS หรือเครื่องบันทึกของ Apex",
         ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "เปิดสำหรับ The Sims 3 ในไดรเวอร์ NVIDIA ทำงานได้ดีที่สุดเมื่อจำกัดเฟรมของ Apex ไว้ที่ 60 ถึง 90 fps",
         ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "เปิดสำหรับ The Sims 3 ในไดรเวอร์ NVIDIA ตั้งการจำกัดเฟรมของ Apex เป็น 60 fps ซึ่งทำงานได้ดีที่สุดแล้ว",
         ["Off for The Sims 3."] = "ปิดสำหรับ The Sims 3",

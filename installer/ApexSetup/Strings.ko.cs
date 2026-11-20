@@ -279,6 +279,7 @@ public static partial class Strings
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Apex Radiance로 게임을 한 번 실행한 다음 여기에서 게임 다시 시작을 켜세요.",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ts3wrap.exe를 제거하고 ApexRadiance.toml에서 게임 다시 시작을 끕니다.",
         ["Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps."] = "NVIDIA 그래픽카드가 게임이 만드는 두 장의 이미지 사이에 한 장을 더 그려서 게임이 약 두 배 부드럽게 보입니다. RTX 40·50 시리즈 전용이며, 프레임 제한을 60~90fps로 두면 가장 좋습니다.",
+        ["While it is on, recording with the NVIDIA app freezes the game. To record, use OBS or Apex's recorder."] = "켜져 있는 동안 NVIDIA 앱으로 녹화하면 게임이 멈춥니다. 녹화하려면 OBS나 Apex 녹화 기능을 사용하세요.",
         ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "NVIDIA 드라이버에서 심즈 3에 켜짐. Apex의 프레임 제한을 60~90fps로 두면 가장 좋습니다.",
         ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "NVIDIA 드라이버에서 The Sims 3에 켜짐. Apex의 프레임 제한을 가장 잘 작동하는 60fps로 맞췄습니다.",
         ["Off for The Sims 3."] = "심즈 3에 꺼짐.",

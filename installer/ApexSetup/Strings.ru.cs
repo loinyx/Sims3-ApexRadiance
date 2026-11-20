@@ -277,6 +277,7 @@ public static partial class Strings
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Запустите игру один раз с Apex Radiance, затем включите здесь перезапуск игры.",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Удаляет ts3wrap.exe и выключает перезапуск игры в ApexRadiance.toml.",
         ["Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps."] = "Видеокарта NVIDIA рисует дополнительный кадр между каждыми двумя кадрами игры, и игра выглядит примерно вдвое плавнее. Только на картах RTX серий 40 и 50; лучше всего с ограничением кадров 60–90 fps.",
+        ["While it is on, recording with the NVIDIA app freezes the game. To record, use OBS or Apex's recorder."] = "Пока он включён, запись через приложение NVIDIA замораживает игру. Для записи используйте OBS или запись Apex.",
         ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "Включено для The Sims 3 в драйвере NVIDIA. Лучше всего работает с ограничением кадров Apex на 60–90 fps.",
         ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "Включено для The Sims 3 в драйвере NVIDIA. Ограничение кадров Apex теперь 60 fps — с ним работает лучше всего.",
         ["Off for The Sims 3."] = "Выключено для The Sims 3.",

@@ -281,6 +281,7 @@ public static partial class Strings
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Apex Radiance でゲームを一度起動してから、ここでゲームの再起動をオンにしてください。",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ts3wrap.exe を削除し、ApexRadiance.toml でゲームの再起動をオフにします。",
         ["Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps."] = "NVIDIA グラフィックカードがゲームの 2 枚の画像の間に 1 枚追加で描くので、ゲームが約 2 倍なめらかに見えます。RTX 40/50 シリーズのみ。フレームレート制限を 60〜90 fps にすると最適です。",
+        ["While it is on, recording with the NVIDIA app freezes the game. To record, use OBS or Apex's recorder."] = "オンの間は、NVIDIA アプリで録画するとゲームが固まります。録画には OBS か Apex のレコーダーを使ってください。",
         ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "NVIDIA ドライバーで The Sims 3 に対してオン。 Apex のフレームレート制限を 60〜90 fps にすると最適です。",
         ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "NVIDIA ドライバーで The Sims 3 に対してオン。Apex のフレームレート制限を最適な 60 fps にしました。",
         ["Off for The Sims 3."] = "The Sims 3 に対してオフ。",
