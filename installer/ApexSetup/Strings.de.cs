@@ -901,7 +901,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "Vom Launcher installiert: unter Komponenten ändern.",
         ["Interface"] = "Oberfläche",
         ["It goes in when you press Play; your settings stay."] = "Es wird beim Klick auf Spielen installiert; deine Einstellungen bleiben.",
-        ["Keep my Apex Radiance settings"] = "Meine Apex Radiance-Einstellungen behalten",
+        ["Keep my settings, albums and mod notes"] = "Meine Einstellungen, Alben und Mod-Notizen behalten",
         ["Last checked {0}"] = "Zuletzt geprüft {0}",
         ["Last played {0}"] = "Zuletzt gespielt {0}",
         ["Last session"] = "Letzte Sitzung",

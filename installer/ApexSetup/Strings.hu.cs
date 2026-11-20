@@ -905,7 +905,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "A launcher telepítette: az Összetevőkben kapcsolhatod.",
         ["Interface"] = "Felület",
         ["It goes in when you press Play; your settings stay."] = "A Játék gomb megnyomásakor kerül be; a beállításaid megmaradnak.",
-        ["Keep my Apex Radiance settings"] = "Az Apex Radiance beállításaim megtartása",
+        ["Keep my settings, albums and mod notes"] = "A beállításaim, albumaim és modjegyzeteim megtartása",
         ["Last checked {0}"] = "Utoljára ellenőrizve: {0}",
         ["Last played {0}"] = "Utoljára játszva: {0}",
         ["Last session"] = "Legutóbbi játékmenet",

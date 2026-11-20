@@ -898,7 +898,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "Installert av launcheren: endre den under Komponenter.",
         ["Interface"] = "Grensesnitt",
         ["It goes in when you press Play; your settings stay."] = "Installeres når du trykker Spill; innstillingene dine blir.",
-        ["Keep my Apex Radiance settings"] = "Behold Apex Radiance-innstillingene mine",
+        ["Keep my settings, albums and mod notes"] = "Behold innstillingene, albumene og mod-notatene mine",
         ["Last checked {0}"] = "Sist sjekket {0}",
         ["Last played {0}"] = "Sist spilt {0}",
         ["Last session"] = "Forrige økt",

@@ -858,7 +858,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "ติดตั้งโดยลอนเชอร์: เปิดปิดได้ในส่วนประกอบ",
         ["Interface"] = "อินเทอร์เฟซ",
         ["It goes in when you press Play; your settings stay."] = "จะถูกติดตั้งเมื่อคุณกดเล่น การตั้งค่าของคุณยังคงเดิม",
-        ["Keep my Apex Radiance settings"] = "เก็บการตั้งค่า Apex Radiance ของฉันไว้",
+        ["Keep my settings, albums and mod notes"] = "เก็บการตั้งค่า อัลบั้ม และบันทึกม็อดของฉันไว้",
         ["Last checked {0}"] = "ตรวจสอบล่าสุด {0}",
         ["Last played {0}"] = "เล่นล่าสุด {0}",
         ["Last session"] = "เซสชันล่าสุด",

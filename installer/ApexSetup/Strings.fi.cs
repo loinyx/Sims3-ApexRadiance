@@ -890,7 +890,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "Käynnistimen asentama: vaihda se Komponenteissa.",
         ["Interface"] = "Käyttöliittymä",
         ["It goes in when you press Play; your settings stay."] = "Se otetaan käyttöön, kun painat Pelaa; asetuksesi säilyvät.",
-        ["Keep my Apex Radiance settings"] = "Säilytä Apex Radiance -asetukseni",
+        ["Keep my settings, albums and mod notes"] = "Säilytä asetukseni, albumini ja modimuistiinpanoni",
         ["Last checked {0}"] = "Tarkistettu viimeksi {0}",
         ["Last played {0}"] = "Pelattu viimeksi {0}",
         ["Last session"] = "Viimeisin pelikerta",

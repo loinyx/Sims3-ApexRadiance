@@ -858,7 +858,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "由啟動器安裝：請在「元件」中切換。",
         ["Interface"] = "介面",
         ["It goes in when you press Play; your settings stay."] = "按「開始遊戲」時放入；你的設定會保留。",
-        ["Keep my Apex Radiance settings"] = "保留我的 Apex Radiance 設定",
+        ["Keep my settings, albums and mod notes"] = "保留我的設定、相簿和模組備註",
         ["Last checked {0}"] = "上次檢查：{0}",
         ["Last played {0}"] = "上次遊戲：{0}",
         ["Last session"] = "上次遊戲階段",

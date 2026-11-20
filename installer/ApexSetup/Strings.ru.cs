@@ -888,7 +888,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "Установлено лаунчером: переключается в «Компонентах».",
         ["Interface"] = "Интерфейс",
         ["It goes in when you press Play; your settings stay."] = "Установится при нажатии «Играть»; настройки сохранятся.",
-        ["Keep my Apex Radiance settings"] = "Сохранить мои настройки Apex Radiance",
+        ["Keep my settings, albums and mod notes"] = "Сохранить мои настройки, альбомы и заметки о модах",
         ["Last checked {0}"] = "Последняя проверка: {0}",
         ["Last played {0}"] = "Последняя игра: {0}",
         ["Last session"] = "Последняя сессия",

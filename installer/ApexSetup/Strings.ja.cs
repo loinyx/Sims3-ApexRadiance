@@ -892,7 +892,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "ランチャーがインストール: コンポーネントで切り替えます。",
         ["Interface"] = "インターフェイス",
         ["It goes in when you press Play; your settings stay."] = "「プレイ」を押すと適用されます。設定はそのまま残ります。",
-        ["Keep my Apex Radiance settings"] = "Apex Radiance の設定を保持する",
+        ["Keep my settings, albums and mod notes"] = "設定、アルバム、Mod のメモを残す",
         ["Last checked {0}"] = "最終チェック: {0}",
         ["Last played {0}"] = "最終プレイ: {0}",
         ["Last session"] = "前回のセッション",

@@ -900,7 +900,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "Installerad av launchern: slå på eller av under Komponenter.",
         ["Interface"] = "Gränssnitt",
         ["It goes in when you press Play; your settings stay."] = "Den installeras när du trycker på Spela; dina inställningar finns kvar.",
-        ["Keep my Apex Radiance settings"] = "Behåll mina Apex Radiance-inställningar",
+        ["Keep my settings, albums and mod notes"] = "Behåll mina inställningar, album och mod-anteckningar",
         ["Last checked {0}"] = "Senast kontrollerat {0}",
         ["Last played {0}"] = "Senast spelat {0}",
         ["Last session"] = "Senaste sessionen",

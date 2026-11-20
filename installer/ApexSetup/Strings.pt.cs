@@ -589,7 +589,7 @@ public static partial class Strings
         ["Apex Radiance by loinyx, and the authors of every component the launcher installs."] = "Apex Radiance por loinyx, e os autores de cada componente que o launcher instala.",
         ["Close the game first"] = "Feche o jogo primeiro",
         ["Close The Sims 3, then uninstall."] = "Feche o The Sims 3 e depois desinstale.",
-        ["Keep my Apex Radiance settings"] = "Manter minhas configurações do Apex Radiance",
+        ["Keep my settings, albums and mod notes"] = "Manter minhas configurações, álbuns e notas de mods",
         ["Apex Radiance and every component the launcher installed are removed, and every file they replaced is put back. Mods you switched off are put back on. Your saves and your own mods stay."] =
             "O Apex Radiance e cada componente que o launcher instalou são removidos, e cada arquivo que eles substituíram é devolvido. Os mods que você desligou são ligados de novo. Seus saves e seus próprios mods ficam.",
         ["Some files could not be put back: see the log."] = "Alguns arquivos não puderam ser devolvidos: veja o log.",

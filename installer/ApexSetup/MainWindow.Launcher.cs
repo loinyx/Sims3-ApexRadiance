@@ -816,7 +816,7 @@ public sealed partial class MainWindow
     public async Task UninstallAsync(bool fromWindows = false)
     {
         if (Games.IsRunning()) { await Message(T("Close the game first"), T("Close The Sims 3, then uninstall.")); return; }
-        var keep = new CheckBox { Content = T("Keep my Apex Radiance settings"), IsChecked = true };
+        var keep = new CheckBox { Content = T("Keep my settings, albums and mod notes"), IsChecked = true };
         var text = new StackPanel { Spacing = 12 };
         text.Children.Add(Body(T("Apex Radiance and every component the launcher installed are removed, and every file they replaced is put back. Mods you switched off are put back on. Your saves and your own mods stay.")));
         text.Children.Add(keep);
@@ -837,12 +837,28 @@ public sealed partial class MainWindow
                 await p.WaitForExitAsync();
                 if (p.ExitCode != 0) left.Add(T("Some files could not be put back: see the log."));
             }
-            else left.AddRange(await Task.Run(() => games.SelectMany(g => Uninstall.FromGame(g, Scan.DocumentsFor(g), keepSettings)).ToList()));
+            else left.AddRange(await Task.Run(() =>
+            {
+                var stayed = new List<string>();
+                foreach (var g in games)
+                {
+                    try { stayed.AddRange(Uninstall.FromGame(g, Scan.DocumentsFor(g), keepSettings)); }
+                    catch (Exception e) { App.Log(e); stayed.Add(g.Root + ": " + ErrorText(e)); }
+                }
+                return stayed;
+            }));
         }
         catch (Exception e) { App.Log(e); left.Add(ErrorText(e)); }
-        Uninstall.Launcher();
         _busy = false;
-        await Message(T("Apex Launcher was uninstalled"), left.Count == 0 ? T("Everything it installed is gone, and the files it replaced are back.") : T("Some things stayed: {0}", string.Join("; ", left)));
+        if (left.Count > 0)
+        {
+            // (the launcher stays: without it nothing could finish the job or put the rest back)
+            await Message(T("The uninstall did not finish"), T("Some things stayed: {0}. Apex Launcher stays so you can try again.", string.Join("; ", left)));
+            if (fromWindows) Application.Current.Exit();
+            return;
+        }
+        Uninstall.Launcher(keepData: keepSettings);
+        await Message(T("Apex Launcher was uninstalled"), T("Everything it installed is gone, and the files it replaced are back."));
         Application.Current.Exit();
     }
 

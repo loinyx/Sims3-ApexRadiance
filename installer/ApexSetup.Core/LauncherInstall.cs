@@ -72,7 +72,8 @@ public static partial class LauncherInstall
     {
         var target = folder is null ? Path.GetFullPath(exe) : Path.Combine(Path.GetFullPath(folder), Path.GetFileName(exe));
         var installed = IsInstalledCopy(exe);
-        if (installed && IsInstalledCopy(target)) throw new ArgumentException("A portable launcher needs a folder outside the install folder.", nameof(folder));
+        // (anywhere under the install folder, which goes once the copy is made, would take the copy with it)
+        if (installed && (IsInstalledCopy(target) || Engine.Within(target, Paths.InstallDir))) throw new ArgumentException("A portable launcher needs a folder outside the install folder.", nameof(folder));
         var moved = !string.Equals(target, Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase);
         if (moved)
         {

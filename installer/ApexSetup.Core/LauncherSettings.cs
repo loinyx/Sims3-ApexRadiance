@@ -26,7 +26,7 @@ public sealed class LauncherSettings
         try
         {
             Directory.CreateDirectory(Paths.Data);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, SetupJson.Default.LauncherSettings));
+            Fs.WriteAtomic(FilePath, JsonSerializer.Serialize(this, SetupJson.Default.LauncherSettings));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }

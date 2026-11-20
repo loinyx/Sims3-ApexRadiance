@@ -225,8 +225,24 @@ public static class Gallery
 
     public static GalleryData Load()
     {
-        try { return File.Exists(FilePath) ? JsonSerializer.Deserialize(File.ReadAllText(FilePath), SetupJson.Default.GalleryData) ?? new() : new(); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { Engine.Log(e); return new(); }
+        try
+        {
+            if (!File.Exists(FilePath)) return new();
+            var d = JsonSerializer.Deserialize(File.ReadAllText(FilePath), SetupJson.Default.GalleryData) ?? new();
+            // (read back, the dictionaries lose their case-blind keys: paths and album keys compare without case)
+            d.Pictures = new(d.Pictures, StringComparer.OrdinalIgnoreCase);
+            d.Albums = new(d.Albums, StringComparer.OrdinalIgnoreCase);
+            foreach (var look in d.Albums.Values) look.Places = new(look.Places, StringComparer.OrdinalIgnoreCase);
+            return d;
+        }
+        catch (JsonException e)
+        {
+            // (a file that cannot be read is kept aside, never written over by an empty gallery)
+            Engine.Log(new InvalidDataException("gallery.json could not be read; kept as gallery.json.corrupt", e));
+            try { File.Move(FilePath, FilePath + ".corrupt", true); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            return new();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); return new(); }
     }
 
     public static void Save(GalleryData d)

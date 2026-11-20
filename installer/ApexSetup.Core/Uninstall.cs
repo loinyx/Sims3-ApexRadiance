@@ -12,8 +12,9 @@ public static class Uninstall
     public static List<string> FromGame(Game g, string docs, bool keepSettings)
     {
         var left = new List<string>();
-        Engine.RemoveAll(g, docs);
-        Mods.EnableAll(g, docs);
+        // (the switched-off mods come back first: they are the player's, whatever happens to the rest)
+        try { Mods.EnableAll(g, docs); }
+        finally { Engine.RemoveAll(g, docs); }
         var dir = Manifest.DirOf(g.Bin);
         if (Manifest.Load(g.Bin).Files.Count == 0)
         {
@@ -21,12 +22,37 @@ public static class Uninstall
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(dir); }
         }
         else left.Add(dir); // (a file could not be put back: its backup stays where Repair can find it)
-        if (!keepSettings)
+        if (!keepSettings) left.AddRange(ApexSettings(docs));
+        return left;
+    }
+
+    // Apex Radiance's settings, logs and caches in Documents go; the pictures and videos it saved there stay (its
+    // Screenshots and Videos folders, and any folder its settings send captures to), and so does the folder holding them
+    public static List<string> ApexSettings(string docs)
+    {
+        var left = new List<string>();
+        var apex = Path.Combine(docs, "Apex Radiance");
+        if (!Directory.Exists(apex)) return left;
+        var keep = Gallery.PictureFolders(docs).Concat(Gallery.VideoFolders(docs))
+            .Append(Path.Combine(apex, "Screenshots")).Append(Path.Combine(apex, "Videos"))
+            .Select(f => Path.GetFullPath(f).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar).ToList();
+        bool Holds(string entry)
         {
-            var apex = Path.Combine(docs, "Apex Radiance");
-            try { if (Directory.Exists(apex)) Fs.Retry(() => Directory.Delete(apex, true)); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(apex); }
+            var e = Path.GetFullPath(entry).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            return keep.Any(k => k.StartsWith(e, StringComparison.OrdinalIgnoreCase));
         }
+        foreach (var entry in Directory.EnumerateFileSystemEntries(apex).ToList())
+        {
+            if (Holds(entry)) continue;
+            try
+            {
+                if (Directory.Exists(entry)) Fs.Retry(() => Directory.Delete(entry, true));
+                else Fs.Retry(() => File.Delete(entry));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(entry); }
+        }
+        try { if (!Directory.EnumerateFileSystemEntries(apex).Any()) Directory.Delete(apex); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return left;
     }
 
@@ -47,11 +73,14 @@ public static class Uninstall
 
     // as the player, last: nothing of the launcher left once this process closes (a copy outside the install folder, portable
     // or never chosen, goes with its marker; the folder it sits in stays)
-    public static void Launcher(string? exe = null)
+    // keepData: the player's albums, captions, mod notes and settings stay for a later install (only the picture copies
+    // and the plans made for the administrator copy go)
+    public static void Launcher(string? exe = null, bool keepData = false)
     {
         exe ??= Environment.ProcessPath;
         LauncherInstall.RemoveTraces();
         var outside = exe is not null && !LauncherInstall.IsInstalledCopy(exe);
-        LauncherInstall.DeleteAfterExit(outside ? [Paths.InstallDir, Paths.Data, exe!, LauncherInstall.MarkerOf(exe!)] : [Paths.InstallDir, Paths.Data]);
+        string[] data = keepData ? [Path.Combine(Paths.Data, "thumbs"), Paths.Ops] : [Paths.Data];
+        LauncherInstall.DeleteAfterExit(outside ? [Paths.InstallDir, .. data, exe!, LauncherInstall.MarkerOf(exe!)] : [Paths.InstallDir, .. data]);
     }
 }

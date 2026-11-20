@@ -903,7 +903,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "Εγκατεστημένο από τον launcher: άλλαξέ το στα Στοιχεία.",
         ["Interface"] = "Περιβάλλον χρήστη",
         ["It goes in when you press Play; your settings stay."] = "Μπαίνει όταν πατάς Παιχνίδι· οι ρυθμίσεις σου μένουν.",
-        ["Keep my Apex Radiance settings"] = "Διατήρηση των ρυθμίσεων του Apex Radiance",
+        ["Keep my settings, albums and mod notes"] = "Διατήρηση των ρυθμίσεων, των άλμπουμ και των σημειώσεων mod",
         ["Last checked {0}"] = "Τελευταίος έλεγχος {0}",
         ["Last played {0}"] = "Τελευταίο παιχνίδι {0}",
         ["Last session"] = "Τελευταία συνεδρία",

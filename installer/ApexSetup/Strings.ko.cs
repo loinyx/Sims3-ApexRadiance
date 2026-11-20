@@ -890,7 +890,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "런처가 설치함: 구성 요소에서 전환하세요.",
         ["Interface"] = "인터페이스",
         ["It goes in when you press Play; your settings stay."] = "플레이를 누르면 들어가요. 설정은 그대로예요.",
-        ["Keep my Apex Radiance settings"] = "내 Apex Radiance 설정 유지",
+        ["Keep my settings, albums and mod notes"] = "내 설정, 앨범, 모드 메모 유지",
         ["Last checked {0}"] = "마지막 확인: {0}",
         ["Last played {0}"] = "마지막 플레이: {0}",
         ["Last session"] = "마지막 세션",

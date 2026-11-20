@@ -900,7 +900,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "Installato dal launcher: cambialo in Componenti.",
         ["Interface"] = "Interfaccia",
         ["It goes in when you press Play; your settings stay."] = "Viene installato quando premi Gioca; le impostazioni restano.",
-        ["Keep my Apex Radiance settings"] = "Mantieni le mie impostazioni di Apex Radiance",
+        ["Keep my settings, albums and mod notes"] = "Mantieni le mie impostazioni, gli album e le note sulle mod",
         ["Last checked {0}"] = "Ultimo controllo {0}",
         ["Last played {0}"] = "Ultima partita {0}",
         ["Last session"] = "Ultima sessione",

@@ -1428,15 +1428,28 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         TestPackage(Path.Combine(udocs, "Mods", "Packages", "mine.package"), (0x1u, "m"u8.ToArray(), false, 1));
         Mods.SetEnabled(Mods.List(ug, udocs).Single(m => m.Name == "mine.package"), false, udocs);
         Directory.CreateDirectory(Path.Combine(udocs, "Apex Radiance")); File.WriteAllText(Path.Combine(udocs, "Apex Radiance", "ApexRadiance.toml"), "[ui]");
+        Directory.CreateDirectory(Path.Combine(udocs, "Apex Radiance", "Screenshots")); File.WriteAllText(Path.Combine(udocs, "Apex Radiance", "Screenshots", "shot.png"), "picture");
+        Directory.CreateDirectory(Path.Combine(udocs, "Apex Radiance", "Videos")); File.WriteAllText(Path.Combine(udocs, "Apex Radiance", "Videos", "clip.mp4"), "video");
+        Directory.CreateDirectory(Path.Combine(udocs, "Apex Radiance", "Captures")); File.WriteAllText(Path.Combine(udocs, "Apex Radiance", "ApexRadiance_LOG.txt"), "log");
+        // (a manifest entry outside the game, as a manifest written by someone else could name, is never touched)
+        var outsider = Path.Combine(lr, "Outside", "x.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(outsider)!); File.WriteAllText(outsider, "not the game's");
+        var um = Manifest.Load(ubin); um.Files.Add(new ManifestFile { Component = Components.Apex, Path = outsider }); um.Save();
         Directory.CreateDirectory(Path.Combine(udocs, "Saves", "Home.sims3")); File.WriteAllText(Path.Combine(udocs, "Saves", "Home.sims3", "h.nhd"), "save");
         File.WriteAllText(Path.Combine(udocs, "Mods", "Resource.cfg"), "Priority 500");
         var left = Uninstall.FromGame(ug, udocs, keepSettings: false);
+        Check(File.Exists(outsider) && left.Count == 1 && left[0] == Manifest.DirOf(ubin), "uninstall leaves a manifest entry outside the game alone, and says the backup folder stayed");
+        um = Manifest.Load(ubin); um.Files.RemoveAll(f => f.Path == outsider); um.Save();
+        left = Uninstall.FromGame(ug, udocs, keepSettings: false);
         Check(left.Count == 0 && !File.Exists(Path.Combine(ubin, "ApexRadiance.asi")) && !File.Exists(Path.Combine(ubin, "wininet.dll"))
             && !Directory.Exists(Manifest.DirOf(ubin)), "uninstall removes Apex, the loader and the backup folder");
         Check(File.Exists(Path.Combine(ubin, "Mine.asi")) && File.Exists(Path.Combine(udocs, "Saves", "Home.sims3", "h.nhd"))
             && File.Exists(Path.Combine(udocs, "Mods", "Resource.cfg")) && File.Exists(Path.Combine(udocs, "Mods", "Packages", "mine.package"))
             && !Directory.Exists(Mods.Disabled(udocs)), "uninstall keeps the player's mods (switched-off ones back on), saves and Resource.cfg");
-        Check(!Directory.Exists(Path.Combine(udocs, "Apex Radiance")), "uninstall removes Apex Radiance's settings unless asked to keep them");
+        Check(!File.Exists(Path.Combine(udocs, "Apex Radiance", "ApexRadiance.toml")) && !File.Exists(Path.Combine(udocs, "Apex Radiance", "ApexRadiance_LOG.txt"))
+            && !Directory.Exists(Path.Combine(udocs, "Apex Radiance", "Captures")), "uninstall removes Apex Radiance's settings, logs and caches unless asked to keep them");
+        Check(File.Exists(Path.Combine(udocs, "Apex Radiance", "Screenshots", "shot.png")) && File.Exists(Path.Combine(udocs, "Apex Radiance", "Videos", "clip.mp4")),
+            "uninstall keeps the pictures and videos Apex saved in its own folder");
 
         // what a mod is, from how many resources of each type it holds (cases from a player's real mods)
         static Dictionary<uint, int> Types(params (uint T, int N)[] t) => t.ToDictionary(x => x.T, x => x.N);

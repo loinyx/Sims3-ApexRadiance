@@ -895,7 +895,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "Nainstalováno spouštěčem: přepněte v Komponentách.",
         ["Interface"] = "Rozhraní",
         ["It goes in when you press Play; your settings stay."] = "Přidá se při stisknutí Hrát; vaše nastavení zůstane.",
-        ["Keep my Apex Radiance settings"] = "Zachovat moje nastavení Apex Radiance",
+        ["Keep my settings, albums and mod notes"] = "Zachovat moje nastavení, alba a poznámky k modům",
         ["Last checked {0}"] = "Naposledy zkontrolováno {0}",
         ["Last played {0}"] = "Naposledy hráno {0}",
         ["Last session"] = "Poslední relace",

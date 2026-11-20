@@ -583,8 +583,14 @@ public static class Engine
             if (rel == "d3d9.dll" && layerBefore != (c == Components.Dxvk ? Layer.Dxvk : Layer.Bridge)) continue;
             if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) Fs.Delete(p);
         }
+        var docsRoot = docs ?? Scan.DocumentsFor(g);
         foreach (var f in m.Files.Where(f => f.Component == c).ToList())
         {
+            if (!Within(f.Path, g.Bin, docsRoot) || f.Backup is not null && !Within(f.Backup, Manifest.DirOf(g.Bin)))
+            {
+                Engine.Log(new InvalidOperationException("Manifest entry outside the game left alone: " + f.Path + " <- " + f.Backup));
+                continue;
+            }
             Fs.Delete(f.Path);
             if (f.Backup is not null && File.Exists(f.Backup)) Fs.Move(f.Backup, f.Path);
             m.Files.Remove(f);
@@ -614,6 +620,17 @@ public static class Engine
         // the restored d3d9.dll is a loader again: the one Setup added for the bridge would load every mod twice
         if (c is Components.Bridge or Components.Dxvk && m.Versions.ContainsKey(Components.Loader) && Scan.Run(g, docs).LoaderIsD3d9)
             Remove(g, Components.Loader, docs);
+    }
+
+    // a path inside one of the folders (after .. and the like are resolved)
+    public static bool Within(string path, params string[] roots)
+    {
+        try
+        {
+            var p = Path.GetFullPath(path);
+            return roots.Any(r => p.StartsWith(Path.GetFullPath(r).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
     }
 
     public static void RemoveAll(Game g, string? docs = null)

@@ -890,7 +890,7 @@ public static partial class Strings
         ["Installed by the launcher: switch it in Components."] = "Installeret af launcheren: skift det under Komponenter.",
         ["Interface"] = "Brugerflade",
         ["It goes in when you press Play; your settings stay."] = "Det kommer med, når du trykker på Spil; dine indstillinger bevares.",
-        ["Keep my Apex Radiance settings"] = "Behold mine Apex Radiance-indstillinger",
+        ["Keep my settings, albums and mod notes"] = "Behold mine indstillinger, albummer og mod-noter",
         ["Last checked {0}"] = "Sidst tjekket {0}",
         ["Last played {0}"] = "Sidst spillet {0}",
         ["Last session"] = "Sidste session",
