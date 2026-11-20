@@ -32,7 +32,7 @@ public sealed class AlbumLook
     public string Frame { get; set; } = "polaroid";      // polaroid, rounded, stamp, film, circle
     public string Font { get; set; } = "Ink Free";
     public double Height { get; set; }                     // the board's height its places were laid on
-    public int Layout { get; set; }                        // 2: laid along the timeline
+    public int Layout { get; set; }                        // 3: laid along the timeline, newest first
     public string Light { get; set; } = "soft";          // soft, spot (a lit middle, darker edges) or flat
     public string Tape { get; set; } = "colour";         // colour, match (the board's own hue) or none
     public double Size { get; set; } = 1;                 // the pictures' size, 0.75 to 1.3

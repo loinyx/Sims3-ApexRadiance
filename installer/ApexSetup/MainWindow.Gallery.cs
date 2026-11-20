@@ -456,8 +456,8 @@ public sealed partial class MainWindow
 
     // ---------- Scrapbook ----------
 
-    // The album as a timeline: the oldest pictures on the left, the newest on the right, a line through the board with each
-    // day marked; it scrolls sideways (the mouse wheel too) and opens on the newest. Every album keeps its own colour (one
+    // The album as a timeline: the newest pictures on the left, going back in time to the right, a line through the board
+    // with each day marked; it scrolls sideways (the mouse wheel too) and opens on the newest. Every album keeps its own colour (one
     // hue fading softly darker), handwriting and frames.
     const double Step = 270;
     double BoardHeight = 660, _boardScale = 1;
@@ -662,7 +662,7 @@ public sealed partial class MainWindow
     {
         var look = Gallery.Look(_gal!, _galAlbum);
         // (boards laid out before the timeline get the timeline's layout once)
-        if (look.Layout < 2) { look.Places.Clear(); look.Layout = 2; look.Background = "desk"; }
+        if (look.Layout < 3) { look.Places.Clear(); look.Layout = 3; }
         var ink = Ink(look);
         // as tall as the window allows, the pictures sized with it
         BoardHeight = BoardFits();
@@ -676,8 +676,8 @@ public sealed partial class MainWindow
         look.Height = BoardHeight;
         var s = _boardScale = BoardHeight / 660;
         var mid = BoardHeight / 2;
-        // the newest sixty, laid oldest to newest along a gentle wave around the line, a breath of room where a day begins
-        var pics = InAlbum().Take(60).Reverse().ToList();
+        // the newest sixty, laid newest first along a gentle wave around the line, a breath of room where a day begins
+        var pics = InAlbum().Take(60).ToList();
         var xs = new double[pics.Count];
         var days = new List<(double X, DateTime Day)>();
         var x = 110 * s;
@@ -736,7 +736,7 @@ public sealed partial class MainWindow
                 look.Places[pics[i].Path] = place;
             }
             // (the newest fall in first, the ones further back already lie there when scrolled to)
-            var delay = 120 + Math.Min(pics.Count - 1 - i, 10) * 130;
+            var delay = 120 + Math.Min(i, 10) * 130;
             var card = Framed(pics[i], place, look, ink, i, delay, pics);
             canvas.Children.Add(card);
             _boardCards.Add((pics[i], card, i));
@@ -791,7 +791,7 @@ public sealed partial class MainWindow
         {
             if (opened || scroll.ScrollableWidth <= 0) return;
             opened = true;
-            scroll.ChangeView((keep ?? 1) * scroll.ScrollableWidth, null, null, true);
+            scroll.ChangeView((keep ?? 0) * scroll.ScrollableWidth, null, null, true);
         };
         var panning = false;
         double grabX = 0, grabOffset = 0;
