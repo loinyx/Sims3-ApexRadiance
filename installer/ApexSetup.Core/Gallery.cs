@@ -2,7 +2,11 @@ using System.Text.Json;
 
 namespace ApexSetup;
 
-public sealed record Picture(string Path, DateTime Taken);
+public sealed record Picture(string Path, DateTime Taken)
+{
+    // a recording rather than a picture (Apex's videos, the game's own)
+    public bool Video => Gallery.VideoKinds.Contains(System.IO.Path.GetExtension(Path).ToLowerInvariant());
+}
 
 // what the player set on one picture
 public sealed class PictureInfo
@@ -97,19 +101,90 @@ public static class Gallery
 {
     public const string All = "all", Favourites = "fav", Mine = "my:";
     static readonly string[] Kinds = [".png", ".jpg", ".jpeg", ".bmp"];
+    public static readonly string[] VideoKinds = [".mp4", ".mkv", ".avi", ".wmv", ".mov", ".webm"];
     static string FilePath => Path.Combine(Paths.Data, "gallery.json");
 
-    public static string Folder(string docs) => Path.Combine(docs, "Screenshots");
+    // Where pictures and videos are saved, as Apex Radiance is set (ApexRadiance.toml): the game's folders (Screenshots,
+    // Recorded Videos), Apex's own (Apex Radiance\Screenshots, \Videos) or a folder the player chose. The Gallery shows all of
+    // them, so changing the setting hides nothing taken before; the first is where new ones go.
+    public static string Folder(string docs) => PictureFolders(docs)[0];
+    public static string VideoFolder(string docs) => VideoFolders(docs)[0];
+
+    public static List<string> PictureFolders(string docs)
+    {
+        var toml = ApexToml(docs);
+        var chosen = Chosen(docs, Setting(toml, "ui", "screenshot_folder"), Setting(toml, "ui", "screenshot_custom_folder"), "Screenshots", "Screenshots");
+        return Folders(chosen, Path.Combine(docs, "Screenshots"), Path.Combine(docs, "Apex Radiance", "Screenshots"));
+    }
+
+    public static List<string> VideoFolders(string docs)
+    {
+        var toml = ApexToml(docs);
+        var chosen = Chosen(docs, Setting(toml, "capture.video", "folder"), Setting(toml, "capture.video", "custom_folder"), "Recorded Videos", "Videos");
+        return Folders(chosen, Path.Combine(docs, "Recorded Videos"), Path.Combine(docs, "Apex Radiance", "Videos"));
+    }
+
+    static string ApexToml(string docs)
+    {
+        try { var f = Path.Combine(docs, "Apex Radiance", "ApexRadiance.toml"); return File.Exists(f) ? File.ReadAllText(f) : ""; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return ""; }
+    }
+
+    // game, apex or custom (a folder that resolves to a full path; else the game's, as Apex falls back)
+    static string Chosen(string docs, string? mode, string? custom, string gameSub, string apexSub)
+    {
+        if (mode == "apex") return Path.Combine(docs, "Apex Radiance", apexSub);
+        if (mode == "custom" && custom is { Length: > 0 } && Environment.ExpandEnvironmentVariables(custom) is var c && !c.Contains('%') && Path.IsPathFullyQualified(c)) return c;
+        return Path.Combine(docs, gameSub);
+    }
+
+    static List<string> Folders(string chosen, params string[] also) =>
+        new[] { chosen }.Concat(also).Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    // a key's text in a [section] of a TOML file: a quoted string (with \\ and \" in a basic one) or a bare word
+    public static string? Setting(string toml, string section, string key)
+    {
+        var inSection = false;
+        foreach (var raw in toml.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.StartsWith('[')) { inSection = line.IndexOf(']') is var c and > 0 && line[1..c].Trim().Equals(section, StringComparison.OrdinalIgnoreCase); continue; }
+            if (!inSection || line.IndexOf('=') is not (> 0 and var eq) || !line[..eq].Trim().Equals(key, StringComparison.OrdinalIgnoreCase)) continue;
+            var v = line[(eq + 1)..].Trim();
+            if (v.StartsWith('\''))
+                return v.IndexOf('\'', 1) is var e and > 0 ? v[1..e] : null;
+            if (v.StartsWith('"'))
+            {
+                var sb = new System.Text.StringBuilder();
+                for (int i = 1; i < v.Length; i++)
+                {
+                    if (v[i] == '"') return sb.ToString();
+                    if (v[i] == '\\' && i + 1 < v.Length) { i++; sb.Append(v[i] switch { 'n' => '\n', 't' => '\t', _ => v[i] }); }
+                    else sb.Append(v[i]);
+                }
+                return null;
+            }
+            return v.Split([' ', '\t', '#'], 2)[0];
+        }
+        return null;
+    }
 
     public static List<Picture> List(string docs)
     {
-        var dir = Folder(docs);
-        try
+        var found = new Dictionary<string, Picture>(StringComparer.OrdinalIgnoreCase);
+        void Read(string dir, string[] kinds)
         {
-            return !Directory.Exists(dir) ? [] : new DirectoryInfo(dir).EnumerateFiles().Where(f => Kinds.Contains(f.Extension.ToLowerInvariant()))
-                .Select(f => new Picture(f.FullName, f.LastWriteTime)).OrderByDescending(p => p.Taken).ToList();
+            try
+            {
+                if (!Directory.Exists(dir)) return;
+                foreach (var f in new DirectoryInfo(dir).EnumerateFiles().Where(f => kinds.Contains(f.Extension.ToLowerInvariant())))
+                    found.TryAdd(f.FullName, new Picture(f.FullName, f.LastWriteTime));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
+        foreach (var dir in PictureFolders(docs)) Read(dir, Kinds);
+        foreach (var dir in VideoFolders(docs)) Read(dir, VideoKinds);
+        return found.Values.OrderByDescending(p => p.Taken).ToList();
     }
 
     // The game does not say which household a picture is of. The guess: the save written soonest after the picture was

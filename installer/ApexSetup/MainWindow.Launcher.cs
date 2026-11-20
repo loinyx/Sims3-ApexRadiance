@@ -135,16 +135,7 @@ public sealed partial class MainWindow
         _ => T("Ready to play"),
     };
 
-    List<string> Screenshots(int n)
-    {
-        var dir = Path.Combine(Docs, "Screenshots");
-        try
-        {
-            return !Directory.Exists(dir) ? [] : new DirectoryInfo(dir).EnumerateFiles().Where(f => f.Extension.ToLowerInvariant() is ".jpg" or ".jpeg" or ".png")
-                .OrderByDescending(f => f.LastWriteTime).Take(n).Select(f => f.FullName).ToList();
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
-    }
+    List<string> Screenshots(int n) => Gallery.List(Docs).Where(p => !p.Video).Take(n).Select(p => p.Path).ToList();
 
     // a pack's own icon from the player's install (its game definition file), else its short code on its colour
     static FrameworkElement PackBadge(Pack p, string? dir, double size)

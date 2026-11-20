@@ -362,6 +362,7 @@ public sealed partial class MainWindow
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(by, T("Group"));
             tools.Children.Add(by);
             tools.Children.Add(Button(T("Screenshots folder"), () => OpenFolder(Gallery.Folder(Docs))));
+            if (_galPics.Any(pc => pc.Video)) tools.Children.Add(Button(T("Videos folder"), () => OpenFolder(Gallery.VideoFolder(Docs))));
         }
         Grid.SetColumn(tools, 1);
         g.Children.Add(tools);
@@ -499,13 +500,14 @@ public sealed partial class MainWindow
     {
         var px = width * 1.5 <= 1100 ? 1100 : 2200;
         var b = new BitmapImage { DecodePixelType = DecodePixelType.Logical, DecodePixelWidth = dw };
-        if (ThumbFile(path, px) is not { } file) { b.UriSource = new Uri(path); return b; }
+        var video = Gallery.VideoKinds.Contains(Path.GetExtension(path).ToLowerInvariant());
+        if (ThumbFile(path, px) is not { } file) { if (!video) b.UriSource = new Uri(path); return b; }
         if (File.Exists(file)) { b.UriSource = new Uri(file); return b; }
         var queue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _ = Task.Run(async () =>
         {
-            var made = await MakeThumb(path, file, px) ? file : path;
-            queue.TryEnqueue(() => b.UriSource = new Uri(made));
+            var made = await MakeThumb(path, file, px) ? file : video ? null : path;
+            if (made is not null) queue.TryEnqueue(() => b.UriSource = new Uri(made));
         });
         return b;
     }
@@ -526,6 +528,25 @@ public sealed partial class MainWindow
         });
     }
 
+    // a frame of a video as Windows' own thumbnail of it (none when Windows has no decoder for it: only its icon)
+    static async Task<Windows.Storage.FileProperties.StorageItemThumbnail?> VideoFrame(string path, int px)
+    {
+        var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(Path.GetFullPath(path));
+        var thumb = await file.GetThumbnailAsync(Windows.Storage.FileProperties.ThumbnailMode.SingleItem, (uint)px, Windows.Storage.FileProperties.ThumbnailOptions.ResizeThumbnail);
+        if (thumb is { Type: Windows.Storage.FileProperties.ThumbnailType.Image }) return thumb;
+        thumb?.Dispose();
+        return null;
+    }
+
+    // the round play mark over a video's picture
+    static Border PlayMark(double size) => new()
+    {
+        Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0C, 0x0C, 0x0C)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x55, 255, 255, 255)), BorderThickness = new Thickness(1.5),
+        IsHitTestVisible = false,
+        Child = new FontIcon { Glyph = "\uF5B0", FontSize = size * 0.38, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), Margin = new Thickness(size * 0.06, 0, 0, 0) },
+    };
+
     static async Task<bool> MakeThumb(string path, string file, int px)
     {
         await ThumbMakers.WaitAsync();
@@ -533,8 +554,11 @@ public sealed partial class MainWindow
         {
             if (File.Exists(file)) return true;
             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            using var source = File.OpenRead(path);
-            var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(source.AsRandomAccessStream());
+            var video = Gallery.VideoKinds.Contains(Path.GetExtension(path).ToLowerInvariant());
+            using var source = video ? null : File.OpenRead(path);
+            using var frame = video ? await VideoFrame(path, px) : null;
+            if (video && frame is null) return false;
+            var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(frame ?? source!.AsRandomAccessStream());
             var scale = Math.Min(1.0, px / (double)decoder.PixelWidth);
             var transform = new Windows.Graphics.Imaging.BitmapTransform
             {
@@ -567,6 +591,7 @@ public sealed partial class MainWindow
         var bmp = Thumb(p.Path, 420);
         var image = new Image { Stretch = Stretch.UniformToFill, Source = bmp, Opacity = bmp.PixelWidth > 0 ? 1 : 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(320) } };
         if (bmp.PixelWidth == 0) bmp.ImageOpened += (_, _) => image.Opacity = 1;
+        if (p.Video) g.Children.Add(PlayMark(46));
         g.Children.Add(image);
         var when = new Border { VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(12, 18, 12, 9), Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) },
             Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(0, 1), GradientStops = { new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0xB3, 0, 0, 0), Offset = 1 } } },
@@ -2319,6 +2344,7 @@ public sealed partial class MainWindow
                 RenderTransform = new CompositeTransform { Rotation = (style % 3 - 1) * 4, ScaleX = _boardCalm ? 1 : 0 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
             holder.Children.Add(strip);
         }
+        if (p.Video) holder.Children.Add(PlayMark(Math.Max(34, 52 * _boardScale)));
         var outer = new Border { Child = holder };
         CardPaths.AddOrUpdate(outer, p.Path);
         Canvas.SetLeft(outer, place.X);
@@ -2859,10 +2885,21 @@ public sealed partial class MainWindow
         var closing = false;
         Microsoft.UI.Dispatching.DispatcherQueueTimer? show = null;
         var wide = false;
+        // a video that was playing stops (its file let go) when another is shown or the viewer closes
+        void StopVideo()
+        {
+            foreach (var v in photo.Children.OfType<MediaPlayerElement>().ToList())
+            {
+                v.MediaPlayer?.Pause();
+                (v.Source as IDisposable)?.Dispose();
+                v.Source = null;
+            }
+        }
         void Close(bool stay = true)
         {
             if (closing) return;
             closing = true;
+            StopVideo();
             root.Changed -= Resized;
             show?.Stop();
             if (wide) Wide(false);
@@ -2976,6 +3013,24 @@ public sealed partial class MainWindow
             if (zoomer.ZoomFactor > 1.01f) zoomer.ChangeView(0, 0, 1, true);
             var look = Gallery.Look(_gal!, _galAlbum);
             var pic = pics[at];
+            StopVideo();
+            // (the zoom island is for pictures: a video has its own controls there)
+            islandFrame.Visibility = pic.Video ? Visibility.Collapsed : Visibility.Visible;
+            if (pic.Video)
+            {
+                // (a video plays in the room, with the player's own controls; the picture's zoom stays at rest)
+                zt.ScaleX = zt.ScaleY = 1; zt.TranslateX = zt.TranslateY = 0; zt.Rotation = 0;
+                var player = new MediaPlayerElement { AreTransportControlsEnabled = true, AutoPlay = true, Stretch = Stretch.Uniform,
+                    Source = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(path)), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
+                player.TransportControls.IsZoomButtonVisible = false;
+                photo.Children.Clear();
+                photo.Children.Add(player);
+                shown = player;
+                photo.Opacity = 1;
+                if (grow && from is not null) from.Opacity = 0;
+                grow = false;
+                return;
+            }
             if (wide)
             {
                 // (full screen: the picture alone, as large as the screen, the cached copy first and the sharp one over it)

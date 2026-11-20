@@ -23,6 +23,27 @@ static class GalleryTests
             var list = Gallery.List(docs);
             check(list.Count == 3 && list[0].Path == c && list[2].Path == a, "gallery: pictures only, newest first");
 
+            // Apex's save folders: its own and a chosen one are read too, videos with the pictures, the chosen first
+            var apexDir = Path.Combine(docs, "Apex Radiance");
+            var mine = Path.Combine(root, "My captures");
+            Directory.CreateDirectory(Path.Combine(apexDir, "Videos"));
+            Directory.CreateDirectory(mine);
+            File.WriteAllText(Path.Combine(apexDir, "ApexRadiance.toml"),
+                "[capture]\nnotes = true\n\n    [capture.video]\n    custom_folder = ''\n    folder = \"apex\"\n\n[ui]\nscreenshot_custom_folder = \"" + mine.Replace("\\", "\\\\") + "\"\nscreenshot_folder = \"custom\"\n");
+            var clip = Path.Combine(apexDir, "Videos", "Video_1.mp4");
+            File.WriteAllBytes(clip, [1]);
+            File.SetLastWriteTime(clip, now.AddMinutes(-5));
+            var mineShot = Path.Combine(mine, "x.png");
+            File.WriteAllBytes(mineShot, [1]);
+            File.SetLastWriteTime(mineShot, now.AddMinutes(-10));
+            var all = Gallery.List(docs);
+            check(Gallery.Folder(docs) == Path.GetFullPath(mine) && Gallery.VideoFolder(docs) == Path.GetFullPath(Path.Combine(apexDir, "Videos"))
+                && all.Count == 5 && all[0].Path == clip && all[0].Video && all[1].Path == mineShot && !all[1].Video,
+                "gallery: Apex's save folders are read (a chosen one first), videos with the pictures");
+            File.Delete(Path.Combine(apexDir, "ApexRadiance.toml"));
+            File.Delete(clip);
+            File.Delete(mineShot);
+
             var saves = new List<Save> { new(Path.Combine(docs, "Saves", "Town.sims3"), "Town", now.AddDays(-2)), new(Path.Combine(docs, "Saves", "Arbor.sims3"), "Arbor", now.AddMinutes(-30)) };
             check(Gallery.GuessHousehold(list[2], saves) == "Town" && Gallery.GuessHousehold(list[0], saves) == "Arbor" && Gallery.GuessHousehold(list[1], saves) == "Arbor",
                 "gallery: a picture goes to the save written soonest after it");
