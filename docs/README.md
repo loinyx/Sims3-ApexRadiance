@@ -72,7 +72,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Depth Blur](features/depth-blur.md): depth of field | Released |
 | [Banding Fix](features/banding-fix.md): dither against colour banding | Experimental (released in 2.2.0); Released in 2.16.0: High-precision scene on by default, redesigned card; Released in 3.2.3: frames without a 3D scene drawn straight into the back buffer |
 | [Looks](features/looks.md): runs a ReShade or GShade preset (.ini) inside Apex, 17 shaders built in plus the player's own .fx files and the packs of ReShade's official list, downloaded on a click; its own page, Image > Shaders (tabs Look and Library) | Released in 4.0.0, Experimental |
-| [Screenshots and video](features/screenshots-and-video.md): screenshots and MP4 or MKV videos with Apex's effects, its own page, Image > Capture (tabs Screenshots and Video) | Released in 4.0.0 |
+| [Screenshots and video](features/screenshots-and-video.md): screenshots and MP4 or MKV videos with Apex's effects up to 4K, its own page, Image > Capture (tabs Screenshots and Video) | Released in 4.0.0; 4K: Released in 4.0.13 |
 
 ### Performance
 

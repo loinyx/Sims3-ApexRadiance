@@ -122,6 +122,7 @@ to gather that evidence first; no scheduling change is made.
 [wall shading](performance-wall-shading-while-moving.md), [scene nodes](performance-scene-node-budget.md),
 [file lookups](performance-resource-lookup-cache.md), [missing files](performance-remember-missing-files.md),
 [file lists](performance-file-list-cache.md), [object lookups](performance-object-lookup-index.md),
+[text lookups](performance-faster-text-lookups.md),
 [texture compression](performance-fast-texture-compression.md), [cache compression](performance-fast-cache-compression.md),
 [Sim building](performance-fast-cas-sort.md), [memory](performance-fast-memory.md),
 [room to save](performance-room-to-save.md), [window updates](performance-lighter-window-updates.md),

@@ -58,6 +58,9 @@ Settings apply immediately and are included in profiles. The preview is never sa
   if a target cannot be created, Sims keep the scene shade and the card shows a warning.
 - **Custom content:** standard Sim materials are covered without a file list. Custom shaders are not guessed.
 - **F7 Light Probe:** its visibility-query copies of a draw are colour-disabled and never enter the mask.
+- **Shaders (Looks):** *On Sims' hair* reads this mask (`features/sim_mask.h`). While a shader that is on
+  asks for it, the mask is made even with the Sim controls off or the shade at 0, and blended hair is recorded even with
+  *Transparent hair* off; the composite uses the Sim controls' own settings as before.
 
 ## Limitations
 

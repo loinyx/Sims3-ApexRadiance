@@ -48,6 +48,8 @@ bool Saving(); // includes PNG encoding (screenshots and texture dumps), unlike 
 // The render thread waits only when the queued pixels pass a memory cap (32-bit game).
 // The current mouse pointer drawn into B G R (3) or B G R X (4) pixels of the game image at w x h (render thread)
 void DrawMousePointer(IDirect3DDevice9* dev, BYTE* px, UINT w, UINT h, UINT bytesPerPixel);
+// The same into an NV12 frame: w x h luma bytes, then h/2 rows of w bytes of interleaved U V (BT.709, 16-235)
+void DrawMousePointerNv12(IDirect3DDevice9* dev, BYTE* nv12, UINT w, UINT h);
 void WritePngAsync(const std::filesystem::path& folder, const std::filesystem::path& file, std::vector<BYTE> pixels, UINT w, UINT h, int channels);
 // Keeps Captures\ within [ui] capture_max_mb and capture_max_folders on a background thread, removing the oldest capture
 // folders first ("YYYY-MM-DD HH-MM-SS <kind>" direct children only; never the open session or a capture still being

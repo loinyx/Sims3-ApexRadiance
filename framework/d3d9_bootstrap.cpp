@@ -146,6 +146,7 @@ void FrameInit(IDirect3DDevice9* dev) {
     if (Platform::RemixBridge()) ExtraHooks::EnsureTraceHooks(dev);
     D3D9Hooks::RegisterPresent("ApexCore", [](D3D9Hooks::DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
         OnPresent(ctx.device);
+        GpuTrace::Frame();
         return D3D9Hooks::HookAction::Continue;
     }, static_cast<D3D9Hooks::Priority>(-2000)); // before everything else (the profiler's frame start is -1000)
     D3D9Hooks::SetAfterPresent([](IDirect3DDevice9* d, HRESULT& hr) {

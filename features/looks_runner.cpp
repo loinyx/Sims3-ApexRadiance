@@ -74,6 +74,22 @@ std::string FullSource(int shader)
              "  float3 c = saturate(tex2D(BackBuffer, uv).rgb); float k = gs_curve.x;\n"
              "  if (k > 0) c = gs_curve.y > 0 ? c * (1 + k) / (c + k) : k * c / (1 + k - c);\n"
              "  return float4(c, 1.0); }\n";
+        if (shader == -2) // Sims' hair takes the picture from before a step back (Step::hair; the test of Ambient Occlusion's Sim controls)
+            s += "\nsampler2D gs_keep : register(s1);\n"   // the picture before the step
+                 "sampler2D gs_sim : register(s2);\n"        // opaque Sim draws: r body depth, g hair depth (1 = none)
+                 "sampler2D gs_blend : register(s3);\n"      // blended Sim draws: r signed depth (< 0: hair), g coverage
+                 "sampler2D gs_scene : register(s4);\n"      // the scene's raw device depth (INTZ)
+                 "float4 gs_masks : register(c4);\n"         // x: opaque mask this frame, y: blended mask this frame, z: 1 - Step::hair
+                 "float4 gs_hair(float2 uv : TEXCOORD0) : COLOR0 {\n"
+                 "  float4 fx = tex2D(BackBuffer, uv); float d = tex2D(gs_scene, uv).x; float w = 0;\n"
+                 "  if (gs_masks.x > 0) { float2 m = tex2D(gs_sim, uv).rg;\n"
+                 "    bool hair = m.y >= 0 && m.y < 1 && abs(m.y - d) <= 2.4e-7, body = m.x >= 0 && m.x < 1 && abs(m.x - d) <= 2.4e-7;\n"
+                 "    if (hair && !body) w = 1; }\n"
+                 "  if (gs_masks.y > 0) { float2 t = tex2D(gs_blend, uv).rg;\n"
+                 // the mask keeps only the last blended layer's alpha: a faint strand over more hair reads as little
+                 // coverage, so 1/16 or more counts as all hair (only the faintest fringe stays in between)
+                 "    if (t.x < 0 && -t.x <= d + 2.4e-7) w = max(w, saturate(t.y * 16)); }\n"
+                 "  return float4(lerp(fx.rgb, tex2D(gs_keep, uv).rgb, w * gs_masks.z), fx.a); }\n";
         return s;
     }
     Append(s, Shader(shader).src);
@@ -86,6 +102,7 @@ int PsConstsUsed(const std::vector<Step>& steps)
     int n = 4; // c0 picture size, c1 pass data, c2 depth, c3 the copy's curve
     for (const Step& s : steps)
     {
+        if (s.hair < 0.999f) n = (std::max)(n, 5); // the hair pass sets c4
         if (IsUserShader(s.shader) || !ValidShader(s.shader)) continue;
         const LooksShader& d = Shader(s.shader);
         for (int i = 0; i < d.paramCount; ++i) n = (std::max)(n, d.params[i].reg + 1);
@@ -134,11 +151,12 @@ void Runner::Free(Tex& t)
 
 void Runner::Release()
 {
-    for (Tex* t : { &ping_, &pong_, &asTex_ })
+    for (Tex* t : { &ping_, &pong_, &asTex_, &keep_ })
         Free(*t);
     for (auto& kv : ps_) if (kv.second) kv.second->Release();
     ps_.clear();
     if (copyPs_) { copyPs_->Release(); copyPs_ = nullptr; }
+    if (hairPs_) { hairPs_->Release(); hairPs_ = nullptr; }
     gpuBytes_ = 0;
 }
 
@@ -156,6 +174,29 @@ IDirect3DPixelShader9* Runner::CopyPs(IDirect3DDevice9* dev)
 {
     if (!copyPs_ && factory_) copyPs_ = factory_(dev, -1, 0);
     return copyPs_;
+}
+
+static void SetSampler(IDirect3DDevice9* dev, int stage, bool point);
+
+bool Runner::KeepHair(const Frame& f, float hair)
+{
+    IDirect3DDevice9* dev = f.dev;
+    if (!hairPs_ && factory_) hairPs_ = factory_(dev, -2, 0);
+    if (!hairPs_) return false;
+    UnbindAll(dev);
+    BindTex(dev, 0, ping_.tex);
+    BindTex(dev, 1, keep_.tex);
+    BindTex(dev, 2, f.simOpaque);
+    BindTex(dev, 3, f.simTransparent);
+    BindTex(dev, 4, f.depth);
+    for (int st = 1; st <= 4; ++st) SetSampler(dev, st, true); // the masks and the depth: exact texels (float targets)
+    const float c4[4] = { f.simOpaque ? 1.0f : 0.0f, f.simTransparent ? 1.0f : 0.0f, 1.0f - (std::min)((std::max)(hair, 0.0f), 1.0f), 0.0f };
+    dev->SetPixelShaderConstantF(4, c4, 1);
+    Draw(dev, hairPs_, pong_.surf, f.width, f.height);
+    UnbindAll(dev);
+    for (int st = 1; st <= 4; ++st) SetSampler(dev, st, false);
+    std::swap(ping_, pong_);
+    return true;
 }
 
 void Runner::Draw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps, IDirect3DSurface9* rt, UINT w, UINT h)
@@ -338,17 +379,21 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
         const bool same = SUCCEEDED(f.target->GetDesc(&td)) && (td.Format == D3DFMT_A8R8G8B8 || td.Format == D3DFMT_X8R8G8B8);
         for (const Step& s : steps)
             if (ValidShader(s.shader) && s.values && !(Shader(s.shader).needsDepth && !f.depth)) direct = &s;
-        if (direct && (!same || IsUserShader(direct->shader) || Shader(direct->shader).srgb)) direct = nullptr;
+        if (direct && (!same || IsUserShader(direct->shader) || Shader(direct->shader).srgb || direct->hair < 0.999f)) direct = nullptr;
     }
     bool wroteTarget = false;
 
     bool drew = false;
+    const bool hairMask = f.depth && (f.simOpaque || f.simTransparent);
     for (const Step& s : steps)
     {
         if (!ValidShader(s.shader) || !s.values) continue;
         out_ = &s == direct ? f.target : pong_.surf;
         const LooksShader& d = Shader(s.shader);
         if (d.needsDepth && !f.depth) { skipped_.push_back(std::string(d.technique) + " (no depth)"); continue; }
+        // Sims' hair as before this shader: the picture kept now, put back where the mask has hair after it ran
+        const bool keepHair = s.hair < 0.999f && hairMask && Ensure(dev, keep_, f.width, f.height, D3DFMT_A8R8G8B8);
+        if (keepHair) dev->StretchRect(ping_.surf, nullptr, keep_.surf, nullptr, D3DTEXF_NONE);
         if (IsUserShader(s.shader))
         {
             // a player's .fx: its technique runs in place on the ping texture, as ReShade runs it on the back buffer
@@ -361,6 +406,7 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
             FixedState(dev); // the effect changed render states, samplers, shaders and the render target
             if (!ran) { skipped_.push_back(std::string(d.technique) + " (" + why + ")"); continue; }
             drew = true;
+            if (keepHair && !KeepHair(f, s.hair)) skipped_.push_back(std::string(d.technique) + " (Sims' hair: shader not ready)");
             continue;
         }
 
@@ -392,6 +438,7 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
         drew = true;
         if (out_ == f.target) { wroteTarget = true; continue; }
         std::swap(ping_, pong_);
+        if (keepHair && !KeepHair(f, s.hair)) skipped_.push_back(std::string(d.technique) + " (Sims' hair: shader not ready)");
     }
 
     UnbindAll(dev);

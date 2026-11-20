@@ -8,7 +8,7 @@ and can switch, reorder and tune the preset's shaders, then save the result as a
 
 | | |
 |---|---|
-| Availability | Released in 4.0.0, Experimental |
+| Availability | Released in 4.0.0, Experimental. ReShade Effect Shader Toggler `.ini` files and On Sims' hair: Released in 4.0.13 |
 | Default | Off |
 | Menu | Image > Shaders (Lucide `swatch-book`, after Color), the switch beside the page title; tab *Look*: the look card, then *Shaders in this look* (its *Add shaders* opens a modal); tab *Installed shaders*: *Installed packs*, *Your shaders*, then *Get more packs*. The Overview's Effects card has a Shaders row |
 | Configuration | `[patches.Looks]` in `ApexRadiance.toml` (an older `[patches.GShadeLooks]` is read once and written under the new name) |
@@ -361,6 +361,8 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | Strength | `mix` | float | 100% | 0 to 100% | How much of the look is blended over the game |
 | Interface without shaders | `onUi` (inverted) | bool | on (`onUi` false) | | Off: menus, the game's panels and loading screens get the look too |
 | Advanced > Order | `beforeColor` | bool | off (After Apex Color) | | Runs the look before Apex's Color instead of after it |
+| An open shader > On Sims' hair | `hair` (technique = amount, per look) | float | 100% | 0 to 100% | How much of that shader Sims' hair takes; 0% leaves the hair as before it (Compatibility, below) |
+| Advanced > ReShade Effect Shader Toggler | `restConfig` | bool | off | | Runs shaders where a `ReshadeEffectShaderToggler.ini` says (Compatibility, below). The note under it says how many groups it read |
 | Shader switches | `off` | array of technique names | empty | at most 256 read | The look's shaders switched off here |
 | Shader switches | `on` | array of technique names | empty | at most 256 read | Shaders the file keeps listed off (`ApexOff=`) switched on here |
 | Remove (trash) | `removed` | array of lower-case `tech@file.fx` | empty | at most 256 read | Shaders removed here, listed with Restore until the look is saved |
@@ -401,11 +403,38 @@ the copy gets a numbered name, which the look then does not use); names with a f
 - **Captures:** `%PresetName%` in file names and *Save the look's preset too* use the look's .ini; *Look only while a
   look is on* captures the frame before the look (`ApexCapture::BeforeLook`).
 - **ReShade or GShade installed too:** both grade the picture; turn one off.
+- **Ambient Occlusion and Sims' hair** (*On Sims' hair*, per shader): Comic.fx and other outline shaders draw lines
+  inside hairstyles, which are many layers of strands. Below 100%, the runner keeps the picture from before that shader
+  and puts it back by the rest where a Sim's hair is the visible surface (`Runner::KeepHair`), with the test of
+  Ambient Occlusion's Sim controls: the hair depth of the opaque Sim draws equal to the scene depth (and not the body's),
+  and the blended hair's coverage in proportion (`features/sim_mask.h`). The body keeps the shader, and so do the lines
+  just outside the hair. The mask is made by Ambient Occlusion (its Sim controls replay each recognised Sim draw), only
+  while a shader that is on asks for it; with Ambient Occlusion off the slider shows that it needs it. While it is
+  asked for, Ambient Occlusion also records the blended hair its own *Transparent hair* switch leaves out (so a shader
+  can skip it), and its composite then shades that hair with *Hair intensity*. A look's .ini does not carry the slider
+  (it is kept in `ApexRadiance.toml` with the look's other edits).
+- **ReShade Effect Shader Toggler (REST) configurations** (`features/looks_rest.h`): REST is a ReShade add-on that runs
+  effects when the game draws with chosen shaders, before the rest of the frame is drawn on top. A Sims 3 configuration
+  made to keep ReShade off the interface also kept Comic.fx's lines out of Sims' hair, which the game draws after it.
+  With *ReShade Effect Shader Toggler* on, Looks reads `ReshadeEffectShaderToggler.ini` from the Apex Radiance folder,
+  else the game's folder (where REST keeps it), as REST does: per group, the vertex and pixel shaders by the CRC32 of
+  their bytecode (what Direct3D 9 gets: the same values under the RTX Remix bridge and DXVK; 4 of the shared file's 27
+  matched Apex's own captures), *InvocationLocation* (0 before the draw, 1 after it, 2 when the game then changes its
+  render target), *MatchSwapchainResolutionOnly* (REST reads it as a number: `True` is 0, the screen's size) and
+  *RequeueAfterRTMatchingFailure*, and which effects the group takes (*Techniques*, *AllowAllTechniques*,
+  *TechniqueExceptions*, by technique name). A shader a group takes runs once a frame at its group's draw, on that
+  render target, instead of at Apex's own points; one whose group did not draw this frame runs at the end of the frame
+  (REST: at Present). Shaders no group takes run where Apex puts them. Draws with vertices in memory (the interface's)
+  count too (`ExtraHooks::SetBeforeDrawUP`). Not read: texture bindings, constant copies, toggle keys and shader hunting
+  (logged once).
 - **RTX Remix bridge:** the device state the passes change is put back by hand, and by a `D3DSBT_ALL` state block when a
   getter the bridge does not answer failed.
 
 ## Limitations
 
+- REST matching hashes the bytecode the device holds (`GetFunction`): a game shader that Apex replaces when it is
+  created hashes differently from the game's own, so a REST `.ini` made under plain ReShade does not match it. Each
+  hashed shader keeps a reference until REST is turned off (at most 16384).
 - Built in: the 17 ported shaders (Levels, Technicolor2, RetroTint, DPX, AdaptiveSharpen, Vibrance, Tint (Sepia),
   Tonemap, Colourfulness, LumaSharpen, CAS, Curves, Vignette, Technicolor, HDR (FakeHDR), PD80 Selective Color,
   LiftGammaGain); other techniques run from the player's Shaders folder or stay in the list as amber rows.

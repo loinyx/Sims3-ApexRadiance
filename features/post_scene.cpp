@@ -99,6 +99,14 @@ void RunEffects(IDirect3DDevice9* dev, bool depthOk) {
     const auto invoke = [&](const auto& e) {
         const void* fn = reinterpret_cast<const void*>(e.second);
         if (g_failedEffects.Has(fn)) return;
+        switch (e.first) { // (the last steps of a session that does not close, gpu_trace.h)
+        case PostScene::kAmbientOcclusion: GpuTrace::MarkIfOn("Post-scene: Ambient Occlusion"); break;
+        case PostScene::kEdgeSmoothing: GpuTrace::MarkIfOn("Post-scene: Edge Smoothing"); break;
+        case PostScene::kDepthBlur: GpuTrace::MarkIfOn("Post-scene: Depth Blur"); break;
+        case PostScene::kPicture: GpuTrace::MarkIfOn("Post-scene: Picture"); break;
+        case PostScene::kRecording: GpuTrace::MarkIfOn("Post-scene: recording"); break;
+        default: GpuTrace::MarkIfOn("Post-scene: Shaders or another effect"); break;
+        }
         try {
             e.second(dev);
             g_ran[e.first]++;

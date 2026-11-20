@@ -173,6 +173,7 @@
     <ClCompile Include="features\deadline_slicing.cpp" />
     <ClCompile Include="features\map_view.cpp" />
     <ClCompile Include="features\object_index.cpp" />
+    <ClCompile Include="features\string_table_index.cpp" />
     <ClCompile Include="features\object_light_bridge.cpp" />
     <ClCompile Include="features\room_map_dither.cpp" />
     <ClCompile Include="features\picture.cpp" />
@@ -214,6 +215,7 @@
       <PreprocessorDefinitions>_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="features\looks_preset.cpp" />
+    <ClCompile Include="features\looks_rest.cpp" />
     <ClCompile Include="features\refpack_codec.cpp" />
     <ClCompile Include="features\resource_cache.cpp" />
     <ClCompile Include="features\rig_tracker.cpp" />
@@ -228,6 +230,7 @@
     <ClCompile Include="framework\call_chain.cpp" />
     <ClCompile Include="framework\crash_report.cpp" />
     <ClCompile Include="framework\hook_guard.cpp" />
+    <ClCompile Include="framework\gpu_trace.cpp" />
     <ClCompile Include="framework\load_timing.cpp" />
     <ClCompile Include="framework\transition_watch.cpp" />
     <ClCompile Include="framework\transition_calls.cpp" />
@@ -406,6 +409,8 @@
     <ClInclude Include="features\room_solve_share_policy.h" />
     <ClInclude Include="features\map_view.h" />
     <ClInclude Include="features\object_index.h" />
+    <ClInclude Include="features\string_table_index.h" />
+    <ClInclude Include="features\string_table_index_core.h" />
     <ClInclude Include="features\object_light_bridge.h" />
     <ClInclude Include="features\room_map_dither.h" />
     <ClInclude Include="features\picture.h" />
@@ -424,6 +429,8 @@
     <ClInclude Include="third_party\reshadefx\effect_symbol_table.hpp" />
     <ClInclude Include="third_party\reshadefx\effect_token.hpp" />
     <ClInclude Include="features\looks_preset.h" />
+    <ClInclude Include="features\looks_rest.h" />
+    <ClInclude Include="features\sim_mask.h" />
     <ClInclude Include="features\looks_shaders.h" />
     <ClInclude Include="features\post_scene.h" />
     <ClInclude Include="features\refpack_codec.h" />
@@ -442,6 +449,7 @@
     <ClInclude Include="framework\call_chain.h" />
     <ClInclude Include="framework\crash_report.h" />
     <ClInclude Include="framework\hook_guard.h" />
+    <ClInclude Include="framework\gpu_trace.h" />
     <ClInclude Include="framework\module_lifetime.h" />
     <ClInclude Include="framework\load_timing.h" />
     <ClInclude Include="framework\transition_watch.h" />

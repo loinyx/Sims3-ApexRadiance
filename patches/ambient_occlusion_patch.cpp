@@ -23,6 +23,7 @@
 // Passes per frame: depth -> 1/z, 8 downsamples, the AO pass, 4 blur passes (box H/V, tent H/V), one composite over a
 // copy of the scene (colour write RGB only).
 
+#include "sim_mask.h"
 #include "patch_base.h"
 #include "apex_version.h"
 #include "apex_log.h"
@@ -119,7 +120,7 @@ float4 cPos   : register(c8);  // view position = z * (p * cPos.xy + cPos.zw, 1)
 float4 cRot   : register(c9);  // x = cos(pi / SLICES), y = sin(pi / SLICES)
 float4 cDepth : register(c10); // x = A, y = 1 / (near A)   (1/z = (A - d) / (near A)), z = composite grain (Banding Fix strength / 255, 0 = off), w = its grain phase
 float4 cSim : register(c11); // body strength, opaque mask available, hair strength, maximum shade
-float4 cSimView : register(c12); // mask preview, transparent hair mask available
+float4 cSimView : register(c12); // mask preview, transparent hair mask available, transparent hair adjusted
 float4 cZoom : register(c13); // slices by zoom: xy = screen centre (pyramid uv), z = 1/z of the mid distance, w = 1/z of the far distance
 sampler2D sHist : register(s8); // still-camera accumulation: the last frame's accumulated AO + 1/z, bilinear
 float4 cTier : register(c14); // xy = pixel -> sTier uv, z = a threshold's factor to leave the nearer tier, w = to return to it (1 = no hysteresis)
@@ -451,7 +452,8 @@ float4 CompositePS(float2 uv : TEXCOORD0, float2 vpos : VPOS) : COLOR0
         float2 hair = tex2Dlod(sHair, float4(uv, 0, 0)).rg;
         // Blended Sim materials can be in front of the final scene depth.
         // Never extend coverage into neighbouring pixels or through foreground geometry.
-        if (abs(hair.x) > 0 && abs(hair.x) <= sceneDepth + 2.4e-7) {
+        // (hair layers are also recorded for Looks' On Sims' hair: shaded only with Transparent hair on)
+        if (abs(hair.x) > 0 && abs(hair.x) <= sceneDepth + 2.4e-7 && (hair.x > 0 || cSimView.z > 0.5)) {
             float alpha = saturate(hair.y);
             bool isHair = hair.x < 0;
             v = lerp(v, 1 - min((1 - original) * (isHair ? cSim.z : cSim.x), cSim.w), alpha);
@@ -642,9 +644,12 @@ struct SimMaskState {
     std::vector<SimMaskCopy> copies;
 } simMask;
 
-bool WantSimMask() {
+// The Sim controls' own use of the mask (the composite and its menu); WantSimMask: made for them or for another feature
+bool AoWantsSimMask() {
     return g.p.simControls && (g.p.simStrength < 1 || g.p.hairStrength < 1 || g.p.simMaxShade < 1 || g.showSimMask);
 }
+std::atomic<bool> g_simMaskOthers{false}; // SimMask::Want (Looks: a shader that leaves Sims' hair as it is)
+bool WantSimMask() { return AoWantsSimMask() || g_simMaskOthers.load(std::memory_order_relaxed); }
 
 template <typename T> void SafeRelease(T*& ptr) {
     if (ptr) {
@@ -728,7 +733,8 @@ SimMaskCopy* SimCopy(IDirect3DDevice9* dev, IDirect3DVertexShader9* vs, IDirect3
 
 template <typename Draw> void RecordSimReceiver(IDirect3DDevice9* dev, Draw draw) {
     if (GetCurrentThreadId() != simRenderThread.load(std::memory_order_relaxed)) return;
-    if (!g.active || !g.ready || g.p.strength <= 0 || !WantSimMask() || !simMask.surface || simMask.failed) return;
+    const bool others = g_simMaskOthers.load(std::memory_order_relaxed);
+    if (!g.active || !g.ready || (g.p.strength <= 0 && !others) || !WantSimMask() || !simMask.surface || simMask.failed) return;
     if (simMask.shaderKnown && !simMask.shaderIsSim) return;
     IDirect3DPixelShader9* ps = nullptr;
     D3D9Hooks::SettleDeferredShaders(dev);
@@ -746,7 +752,7 @@ template <typename Draw> void RecordSimReceiver(IDirect3DDevice9* dev, Draw draw
                            SUCCEEDED(dev->GetRenderState(D3DRS_ALPHABLENDENABLE, &blend)) &&
                            SUCCEEDED(dev->GetRenderState(D3DRS_COLORWRITEENABLE, &colourWrite));
     bool transparent = false;
-    if (stateRead && blend && (accepted != 2 || g.p.transparentHair) && simMask.hairSurface) {
+    if (stateRead && blend && (accepted != 2 || g.p.transparentHair || others) && simMask.hairSurface) {
         DWORD src = 0, dst = 0, op = 0;
         transparent = SUCCEEDED(dev->GetRenderState(D3DRS_SRCBLEND, &src)) && src == D3DBLEND_SRCALPHA &&
                       SUCCEEDED(dev->GetRenderState(D3DRS_DESTBLEND, &dst)) && dst == D3DBLEND_INVSRCALPHA &&
@@ -1365,9 +1371,9 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {2.0f * tanX / W, -2.0f * tanY / H, -tanX, tanY},
         {std::cos(kPi / slices), std::sin(kPi / slices), 0, 0},
         {A, 1.0f / (nearZ * A), SceneDither::On() ? SceneDither::Strength() / 255.0f : 0.0f, SceneDither::GrainPhase()},
-        {std::clamp(g.p.simStrength, 0.0f, 1.0f), WantSimMask() && simMask.cleared && !simMask.failed ? 1.0f : 0.0f,
+        {std::clamp(g.p.simStrength, 0.0f, 1.0f), AoWantsSimMask() && simMask.cleared && !simMask.failed ? 1.0f : 0.0f,
          std::clamp(g.p.hairStrength, 0.0f, 1.0f), std::clamp(g.p.simMaxShade, 0.0f, 1.0f)},
-        {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
+        {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, AoWantsSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, g.p.transparentHair ? 1.0f : 0.0f, 0},
         // (thresholds of 0 keep tier 0: the looped pass without Fewer directions when far)
         {W * 0.5f / g.padW, H * 0.5f / g.padH, g.p.zoomSlices ? 1.0f / kZoomMid : 0.0f, g.p.zoomSlices ? 1.0f / kZoomFar : 0.0f},
         {g.blockOn ? 0.25f / g.blockW : 0.0f, g.blockOn ? 0.25f / g.blockH : 0.0f, g.p.zoomHysteresis ? 1.0f / (1.0f + kZoomHysteresis) : 1.0f, g.p.zoomHysteresis ? 1.0f / (1.0f - kZoomHysteresis) : 1.0f},
@@ -1573,6 +1579,22 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
     }
 }
 
+bool SimMaskReadyForOthers() { return g.active && g.ready && !simMask.failed; }
+SimMask::View SimMaskView() {
+    SimMask::View v;
+    if (!SimMaskReadyForOthers() || !g_simMaskOthers.load(std::memory_order_relaxed)) return v;
+    if (simMask.cleared) v.opaque = simMask.texture;
+    if (simMask.hairCleared) v.transparent = simMask.hairTexture;
+    v.width = simMask.width;
+    v.height = simMask.height;
+    return v;
+}
+const char* SimMaskWhyNot() {
+    if (!g.active) return "Needs Ambient Occlusion on: it finds where Sims' hair is";
+    if (simMask.failed) return "This graphics card cannot find Sims' hair (no MIN blending of float targets)";
+    return nullptr;
+}
+
 void OnPreReset(IDirect3DDevice9*) {
     if (!g.active) return;
     ReleaseResources();
@@ -1614,7 +1636,7 @@ void SimOcclusion::RenderUI(ApexPatch* patch) {
                                             "Caps how dark Sims and hair can get", defaults.simMaxShade);
             changed |= ApexUi::SwitchRow("Transparent hair", &g.p.transparentHair,
                                         "Also adjust supported transparent hair strands", defaults.transparentHair);
-            if (WantSimMask() && simMask.failed)
+            if (AoWantsSimMask() && simMask.failed)
                 ApexUi::IconNote(ApexUi::IconId::TriangleAlert, "Sim shading control is unavailable; original shade is kept", VioletTheme::kWarning);
             ImGui::EndDisabled();
         }
@@ -1856,3 +1878,9 @@ APEX_REGISTER_FEATURE(AmbientOcclusionPatch,
                                             "cancelled by a 4x4 box, then a tent.",
                                             "Composite: dead zone, Jimenez multi-bounce per channel, lamp-lit pixels keep part of their light.",
                                             "Runs first in the PostScene chain (before edge smoothing and Depth Blur); saves/restores only the states it touches."}})
+
+namespace SimMask {
+void Want(bool on) { g_simMaskOthers.store(on, std::memory_order_relaxed); }
+View Current() { return SimMaskView(); }
+const char* Unavailable() { return SimMaskWhyNot(); }
+} // namespace SimMask

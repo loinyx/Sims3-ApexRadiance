@@ -63,6 +63,18 @@ const I18n::Entry kEntries[] = {
      "en todos los paquetes una y otra vez. Requiere las búsquedas rápidas de archivos. Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
      "Permet aux recherches rapides de fichiers de retenir aussi les fichiers qu'aucun paquet ne contient, pour que le jeu ne les cherche "
      "plus sans cesse dans tous les paquets. Nécessite les recherches rapides de fichiers. Fait partie d'" APEX_PRODUCT_NAME ". Crédits : @loinyx"},
+    {"Every name and text the game shows (pie menus, tooltips, catalog names) is looked up in each of its string tables in turn, one table "
+     "per package with text, so thousands of custom content packages make every lookup slower. This keeps one index of the tables already "
+     "loaded and goes straight to the table that answers, with the same text. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
+     "Cada nome e texto que o jogo mostra (menus de ações, dicas, nomes do catálogo) é procurado em cada uma das suas tabelas de texto, "
+     "uma por pacote com texto, então milhares de pacotes de conteúdo personalizado deixam cada busca mais lenta. Isto mantém um índice das "
+     "tabelas já carregadas e vai direto à tabela que responde, com o mesmo texto. Parte do " APEX_PRODUCT_NAME ". Créditos: @loinyx",
+     "Cada nombre y texto que muestra el juego (menús de acciones, descripciones emergentes, nombres del catálogo) se busca en cada una de "
+     "sus tablas de texto, una por paquete con texto, así que miles de paquetes de contenido personalizado hacen más lenta cada búsqueda. "
+     "Esto mantiene un índice de las tablas ya cargadas y va directo a la tabla que responde, con el mismo texto. Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
+     "Chaque nom et texte affiché par le jeu (menus d'actions, info-bulles, noms du catalogue) est cherché dans chacune de ses tables de "
+     "texte, une par paquet avec du texte, donc des milliers de paquets de contenu personnalisé ralentissent chaque recherche. Ceci garde un "
+     "index des tables déjà chargées et va droit à la table qui répond, avec le même texte. Fait partie d'" APEX_PRODUCT_NAME ". Crédits : @loinyx"},
     {"Remembers which files of a kind each of the game's packages holds, so Create a Sim and Sim loading do not read the list of every "
      "package again. Fewer small stutters when Sims change outfits or load. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
      "Memoriza quais arquivos de cada tipo cada pacote do jogo contém, para o Criar um Sim e o carregamento de Sims não lerem de novo a "
