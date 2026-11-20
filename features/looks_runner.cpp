@@ -102,6 +102,7 @@ int PsConstsUsed(const std::vector<Step>& steps)
     int n = 4; // c0 picture size, c1 pass data, c2 depth, c3 the copy's curve
     for (const Step& s : steps)
     {
+        if (s.hair < 0.999f) n = (std::max)(n, 5); // the hair pass sets c4
         if (IsUserShader(s.shader) || !ValidShader(s.shader)) continue;
         const LooksShader& d = Shader(s.shader);
         for (int i = 0; i < d.paramCount; ++i) n = (std::max)(n, d.params[i].reg + 1);

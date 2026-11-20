@@ -190,8 +190,15 @@ void Start() noexcept
             std::ifstream f(path, std::ios::binary);
             static TraceFile last; // (8 KB+: off the stack)
             if (f.read(reinterpret_cast<char*>(&last), sizeof last) && !std::memcmp(last.magic, kMagic, sizeof kMagic) && last.state == kRunning &&
-                last.pid != GetCurrentProcessId())
+                last.pid != GetCurrentProcessId()) {
+                // a second game running beside it (its trace still open) is not a hang
+                DWORD code = 0;
+                const HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, last.pid);
+                const bool alive = p && GetExitCodeProcess(p, &code) && code == STILL_ACTIVE;
+                if (p) CloseHandle(p);
+                if (alive) return;
                 Report(last);
+            }
         }
         const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE) return;

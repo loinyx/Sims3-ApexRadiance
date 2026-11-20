@@ -8,7 +8,7 @@ and can switch, reorder and tune the preset's shaders, then save the result as a
 
 | | |
 |---|---|
-| Availability | Released in 4.0.0, Experimental |
+| Availability | Released in 4.0.0, Experimental. ReShade Effect Shader Toggler `.ini` files and On Sims' hair: Released in 4.0.13 |
 | Default | Off |
 | Menu | Image > Shaders (Lucide `swatch-book`, after Color), the switch beside the page title; tab *Look*: the look card, then *Shaders in this look* (its *Add shaders* opens a modal); tab *Installed shaders*: *Installed packs*, *Your shaders*, then *Get more packs*. The Overview's Effects card has a Shaders row |
 | Configuration | `[patches.Looks]` in `ApexRadiance.toml` (an older `[patches.GShadeLooks]` is read once and written under the new name) |
@@ -432,6 +432,9 @@ the copy gets a numbered name, which the look then does not use); names with a f
 
 ## Limitations
 
+- REST matching hashes the bytecode the device holds (`GetFunction`): a game shader that Apex replaces when it is
+  created hashes differently from the game's own, so a REST `.ini` made under plain ReShade does not match it. Each
+  hashed shader keeps a reference until REST is turned off (at most 16384).
 - Built in: the 17 ported shaders (Levels, Technicolor2, RetroTint, DPX, AdaptiveSharpen, Vibrance, Tint (Sepia),
   Tonemap, Colourfulness, LumaSharpen, CAS, Curves, Vignette, Technicolor, HDR (FakeHDR), PD80 Selective Color,
   LiftGammaGain); other techniques run from the player's Shaders folder or stay in the list as amber rows.

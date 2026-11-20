@@ -178,7 +178,7 @@ bool ToNv12(IDirect3DDevice9* dev, IDirect3DSurface9* rt, UINT w, UINT h) {
     IDirect3DSurface9* savedDs = nullptr;
     for (DWORD i = 0; i < 4; i++) if (FAILED(dev->GetRenderTarget(i, &savedRt[i]))) savedRt[i] = nullptr;
     if (FAILED(dev->GetDepthStencilSurface(&savedDs))) savedDs = nullptr;
-    for (DWORD i = 1; i < 4; i++) dev->SetRenderTarget(i, nullptr);
+    for (DWORD i = 1; i < 4; i++) D3D9Hooks::CallOriginalSetRenderTarget(dev, i, nullptr);
     D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, rt);
     dev->SetDepthStencilSurface(nullptr);
     for (const auto [st, v] : {std::pair{D3DRS_ZENABLE, 0ul}, {D3DRS_ZWRITEENABLE, 0ul}, {D3DRS_ALPHABLENDENABLE, 0ul}, {D3DRS_ALPHATESTENABLE, 0ul},
@@ -194,17 +194,18 @@ bool ToNv12(IDirect3DDevice9* dev, IDirect3DSurface9* rt, UINT w, UINT h) {
     D3D9Hooks::CallOriginalSetVertexShader(dev, nullptr);
     D3D9Hooks::CallOriginalSetPixelShader(dev, g_nv12);
     const float c0[4] = { 1.0f / w, 1.0f / h, static_cast<float>(h), 0.0f };
-    dev->SetPixelShaderConstantF(0, c0, 1);
+    D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, 0, c0, 1);
     dev->SetFVF(D3DFVF_XYZRHW);
     dev->SetStreamSource(0, g_quad, 0, 16);
     dev->SetStreamSourceFreq(0, 1);
     const bool drawn = SUCCEEDED(D3D9Hooks::CallOriginalDrawPrimitive(dev, D3DPT_TRIANGLESTRIP, 0, 2));
     D3D9Hooks::CallOriginalSetTexture(dev, 0, nullptr);
     D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, savedRt[0]);
-    for (DWORD i = 1; i < 4; i++) dev->SetRenderTarget(i, savedRt[i]);
+    for (DWORD i = 1; i < 4; i++) D3D9Hooks::CallOriginalSetRenderTarget(dev, i, savedRt[i]);
     dev->SetDepthStencilSurface(savedDs);
     g_saved->Apply(); // (after the targets: setting target 0 resets the viewport)
     ExtraHooks::RestoreVertexInput(input);
+    D3D9Hooks::ShaderStateChanged(); // Apply put the shaders and textures back unseen by the detours
     for (auto*& s : savedRt) SafeRelease(s);
     SafeRelease(savedDs);
     return drawn;
@@ -696,6 +697,11 @@ bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Optio
     if (!s->nv12) {
         LOG_WARNING("[Video] The frame is converted on the CPU: the GPU conversion could not be set up (" + nv12Why + ")");
         ReleaseSlots();
+        if (s->h > 1440) { // 4 bytes a pixel: a 4K frame is 33 MB, too much for the 32-bit game's slots and queue
+            s->h = 1440;
+            s->w = static_cast<UINT>(static_cast<unsigned long long>(d.Width) * s->h / d.Height) & ~3u;
+            LOG_WARNING("[Video] Without the GPU conversion the video is 1440 lines at most");
+        }
     }
     s->frameBytes = s->nv12 ? s->w * s->h * 3 / 2 : s->w * s->h * 4;
     for (auto& sl : g_slots) {
