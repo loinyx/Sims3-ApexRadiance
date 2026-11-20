@@ -53,7 +53,7 @@ public sealed partial class MainWindow : Window
             : $"game {cg.Root} ({cg.Label} {cg.Version}, {cg.Exe}); renderer {_state?.Layer.ToString() ?? "?"}; loaders {(Scan.Loaders(cg.Bin) is { Count: > 0 } ls ? string.Join(", ", ls) : "none")}";
         Root.SizeChanged += (_, _) => QueueAudit();
         // (the version under the sidebar only fits it expanded)
-        Nav.DisplayModeChanged += (_, e) => SetupVersion.Visibility = e.DisplayMode == NavigationViewDisplayMode.Expanded ? Visibility.Visible : Visibility.Collapsed;
+        Nav.DisplayModeChanged += (_, _) => ShowSetupVersion();
         _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer,
             ScreenHome, ScreenMods, ScreenWorlds, ScreenSaves, ScreenHealth, ScreenNews, ScreenSettings };
         ExtendsContentIntoTitleBar = true;
@@ -306,6 +306,21 @@ public sealed partial class MainWindow : Window
         sb.Children.Add(fade); sb.Children.Add(move);
         sb.Begin();
     }
+
+    // the side pane: wide windows keep it open unless the player folded it to its icons with the toggle (remembered);
+    // narrow ones fold it on their own, which is not a choice to remember
+    void OnNavLoaded(object sender, RoutedEventArgs e) { if (_settings.NavCompact) Nav.IsPaneOpen = false; ShowSetupVersion(); }
+    void OnNavPaneOpening(NavigationView sender, object args) => NavFolded(false);
+    void OnNavPaneClosing(NavigationView sender, NavigationViewPaneClosingEventArgs args) => NavFolded(true);
+    void NavFolded(bool folded)
+    {
+        SetupVersion.Visibility = !folded && Nav.DisplayMode == NavigationViewDisplayMode.Expanded ? Visibility.Visible : Visibility.Collapsed;
+        if (Nav.DisplayMode != NavigationViewDisplayMode.Expanded || _settings.NavCompact == folded) return;
+        _settings.NavCompact = folded;
+        _settings.Save();
+    }
+    // (the version line fits only the open pane: folded to icons it would wrap a letter at a time)
+    void ShowSetupVersion() => SetupVersion.Visibility = Nav.IsPaneOpen && Nav.DisplayMode == NavigationViewDisplayMode.Expanded ? Visibility.Visible : Visibility.Collapsed;
 
     void OnNavSelection(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {

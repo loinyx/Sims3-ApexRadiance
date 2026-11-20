@@ -11,6 +11,7 @@ public sealed class LauncherSettings
     public bool HideWhilePlaying { get; set; } = true;
     public bool WelcomedBack { get; set; }
     public bool DesktopShortcut { get; set; } = true;
+    public bool NavCompact { get; set; }                  // the side pane kept to its icons (the toggle at its top)
 
     static string FilePath => Path.Combine(Paths.Data, "settings.json");
 

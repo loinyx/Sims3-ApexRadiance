@@ -150,9 +150,10 @@
             </Button>
         </Grid>
 
-        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Auto" CompactModeThresholdWidth="0" ExpandedModeThresholdWidth="1100" IsPaneToggleButtonVisible="False"
+        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Auto" CompactModeThresholdWidth="0" ExpandedModeThresholdWidth="1100" IsPaneToggleButtonVisible="True"
                         IsBackButtonVisible="Collapsed" IsSettingsVisible="False" OpenPaneLength="232"
-                        IsTitleBarAutoPaddingEnabled="False" SelectionChanged="OnNavSelection" ItemInvoked="OnNavInvoked">
+                        IsTitleBarAutoPaddingEnabled="False" SelectionChanged="OnNavSelection" ItemInvoked="OnNavInvoked"
+                        Loaded="OnNavLoaded" PaneOpening="OnNavPaneOpening" PaneClosing="OnNavPaneClosing">
             <NavigationView.Resources>
                 <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D90B0C0E" />
                 <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#1F2025" />
