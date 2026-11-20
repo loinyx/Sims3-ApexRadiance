@@ -28,6 +28,7 @@
 #include "looks_fx.h"
 #include "looks_packs.h"
 #include "looks_rest.h"
+#include "sim_mask.h"
 #include "apex_paths.h"
 #include "overlay.h"
 #include "apex_capture.h"
@@ -72,6 +73,7 @@ struct ShaderIds
 {
     std::vector<std::vector<ShaderCache::Id>> ids; // [shader][entry]
     ShaderCache::Id copy = -1;
+    ShaderCache::Id hair = -1; // Sims' hair takes the picture from before a step back (Runner::KeepHair)
     bool registered = false;
 } g_ids;
 
@@ -93,6 +95,7 @@ void RegisterShaders()
     if (g_ids.registered) return;
     g_ids.registered = true;
     g_ids.copy = AddOne("Looks copy", Looks::FullSource(-1), "looks_copy.hlsl", "gs_copy");
+    g_ids.hair = AddOne("Looks Sims' hair", Looks::FullSource(-2), "looks_hair.hlsl", "gs_hair");
     g_ids.ids.resize(Looks::ShaderCount());
     for (int i = 0; i < Looks::ShaderCount(); ++i)
     {
@@ -106,7 +109,7 @@ void RegisterShaders()
 IDirect3DPixelShader9* CreatePs(IDirect3DDevice9* dev, int shader, int entry)
 {
     if (!g_ids.registered || (shader >= 0 && (shader >= (int)g_ids.ids.size() || entry < 0 || entry >= (int)g_ids.ids[shader].size()))) return nullptr;
-    const ShaderCache::Id id = shader < 0 ? g_ids.copy : g_ids.ids[shader][entry];
+    const ShaderCache::Id id = shader == -2 ? g_ids.hair : shader < 0 ? g_ids.copy : g_ids.ids[shader][entry];
     IDirect3DPixelShader9* ps = nullptr;
     std::string msg;
     switch (ShaderCache::CreatePixelShader(dev, id, &ps, &msg))
@@ -128,6 +131,7 @@ struct State
     bool restConfig = false;   // run shaders where a ReShade Effect Shader Toggler .ini says (looks_rest.h)
     float mix = 1.0f;
     std::set<std::string> off; // techniques switched off here (still in the list: the .ini's or added here)
+    std::map<std::string, float> hair; // technique -> how much of it Sims' hair takes, below 1 (features/sim_mask.h)
     std::set<std::string> on;  // techniques the look's file keeps listed but off (ApexOff=), switched on here
     std::set<std::string> removed; // lower-case "tech@file.fx" taken out here: listed with Restore until the look is saved
     std::map<std::string, std::vector<float>> tweaks; // technique -> 4 floats per param
@@ -793,6 +797,10 @@ void OnPresent(IDirect3DDevice9* dev)
         }
     }
     if (Looks::Fx::Poll(bd.Width, bd.Height)) ResolveShaders(); // a scan of the Shaders folder finished (part of it)
+    bool wantHair = false;
+    for (size_t i = 0; g.active && !wantHair && i < g.order.size(); ++i)
+        wantHair = Runnable(i) && !IsOff(i) && g.hair.count(g.order[i].technique);
+    SimMask::Want(wantHair);
     SyncDepth(g.active);
     if (dev && SUCCEEDED(dev->GetRenderTarget(0, &s)) && s) { g_curRT0 = s; s->Release(); }
 }
@@ -875,13 +883,16 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask, int restG
 
     static std::vector<Looks::Step> steps; // in the run list's order; kept between frames (no allocation per frame)
     steps.clear();
+    bool anySkipHair = false;
     int keptOffUi = 0;
     bool userFx = false;
     for (size_t i = 0; i < g.order.size(); ++i)
     {
         if (!Runnable(i) || IsOff(i)) continue;
         if (!inPart(i)) { if (atEndScene && restGroup == kRestNone) ++keptOffUi; continue; } // depth shaders: world only, never over the UI
-        steps.push_back({ g.order[i].shader, ValuesFor(i) });
+        const auto hair = g.hair.find(g.order[i].technique);
+        steps.push_back({ g.order[i].shader, ValuesFor(i), hair != g.hair.end() ? hair->second : 1.0f });
+        anySkipHair |= hair != g.hair.end();
         if (restGroup != kRestNone && i < g_rest.ran.size()) g_rest.ran[i] = 1; // once a frame, also when it does not draw
         userFx |= Looks::IsUserShader(g.order[i].shader);
     }
@@ -932,6 +943,9 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask, int restG
         f.dev = dev; f.target = rt; f.width = rd.Width; f.height = rd.Height;
         f.depth = depth; f.mix = g.mix; f.frame = g_frame; f.gameCurve = g_curve;
         f.wheel = g_wheel; f.overlayOpen = Overlay::IsVisible();
+        if (anySkipHair && depth)
+            if (const SimMask::View m = SimMask::Current(); m.width == rd.Width && m.height == rd.Height)
+                f.simOpaque = m.opaque, f.simTransparent = m.transparent;
         const bool drew = g.runner.Run(f, steps);
         {
             // The line is only rebuilt when one of its parts changed, not at every run point
@@ -990,7 +1004,7 @@ void RestartEffects(IDirect3DDevice9*) { ReleaseGpu(); }
 void SelectLook(const std::string& ref)
 {
     g.preset = ref;
-    g.off.clear(); g.on.clear(); g.removed.clear(); g.extra.clear(); g.runOrder.clear(); g.tweaks.clear(); g.defs.clear();
+    g.off.clear(); g.on.clear(); g.removed.clear(); g.extra.clear(); g.runOrder.clear(); g.tweaks.clear(); g.defs.clear(); g.hair.clear();
     LoadPreset();
     g.runner.Release();
 }
@@ -1093,13 +1107,13 @@ bool AnyEdited()
 // These changes live in Apex's settings (saved by itself); the file changes only with Save.
 bool Dirty()
 {
-    return !g.off.empty() || !g.on.empty() || !g.extra.empty() || !g.runOrder.empty() || !g.removed.empty() || AnyEdited();
+    return !g.off.empty() || !g.on.empty() || !g.extra.empty() || !g.runOrder.empty() || !g.removed.empty() || !g.hair.empty() || AnyEdited();
 }
 
 // Back to the look as its file has it (the undo toast can bring the changes back)
 void PutBackAsSaved()
 {
-    g.off.clear(); g.on.clear(); g.extra.clear(); g.runOrder.clear(); g.removed.clear(); g.tweaks.clear(); g.defs.clear();
+    g.off.clear(); g.on.clear(); g.extra.clear(); g.runOrder.clear(); g.removed.clear(); g.tweaks.clear(); g.defs.clear(); g.hair.clear();
     RebuildOrder(); // also pushes the definitions
 }
 
@@ -2534,6 +2548,19 @@ bool ValuesUi(size_t i)
         ImGui::PopID();
     }
     if (!EditedValues(i) && !ImGui::IsAnyItemActive()) g.tweaks.erase(e.technique); // back at the .ini: not "edited"
+    {
+        const auto it = g.hair.find(e.technique);
+        float amount = it != g.hair.end() ? it->second : 1.0f;
+        if (ApexUi::SliderPercent("On Sims' hair", &amount, 0.0f, 1.0f,
+                                  "How much of this shader Sims' hair takes: lower it for outline shaders such as Comic, which draw lines inside hairstyles", 1.0f))
+        {
+            if (amount < 0.999f) g.hair[e.technique] = amount;
+            else g.hair.erase(e.technique);
+            changed = true;
+        }
+        if (amount < 0.999f)
+            if (const char* why = SimMask::Unavailable()) ApexUi::IconNote(IconId::TriangleAlert, I18n::Tr(why), VioletTheme::kWarning);
+    }
     if (Looks::IsUserShader(e.shader))
         if (const Looks::Fx::Effect* fx = Looks::Fx::UserEffect(e.shader - Looks::kUserShaderBase)) changed |= DefinesUi(i, *fx);
     return changed;
@@ -3498,6 +3525,7 @@ public:
         RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Remove(RenderCallbacks::restartEffects, RestartEffects);
         ExtraHooks::SetBeforeDrawUP(nullptr);
+        SimMask::Want(false);
         ReleaseGpu();
         ReleaseRestShaders();
         PostScene::WantCamera(false, /*plain*/ false);
@@ -3526,6 +3554,9 @@ public:
         table.insert_or_assign("removed", std::move(removed));
         table.insert_or_assign("extra", std::move(extra));
         table.insert_or_assign("runOrder", std::move(runOrder));
+        toml::table hair;
+        for (auto& [tech, v] : g.hair) hair.insert_or_assign(tech, (double)v);
+        table.insert_or_assign("hair", std::move(hair));
         toml::table tw;
         for (auto& [tech, vals] : g.tweaks)
         {
@@ -3571,6 +3602,13 @@ public:
         else if (table["off"].as_array()) { g.removed.clear(); g.on.clear(); } // a preset saved by an older build: its list as it was
         if (table["extra"].as_array()) { g.extra.clear(); any |= strings("extra", [](const std::string& s) { g.extra.push_back(s); }); }
         if (table["runOrder"].as_array()) { g.runOrder.clear(); any |= strings("runOrder", [](const std::string& s) { g.runOrder.push_back(s); }); }
+        if (const toml::table* t = table["hair"].as_table())
+        {
+            g.hair.clear();
+            for (auto& [k, v] : *t)
+                if (const double x = v.value_or(1.0); std::isfinite(x) && x < 0.999 && g.hair.size() < kMaxTweaks) g.hair[std::string(k.str())] = (float)std::clamp(x, 0.0, 1.0);
+            any = true;
+        }
         if (const toml::table* t = table["tweaks"].as_table())
         {
             g.tweaks.clear();

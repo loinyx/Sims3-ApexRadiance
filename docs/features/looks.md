@@ -361,6 +361,7 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | Strength | `mix` | float | 100% | 0 to 100% | How much of the look is blended over the game |
 | Interface without shaders | `onUi` (inverted) | bool | on (`onUi` false) | | Off: menus, the game's panels and loading screens get the look too |
 | Advanced > Order | `beforeColor` | bool | off (After Apex Color) | | Runs the look before Apex's Color instead of after it |
+| An open shader > On Sims' hair | `hair` (technique = amount, per look) | float | 100% | 0 to 100% | How much of that shader Sims' hair takes; 0% leaves the hair as before it (Compatibility, below) |
 | Advanced > ReShade Effect Shader Toggler | `restConfig` | bool | off | | Runs shaders where a `ReshadeEffectShaderToggler.ini` says (Compatibility, below). The note under it says how many groups it read |
 | Shader switches | `off` | array of technique names | empty | at most 256 read | The look's shaders switched off here |
 | Shader switches | `on` | array of technique names | empty | at most 256 read | Shaders the file keeps listed off (`ApexOff=`) switched on here |
@@ -402,6 +403,16 @@ the copy gets a numbered name, which the look then does not use); names with a f
 - **Captures:** `%PresetName%` in file names and *Save the look's preset too* use the look's .ini; *Look only while a
   look is on* captures the frame before the look (`ApexCapture::BeforeLook`).
 - **ReShade or GShade installed too:** both grade the picture; turn one off.
+- **Ambient Occlusion and Sims' hair** (*On Sims' hair*, per shader): Comic.fx and other outline shaders draw lines
+  inside hairstyles, which are many layers of strands. Below 100%, the runner keeps the picture from before that shader
+  and puts it back by the rest where a Sim's hair is the visible surface (`Runner::KeepHair`), with the test of
+  Ambient Occlusion's Sim controls: the hair depth of the opaque Sim draws equal to the scene depth (and not the body's),
+  and the blended hair's coverage in proportion (`features/sim_mask.h`). The body keeps the shader, and so do the lines
+  just outside the hair. The mask is made by Ambient Occlusion (its Sim controls replay each recognised Sim draw), only
+  while a shader that is on asks for it; with Ambient Occlusion off the slider shows that it needs it. While it is
+  asked for, Ambient Occlusion also records the blended hair its own *Transparent hair* switch leaves out (so a shader
+  can skip it), and its composite then shades that hair with *Hair intensity*. A look's .ini does not carry the slider
+  (it is kept in `ApexRadiance.toml` with the look's other edits).
 - **ReShade Effect Shader Toggler (REST) configurations** (`features/looks_rest.h`): REST is a ReShade add-on that runs
   effects when the game draws with chosen shaders, before the rest of the frame is drawn on top. A Sims 3 configuration
   made to keep ReShade off the interface also kept Comic.fx's lines out of Sims' hair, which the game draws after it.

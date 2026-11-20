@@ -50,7 +50,9 @@ using PsFactory = std::function<IDirect3DPixelShader9*(IDirect3DDevice9*, int sh
 struct Step
 {
     int shader;
-    const float* values; // 4 floats per param of that shader
+    const float* values;   // 4 floats per param of that shader
+    float hair = 1.0f;     // how much of this shader Sims' hair takes (1: all; below 1 the picture from before it shows
+                           // through there, Frame::simOpaque / simTransparent)
 };
 
 // PS constant registers the built-in steps write (c0..c2 and their parameters' registers): c0..PsConstsUsed()-1
@@ -69,6 +71,9 @@ struct Frame
     bool overlayOpen = false;            // the Apex menu is open (overlay_open)
     float gameCurve = 0.0f;              // > 0: the game later applies x (1 + c) / (x + c) to the target; the stage sees it
                                          // applied and writes its inverse, so the picture after the game's curve is the look's
+    // Where Sims' hair is (features/sim_mask.h, the size of the target), for steps with hair below 1; with depth. Null: none
+    IDirect3DTexture9* simOpaque = nullptr;
+    IDirect3DTexture9* simTransparent = nullptr;
 };
 
 class Runner
@@ -90,6 +95,7 @@ private:
     void Free(Tex& t);
     IDirect3DPixelShader9* Ps(IDirect3DDevice9* dev, int shader, int entry);
     IDirect3DPixelShader9* CopyPs(IDirect3DDevice9* dev);
+    bool KeepHair(const Frame& f, float hair); // after a step: Sims' hair takes keep_ (the picture before it) back by 1 - hair
     void Draw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps, IDirect3DSurface9* rt, UINT w, UINT h);
     void SetParams(IDirect3DDevice9* dev, int shader, const float* values);
     void BindTex(IDirect3DDevice9* dev, int stage, IDirect3DBaseTexture9* tex);
@@ -101,7 +107,8 @@ private:
     std::function<HRESULT(IDirect3DDevice9*, DWORD, IDirect3DSurface9*)> setRT_;
     std::map<long long, IDirect3DPixelShader9*> ps_;
     IDirect3DPixelShader9* copyPs_ = nullptr;
-    Tex ping_, pong_, asTex_;
+    IDirect3DPixelShader9* hairPs_ = nullptr;
+    Tex ping_, pong_, asTex_, keep_;
     std::vector<std::string> skipped_;
     size_t gpuBytes_ = 0;
     // what the current Run has set (the RTX Remix bridge sends each call across processes)

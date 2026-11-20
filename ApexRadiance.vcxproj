@@ -429,6 +429,7 @@
     <ClInclude Include="third_party\reshadefx\effect_token.hpp" />
     <ClInclude Include="features\looks_preset.h" />
     <ClInclude Include="features\looks_rest.h" />
+    <ClInclude Include="features\sim_mask.h" />
     <ClInclude Include="features\looks_shaders.h" />
     <ClInclude Include="features\post_scene.h" />
     <ClInclude Include="features\refpack_codec.h" />
