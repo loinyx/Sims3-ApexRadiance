@@ -220,6 +220,7 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/i18n_check/` | Translation tables: conflicts, missing languages, placeholder and `##id` mismatches; coverage and stale keys of the other languages; `i18n/keys.tsv` up to date (`tools/i18n_keys.pl` writes it) |
 | `tools/liveness_prune_test/` | Pruning of per-story caches by live story managers (`features/liveness_prune.h`, `run.ps1`) |
 | `tools/loading_gate_test/` | Loaded-world reader and the extracted start-notice and Depth Blur loading guards (`run.ps1`) |
+| `tools/looks_rest_test/` | Looks: ReShade Effect Shader Toggler configurations (`features/looks_rest.cpp`): the .ini parser as REST reads it, CRC32, which techniques a group takes, render-target size matching; optionally lists a given .ini |
 | `tools/looks_test/` | Looks: the preset loader (values, definitions, old `apex:` references) and the in-game licence texts against `LICENSES.md` |
 | `tools/lot_streaming_test/` | Lot Streaming: the shared lot build time decision and a replay of recorded lot loads, the detailed-lot hysteresis model, the Steam bytes (`run.ps1 [-CsvDir <folder>] [-Exe <TS3W.exe>]`) |
 | `tools/settings_migration_test/` | The one-time move to the new lighting defaults: old defaults move, choices stay, new values are the registered ones (`run.ps1`) |

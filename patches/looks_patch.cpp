@@ -27,6 +27,8 @@
 #include "looks_preset.h"
 #include "looks_fx.h"
 #include "looks_packs.h"
+#include "looks_rest.h"
+#include "apex_paths.h"
 #include "overlay.h"
 #include "apex_capture.h"
 #include "apex_version.h"
@@ -36,6 +38,9 @@
 #include <d3dcompiler.h>
 #include <windows.h>
 #include <shellapi.h>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
 #include <shobjidl.h>
 #include <algorithm>
 #include <cfloat>
@@ -120,6 +125,7 @@ struct State
     std::string preset;        // "looks:<file>", "gshade:<file>"; empty = none chosen
     bool beforeColor = false;  // run before Apex's colour (Picture) instead of after
     bool onUi = false;         // also shade the game's UI, menus and loading screens (end of frame, like GShade)
+    bool restConfig = false;   // run shaders where a ReShade Effect Shader Toggler .ini says (looks_rest.h)
     float mix = 1.0f;
     std::set<std::string> off; // techniques switched off here (still in the list: the .ini's or added here)
     std::set<std::string> on;  // techniques the look's file keeps listed but off (ApexOff=), switched on here
@@ -550,7 +556,129 @@ IDirect3DSurface9* g_curRT0 = nullptr;     // identity only
 IDirect3DSurface9* g_backBuffer = nullptr; // identity only
 const char* g_mode = "";
 
-void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask);
+// ---- ReShade Effect Shader Toggler configurations (features/looks_rest.h, the Advanced switch). A shader a group takes runs
+// when the game draws with one of the group's shaders (before that draw, after it, or when the game then changes its
+// render target), once a frame, on that render target, instead of at Apex's own points; one whose group did not run this
+// frame runs at the end of the frame (REST: at Present). The others run where Apex puts them.
+constexpr int kRestNone = -2, kRestLeftovers = -1;
+struct RestRuntime
+{
+    bool on = false;                // the switch is on and the file has an active group
+    Looks::Rest::Config cfg;
+    std::string status;             // English, for the menu note and the log
+    std::vector<std::string> modes; // per group: g_mode while it runs (stable pointers for the log line)
+    std::unordered_map<IUnknown*, uint32_t> crc; // the game's shaders seen in a draw -> CRC32 of their bytecode (a reference each)
+    IUnknown* lastVs = nullptr; uint32_t lastVsCrc = 0;
+    IUnknown* lastPs = nullptr; uint32_t lastPsCrc = 0;
+    std::vector<uint8_t> fired;     // per group: its effects ran this frame
+    std::vector<uint8_t> ran;       // per run-list entry: run by a group this frame
+    struct Pending { int group; IDirect3DSurface9* rt; bool afterDraw; IUnknown* vs; IUnknown* ps; }; // identities only (vs / ps: the matched stage's)
+    std::vector<Pending> pending;
+    UINT bbW = 0, bbH = 0;
+    bool busy = false; // Looks runs now: draws of its own passes do not count
+} g_rest;
+
+uint64_t RestMask(size_t i) // the groups that take run-list entry i
+{
+    uint64_t m = 0;
+    if (!g_rest.on || i >= g.order.size()) return 0;
+    for (size_t k = 0; k < g_rest.cfg.groups.size() && k < 64; ++k)
+        if (Looks::Rest::Takes(g_rest.cfg.groups[k], g.order[i].technique, g.order[i].file)) m |= 1ull << k;
+    return m;
+}
+bool RestRan(size_t i) { return i < g_rest.ran.size() && g_rest.ran[i]; }
+
+template <class S> uint32_t RestCrc(S* shader, IUnknown*& last, uint32_t& lastCrc)
+{
+    if (!shader) return 0;
+    if (shader == last) return lastCrc;
+    uint32_t c = 0;
+    if (const auto it = g_rest.crc.find(shader); it != g_rest.crc.end()) c = it->second;
+    else
+    {
+        UINT bytes = 0;
+        std::vector<uint8_t> code;
+        if (SUCCEEDED(shader->GetFunction(nullptr, &bytes)) && bytes >= 8 && bytes <= (1u << 20))
+        {
+            code.resize(bytes);
+            if (FAILED(shader->GetFunction(code.data(), &bytes))) code.clear();
+        }
+        c = code.empty() ? 0 : Looks::Rest::Crc32(code.data(), code.size());
+        if (g_rest.crc.size() >= 16384) return c; // (not kept: not remembered as the last one either)
+        shader->AddRef(); // a reference: no address reuse
+        g_rest.crc.emplace(shader, c);
+    }
+    last = shader;
+    lastCrc = c;
+    return c;
+}
+
+void ReleaseRestShaders()
+{
+    for (auto& [shader, c] : g_rest.crc) shader->Release();
+    g_rest.crc.clear();
+    g_rest.lastVs = g_rest.lastPs = nullptr;
+}
+
+std::wstring GameFolder()
+{
+    wchar_t exe[MAX_PATH] = {};
+    const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring dir(exe, n);
+    const size_t slash = dir.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? std::wstring() : dir.substr(0, slash + 1);
+}
+
+// Reads the file when the switch turns on (and at install): the Apex Radiance folder first, then the game's (REST's own)
+void LoadRest()
+{
+    ReleaseRestShaders();
+    g_rest.cfg = {};
+    g_rest.on = false;
+    g_rest.status.clear();
+    g_rest.modes.clear();
+    if (!g.restConfig) return;
+    const std::pair<std::wstring, const char*> places[] = { { ApexPaths::ApexDirectory(), "the Apex Radiance folder" }, { GameFolder(), "the game's folder" } };
+    for (const auto& [dir, where] : places)
+    {
+        if (dir.empty()) continue;
+        std::ifstream f(dir + L"ReshadeEffectShaderToggler.ini", std::ios::binary);
+        if (!f) continue;
+        std::stringstream text;
+        text << f.rdbuf();
+        if (text.str().size() > (4u << 20) || !Looks::Rest::Parse(text.str(), g_rest.cfg))
+        {
+            g_rest.cfg = {};
+            g_rest.status = std::format("ReshadeEffectShaderToggler.ini in {} has no shader group", where);
+            LOG_WARNING("[Looks] REST: " + g_rest.status);
+            return;
+        }
+        int active = 0;
+        std::string names;
+        for (const Looks::Rest::Group& grp : g_rest.cfg.groups)
+        {
+            static const char* const kWhere[] = { "before the draw", "after the draw", "on render target change" };
+            g_rest.modes.push_back(std::format("for the REST group \"{}\" ({})", grp.name, kWhere[grp.location]));
+            if (!grp.active) continue;
+            ++active;
+            names += std::format("{}\"{}\" ({} shaders, {})", names.empty() ? "" : ", ", grp.name, grp.vs.size() + grp.ps.size(), kWhere[grp.location]);
+        }
+        g_rest.on = active > 0;
+        g_rest.fired.assign(g_rest.cfg.groups.size(), 0); // (installed mid-frame: draws come before the next Present)
+        g_rest.ran.assign(g.order.size(), 0);
+        g_rest.pending.clear();
+        g_rest.status = std::format("ReshadeEffectShaderToggler.ini in {}: {} active of {} groups{}{}", where, active, g_rest.cfg.groups.size(),
+                                    names.empty() ? "" : ": ", names);
+        LOG_INFO("[Looks] REST: " + g_rest.status);
+        for (const std::string& note : g_rest.cfg.notes) LOG_INFO("[Looks] REST: " + note);
+        return;
+    }
+    g_rest.status = "No ReshadeEffectShaderToggler.ini next to the game or in the Apex Radiance folder";
+    LOG_INFO("[Looks] REST: " + g_rest.status);
+}
+
+void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask, int restGroup = kRestNone);
+void RestFlush(IDirect3DDevice9* dev, bool afterDrawOnly, IUnknown* vs, IUnknown* ps);
 void World(IDirect3DDevice9* dev, bool curveAhead);
 void Effect(IDirect3DDevice9* dev)
 {
@@ -607,6 +735,16 @@ void AtEndScene(IDirect3DDevice9* dev)
     if (rt) rt->Release();
     if (!onBackBuffer) return; // an off-screen pass (reflection, thumbnail): wait for the frame's own EndScene
     g_ranThisFrame = true;
+    if (g_rest.on)
+    {
+        RestFlush(dev, false, nullptr, nullptr);
+        if (g_worldPending) World(dev, false); // (the world part first, as on any other frame)
+        if (WorldSession::InWorld()) // a group that did not run this frame: its shaders at the end of the frame (REST: at Present)
+        {
+            g_mode = "for REST groups that did not run this frame, at the end of the frame";
+            EffectImpl(dev, true, 0, kRestLeftovers);
+        }
+    }
     if (g_worldPending) World(dev, false); // the frame ended on the bloom (no UI, no colour pass)
     if (!g.onUi) return; // UI left clean: nothing at the end of frame
     g_mode = "at the end of frame";
@@ -633,10 +771,15 @@ void OnPresent(IDirect3DDevice9* dev)
     g_frameWhy.clear();
     g_frameTried = false;
     g_ranThisFrame = g_boundaryThisFrame = g_worldDone = g_worldPending = g_boundaryDraw = g_beforeLookDone = g_frameTicked = false;
+    g_rest.fired.assign(g_rest.cfg.groups.size(), 0);
+    g_rest.ran.assign(g.order.size(), 0);
+    g_rest.pending.clear();
     IDirect3DSurface9* s = nullptr;
     g_backBuffer = nullptr;
     D3DSURFACE_DESC bd{};
     if (dev && SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &s)) && s) { g_backBuffer = s; s->GetDesc(&bd); s->Release(); }
+    g_rest.bbW = bd.Width;
+    g_rest.bbH = bd.Height;
     Looks::Packs::BeginFrame(); // the pack list changes only here, between menu frames
     g_wheel = Overlay::TakeWheel();
     if (static bool adapter = false; !adapter && dev) // __VENDOR__ / __DEVICE__ before the first scan compiles
@@ -654,14 +797,81 @@ void OnPresent(IDirect3DDevice9* dev)
     if (dev && SUCCEEDED(dev->GetRenderTarget(0, &s)) && s) { g_curRT0 = s; s->Release(); }
 }
 
-void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
+// A group's run on the render target bound now (the one its draw drew on; a group whose size does not match waits for its
+// next draw when it asks for that, else gives up for the frame)
+void RestRun(IDirect3DDevice9* dev, int gi, IDirect3DSurface9* expected)
 {
+    IDirect3DSurface9* rt = nullptr;
+    D3DSURFACE_DESC d{};
+    if (FAILED(dev->GetRenderTarget(0, &rt)) || !rt) return;
+    rt->GetDesc(&d);
+    const bool same = !expected || rt == expected;
+    rt->Release();
+    const Looks::Rest::Group& grp = g_rest.cfg.groups[gi];
+    // REST queues the group's effects again at each of its draws until they ran on a render target of the screen's size
+    static const D3DFORMAT kColour[] = { D3DFMT_A8R8G8B8, D3DFMT_X8R8G8B8, D3DFMT_A2R10G10B10, D3DFMT_A2B10G10R10, D3DFMT_A16B16G16R16,
+                                         D3DFMT_A16B16G16R16F, D3DFMT_A32B32G32R32F, D3DFMT_R5G6B5, D3DFMT_X1R5G5B5, D3DFMT_A1R5G5B5 };
+    const bool colour = std::find(std::begin(kColour), std::end(kColour), d.Format) != std::end(kColour); // (REST: IsColorBuffer)
+    if (!same || !colour || !Looks::Rest::SizeMatches(grp, d.Width, d.Height, g_rest.bbW, g_rest.bbH)) return;
+    g_rest.fired[gi] = 1;
+    g_curve = !PostScene::ColourTilesStarted() ? PostScene::ColourCurveLastFrame() : 0.0f; // as at the scene boundary
+    g_mode = g_rest.modes[gi].c_str();
+    EffectImpl(dev, false, 0, gi);
+    g_curve = 0.0f;
+}
+
+// The runs waiting for the matched draw to be done (afterDrawOnly) or for the render target to change (all)
+void RestFlush(IDirect3DDevice9* dev, bool afterDrawOnly, IUnknown* vs = nullptr, IUnknown* ps = nullptr)
+{
+    if (g_rest.busy) return;
+    for (size_t k = 0; k < g_rest.pending.size();)
+    {
+        const auto p = g_rest.pending[k];
+        // after the draw = after the run of draws with the matched shader (REST: when that stage's shader changes)
+        if (afterDrawOnly && (!p.afterDraw || (p.vs && p.vs == vs) || (p.ps && p.ps == ps))) { ++k; continue; }
+        g_rest.pending.erase(g_rest.pending.begin() + k);
+        RestRun(dev, p.group, p.rt);
+    }
+}
+
+void RestOnDraw(IDirect3DDevice9* dev)
+{
+    if (!g_rest.on || g_rest.busy || !g.active || !g.loaded || DepthShare::InternalPass()) return;
+    if (g_rest.fired.size() != g_rest.cfg.groups.size()) g_rest.fired.assign(g_rest.cfg.groups.size(), 0);
+    if (g_rest.ran.size() != g.order.size()) g_rest.ran.assign(g.order.size(), 0); // (a look loaded mid-frame)
+    IDirect3DVertexShader9* vs = D3D9Hooks::BoundVertexShader(dev);
+    IDirect3DPixelShader9* ps = D3D9Hooks::BoundPixelShader(dev);
+    if (!g_rest.pending.empty()) RestFlush(dev, true, vs, ps); // the matched draws before this one are done
+    const uint32_t vh = RestCrc(vs, g_rest.lastVs, g_rest.lastVsCrc);
+    const uint32_t ph = RestCrc(ps, g_rest.lastPs, g_rest.lastPsCrc);
+    for (size_t gi = 0; gi < g_rest.cfg.groups.size(); ++gi)
+    {
+        const Looks::Rest::Group& grp = g_rest.cfg.groups[gi];
+        const bool byVs = vh && grp.vs.count(vh), byPs = ph && grp.ps.count(ph);
+        if (g_rest.fired[gi] || !grp.active || !(byVs || byPs)) continue;
+        if (std::any_of(g_rest.pending.begin(), g_rest.pending.end(), [gi](const RestRuntime::Pending& p) { return p.group == (int)gi; })) continue;
+        if (grp.location == Looks::Rest::kBeforeDraw) { RestRun(dev, (int)gi, nullptr); continue; }
+        IDirect3DSurface9* rt = nullptr;
+        if (FAILED(dev->GetRenderTarget(0, &rt)) || !rt) continue;
+        rt->Release();
+        g_rest.pending.push_back({ (int)gi, rt, grp.location == Looks::Rest::kAfterDraw, byVs ? vs : nullptr, byVs ? nullptr : ps });
+    }
+}
+
+void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask, int restGroup)
+{
+    struct Busy { bool was = std::exchange(g_rest.busy, true); ~Busy() { g_rest.busy = was; } } busy; // (REST: no run inside a run)
     g_frameTried = true;
     if (!g.active || !g.loaded) { PartWhy(g.loaded ? "waiting: off" : "waiting: preset not loaded"); return; }
     if (GetTickCount64() < g_holdUntil) { PartWhy("held: showing the game without the look"); return; }
     if (!atEndScene && !WorldSession::InWorld()) { PartWhy("waiting: not in a world"); return; }
     if (!ShaderCache::PrecompileComplete()) { PartWhy("waiting: Apex shaders still compiling"); return; }
-    auto inPart = [mask](size_t i) { return ((mask >> WhereOf(i)) & 1u) != 0; };
+    auto inPart = [mask, restGroup](size_t i) {
+        const uint64_t rest = RestMask(i);
+        if (restGroup >= 0) return ((rest >> restGroup) & 1u) != 0 && !RestRan(i);
+        if (restGroup == kRestLeftovers) return rest != 0 && !RestRan(i);
+        return rest == 0 && ((mask >> WhereOf(i)) & 1u) != 0; // a REST group's shader runs only at its group's draw
+    };
 
     static std::vector<Looks::Step> steps; // in the run list's order; kept between frames (no allocation per frame)
     steps.clear();
@@ -670,8 +880,9 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
     for (size_t i = 0; i < g.order.size(); ++i)
     {
         if (!Runnable(i) || IsOff(i)) continue;
-        if (!inPart(i)) { if (atEndScene) ++keptOffUi; continue; } // depth shaders: world only, never over the UI
+        if (!inPart(i)) { if (atEndScene && restGroup == kRestNone) ++keptOffUi; continue; } // depth shaders: world only, never over the UI
         steps.push_back({ g.order[i].shader, ValuesFor(i) });
+        if (restGroup != kRestNone && i < g_rest.ran.size()) g_rest.ran[i] = 1; // once a frame, also when it does not draw
         userFx |= Looks::IsUserShader(g.order[i].shader);
     }
     if (steps.empty()) return; // nothing of this part is on
@@ -692,7 +903,10 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
     {
         IDirect3DSurface9* ds = nullptr;
         ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
-        if (!(ds && ds == DepthShare::Surface()) || !PostScene::SceneDepthValid()) depth = nullptr;
+        // A REST group's run also takes it when its draw has none bound (the interface's) once this frame's scene boundary
+        // has passed: the shared copy holds the whole scene then, as ReShade's depth does
+        const bool bound = ds && ds == DepthShare::Surface();
+        if (!(bound || (restGroup != kRestNone && g_boundaryThisFrame)) || !PostScene::SceneDepthValid()) depth = nullptr;
         if (ds) ds->Release();
     }
 
@@ -726,12 +940,12 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
                 const char* mode; UINT w, h; int fmt; bool depth; bool drew; size_t steps; int kept; float mix; bool boundary;
                 bool operator==(const Key&) const = default;
             };
-            static Key lastKey[3];
-            static std::vector<std::string> lastSkipped[3];
-            static std::string lastLine[3];
+            static Key lastKey[4];
+            static std::vector<std::string> lastSkipped[4];
+            static std::string lastLine[4];
             const Key k{ g_mode, rd.Width, rd.Height, (int)rd.Format, depth != nullptr, drew, steps.size(), keptOffUi, g.mix, g_boundaryThisFrame };
             const std::vector<std::string>& skipped = g.runner.skipped();
-            const int slot = atEndScene ? 2 : (mask & (1u << kBoundary)) ? 0 : 1;
+            const int slot = restGroup != kRestNone ? 3 : atEndScene ? 2 : (mask & (1u << kBoundary)) ? 0 : 1;
             if (lastLine[slot].empty() || !(k == lastKey[slot]) || skipped != lastSkipped[slot])
             {
                 std::string s = std::format("drawing {} on {}x{} (format {}), depth {}: {} shaders, {}, mix {:.0f}%",
@@ -3219,6 +3433,7 @@ public:
         g_patch = this;
         RegisterBoolSetting(&g.beforeColor, "beforeColor", false, "Run before Apex's color instead of after it");
         RegisterBoolSetting(&g.onUi, "onUi", false, "Also shade the game's UI, menus and loading screens");
+        RegisterBoolSetting(&g.restConfig, "restConfig", false, "Run shaders where a ReShade Effect Shader Toggler .ini says");
         RegisterFloatSetting(&g.mix, "mix", SettingWidget::Slider, 1.0f, 0.0f, 1.0f, "How much of the look is applied");
     }
 
@@ -3233,6 +3448,7 @@ public:
         Looks::Fx::SetRoomCheck(LooksRoom);
         Looks::Fx::RequestScan(); // the player's .fx files compile in the background (unchanged ones are kept)
         LoadPreset();
+        LoadRest();
         PostScene::WantCamera(true, /*plain*/ false);
         RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Add(RenderCallbacks::restartEffects, RestartEffects);
@@ -3243,7 +3459,8 @@ public:
             OnPresent(ctx.device); // a new frame
             return D3D9Hooks::HookAction::Continue;
         }, D3D9Hooks::Priority::First);
-        D3D9Hooks::RegisterSetRenderTarget("Looks", [](D3D9Hooks::DeviceContext&, DWORD index, IDirect3DSurface9* rt) {
+        D3D9Hooks::RegisterSetRenderTarget("Looks", [](D3D9Hooks::DeviceContext& ctx, DWORD index, IDirect3DSurface9* rt) {
+            if (index == 0 && !g_rest.pending.empty() && rt != g_curRT0) RestFlush(ctx.device, false, nullptr, nullptr); // on the target being left
             if (index == 0) g_curRT0 = rt, g_viewportSetSinceRt0 = false;
             return D3D9Hooks::HookAction::Continue;
         }, D3D9Hooks::Priority::First);
@@ -3253,10 +3470,13 @@ public:
         }, D3D9Hooks::Priority::First);
         // after PostScene's draw hooks (Priority::First), which run the scene boundary on the same draw
         D3D9Hooks::RegisterDrawIndexedPrimitive("Looks", [](D3D9Hooks::DeviceContext& ctx, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT) {
+            RestOnDraw(ctx.device);
             OnDraw(ctx, false);
             return D3D9Hooks::HookAction::Continue;
         }, static_cast<D3D9Hooks::Priority>(12));
+        ExtraHooks::SetBeforeDrawUP(RestOnDraw); // the game's interface draws with vertices in memory
         D3D9Hooks::RegisterDrawPrimitive("Looks", [](D3D9Hooks::DeviceContext& ctx, D3DPRIMITIVETYPE type, UINT, UINT prims) {
+            RestOnDraw(ctx.device);
             OnDraw(ctx, type == D3DPT_TRIANGLESTRIP && prims == 2);
             return D3D9Hooks::HookAction::Continue;
         }, static_cast<D3D9Hooks::Priority>(12));
@@ -3277,7 +3497,9 @@ public:
         g.active = false;
         RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Remove(RenderCallbacks::restartEffects, RestartEffects);
+        ExtraHooks::SetBeforeDrawUP(nullptr);
         ReleaseGpu();
+        ReleaseRestShaders();
         PostScene::WantCamera(false, /*plain*/ false);
         SyncDepth(false);
         g.status = "Off";
@@ -3463,6 +3685,18 @@ public:
                 SetOrder();
                 changed = true;
             }
+            if (ApexUi::SwitchRow("ReShade Effect Shader Toggler", &g.restConfig,
+                                  "Runs shaders where a ReshadeEffectShaderToggler.ini says, without ReShade: put the file next to the game or in the Apex Radiance folder",
+                                  false))
+            {
+                LoadRest();
+                changed = true;
+            }
+            if (g.restConfig && !g_rest.status.empty())
+                ApexUi::IconNote(g_rest.on ? IconId::Info : IconId::TriangleAlert,
+                                 g_rest.on ? I18n::Trf("{} active groups from ReshadeEffectShaderToggler.ini", (int)std::count_if(g_rest.cfg.groups.begin(), g_rest.cfg.groups.end(), [](const Looks::Rest::Group& x) { return x.active; })).c_str()
+                                           : I18n::Tr("No ReshadeEffectShaderToggler.ini with an active group next to the game or in the Apex Radiance folder"),
+                                 g_rest.on ? VioletTheme::kTextMuted : VioletTheme::kWarning);
             ApexUi::EndAdvanced();
         }
 

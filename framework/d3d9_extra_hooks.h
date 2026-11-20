@@ -31,6 +31,10 @@ using BeforeStretchRect = void (*)(IDirect3DDevice9* device, IDirect3DSurface9* 
                                   IDirect3DSurface9* dst, const RECT* dstRect, D3DTEXTUREFILTERTYPE filter);
 void SetBeforeStretchRect(BeforeStretchRect fn);
 void SetDrawUPObserver(DrawUPObserver fn);
+// Called before every DrawPrimitiveUP / DrawIndexedPrimitiveUP, separate from the observer slot (Looks: a REST group's
+// shaders drawn with vertices in memory, as the game's interface draws)
+using BeforeDrawUP = void (*)(IDirect3DDevice9* device);
+void SetBeforeDrawUP(BeforeDrawUP fn);
 void SetDepthSubstitution(DepthSubstitute substitute, DepthReport report);
 
 // Call the real device methods, bypassing substitution

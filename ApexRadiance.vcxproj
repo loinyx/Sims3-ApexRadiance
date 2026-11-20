@@ -215,6 +215,7 @@
       <PreprocessorDefinitions>_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="features\looks_preset.cpp" />
+    <ClCompile Include="features\looks_rest.cpp" />
     <ClCompile Include="features\refpack_codec.cpp" />
     <ClCompile Include="features\resource_cache.cpp" />
     <ClCompile Include="features\rig_tracker.cpp" />
@@ -427,6 +428,7 @@
     <ClInclude Include="third_party\reshadefx\effect_symbol_table.hpp" />
     <ClInclude Include="third_party\reshadefx\effect_token.hpp" />
     <ClInclude Include="features\looks_preset.h" />
+    <ClInclude Include="features\looks_rest.h" />
     <ClInclude Include="features\looks_shaders.h" />
     <ClInclude Include="features\post_scene.h" />
     <ClInclude Include="features\refpack_codec.h" />

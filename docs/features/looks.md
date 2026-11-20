@@ -361,6 +361,7 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | Strength | `mix` | float | 100% | 0 to 100% | How much of the look is blended over the game |
 | Interface without shaders | `onUi` (inverted) | bool | on (`onUi` false) | | Off: menus, the game's panels and loading screens get the look too |
 | Advanced > Order | `beforeColor` | bool | off (After Apex Color) | | Runs the look before Apex's Color instead of after it |
+| Advanced > ReShade Effect Shader Toggler | `restConfig` | bool | off | | Runs shaders where a `ReshadeEffectShaderToggler.ini` says (Compatibility, below). The note under it says how many groups it read |
 | Shader switches | `off` | array of technique names | empty | at most 256 read | The look's shaders switched off here |
 | Shader switches | `on` | array of technique names | empty | at most 256 read | Shaders the file keeps listed off (`ApexOff=`) switched on here |
 | Remove (trash) | `removed` | array of lower-case `tech@file.fx` | empty | at most 256 read | Shaders removed here, listed with Restore until the look is saved |
@@ -401,6 +402,20 @@ the copy gets a numbered name, which the look then does not use); names with a f
 - **Captures:** `%PresetName%` in file names and *Save the look's preset too* use the look's .ini; *Look only while a
   look is on* captures the frame before the look (`ApexCapture::BeforeLook`).
 - **ReShade or GShade installed too:** both grade the picture; turn one off.
+- **ReShade Effect Shader Toggler (REST) configurations** (`features/looks_rest.h`): REST is a ReShade add-on that runs
+  effects when the game draws with chosen shaders, before the rest of the frame is drawn on top. A Sims 3 configuration
+  made to keep ReShade off the interface also kept Comic.fx's lines out of Sims' hair, which the game draws after it.
+  With *ReShade Effect Shader Toggler* on, Looks reads `ReshadeEffectShaderToggler.ini` from the Apex Radiance folder,
+  else the game's folder (where REST keeps it), as REST does: per group, the vertex and pixel shaders by the CRC32 of
+  their bytecode (what Direct3D 9 gets: the same values under the RTX Remix bridge and DXVK; 4 of the shared file's 27
+  matched Apex's own captures), *InvocationLocation* (0 before the draw, 1 after it, 2 when the game then changes its
+  render target), *MatchSwapchainResolutionOnly* (REST reads it as a number: `True` is 0, the screen's size) and
+  *RequeueAfterRTMatchingFailure*, and which effects the group takes (*Techniques*, *AllowAllTechniques*,
+  *TechniqueExceptions*, by technique name). A shader a group takes runs once a frame at its group's draw, on that
+  render target, instead of at Apex's own points; one whose group did not draw this frame runs at the end of the frame
+  (REST: at Present). Shaders no group takes run where Apex puts them. Draws with vertices in memory (the interface's)
+  count too (`ExtraHooks::SetBeforeDrawUP`). Not read: texture bindings, constant copies, toggle keys and shader hunting
+  (logged once).
 - **RTX Remix bridge:** the device state the passes change is put back by hand, and by a `D3DSBT_ALL` state block when a
   getter the bridge does not answer failed.
 
