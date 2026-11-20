@@ -90,46 +90,6 @@ public sealed partial class MainWindow
 
     // ---------- Home ----------
 
-    void BuildHome()
-    {
-        var host = ScreenHome;
-        host.Children.Clear();
-        if (_game is not { } g)
-        {
-            host.Children.Add(Heading(T("Home")));
-            host.Children.Add(Card(Body(T("The launcher found no The Sims 3. Choose the game folder in Settings.")), Button(T("Choose the game"), () => Show(GameStep))));
-            return;
-        }
-        // what waits for the player first
-        if (_running) host.Children.Add(Banner(InfoBarSeverity.Success, T("The Sims 3 is running"), _session is { } ss ? T("Playing for {0}.", Duration(ss.Played)) : ""));
-        else if (WelcomeUpdates() is { Count: > 0 } ups)
-            host.Children.Add(Banner(InfoBarSeverity.Informational, ups.Count == 1 ? T("1 update is ready") : T("{0} updates are ready", ups.Count),
-                ups.Count == 1
-                    ? _settings.InstallUpdatesOnPlay ? T("It goes in when you press Play; your settings stay.") : T("Install it before you play; your settings stay.")
-                    : _settings.InstallUpdatesOnPlay ? T("They go in when you press Play; your settings stay.") : T("Install them before you play; your settings stay."),
-                T("See updates"), () => Show(Welcome)));
-        if (_offline) host.Children.Add(Banner(InfoBarSeverity.Warning, T("No internet"), T("You can still play. Updates wait until you're back online."), T("Try again"), async () => await LoadReleasesAsync()));
-        if (_healthState == HealthState.Blocked)
-            host.Children.Add(Banner(InfoBarSeverity.Error, T("Apex Radiance can't start"), T("The game still starts, but without Apex Radiance until this is fixed."), T("Open Health"), () => Show(HealthScreen)));
-
-        host.Children.Add(Hero(g));
-        host.Children.Add(HealthWidget());
-
-        var cards = new Grid { ColumnSpacing = 16 };
-        for (int i = 0; i < 3; i++) cards.ColumnDefinitions.Add(new ColumnDefinition());
-        var newest = Saves.Newest(Docs);
-        var cont = Card(Col(Eyebrow(T("CONTINUE")), Strong(newest?.Name ?? T("No save yet")),
-            Muted(newest is null ? T("Start a new game from the game's menu.") : T("Starts the game straight into your last save.")),
-            newest is null ? new Border() : Link(T("Pick another save"), () => Show(SavesScreen))));
-        var apex = _latest.GetValueOrDefault(Releases.Apex);
-        var news = Card(Col(Eyebrow(T("WHAT'S NEW")), Strong(apex is null ? T("Release notes") : "Apex Radiance " + apex.Version),
-            Muted(FirstLine(apex?.Body) ?? T("The notes of each release, read from GitHub.")), Link(T("All release notes"), () => Show(NewsScreen))));
-        var pics = Card(Col(Eyebrow(T("YOUR PICTURES")), Pictures(), Link(T("Screenshots folder"), () => OpenFolder(Path.Combine(Docs, "Screenshots")))));
-        Grid.SetColumn(news, 1); Grid.SetColumn(pics, 2);
-        cards.Children.Add(cont); cards.Children.Add(news); cards.Children.Add(pics);
-        host.Children.Add(cards);
-    }
-
     // Components: Apex Radiance and Sims 3 Modernization side by side, one above the other on a narrow window (so neither
     // name is cut)
     void OnCoreSized(object sender, SizeChangedEventArgs e)
@@ -143,125 +103,6 @@ public sealed partial class MainWindow
         Grid.SetColumn(CoreDivider, narrow ? 0 : 1);
         Grid.SetRow(CoreDivider, narrow ? 1 : 0);
         CoreDivider.Height = narrow ? 1 : double.NaN;
-    }
-
-    UIElement Hero(Game g)
-    {
-        var grid = new Grid { MinHeight = 300, CornerRadius = new CornerRadius(12), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
-        if (Screenshots(1).FirstOrDefault() is { } shot)
-            grid.Children.Add(new Image { Source = new BitmapImage(new Uri(shot)), Stretch = Stretch.UniformToFill });
-        var shade = new Border
-        {
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 1), EndPoint = new Windows.Foundation.Point(0, 0),
-                GradientStops = { new GradientStop { Color = Windows.UI.Color.FromArgb(240, 11, 12, 14), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(40, 11, 12, 14), Offset = 1 } },
-            },
-        };
-        grid.Children.Add(shade);
-        var row = new Grid { Padding = new Thickness(28, 72, 28, 28), VerticalAlignment = VerticalAlignment.Bottom, ColumnSpacing = 20 };
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var left = Col(Eyebrow(g.Label.ToUpperInvariant()), new TextBlock { Text = "The Sims 3", FontSize = 36, FontWeight = FontWeights.SemiBold });
-        ((StackPanel)left).Spacing = 8;
-        // (a grid, not a row: the versions line wraps on a narrow window instead of running past the edge)
-        var versions = new Grid { ColumnSpacing = 8 };
-        versions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        versions.ColumnDefinitions.Add(new ColumnDefinition());
-        versions.Children.Add(new Image { Source = new BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 0, 0) });
-        var vtext = Muted("Apex Radiance " + (_state?.ApexVersion ?? "?")
-            + (Known(Components.Modernization) is { Length: > 0 } mv ? "  ·  Sims 3 Modernization " + mv : ""));
-        Grid.SetColumn(vtext, 1);
-        versions.Children.Add(vtext);
-        ((StackPanel)left).Children.Add(versions);
-        // expansions, then a little apart the stuff packs
-        // (wrapping: twenty packs fit a narrow window on two lines)
-        var badges = new WrapPanel { Spacing = 4 };
-        var firstStuff = true;
-        foreach (var (p, dir) in Expansions.Installed(g))
-        {
-            var badge = PackBadge(p, dir, 24);
-            if (!p.Expansion && firstStuff && badges.Children.Count > 0) { badge.Margin = new Thickness(8, 0, 0, 0); firstStuff = false; }
-            badges.Children.Add(badge);
-        }
-        // the packs in the picture's top-right corner, on a soft shade so they read over any screenshot
-        if (badges.Children.Count > 0)
-            grid.Children.Add(new Border
-            {
-                Child = badges, Padding = new Thickness(10, 8, 10, 8), CornerRadius = new CornerRadius(12),
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x8C, 0x0B, 0x0C, 0x0E)),
-                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(120, 18, 18, 0),
-            });
-        row.Children.Add(left);
-        UIElement action;
-        if (_running)
-        {
-            action = new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 22, 36, 28)), CornerRadius = new CornerRadius(8), Padding = new Thickness(20, 14, 20, 14),
-                Child = new TextBlock { Text = _session is { } s ? T("Playing · {0}", Duration(s.Played)) : T("Playing"), Foreground = Res("ApexSuccessBrush"), FontWeight = FontWeights.SemiBold } };
-        }
-        else
-        {
-            var play = new Button { Style = (Style)Application.Current.Resources["AccentButtonStyle"], MinWidth = 180, Height = 52, IsEnabled = !_busy && !Maintenance };
-            play.Content = new TextBlock { Text = _healthState == HealthState.Blocked ? T("Play anyway") : T("Play"), FontSize = 17, FontWeight = FontWeights.SemiBold };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(play, "PlayButton");
-            play.Click += async (_, _) => await PlayAsync(null);
-            action = play;
-        }
-        var act = (FrameworkElement)action;
-        act.VerticalAlignment = VerticalAlignment.Bottom;
-        row.Children.Add(act);
-        grid.Children.Add(row);
-        // a narrow window: Play goes under the title, full width, and the hero grows to fit (the title never cut short)
-        void Lay(double width)
-        {
-            var narrow = width < 640;
-            Grid.SetColumn(act, narrow ? 0 : 1);
-            Grid.SetRow(act, narrow ? 1 : 0);
-            Grid.SetColumnSpan(act, narrow ? 2 : 1);
-            act.HorizontalAlignment = narrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
-            act.Margin = new Thickness(0, narrow ? 18 : 0, 0, 0);
-            Grid.SetColumnSpan((FrameworkElement)left, narrow ? 2 : 1);
-        }
-        grid.SizeChanged += (_, e) => Lay(e.NewSize.Width);
-        Lay(1000);
-        return grid;
-    }
-
-    UIElement HealthWidget()
-    {
-        var b = new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(14, 10, 22, 10), CornerRadius = new CornerRadius(14) };
-        // the state's colour coming in from the crystal's side, as in the design
-        b.Background = new LinearGradientBrush
-        {
-            StartPoint = new Windows.Foundation.Point(0, 0.5), EndPoint = new Windows.Foundation.Point(1, 0.5),
-            GradientStops = { new GradientStop { Color = CardTint(0.07), Offset = 0 }, new GradientStop { Color = CardTint(0), Offset = 0.6 } },
-        };
-        var g = new Grid { ColumnSpacing = 20 };
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        _homeCrystal = new Crystal(84); // (a new one each time: a XAML element cannot move between rebuilt screens)
-        _homeCrystal.SetLevel(HealthLevel, animate: false);
-        g.Children.Add(_homeCrystal);
-        var text = Col(Eyebrow(T("HEALTH")), new TextBlock { Text = HealthTitle(), FontSize = 20, FontWeight = FontWeights.SemiBold },
-            Muted(_checked == default ? T("Checked when you press Play") : T("Checked {0} · checked again when you press Play", _checked.ToString("t"))));
-        var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 4, 0, 0) };
-        chips.Children.Add(Chip(WelcomeUpdates().Count > 0 ? T("Update ready") : T("Up to date"), WelcomeUpdates().Count > 0 ? "ApexAccentBrush" : "ApexSuccessBrush", () => Show(WelcomeUpdates().Count > 0 ? Welcome : NewsScreen)));
-        var issues = _health.Count(i => i.Finding.Severity != Severity.Info);
-        chips.Children.Add(Chip(issues == 0 ? T("All checks passed") : issues == 1 ? T("1 thing to look at") : T("{0} things to look at", issues), issues == 0 ? "ApexSuccessBrush" : "ApexWarningBrush", () => Show(HealthScreen)));
-        if (_modLooks.Count > 0) chips.Children.Add(Chip(_modLooks.Count == 1 ? T("1 mod needs a look") : T("{0} mods need a look", _modLooks.Count), "ApexWarningBrush", () => Show(ModsScreen)));
-        ((StackPanel)text).Children.Add(chips);
-        Grid.SetColumn((FrameworkElement)text, 1);
-        ((FrameworkElement)text).VerticalAlignment = VerticalAlignment.Center;
-        g.Children.Add(text);
-        var open = Button(T("Open Health"), () => Show(HealthScreen));
-        Grid.SetColumn(open, 2);
-        open.VerticalAlignment = VerticalAlignment.Center;
-        g.Children.Add(open);
-        b.Child = g;
-        return b;
     }
 
     // how much needs attention, for the crystal's colour: nothing is 0, a blocked game 1; warnings fill the way between
@@ -291,21 +132,6 @@ public sealed partial class MainWindow
         HealthState.NeedsYou => _health.Count(i => i.Finding.Severity != Severity.Info) is var n && n == 1 ? T("1 thing to look at") : T("{0} things to look at", _health.Count(i => i.Finding.Severity != Severity.Info)),
         _ => T("Ready to play"),
     };
-
-    UIElement Pictures()
-    {
-        var row = new Grid { ColumnSpacing = 6, Height = 64 };
-        var shots = Screenshots(3);
-        for (int i = 0; i < 3; i++)
-        {
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            var b = new Border { CornerRadius = new CornerRadius(4), Background = Res("ApexPillBrush") };
-            if (i < shots.Count) b.Child = new Image { Source = new BitmapImage(new Uri(shots[i])) { DecodePixelWidth = 200 }, Stretch = Stretch.UniformToFill };
-            Grid.SetColumn(b, i);
-            row.Children.Add(b);
-        }
-        return row;
-    }
 
     List<string> Screenshots(int n)
     {
@@ -345,19 +171,16 @@ public sealed partial class MainWindow
 
     // ---------- Play and the session ----------
 
-    async Task PlayAsync(string? save)
+    // Play starts the game as it is; update (Update and play) puts the ready updates in first. Nothing is installed
+    // without that choice.
+    async Task PlayAsync(string? save, bool update = false)
     {
         if (_game is not { } g || _busy) return;
         if (_running || Games.IsRunning()) { await Message(T("The Sims 3 is already running"), T("Switch to the game, or close it and press Play again.")); return; }
-        // updates already offered: in before the game starts, as the player chose in Settings
-        if (WelcomeUpdates() is { Count: > 0 } ups)
+        if (update && WelcomeUpdates() is { Count: > 0 } ups)
         {
-            var install = _settings.InstallUpdatesOnPlay || await Confirm(T("Updates are ready"), T("Install them first? It takes about a minute; your settings stay."), T("Install and play"));
-            if (install)
-            {
-                await InstallAsync(ups);
-                if (WelcomeUpdates().Count > 0) return; // (it failed or was cancelled: its message said why)
-            }
+            await InstallAsync(ups);
+            if (WelcomeUpdates().Count > 0) return; // (it failed or was cancelled: its message said why)
         }
         CheckHealth();
         // the fixes that are safe to make without asking (each keeps a copy of the file it changes)
@@ -979,8 +802,6 @@ public sealed partial class MainWindow
         host.Children.Add(Toggle(T("Fix safe things without asking"), T("Like the Resource.cfg and Edge Smoothing fixes. A copy of each file is always kept."), _settings.FixSafeAutomatically,
             on => { _settings.FixSafeAutomatically = on; _settings.Save(); }));
         host.Children.Add(Section(T("Updates")));
-        host.Children.Add(Toggle(T("Install updates when I press Play"), T("Otherwise the launcher asks first."), _settings.InstallUpdatesOnPlay,
-            on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
         host.Children.Add(Row(T("Apex Launcher {0}", App.Version), T("Updates itself from each Apex Radiance release."), null));
         host.Children.Add(InstallModeRow());
         host.Children.Add(Section(T("General")));
