@@ -280,12 +280,14 @@ public sealed partial class MainWindow
         foreach (var (key, list) in groups)
         {
             var block = new StackPanel { Spacing = 10 };
-            var head = new TextBlock { FontSize = 15, FontWeight = FontWeights.SemiBold };
-            head.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = key });
-            var homes = _galByHome ? (list.Count == 1 ? T("1 picture") : T("{0} pictures", list.Count)) : string.Join(" · ", list.Select(p => Gallery.HouseholdOf(p, _gal!, _galSaves)).OfType<string>().Distinct());
-            if (homes.Length > 0) head.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "   " + homes, FontWeight = FontWeights.Normal, Foreground = Res("ApexMutedBrush"), FontSize = 13 });
+            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            head.Children.Add(new TextBlock { Text = key, FontSize = 17, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            head.Children.Add(new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 1, 8, 2), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock { Text = list.Count.ToString(), FontSize = 12, Foreground = Res("ApexSoftTextBrush") } });
+            if (!_galByHome && string.Join(" · ", list.Select(p => Gallery.HouseholdOf(p, _gal!, _galSaves)).OfType<string>().Distinct()) is { Length: > 0 } homes)
+                head.Children.Add(new TextBlock { Text = homes, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
             block.Children.Add(head);
-            var wrap = new WrapPanel { Spacing = 8, ChildrenTransitions = new TransitionCollection { new EntranceThemeTransition { IsStaggeringEnabled = true, FromVerticalOffset = 26 } } };
+            var wrap = new CardGrid { MinItemWidth = 250, Spacing = 10, ChildrenTransitions = new TransitionCollection { new EntranceThemeTransition { IsStaggeringEnabled = true, FromVerticalOffset = 30 } } };
             foreach (var p in list)
             {
                 var at = pics.IndexOf(p);
@@ -304,23 +306,79 @@ public sealed partial class MainWindow
         return s;
     }
 
-    // a picture in a row: it rises a little under the pointer; a star when it is a favourite
+    // a picture in the grid: it fades in once read, rises and grows a touch under the pointer with its time showing, a star
+    // when it is a favourite
     UIElement Tile(Picture p, Action open)
     {
-        var g = new Grid { Width = 260, Height = 146, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush") };
-        g.Children.Add(new Image { Source = new BitmapImage(new Uri(p.Path)) { DecodePixelWidth = 400 }, Stretch = Stretch.UniformToFill });
+        var g = new Grid { CornerRadius = new CornerRadius(12), Background = Res("ApexPillBrush") };
+        var image = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(320) } };
+        var bmp = new BitmapImage { DecodePixelWidth = 480 };
+        bmp.ImageOpened += (_, _) => image.Opacity = 1;
+        bmp.UriSource = new Uri(p.Path);
+        image.Source = bmp;
+        g.Children.Add(image);
+        var when = new Border { VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(12, 18, 12, 9), Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) },
+            Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(0, 1), GradientStops = { new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0xB3, 0, 0, 0), Offset = 1 } } },
+            Child = new TextBlock { Text = p.Taken.ToString("t") + "  ·  " + (Gallery.HouseholdOf(p, _gal!, _galSaves) ?? ""), FontSize = 12, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), TextTrimming = TextTrimming.CharacterEllipsis } };
+        g.Children.Add(when);
         if (Gallery.Peek(_gal!, p.Path).Favourite)
             g.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Margin = new Thickness(8), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0B, 0x0C, 0x0E)), Child = new FontIcon { Glyph = "", FontSize = 13, Foreground = new SolidColorBrush(Rgb(0xF2, 0xC9, 0x4C)) } });
-        var b = new Button { Content = g, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(10), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var b = new Button { Content = g, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Shadow = new ThemeShadow(), Translation = new Vector3(0, 0, 8) };
         b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, Path.GetFileNameWithoutExtension(p.Path));
-        b.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(200) };
-        b.PointerEntered += (_, _) => b.Translation = new Vector3(0, -4, 0);
-        b.PointerExited += (_, _) => b.Translation = Vector3.Zero;
+        // (16:9, as wide as its column)
+        b.SizeChanged += (_, e) => { if (Math.Abs(g.Height - e.NewSize.Width * 9 / 16) > 1) g.Height = e.NewSize.Width * 9 / 16; b.CenterPoint = new Vector3((float)e.NewSize.Width / 2, (float)e.NewSize.Height / 2, 0); };
+        b.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(220) };
+        b.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(220) };
+        b.PointerEntered += (_, _) => { b.Translation = new Vector3(0, -6, 30); b.Scale = new Vector3(1.025f, 1.025f, 1); when.Opacity = 1; };
+        b.PointerExited += (_, _) => { b.Translation = new Vector3(0, 0, 8); b.Scale = Vector3.One; when.Opacity = 0; };
         b.Click += (_, _) => open();
         return b;
+    }
+
+    // a storyboard step: one property of one element to a value, over a time, with an ease
+    static void Tween(Storyboard sb, DependencyObject target, string property, double to, int ms, EasingFunctionBase? ease = null, int begin = 0)
+    {
+        var a = new DoubleAnimation { To = to, Duration = TimeSpan.FromMilliseconds(ms), EasingFunction = ease, BeginTime = TimeSpan.FromMilliseconds(begin) };
+        Storyboard.SetTarget(a, target);
+        Storyboard.SetTargetProperty(a, property);
+        sb.Children.Add(a);
+    }
+
+    // a card's landing: from above, turned and a little large, it falls with a bounce, its turn settling with a spring
+    static CompositeTransform Land(FrameworkElement el, double angle, int delay, double fromX)
+    {
+        var t = new CompositeTransform { TranslateY = -260, TranslateX = fromX, Rotation = angle + 26, ScaleX = 1.2, ScaleY = 1.2 };
+        el.RenderTransform = t;
+        el.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
+        el.Opacity = 0;
+        var sb = new Storyboard { BeginTime = TimeSpan.FromMilliseconds(delay) };
+        Tween(sb, t, "TranslateY", 0, 900, new BounceEase { EasingMode = EasingMode.EaseOut, Bounces = 2, Bounciness = 3.2 });
+        Tween(sb, t, "TranslateX", 0, 760, new CubicEase { EasingMode = EasingMode.EaseOut });
+        Tween(sb, t, "Rotation", angle, 1250, new ElasticEase { EasingMode = EasingMode.EaseOut, Oscillations = 2, Springiness = 5 });
+        Tween(sb, t, "ScaleX", 1, 640, new CubicEase { EasingMode = EasingMode.EaseOut });
+        Tween(sb, t, "ScaleY", 1, 640, new CubicEase { EasingMode = EasingMode.EaseOut });
+        Tween(sb, el, "Opacity", 1, 240);
+        sb.Begin();
+        return t;
+    }
+
+    // a quick turn of a card (hover, shuffle)
+    static void Turn(CompositeTransform t, double to, int ms = 320, EasingFunctionBase? ease = null)
+    {
+        var sb = new Storyboard();
+        Tween(sb, t, "Rotation", to, ms, ease ?? new CubicEase { EasingMode = EasingMode.EaseOut });
+        sb.Begin();
+    }
+
+    // the tape's colour: bright, or the board's own hue made paler
+    Brush TapeBrush(AlbumLook look, int order)
+    {
+        if (look.Tape == "match") { var c = Shade(BoardColor(look), 0.45); return new SolidColorBrush(Windows.UI.Color.FromArgb(0xB8, c.R, c.G, c.B)); }
+        return new SolidColorBrush(Tapes[order % Tapes.Length]);
     }
 
     // ---------- Scrapbook ----------
@@ -411,7 +469,37 @@ public sealed partial class MainWindow
             buttons.Add(t);
         }
         panel.Children.Add(frames);
-        var fly = new Flyout { Content = panel, Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
+        StackPanel Choice(string title, (string Key, string Name)[] options, Func<string> now, Action<string> set)
+        {
+            var box = new StackPanel { Spacing = 6, Margin = new Thickness(0, 6, 0, 0) };
+            box.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.SemiBold });
+            var row = new Grid { ColumnSpacing = 6 };
+            var all = new List<ToggleButton>();
+            for (int i = 0; i < options.Length; i++)
+            {
+                row.ColumnDefinitions.Add(new ColumnDefinition());
+                var (key, name) = options[i];
+                var t = new ToggleButton { Content = name, IsChecked = now() == key, HorizontalAlignment = HorizontalAlignment.Stretch };
+                t.Click += (_, _) => { set(key); foreach (var o in all) o.IsChecked = o == t; rebuild = true; };
+                Grid.SetColumn(t, i);
+                row.Children.Add(t);
+                all.Add(t);
+            }
+            box.Children.Add(row);
+            return box;
+        }
+        panel.Children.Add(Choice(T("Light"), [("soft", T("Soft")), ("spot", T("Spotlight")), ("flat", T("Flat"))], () => look.Light, v => look.Light = v));
+        panel.Children.Add(Choice(T("Tape"), [("colour", T("Colourful")), ("match", T("Matching")), ("none", T("None"))], () => look.Tape, v => look.Tape = v));
+        Slider Slide(string title, double min, double max, double value, string left, string right, Action<double> set)
+        {
+            var s = new Slider { Header = title, Minimum = min, Maximum = max, StepFrequency = 0.05, Value = value, Margin = new Thickness(0, 6, 0, 0) };
+            ToolTipService.SetToolTip(s, left + "  ←→  " + right);
+            s.ValueChanged += (_, e) => { set(e.NewValue); rebuild = true; };
+            return s;
+        }
+        panel.Children.Add(Slide(T("Picture size"), 0.75, 1.3, look.Size, T("Small"), T("Large"), v => look.Size = v));
+        panel.Children.Add(Slide(T("Tilt: tidy to messy"), 0, 1.6, look.Tilt, T("Tidy"), T("Messy"), v => look.Tilt = v));
+        var fly = new Flyout { Content = new ScrollViewer { Content = panel, MaxHeight = 680, Padding = new Thickness(0, 0, 14, 0) }, Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
         fly.Closed += (_, _) => { Gallery.Save(_gal!); if (rebuild) BuildGallery(); };
         return fly;
     }
@@ -452,7 +540,7 @@ public sealed partial class MainWindow
         {
             if (i == 0 || pics[i].Taken.Date != pics[i - 1].Taken.Date) { if (i > 0) x += 90 * s; days.Add((x, pics[i].Taken.Date)); }
             xs[i] = x;
-            last = ((i % 4 == 0 ? 290 : 230) * s + 24);
+            last = ((i % 4 == 0 ? 290 : 230) * s * look.Size + 24);
             x += last * 0.8;
         }
         var width = Math.Max(1100, pics.Count == 0 ? 0 : xs[^1] + last + 110 * s);
@@ -488,7 +576,7 @@ public sealed partial class MainWindow
             if (!look.Places.TryGetValue(pics[i].Path, out var place))
             {
                 var phase = i * 1.1;
-                var h = ((i % 4 == 0 ? 194 : 154) * s) + 70;
+                var h = ((i % 4 == 0 ? 194 : 154) * s * look.Size) + 70;
                 place = new Placed
                 {
                     X = xs[i] + rnd.Next(-12, 12),
@@ -517,10 +605,80 @@ public sealed partial class MainWindow
             e.Handled = true;
         }), true);
         scroll.Loaded += (_, _) => DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => scroll.ChangeView(scroll.ScrollableWidth, null, null, true));
-        var frame = new Border { Height = BoardHeight, CornerRadius = new CornerRadius(14), Background = BoardBrush(look), Child = scroll, BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
+        var inside = new Grid();
+        inside.Children.Add(scroll);
+        // (the light: an even fade, a lit middle with darker edges, or nothing over the colour)
+        if (look.Light != "flat")
+            inside.Children.Add(new Border { IsHitTestVisible = false, Background = new RadialGradientBrush { Center = new(0.5, 0.42), GradientOrigin = new(0.5, 0.35), RadiusX = 0.75, RadiusY = 0.85, GradientStops =
+            {
+                new GradientStop { Color = look.Light == "spot" ? Windows.UI.Color.FromArgb(0x1C, 255, 255, 255) : Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0 },
+                new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0.55 },
+                new GradientStop { Color = Windows.UI.Color.FromArgb((byte)(look.Light == "spot" ? 0x8C : 0x40), 0, 0, 0), Offset = 1 },
+            } } });
+        Border Edge(bool left) => new()
+        {
+            Width = 90, HorizontalAlignment = left ? HorizontalAlignment.Left : HorizontalAlignment.Right, IsHitTestVisible = false, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(250) },
+            Background = new LinearGradientBrush { StartPoint = new(left ? 0 : 1, 0.5), EndPoint = new(left ? 1 : 0, 0.5), GradientStops = { new GradientStop { Color = Windows.UI.Color.FromArgb(0x70, 0, 0, 0), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 1 } } },
+        };
+        var leftEdge = Edge(true);
+        var rightEdge = Edge(false);
+        inside.Children.Add(leftEdge);
+        inside.Children.Add(rightEdge);
+        var frame = new Border { Height = BoardHeight, CornerRadius = new CornerRadius(14), Background = BoardBrush(look), Child = inside, BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
         _boardFrame = frame;
+
+        // the strip of dates under the board: each day where it lies, the part in view lit; a click goes there
+        var strip = new Grid { Height = 40, Margin = new Thickness(0, 10, 0, 0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var track = new Canvas();
+        strip.Children.Add(track);
+        var window = new Border { Height = 30, CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 0x7F, 0x77, 0xDD)), BorderBrush = Res("ApexAccentBrush"), BorderThickness = new Thickness(1) };
+        Canvas.SetTop(window, 5);
+        void Lay()
+        {
+            var tw = strip.ActualWidth;
+            if (tw <= 0) return;
+            track.Children.Clear();
+            var rule = new Border { Width = tw, Height = 1, Background = Res("ApexCardBorderBrush") };
+            Canvas.SetTop(rule, 20);
+            track.Children.Add(rule);
+            var lastRight = -1000.0;
+            foreach (var (dx, d) in days)
+            {
+                var at = dx / width * tw;
+                var tick = new Border { Width = 2, Height = 10, CornerRadius = new CornerRadius(1), Background = Res("ApexMutedBrush") };
+                Canvas.SetLeft(tick, at); Canvas.SetTop(tick, 15);
+                track.Children.Add(tick);
+                if (at < lastRight + 8) continue;  // (labels that would touch stay ticks)
+                var label = new TextBlock { Text = d.ToString("d MMM"), FontSize = 11, Foreground = Res("ApexSoftTextBrush") };
+                Canvas.SetLeft(label, at + 5); Canvas.SetTop(label, 0);
+                track.Children.Add(label);
+                lastRight = at + 5 + d.ToString("d MMM").Length * 6.5;
+            }
+            track.Children.Add(window);
+            Place();
+        }
+        void Place()
+        {
+            var tw = strip.ActualWidth;
+            if (tw <= 0 || scroll.ExtentWidth <= 0) return;
+            window.Width = Math.Max(24, scroll.ViewportWidth / scroll.ExtentWidth * tw);
+            Canvas.SetLeft(window, scroll.HorizontalOffset / scroll.ExtentWidth * tw);
+            leftEdge.Opacity = scroll.HorizontalOffset > 4 ? 1 : 0;
+            rightEdge.Opacity = scroll.HorizontalOffset < scroll.ScrollableWidth - 4 ? 1 : 0;
+        }
+        strip.SizeChanged += (_, _) => Lay();
+        scroll.ViewChanged += (_, _) => Place();
+        strip.Tapped += (_, e) =>
+        {
+            var at = e.GetPosition(strip).X / Math.Max(1, strip.ActualWidth) * width;
+            scroll.ChangeView(Math.Clamp(at - scroll.ViewportWidth / 2, 0, scroll.ScrollableWidth), null, null, false);
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(strip, T("Dates"));
+        var all = new StackPanel();
+        all.Children.Add(frame);
+        if (days.Count > 1) all.Children.Add(strip);
         Gallery.Save(_gal!);
-        return frame;
+        return all;
     }
 
     // a picture in the album's frame: it falls in turning and bounces, its tape sticks, its caption writes itself; dragged
@@ -529,7 +687,7 @@ public sealed partial class MainWindow
     {
         var info = Gallery.Peek(_gal!, p.Path);
         var big = order % 4 == 0;
-        double w = (big ? 290 : 230) * _boardScale, h = (big ? 194 : 154) * _boardScale;
+        double w = (big ? 290 : 230) * _boardScale * look.Size, h = (big ? 194 : 154) * _boardScale * look.Size;
         var source = new BitmapImage(new Uri(p.Path)) { DecodePixelWidth = 600 };
         var dark = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
         var caption = new TextBlock { FontFamily = new FontFamily(look.Font), FontSize = (big ? 24 : 20) * Math.Max(0.85, _boardScale), TextTrimming = TextTrimming.CharacterEllipsis, MinHeight = 28, HorizontalAlignment = HorizontalAlignment.Left };
@@ -573,7 +731,7 @@ public sealed partial class MainWindow
                 body = film;
                 break;
             case "circle":
-                var size = (big ? 210 : 170) * _boardScale;
+                var size = (big ? 210 : 170) * _boardScale * look.Size;
                 stack.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = size, Height = size, StrokeThickness = 7, Stroke = new SolidColorBrush(Rgb(0xF6, 0xF2, 0xEA)), Fill = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill } });
                 caption.Foreground = ink;
                 caption.HorizontalAlignment = HorizontalAlignment.Center;
@@ -594,32 +752,34 @@ public sealed partial class MainWindow
         holder.Children.Add(body);
         if (look.Frame != "circle" && look.Frame != "film") body.Shadow = new ThemeShadow();
         Border? strip = null;
-        if (tape)
+        if (tape && look.Tape != "none")
         {
-            strip = new Border { Width = 96, Height = 22, Background = new SolidColorBrush(Tapes[order % Tapes.Length]), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -22, 0, 0),
-                Rotation = (order % 3 - 1) * 4, ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(380) }, Scale = new Vector3(0, 1, 1) };
+            strip = new Border { Width = 96, Height = 22, Background = TapeBrush(look, order), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -22, 0, 0),
+                RenderTransform = new CompositeTransform { Rotation = (order % 3 - 1) * 4, ScaleX = 0 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
             holder.Children.Add(strip);
         }
         var outer = new Border { Child = holder };
         Canvas.SetLeft(outer, place.X);
         Canvas.SetTop(outer, place.Y);
         Canvas.SetZIndex(outer, order);
-        outer.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(700) };
-        outer.RotationTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(700) };
-        outer.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(700) };
-        outer.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(400) };
-        outer.Opacity = 0;
-        outer.Translation = new Vector3(order % 2 == 0 ? -60 : 60, -220, 32);
-        outer.Rotation = (float)place.Angle + 22;
-        outer.Scale = new Vector3(1.15f, 1.15f, 1);
+        outer.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(220) };
+        outer.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(240) };
+        outer.Translation = new Vector3(0, 0, 32);
         outer.SizeChanged += (_, e) => outer.CenterPoint = new Vector3((float)e.NewSize.Width / 2, (float)e.NewSize.Height / 2, 0);
+        var angle = place.Angle * look.Tilt;
+        var turn = Land(holder, angle, delay, order % 2 == 0 ? -50 : 50);
         var text = info.Caption is { Length: > 0 } c ? c : T("+ write something");
-        After(delay, () => { outer.Opacity = 1; outer.Translation = new Vector3(0, 0, 32); outer.Rotation = (float)place.Angle; outer.Scale = Vector3.One; });
-        if (strip is not null) After(delay + 560, () => strip.Scale = Vector3.One);
-        After(delay + 760, () => Write(caption, text));
+        if (strip is not null)
+        {
+            var tapeIn = new Storyboard { BeginTime = TimeSpan.FromMilliseconds(delay + 640) };
+            Tween(tapeIn, strip.RenderTransform, "ScaleX", 1, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.6 });
+            tapeIn.Begin();
+        }
+        After(delay + 820, () => Write(caption, text));
 
-        outer.PointerEntered += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, -12, 48); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); };
-        outer.PointerExited += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, order); };
+        // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
+        outer.PointerEntered += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, angle * 0.25); };
+        outer.PointerExited += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, order); Turn(turn, angle, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
         Draggable(outer, () => { place.X = Canvas.GetLeft(outer); place.Y = Canvas.GetTop(outer); Gallery.Save(_gal!); });
         outer.DoubleTapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p)); };
         caption.Tapped += (_, e) =>
@@ -669,27 +829,25 @@ public sealed partial class MainWindow
         grid.Children.Add(box);
         grid.Children.Add(close);
         close.Margin = new Thickness(0, -20, -8, 0);
-        var outer = new Border { Child = grid, Background = new SolidColorBrush(color), Shadow = new ThemeShadow(), CornerRadius = new CornerRadius(2) };
+        var paper = new Border { Child = grid, Background = new SolidColorBrush(color), Shadow = new ThemeShadow(), CornerRadius = new CornerRadius(2), Translation = new Vector3(0, 0, 24) };
+        var tilt = new Border { Child = paper };
+        var outer = new Border { Child = tilt };
         Canvas.SetLeft(outer, note.X);
         Canvas.SetTop(outer, note.Y);
         Canvas.SetZIndex(outer, 500 + order);
-        outer.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(650) };
-        outer.RotationTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(650) };
-        outer.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(350) };
-        outer.CenterPoint = new Vector3(90, 85, 0);
-        outer.Opacity = 0;
-        outer.Translation = new Vector3(0, -160, 24);
-        outer.Rotation = (float)note.Angle - 18;
-        After(160 + order * 140, () => { outer.Opacity = 1; outer.Translation = new Vector3(0, 0, 24); outer.Rotation = (float)note.Angle; });
+        Land(tilt, note.Angle, 160 + order * 140, 0);
         outer.PointerEntered += (_, _) => close.Opacity = 1;
         outer.PointerExited += (_, _) => close.Opacity = 0;
         close.Click += (_, _) =>
         {
             look.Notes.Remove(note);
             Gallery.Save(_gal!);
-            outer.Opacity = 0;
-            outer.Translation = new Vector3(0, 40, 24);
-            After(360, () => _boardCanvas?.Children.Remove(outer));
+            var away = new Storyboard();
+            Tween(away, outer, "Opacity", 0, 260);
+            Tween(away, tilt.RenderTransform, "TranslateY", 60, 300, new CubicEase { EasingMode = EasingMode.EaseIn });
+            Tween(away, tilt.RenderTransform, "Rotation", note.Angle + 14, 300);
+            away.Completed += (_, _) => _boardCanvas?.Children.Remove(outer);
+            away.Begin();
         };
         Draggable(outer, () => { note.X = Canvas.GetLeft(outer); note.Y = Canvas.GetTop(outer); Gallery.Save(_gal!); });
         return outer;
@@ -751,7 +909,7 @@ public sealed partial class MainWindow
                 Storyboard.SetTargetProperty(a, prop);
                 sb.Children.Add(a);
             }
-            card.Rotation = (float)place.Angle;
+            Tween(sb, ((Border)card).Child.RenderTransform, "Rotation", place.Angle * look.Tilt, 1100, new ElasticEase { EasingMode = EasingMode.EaseOut, Oscillations = 1, Springiness = 4 });
         }
         sb.Completed += (_, _) => { foreach (var (pic, card, _) in _boardCards) { Canvas.SetLeft(card, look.Places[pic.Path].X); Canvas.SetTop(card, look.Places[pic.Path].Y); } };
         sb.Begin();

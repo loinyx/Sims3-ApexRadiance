@@ -32,6 +32,10 @@ public sealed class AlbumLook
     public string Frame { get; set; } = "polaroid";      // polaroid, rounded, stamp, film, circle
     public string Font { get; set; } = "Ink Free";
     public int Layout { get; set; }                        // 2: laid along the timeline
+    public string Light { get; set; } = "soft";          // soft, spot (a lit middle, darker edges) or flat
+    public string Tape { get; set; } = "colour";         // colour, match (the board's own hue) or none
+    public double Size { get; set; } = 1;                 // the pictures' size, 0.75 to 1.3
+    public double Tilt { get; set; } = 1;                 // 0 lies them straight, 1.6 throws them about
     public Dictionary<string, Placed> Places { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<StickyNote> Notes { get; set; } = [];
 }
