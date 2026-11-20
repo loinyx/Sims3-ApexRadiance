@@ -909,7 +909,7 @@ public sealed partial class MainWindow
             _gal.Albums.Remove(c.Key);
             Gallery.Look(_gal, _galAlbum).Places.Remove(c.Key);
             _spread.Remove(c.Key);
-            Keep();
+            Keep(step: true);
             if (_galSide is not null) _galSide.Content = GalleryAlbums();
             FlipBoard();
             ShowUndo(T("Album undone: its pictures are back on the board"), () => StepBack(true));
@@ -2492,13 +2492,14 @@ public sealed partial class MainWindow
     readonly Stack<string> _redoSteps = new();
     string? _lastKept;
     long _lastKeptAt;
-    void Keep()
+    // step: always a step of its own (an album undone, a rearrange), never folded into a change made just before
+    void Keep(bool step = false)
     {
         if (_gal is null) return;
         var now = System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         if (_lastKept is not null && now != _lastKept)
         {
-            if (Environment.TickCount64 - _lastKeptAt > 700 || _undoSteps.Count == 0) _undoSteps.Push(_lastKept);
+            if (step || Environment.TickCount64 - _lastKeptAt > 700 || _undoSteps.Count == 0) _undoSteps.Push(_lastKept);
             _redoSteps.Clear();
             while (_undoSteps.Count > 60) { var keep = _undoSteps.ToArray()[..60]; _undoSteps.Clear(); foreach (var k in keep.Reverse()) _undoSteps.Push(k); }
         }
