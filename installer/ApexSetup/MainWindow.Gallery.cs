@@ -893,6 +893,34 @@ public sealed partial class MainWindow
         DispatcherQueue.TryEnqueue(() => shut.Focus(FocusState.Programmatic));
     }
 
+    // a right click on a pile or its tag: open it, rename it, or undo it (its pictures go back on the board; Undo brings it back)
+    MenuFlyout PileMenu(CustomAlbum c)
+    {
+        var menu = new MenuFlyout();
+        var open = new MenuFlyoutItem { Text = T("Open the album"), Icon = new FontIcon { Glyph = "" } };
+        open.Click += (_, _) => { _galAlbum = c.Key; BuildGallery(); };
+        var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = new FontIcon { Glyph = "" } };
+        rename.Click += async (_, _) => { if (await AlbumDialog(c) is not null) BuildGallery(); };
+        var undo = new MenuFlyoutItem { Text = T("Undo the album"), Icon = new FontIcon { Glyph = "" } };
+        undo.Click += (_, _) =>
+        {
+            if (_gal is null) return;
+            _gal.Custom.Remove(c);
+            _gal.Albums.Remove(c.Key);
+            Gallery.Look(_gal, _galAlbum).Places.Remove(c.Key);
+            _spread.Remove(c.Key);
+            Keep();
+            if (_galSide is not null) _galSide.Content = GalleryAlbums();
+            FlipBoard();
+            ShowUndo(T("Album undone: its pictures are back on the board"), () => StepBack(true));
+        };
+        menu.Items.Add(open);
+        menu.Items.Add(rename);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(undo);
+        return menu;
+    }
+
     // the board laid again where it is, each picture sliding from where it lay to its new place
     void FlipBoard()
     {
@@ -1839,6 +1867,7 @@ public sealed partial class MainWindow
             // (the newest fall in first, the ones further back already lie there when scrolled to)
             var delay = 120 + Math.Min(slotOf[i], 10) * 130;
             var card = Framed(pics[i], place, look, ink, i, delay, pics, heap, bare: heap is not null && inPile[heap] > 1, kind: Kind(own));
+            if (heap is not null) card.ContextFlyout = PileMenu(heap);
             if (heap is not null) Canvas.SetZIndex(card, firstOf[heap] * 10 + 9 - inPile[heap]);
             // (a picture the player put down lies over the ones it was put on, the last one put down on top)
             else if (place.Moved && look.Places.TryGetValue(path, out var top) && top.Z > 0) _restZ[card] = 600 + look.Places.Values.Count(o => o.Moved && o.Z > 0 && o.Z < top.Z);
@@ -1904,6 +1933,7 @@ public sealed partial class MainWindow
             Canvas.SetLeft(tags, anchor.X + 8);
             Canvas.SetTop(tags, gathered ? Math.Min(anchor.Y + cardH + 34 * s, BoardHeight - 38) : Math.Max(6, anchor.Y - 42));
             Canvas.SetZIndex(tags, 950);
+            tags.ContextFlyout = PileMenu(c);
             canvas.Children.Add(tags);
             // (under a pile the tag sits just below its top picture, whatever the frame's height)
             if (gathered && albumCards.Count > 0)
