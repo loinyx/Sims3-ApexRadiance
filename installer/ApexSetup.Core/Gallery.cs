@@ -39,6 +39,19 @@ public sealed class AlbumLook
     public double Tilt { get; set; } = 1;                 // 0 lies them straight, 1.6 throws them about
     public Dictionary<string, Placed> Places { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<StickyNote> Notes { get; set; } = [];
+    public string Pattern { get; set; } = "none";        // none, lines, grid or dots: the paper under the pictures
+    public List<Sticker> Stickers { get; set; } = [];
+}
+
+// a sticker on a board: an emoji, where it lies, its turn and its size
+public sealed class Sticker
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Text { get; set; } = "";
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Angle { get; set; }
+    public double Size { get; set; } = 1;
 }
 
 // an album the player made (a trip, a family's story): its name, its icon and the pictures put in it
