@@ -1,5 +1,6 @@
 // Crash report (see crash_report.h).
 #include "crash_report.h"
+#include "gpu_trace.h"
 #include "apex_paths.h"
 #include "apex_version.h"
 #include "build_flavor.h"
@@ -293,6 +294,7 @@ void WriteDump(EXCEPTION_POINTERS* ep) {
 }
 
 void WriteReport(EXCEPTION_POINTERS* ep) {
+    GpuTrace::Crashed(); // the report says it: not reported again as a hang at the next start
     __try {
         WriteText(ep);
     } __except (EXCEPTION_EXECUTE_HANDLER) {

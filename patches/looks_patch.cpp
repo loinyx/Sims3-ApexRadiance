@@ -946,6 +946,8 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask, int restG
         if (anySkipHair && depth)
             if (const SimMask::View m = SimMask::Current(); m.width == rd.Width && m.height == rd.Height)
                 f.simOpaque = m.opaque, f.simTransparent = m.transparent;
+        GpuTrace::MarkIfOn(g_mode); // (the last steps of a session that does not close: where Looks runs, then its shaders)
+        for (const Looks::Step& s : steps) GpuTrace::MarkIfOn(Looks::Shader(s.shader).technique);
         const bool drew = g.runner.Run(f, steps);
         {
             // The line is only rebuilt when one of its parts changed, not at every run point

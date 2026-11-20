@@ -230,6 +230,7 @@
     <ClCompile Include="framework\call_chain.cpp" />
     <ClCompile Include="framework\crash_report.cpp" />
     <ClCompile Include="framework\hook_guard.cpp" />
+    <ClCompile Include="framework\gpu_trace.cpp" />
     <ClCompile Include="framework\load_timing.cpp" />
     <ClCompile Include="framework\transition_watch.cpp" />
     <ClCompile Include="framework\transition_calls.cpp" />
@@ -448,6 +449,7 @@
     <ClInclude Include="framework\call_chain.h" />
     <ClInclude Include="framework\crash_report.h" />
     <ClInclude Include="framework\hook_guard.h" />
+    <ClInclude Include="framework\gpu_trace.h" />
     <ClInclude Include="framework\module_lifetime.h" />
     <ClInclude Include="framework\load_timing.h" />
     <ClInclude Include="framework\transition_watch.h" />
