@@ -44,6 +44,10 @@ static class GalleryTests
             check(Gallery.HomeOf(trip, d, list, saves) == "Town" && Gallery.HomeOf(new CustomAlbum(), d, list, saves) is null
                 && Gallery.HomeOf(new CustomAlbum { Household = "Arbor", Pictures = [b] }, d, list, saves) == "Arbor",
                 "gallery: an album sits in the household it was made in, else the one its pictures belong to");
+            check(Fonts.Families("Segoe UI Semibold Italic (TrueType)").Single() == "Segoe UI"
+                && Fonts.Families("Cambria & Cambria Math (TrueType)").SequenceEqual(["Cambria", "Cambria Math"])
+                && Fonts.Families("Black (TrueType)").Single() == "Black" && Fonts.Installed().Count > 0,
+                "gallery: the fonts on this PC by family, styles and file kinds left out");
             var look = Gallery.Look(d, "Town");
             look.Background = "cork";
             look.Font = "Segoe Print";

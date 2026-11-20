@@ -254,17 +254,20 @@ public sealed partial class MainWindow
         titles.Children.Add(name);
         var hint = Muted(_galBook ? T("Drag to travel the timeline · click a picture to open it")
             : pics.Count == 1 ? T("1 picture · newest first") : T("{0} pictures · newest first", pics.Count));
-        if (_galBook) { hint.Foreground = Ink(look); hint.Opacity = 0.7; hint.TextWrapping = TextWrapping.NoWrap; hint.TextTrimming = TextTrimming.CharacterEllipsis; _boardTitle.TextTrimming = TextTrimming.CharacterEllipsis; }
+        if (_galBook) { _boardHint = hint; hint.Foreground = Ink(look); hint.Opacity = 0.7; hint.TextWrapping = TextWrapping.NoWrap; hint.TextTrimming = TextTrimming.CharacterEllipsis; _boardTitle.TextTrimming = TextTrimming.CharacterEllipsis; }
         titles.Children.Add(hint);
         g.Children.Add(titles);
 
         var tools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
         if (_galBook)
         {
+            _boardTools.Clear();
             T Round<T>(T b, string glyph, string name) where T : Button
             {
                 b.Content = new FontIcon { Glyph = glyph, FontSize = 16 };
-                b.Width = 44; b.Height = 44; b.Padding = new Thickness(0); b.CornerRadius = new CornerRadius(22);
+                b.Width = 44; b.Height = 44; b.Padding = new Thickness(0); b.CornerRadius = new CornerRadius(22); b.BorderThickness = new Thickness(1);
+                _boardTools.Add(b);
+                InkTool(b, look);
                 ToolTipService.SetToolTip(b, name);
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
                 return b;
@@ -477,7 +480,36 @@ public sealed partial class MainWindow
     ScrollViewer? _boardScroll;
     readonly List<(Picture Pic, FrameworkElement Card, int Index)> _boardCards = [];
     static readonly (string Key, string Name)[] Frames =
-        [("polaroid", "Polaroid"), ("print", "Print"), ("rounded", "Rounded"), ("kraft", "Kraft"), ("stamp", "Stamp"), ("film", "Film")];
+        [("polaroid", "Polaroid"), ("print", "Print"), ("washi", "Washi tape"), ("clip", "Paper clip"), ("rounded", "Rounded"), ("kraft", "Kraft"), ("deckle", "Vintage"), ("doodle", "Doodled"), ("stamp", "Stamp"), ("film", "Film")];
+
+    // diagonal stripes, as on washi tape
+    static Brush Stripes(Windows.UI.Color a, Windows.UI.Color b, double size) => new LinearGradientBrush
+    {
+        MappingMode = BrushMappingMode.Absolute, SpreadMethod = GradientSpreadMethod.Repeat, StartPoint = new(0, 0), EndPoint = new(size, size),
+        GradientStops = { new GradientStop { Color = a, Offset = 0 }, new GradientStop { Color = a, Offset = 0.5 }, new GradientStop { Color = b, Offset = 0.5 }, new GradientStop { Color = b, Offset = 1 } },
+    };
+    static readonly (Windows.UI.Color A, Windows.UI.Color B)[] Washi =
+        [(Rgb(0xF3, 0xA6, 0xC0), Rgb(0xFB, 0xD3, 0xE0)), (Rgb(0x9F, 0xD3, 0xC7), Rgb(0xD6, 0xF0, 0xEA)), (Rgb(0xF2, 0xC9, 0x6B), Rgb(0xFA, 0xE6, 0xB4)), (Rgb(0xB4, 0xAE, 0xF2), Rgb(0xDE, 0xDB, 0xFA))];
+
+    // a strip of washi tape over one corner of a picture
+    static Border WashiStrip(int corner, int order, double k)
+    {
+        var (a, b) = Washi[(order + (corner is 0 or 3 ? 0 : 1)) % Washi.Length];
+        var left = corner % 2 == 0;
+        var top = corner < 2;
+        return new Border
+        {
+            Width = 58 * k, Height = 18 * k, Opacity = 0.9, Background = Stripes(a, b, 12 * k),
+            HorizontalAlignment = left ? HorizontalAlignment.Left : HorizontalAlignment.Right, VerticalAlignment = top ? VerticalAlignment.Top : VerticalAlignment.Bottom,
+            Margin = new Thickness(left ? -18 * k : 0, top ? -4 * k : 0, left ? 0 : -18 * k, top ? 0 : -4 * k),
+            RenderTransform = new RotateTransform { Angle = left == top ? -38 : 38 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+        };
+    }
+
+    static Geometry Geo(string d) => (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), d);
+    const string DoodleA = "M6 8 Q60 3 120 7 T224 6 Q226 70 222 150 Q160 156 110 152 T4 154 Q2 90 6 8";
+    const string DoodleB = "M10 4 Q90 9 218 3 Q221 80 226 148 Q120 158 8 150 Q6 70 10 4";
+    const string Star = "M7 0 L9 5 L14 5.5 L10 9 L11 14 L7 11.5 L3 14 L4 9 L0 5.5 L5 5 Z";
 
     static Windows.UI.Color Hex(string? hex, Windows.UI.Color fallback)
     {
@@ -506,6 +538,27 @@ public sealed partial class MainWindow
     // ---------- Customize: a panel that slides in over the board's right side, the board changing behind it ----------
 
     Border? _custDrawer;
+    TextBlock? _boardHint;
+    readonly List<Button> _boardTools = [];
+
+    // a round tool on the board, its icon in the board's ink and its fill a breath of the same
+    static void InkTool(Button b, AlbumLook look)
+    {
+        var c = IsLight(BoardColor(look)) ? Rgb(0x3A, 0x34, 0x2A) : Rgb(0xE8, 0xE2, 0xD4);
+        var fill = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, c.R, c.G, c.B));
+        var over = new SolidColorBrush(Windows.UI.Color.FromArgb(0x2E, c.R, c.G, c.B));
+        var ink = new SolidColorBrush(c);
+        b.Foreground = ink;
+        b.Background = fill;
+        b.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x30, c.R, c.G, c.B));
+        b.Resources["ButtonBackgroundPointerOver"] = over;
+        b.Resources["ButtonBackgroundPressed"] = over;
+        b.Resources["ButtonForegroundPointerOver"] = ink;
+        b.Resources["ButtonForegroundPressed"] = ink;
+        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x50, c.R, c.G, c.B));
+    }
+    string _fontQuery = "";
+    List<string>? _fonts;
     int _custTab;
     bool _custChanged;
 
@@ -578,8 +631,10 @@ public sealed partial class MainWindow
 
     static readonly (string Hex, string Name)[] Palette =
     [
-        ("#1C1914", "Night desk"), ("#3B2A20", "Espresso"), ("#9A744C", "Cork"), ("#E9E1CF", "Paper"), ("#7E9A7A", "Sage"), ("#2C5E43", "Green felt"),
-        ("#1F5260", "Lagoon"), ("#24305C", "Midnight blue"), ("#8A7FC0", "Lavender"), ("#C98BA0", "Blush"), ("#8C2449", "Berry"), ("#C8194A", "Rose"),
+        ("#16161D", "Ink"), ("#2A2D33", "Charcoal"), ("#1E2A4F", "Navy"), ("#2E5340", "Forest"), ("#4E2A55", "Plum"), ("#6E1F3A", "Wine"),
+        ("#3E2A23", "Espresso"), ("#3C5A8A", "Denim"), ("#2B6F73", "Teal"), ("#6F7445", "Olive"), ("#B5573B", "Terracotta"), ("#C8566F", "Rose"),
+        ("#6B4A35", "Walnut"), ("#4A5560", "Slate"), ("#93A68A", "Sage"), ("#D9A441", "Mustard"), ("#A99BD6", "Lavender"), ("#E7B8C0", "Blush"),
+        ("#A57C55", "Cork"), ("#8DB5D6", "Sky"), ("#A9D5C1", "Mint"), ("#F0B48E", "Peach"), ("#D8C3A0", "Sand"), ("#EFE6D6", "Linen"),
     ];
 
     // hue and brightness to a colour: the brighter, the softer the colour, so a board never shouts
@@ -592,11 +647,11 @@ public sealed partial class MainWindow
         var (r, g, b) = hue switch { < 60 => (c, x, 0d), < 120 => (x, c, 0d), < 180 => (0d, c, x), < 240 => (0d, x, c), < 300 => (x, 0d, c), _ => (c, 0d, x) };
         return Windows.UI.Color.FromArgb(255, (byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255));
     }
-    static (double Hue, double Bright) HueOf(Windows.UI.Color col)
+    static (double Hue, double Bright, double Sat) HueOf(Windows.UI.Color col)
     {
         double r = col.R / 255.0, g = col.G / 255.0, b = col.B / 255.0, max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), d = max - min;
         var h = d == 0 ? 0 : max == r ? 60 * ((g - b) / d % 6) : max == g ? 60 * ((b - r) / d + 2) : 60 * ((r - g) / d + 4);
-        return (h < 0 ? h + 360 : h, max);
+        return (h < 0 ? h + 360 : h, max, max == 0 ? 0 : d / max);
     }
 
     void FillCustomize()
@@ -651,7 +706,7 @@ public sealed partial class MainWindow
 
         if (_custTab == 0)
         {
-            // the colour: ready ones, or any hue at any brightness
+            // the colour: ready ones, or any colour from the wheel at any brightness
             body.Children.Add(Caption(T("COLOUR")));
             var swatches = Columns(6, 10);
             var now = BoardColor(look);
@@ -659,58 +714,66 @@ public sealed partial class MainWindow
             {
                 var c = Hex(Palette[i].Hex, now);
                 var on = string.Equals(look.Color ?? Hex(now), Palette[i].Hex, StringComparison.OrdinalIgnoreCase);
-                var dot = new Button { Height = 40, HorizontalAlignment = HorizontalAlignment.Stretch, CornerRadius = new CornerRadius(20), Padding = new Thickness(0),
-                    BorderThickness = new Thickness(on ? 3 : 1), BorderBrush = on ? new SolidColorBrush(Microsoft.UI.Colors.White) : new SolidColorBrush(Windows.UI.Color.FromArgb(0x30, 255, 255, 255)),
-                    Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(1, 1), GradientStops = { new GradientStop { Color = Shade(c, 0.12), Offset = 0 }, new GradientStop { Color = Shade(c, -0.35), Offset = 1 } } } };
+                var dot = new Button { Width = 38, Height = 38, HorizontalAlignment = HorizontalAlignment.Center, CornerRadius = new CornerRadius(19), Padding = new Thickness(0),
+                    BorderThickness = new Thickness(on ? 3 : 1), BorderBrush = on ? new SolidColorBrush(Microsoft.UI.Colors.White) : new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)),
+                    Background = new LinearGradientBrush { StartPoint = new(0.2, 0), EndPoint = new(0.8, 1), GradientStops = { new GradientStop { Color = Shade(c, 0.1), Offset = 0 }, new GradientStop { Color = c, Offset = 0.5 }, new GradientStop { Color = Shade(c, -0.3), Offset = 1 } } } };
                 dot.Resources["ButtonBackgroundPointerOver"] = dot.Background;
                 dot.Resources["ButtonBackgroundPressed"] = dot.Background;
+                dot.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB0, 255, 255, 255));
                 ToolTipService.SetToolTip(dot, T(Palette[i].Name));
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(dot, T(Palette[i].Name));
                 var hex = Palette[i].Hex;
-                dot.Click += (_, _) => { look.Color = hex; if (_boardFrame is not null) _boardFrame.Background = BoardBrush(look); Changed(); FillCustomize(); };
+                dot.Click += (_, _) => { look.Color = hex; if (_boardFrame is not null) _boardFrame.Background = BoardBrush(look); foreach (var t in _boardTools) InkTool(t, look); Changed(); FillCustomize(); };
                 PutAt(swatches, dot, i, 6);
             }
             body.Children.Add(swatches);
 
             body.Children.Add(Caption(T("YOUR OWN")));
-            var (hue, bright) = HueOf(now);
-            var rainbow = new LinearGradientBrush { StartPoint = new(0, 0.5), EndPoint = new(1, 0.5) };
-            for (int k = 0; k <= 6; k++) rainbow.GradientStops.Add(new GradientStop { Color = FromHue(k * 60 % 360, 0.9, 0.8), Offset = k / 6.0 });
-            Slider Track(Brush brush, double min, double max, double value, string name)
+            var (hue, bright, sat) = HueOf(now);
+            var wheel = new Microsoft.UI.Xaml.Controls.Primitives.ColorSpectrum
             {
-                var s = new Slider { Minimum = min, Maximum = max, Value = value, StepFrequency = 0.5, Margin = new Thickness(0, -4, 0, -4) };
-                s.Resources["SliderTrackFill"] = brush;
-                s.Resources["SliderTrackFillPointerOver"] = brush;
-                s.Resources["SliderTrackValueFill"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-                s.Resources["SliderTrackValueFillPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-                s.Resources["SliderTrackValueFillPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(s, name);
-                return s;
-            }
-            var light = new LinearGradientBrush { StartPoint = new(0, 0.5), EndPoint = new(1, 0.5), GradientStops = { new GradientStop { Color = FromHue(hue, 0.06), Offset = 0 }, new GradientStop { Color = FromHue(hue, 0.5), Offset = 0.5 }, new GradientStop { Color = FromHue(hue, 0.95), Offset = 1 } } };
-            var hueSlider = Track(rainbow, 0, 359, hue, T("Hue"));
-            var brightSlider = Track(light, 4, 95, bright * 100, T("Brightness"));
-            var preview = new Border { Height = 44, CornerRadius = new CornerRadius(10), Background = BoardBrush(look), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x30, 255, 255, 255)), BorderThickness = new Thickness(1) };
-            var hexText = new TextBlock { Text = Hex(now), FontSize = 12, Opacity = 0.7, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0), FontFamily = new FontFamily("Cascadia Mono, Consolas") };
-            preview.Child = hexText;
+                Shape = ColorSpectrumShape.Ring, Components = ColorSpectrumComponents.HueSaturation, Width = 196, Height = 196, HorizontalAlignment = HorizontalAlignment.Center,
+                HsvColor = new System.Numerics.Vector4((float)hue, (float)sat, 1, 1),
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(wheel, T("Colour wheel"));
+            var shade = new LinearGradientBrush { StartPoint = new(0, 0.5), EndPoint = new(1, 0.5), GradientStops = { new GradientStop { Color = FromHue(hue, 0.04, sat), Offset = 0 }, new GradientStop { Color = FromHue(hue, 1, sat), Offset = 1 } } };
+            var brightness = new Slider { Minimum = 4, Maximum = 100, Value = bright * 100, StepFrequency = 0.5 };
+            brightness.Resources["SliderTrackFill"] = shade;
+            brightness.Resources["SliderTrackFillPointerOver"] = shade;
+            brightness.Resources["SliderTrackValueFill"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            brightness.Resources["SliderTrackValueFillPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            brightness.Resources["SliderTrackValueFillPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(brightness, T("Brightness"));
+            var hexText = new TextBlock { Text = Hex(now), FontSize = 12, FontFamily = new FontFamily("Cascadia Mono, Consolas"), HorizontalAlignment = HorizontalAlignment.Center, Opacity = 0.7 };
             void Mix()
             {
-                var c = FromHue(hueSlider.Value, brightSlider.Value / 100);
+                var v = wheel.HsvColor;
+                var c = FromHue(v.X % 360, brightness.Value / 100, v.Y);
                 look.Color = Hex(c);
-                preview.Background = BoardBrush(look);
                 hexText.Text = look.Color;
-                hexText.Foreground = new SolidColorBrush(IsLight(c) ? Rgb(0x2B, 0x2A, 0x26) : Microsoft.UI.Colors.White);
-                light.GradientStops[0].Color = FromHue(hueSlider.Value, 0.06);
-                light.GradientStops[1].Color = FromHue(hueSlider.Value, 0.5);
-                light.GradientStops[2].Color = FromHue(hueSlider.Value, 0.95);
+                shade.GradientStops[0].Color = FromHue(v.X % 360, 0.04, v.Y);
+                shade.GradientStops[1].Color = FromHue(v.X % 360, 1, v.Y);
                 if (_boardFrame is not null) _boardFrame.Background = BoardBrush(look);
+                foreach (var t in _boardTools) InkTool(t, look);
                 Changed();
             }
-            hueSlider.ValueChanged += (_, _) => Mix();
-            brightSlider.ValueChanged += (_, _) => Mix();
-            body.Children.Add(preview);
-            body.Children.Add(hueSlider);
-            body.Children.Add(brightSlider);
+            var live = false;
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => live = true);
+            wheel.ColorChanged += (_, _) => { if (live) Mix(); };
+            brightness.ValueChanged += (_, _) => { if (live) Mix(); };
+            body.Children.Add(wheel);
+            var shadeRow = new Grid { ColumnSpacing = 10 };
+            shadeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            shadeRow.ColumnDefinitions.Add(new ColumnDefinition());
+            shadeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            shadeRow.Children.Add(new FontIcon { Glyph = "\uE708", FontSize = 13, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
+            Grid.SetColumn(brightness, 1);
+            shadeRow.Children.Add(brightness);
+            var sun = new FontIcon { Glyph = "\uE706", FontSize = 15, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(sun, 2);
+            shadeRow.Children.Add(sun);
+            body.Children.Add(shadeRow);
+            body.Children.Add(hexText);
 
             // the light over the board, each shown on the board's own colour
             body.Children.Add(Caption(T("LIGHT")));
@@ -774,11 +837,11 @@ public sealed partial class MainWindow
         {
             // the frames, each drawn small
             body.Children.Add(Caption(T("FRAME")));
-            var frames = Columns(3);
+            var frames = Columns(2);
             for (int i = 0; i < Frames.Length; i++)
             {
                 var key = Frames[i].Key;
-                PutAt(frames, Choice(FrameIcon(key), T(Frames[i].Name), look.Frame == key, () => { look.Frame = key; Changed(); FillCustomize(); }), i, 3);
+                PutAt(frames, Choice(FrameIcon(key), T(Frames[i].Name), look.Frame == key, () => { look.Frame = key; Changed(); FillCustomize(); }), i, 2);
             }
             body.Children.Add(frames);
 
@@ -824,27 +887,45 @@ public sealed partial class MainWindow
         }
         else
         {
-            // the handwriting: each written out in the album's name
+            // the handwriting: a few chosen ones, and every font on this PC behind a search
             body.Children.Add(Caption(T("HANDWRITING")));
-            foreach (var f in Hands)
+            var search = new TextBox { PlaceholderText = T("Search the fonts on this PC"), Text = _fontQuery, Margin = new Thickness(0, 0, 0, 4) };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(search, T("Search fonts"));
+            body.Children.Add(search);
+            var list = new StackPanel { Spacing = 8 };
+            body.Children.Add(list);
+            var all = _fonts ??= Fonts.Installed();
+            void Show(string q)
             {
-                var on = look.Font == f;
-                var g = new Grid { ColumnSpacing = 12 };
-                g.ColumnDefinitions.Add(new ColumnDefinition());
-                g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var lines = new StackPanel { Spacing = 0 };
-                lines.Children.Add(new TextBlock { Text = AlbumName(_galAlbum), FontFamily = new FontFamily(f), FontSize = 24, TextTrimming = TextTrimming.CharacterEllipsis });
-                lines.Children.Add(new TextBlock { Text = f, FontSize = 11, Opacity = 0.55 });
-                g.Children.Add(lines);
-                if (on) { var tick = new FontIcon { Glyph = "", FontSize = 14, Foreground = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(tick, 1); g.Children.Add(tick); }
-                var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(14, 8, 14, 10), CornerRadius = new CornerRadius(12),
-                    BorderThickness = new Thickness(on ? 2 : 1), BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 255, 255, 255)),
-                    Background = new SolidColorBrush(on ? Windows.UI.Color.FromArgb(0x2E, 0x7F, 0x77, 0xDD) : Windows.UI.Color.FromArgb(0x0C, 255, 255, 255)) };
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, f);
-                var font = f;
-                b.Click += (_, _) => { look.Font = font; Changed(); FillCustomize(); };
-                body.Children.Add(b);
+                list.Children.Clear();
+                var names = q.Length == 0
+                    ? (Hands.Contains(look.Font) ? Hands : [look.Font, .. Hands]).ToList()
+                    : all.Where(f => f.Contains(q, StringComparison.OrdinalIgnoreCase)).Take(40).ToList();
+                foreach (var f in names)
+                {
+                    var on = look.Font == f;
+                    var g = new Grid { ColumnSpacing = 12 };
+                    g.ColumnDefinitions.Add(new ColumnDefinition());
+                    g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    var lines = new StackPanel { Spacing = 0 };
+                    lines.Children.Add(new TextBlock { Text = AlbumName(_galAlbum), FontFamily = new FontFamily(f), FontSize = 24, TextTrimming = TextTrimming.CharacterEllipsis });
+                    lines.Children.Add(new TextBlock { Text = f, FontSize = 11, Opacity = 0.55 });
+                    g.Children.Add(lines);
+                    if (on) { var tick = new FontIcon { Glyph = "\uE73E", FontSize = 14, Foreground = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(tick, 1); g.Children.Add(tick); }
+                    var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(14, 8, 14, 10), CornerRadius = new CornerRadius(12),
+                        BorderThickness = new Thickness(on ? 2 : 1), BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 255, 255, 255)),
+                        Background = new SolidColorBrush(on ? Windows.UI.Color.FromArgb(0x2E, 0x7F, 0x77, 0xDD) : Windows.UI.Color.FromArgb(0x0C, 255, 255, 255)) };
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, f);
+                    var font = f;
+                    b.Click += (_, _) => { look.Font = font; Changed(); FillCustomize(); };
+                    list.Children.Add(b);
+                }
+                var more = q.Length == 0 ? T("{0} fonts on this PC: search to use any of them.", all.Count)
+                    : names.Count == 0 ? T("No font with that name.") : names.Count == 40 ? T("The first 40; type more to narrow them.") : "";
+                if (more.Length > 0) list.Children.Add(new TextBlock { Text = more, FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 2, 0, 0) });
             }
+            search.TextChanged += (_, _) => { _fontQuery = search.Text.Trim(); Show(_fontQuery); };
+            Show(_fontQuery);
         }
         _custDrawer.Child = root;
     }
@@ -870,6 +951,43 @@ public sealed partial class MainWindow
             }
             case "kraft":
                 return new Border { Background = new SolidColorBrush(Rgb(0xC4, 0xA2, 0x7A)), Padding = new Thickness(4, 4, 4, 12), Child = Photo(40, 32) };
+            case "washi":
+            {
+                var g = new Grid { Width = 58, Height = 46 };
+                g.Children.Add(new Border { Background = new SolidColorBrush(Microsoft.UI.Colors.White), Padding = new Thickness(3), Margin = new Thickness(4), Child = Photo(44, 32) });
+                for (int c = 0; c < 4; c++) g.Children.Add(WashiStrip(c, 0, 0.32));
+                return g;
+            }
+            case "clip":
+            {
+                var g = new Grid();
+                g.Children.Add(new Border { Background = paper, Padding = new Thickness(3, 3, 3, 9), Margin = new Thickness(0, 6, 0, 0), Child = Photo(42, 30) });
+                var silver = new SolidColorBrush(Rgb(0xB9, 0xBC, 0xC4));
+                g.Children.Add(new Border { Width = 7, Height = 20, BorderBrush = silver, BorderThickness = new Thickness(1.5), CornerRadius = new CornerRadius(4), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(8, 0, 0, 0) });
+                return g;
+            }
+            case "deckle":
+            {
+                var cream = new SolidColorBrush(Rgb(0xEF, 0xE6, 0xD0));
+                var g = new Grid();
+                g.Children.Add(new Border { Background = cream, Padding = new Thickness(5, 5, 5, 9), Child = Photo(40, 30) });
+                for (int t = 0; t < 2; t++)
+                {
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = t == 0 ? VerticalAlignment.Top : VerticalAlignment.Bottom, Margin = new Thickness(0, t == 0 ? -2.5 : 0, 0, t == 0 ? 0 : -2.5) };
+                    for (int c = 0; c < 10; c++) row.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 5, Height = 5, Fill = cream });
+                    g.Children.Add(row);
+                }
+                return g;
+            }
+            case "doodle":
+            {
+                var ink = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4));
+                var g = new Grid { Padding = new Thickness(5), Width = 54, Height = 42 };
+                g.Children.Add(Photo(44, 32));
+                g.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(DoodleA), Stroke = ink, StrokeThickness = 1.4, Stretch = Stretch.Fill, Margin = new Thickness(-5) });
+                g.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(Star), Fill = ink, Width = 8, Height = 8, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -9, -9) });
+                return g;
+            }
             case "print":
                 return new Border { BorderBrush = paper, BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(5), Child = Photo(48, 34, 2) };
             default:
@@ -978,6 +1096,8 @@ public sealed partial class MainWindow
                 if (_boardLight is not null) _boardLight.Background = LightBrush(look);
                 if (_boardPaper is not null && _boardFrame is not null) DrawPaper(_boardPaper, look, _boardFrame.ActualWidth, _boardFrame.ActualHeight, 28);
                 if (_boardTitle is not null) { _boardTitle.FontFamily = new FontFamily(look.Font); _boardTitle.Foreground = Ink(look); }
+                if (_boardHint is not null) _boardHint.Foreground = Ink(look);
+                foreach (var b in _boardTools) InkTool(b, look);
             }
             finally { _boardCalm = false; }
         });
@@ -1314,6 +1434,77 @@ public sealed partial class MainWindow
                 body = new Border { Background = new SolidColorBrush(Rgb(0xC4, 0xA2, 0x7A)), Padding = new Thickness(12, 12, 12, 13), Child = stack };
                 tape = true;
                 break;
+            case "washi":
+                // (a white border held by four strips of patterned washi tape, the caption on the board under it)
+                var wash = new Grid();
+                var washPaper = new Border { Background = new SolidColorBrush(Microsoft.UI.Colors.White), Padding = new Thickness(8), Child = new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h } };
+                washPaper.Shadow = new ThemeShadow();
+                wash.Children.Add(washPaper);
+                for (int q = 0; q < 4; q++) wash.Children.Add(WashiStrip(q, order, _boardScale));
+                stack.Children.Add(wash);
+                caption.Foreground = ink;
+                caption.Margin = new Thickness(4, 12, 0, 0);
+                stack.Children.Add(caption);
+                body = stack;
+                break;
+            case "clip":
+                // (a white print with a silver paper clip over its top edge)
+                var clipped = new Grid();
+                var card = new StackPanel { Background = new SolidColorBrush(Rgb(0xFD, 0xFD, 0xFB)), Padding = new Thickness(9, 9, 9, 6) };
+                card.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
+                caption.Foreground = dark;
+                caption.Margin = new Thickness(3, 8, 0, 2);
+                card.Children.Add(caption);
+                clipped.Children.Add(card);
+                var silver = new SolidColorBrush(Rgb(0xB9, 0xBC, 0xC4));
+                var k = _boardScale;
+                clipped.Children.Add(new Border
+                {
+                    Width = 18 * k, Height = 56 * k, BorderBrush = silver, BorderThickness = new Thickness(2.5), CornerRadius = new CornerRadius(9 * k),
+                    HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(26 * k, -20 * k, 0, 0),
+                    RenderTransform = new RotateTransform { Angle = 6 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                    Child = new Border { Width = 8 * k, Height = 36 * k, BorderBrush = silver, BorderThickness = new Thickness(2.5), CornerRadius = new CornerRadius(6 * k), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(1.5, 5 * k, 0, 0) },
+                });
+                body = clipped;
+                break;
+            case "deckle":
+                // (an old print: a cream border with a scalloped edge, a touch of sepia, the caption on the border)
+                var cream = Rgb(0xEF, 0xE6, 0xD0);
+                var aged = new Grid();
+                var print2 = new StackPanel { Background = new SolidColorBrush(cream), Padding = new Thickness(12, 12, 12, 10) };
+                var tinted = new Grid { Width = w, Height = h };
+                tinted.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
+                tinted.Children.Add(new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x38, 0x8A, 0x5A, 0x20)) });
+                print2.Children.Add(tinted);
+                caption.Foreground = new SolidColorBrush(Rgb(0x6B, 0x5A, 0x3A));
+                caption.Margin = new Thickness(2, 6, 0, 0);
+                print2.Children.Add(caption);
+                aged.Children.Add(print2);
+                StackPanel Scallops(bool top)
+                {
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = top ? VerticalAlignment.Top : VerticalAlignment.Bottom, Margin = new Thickness(0, top ? -5 : 0, 0, top ? 0 : -5) };
+                    for (int q = 0; q < (int)((w + 24) / 10); q++) row.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 10, Height = 10, Fill = new SolidColorBrush(cream) });
+                    return row;
+                }
+                aged.Children.Add(Scallops(true));
+                aged.Children.Add(Scallops(false));
+                body = aged;
+                break;
+            case "doodle":
+                // (no paper: a border drawn by hand round the picture, and a couple of stars, in the board's own ink)
+                var drawn = new Grid { Padding = new Thickness(14), Width = w + 28, Height = h + 28 };
+                drawn.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
+                drawn.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(DoodleA), Stroke = ink, StrokeThickness = 2, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Stretch = Stretch.Fill, Margin = new Thickness(-14) });
+                drawn.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(DoodleB), Stroke = ink, StrokeThickness = 1.2, Opacity = 0.6, Stretch = Stretch.Fill, Margin = new Thickness(-14) });
+                drawn.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(Star), Fill = ink, Width = 16, Height = 16, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -22, -26) });
+                drawn.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(Star), Fill = ink, Opacity = 0.7, Width = 11, Height = 11, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-20, 0, 0, -22) });
+                stack.Children.Add(drawn);
+                caption.Foreground = ink;
+                caption.HorizontalAlignment = HorizontalAlignment.Center;
+                caption.Margin = new Thickness(0, 4, 0, 0);
+                stack.Children.Add(caption);
+                body = stack;
+                break;
             default:
                 stack.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
                 caption.Foreground = dark;
@@ -1325,7 +1516,7 @@ public sealed partial class MainWindow
         }
         var holder = new Grid();
         holder.Children.Add(body);
-        if (look.Frame is not ("film" or "print")) body.Shadow = new ThemeShadow();
+        if (look.Frame is not ("film" or "print" or "washi" or "doodle")) body.Shadow = new ThemeShadow();
         Border? strip = null;
         if (tape && look.Tape != "none")
         {
