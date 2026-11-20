@@ -52,6 +52,5 @@ described in [features/installer.md](../features/installer.md).
 ## Open checks
 
 - Steps 1 to 6 of the in-game test plan on a real install, including the EA app edition.
-- `ui-smoke` on the published 2.0.0 exe.
 - Dragging a picture onto another to make or join an album, with a real mouse.
 - The texts new in 4.1.0 in the 19 languages other than English and Portuguese.
