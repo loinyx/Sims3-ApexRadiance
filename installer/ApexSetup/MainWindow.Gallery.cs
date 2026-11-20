@@ -112,7 +112,9 @@ public sealed partial class MainWindow
         page.Loaded += (_, _) => page.Height = Math.Max(420, Scroller.ActualHeight);
         _galPage = page;
         WatchBoardSize();
-        albums.Padding = new Thickness(22, 26, 14, 18);
+        // (the search and the list under it on the same margins)
+        sideColumn.Padding = new Thickness(22, 26, 14, 0);
+        albums.Padding = new Thickness(0, 0, 0, 18);
         // the title row, then the board in all the room left: the room measured, the board laid to it
         var head = (FrameworkElement)main.Children[^1];
         main.Children.Clear();
@@ -173,7 +175,7 @@ public sealed partial class MainWindow
     // the search box over the albums: kept while the list and the pictures under it are laid again as it is typed in
     FrameworkElement GallerySearch()
     {
-        var box = new TextBox { PlaceholderText = T("Search pictures"), Text = _galQuery, Margin = new Thickness(0, 0, 0, 14) };
+        var box = new TextBox { PlaceholderText = T("Search pictures"), Text = _galQuery, Margin = new Thickness(0, 0, 0, 20) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Search pictures"));
         var typed = 0;
         box.TextChanged += (_, _) =>
