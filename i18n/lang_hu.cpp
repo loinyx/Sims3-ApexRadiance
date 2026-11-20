@@ -166,6 +166,7 @@ const I18n::Pair kPairs[] = {
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "Shaderek: ReShade- és GShade-lookok az Apexben, egyik telepítése nélkül"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "Shaderek: öt beépített look kezdésnek és a saját .fx-fájljaid"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "Shaderek: töltsd le a ReShade shadercsomagjait a menüből, választhatóan"},
+    {"Display: opening the page no longer crashes the game with Turbo Simulation Engine", "Megjelenítés: az oldal megnyitásakor a játék már nem omlik össze a Turbo Simulation Engine mellett"},
     {"Display: opening the page no longer crashes the game with some mods installed", "Megjelenítés: az oldal megnyitásakor a játék már nem omlik össze egyes modokkal"},
     {"Capture: screenshots and videos work when another mod sets a 10-bit screen", "Rögzítés: a képernyőképek és videók akkor is működnek, ha egy másik mod 10 bitesre állítja a képernyőt"},
     {"Capture: screenshots and videos with your effects, on a page of their own", "Rögzítés: képernyőképek és videók az effektjeiddel, saját oldalon"},

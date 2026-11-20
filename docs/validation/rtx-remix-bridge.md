@@ -130,6 +130,10 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 | 2026-11-19 | release/4.0.8 fix, standard flavour, without Turbo | Start and world load under the bridge | pass, one device, no error |
 | 2026-11-19 | release/4.0.8 b6b15079 on the player's machine | Turbo loaded as a renamed file (`$RI76P92.asi`, Turbo's size) | hang at start: the name check missed it and Turbo's 0x0 request after the first frame became a real second device; the check was removed |
 | 2026-11-19 | release/4.0.8 b6b15079 on the player's machine | The same Turbo renamed back to `Turbo.asi` | pass: the game started and loaded (the fix of 4.0.7's crash) |
+| 2026-11-19 | release/4.0.11, in-game runner | `tools/second_device_probe` (Turbo's request from a file of another name) right after the game's device, before its first frame | pass: `Second device asked`, the game's device given, the world loaded and ran 4 minutes |
+| 2026-11-19 | release/4.0.11, in-game runner | The probe 600 ms after the first Present | pass: the game's device given |
+| 2026-11-19 | release/4.0.11, in-game runner | Turbo Simulation Engine V3.4 (`Turbo.asi`, default `Turbo.txt`), Display Borderless and *Game setting* | pass: Turbo asked 0.1 to 0.3 s after the first Present and got the game's device |
+| 2026-11-19 | release/4.0.11, in-game runner | No probe, no Turbo | pass: one device, no `Second device` line |
 
 ### Rewind mode (patch 0015)
 
@@ -172,7 +176,6 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 
 ## Open checks
 
-- 4.0.8 b492adc2 (no file name check) with Turbo under another file name: not run yet.
 - Rewind mode (patch 0015) in game: the mode on and idle for a session, the numbers of a plan in a loaded world,
   and one rewind. The rewind Op itself (queue positions, the server's wait for the client) has no offline test:
   it needs a host that puts the game process back.

@@ -94,8 +94,10 @@ Shipped in the package; players do not need to change them.
   `Second device asked (0x0 back buffer, another window)`. Since 4.0.8 the file name is not checked (a player's Turbo
   loaded as a renamed file and got a real second device), and the device given is the one Apex draws on (set at its
   first `EndScene`), not the first HAL device created: that one can be a 0x0 probe released before Turbo asks (a crash
-  in 4.0.7). Before the game's first frame the request goes to the bridge. Any other request, and every setup without the bridge, goes to the
-  client as before. Turbo's split game packages need `Turbo.asi`; its menu key, F7, also fires on Apex's Ctrl+Shift+F7.
+  in 4.0.7). Turbo can also ask between the game's device and its first frame (a player's DXVK log: 5 ms after it):
+  since 4.0.11 that request gets the last HAL device made with a size of its own (`g_sizedDevice`, the game's; Apex
+  holds a reference on it until the first frame, so it is never a released one). Before the game's device the request
+  goes to the bridge. Any other request, and every setup without the bridge, goes to the client as before. Turbo's split game packages need `Turbo.asi`; its menu key, F7, also fires on Apex's Ctrl+Shift+F7.
 - **EA app 1.69.47:** works with `client.targetProcess = TS3.exe` in both `bridge.conf` files.
 - **DXVK in the game:** the bridge replaces it; the package's `d3d9.dll` takes its place.
 - **Wine and Proton:** not offered under Wine (*Optional* hides it there); untested.
