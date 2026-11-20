@@ -49,6 +49,7 @@ public sealed partial class MainWindow
             case HealthScreen: BuildHealth(); break;
             case NewsScreen: BuildNews(); break;
             case SettingsScreen: BuildSettings(); break;
+            case GalleryScreen: BuildGallery(); break;
         }
     }
 

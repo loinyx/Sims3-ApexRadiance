@@ -164,6 +164,7 @@
                 <NavigationViewItem Content="Mods" Tag="9"><NavigationViewItem.Icon><FontIcon Glyph="&#xF0E2;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="Worlds" Tag="10"><NavigationViewItem.Icon><FontIcon Glyph="&#xE909;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="Saves" Tag="11"><NavigationViewItem.Icon><FontIcon Glyph="&#xE74E;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Gallery" Tag="15"><NavigationViewItem.Icon><FontIcon Glyph="&#xE91B;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem x:Name="NavHealth" Content="Health" Tag="12"><NavigationViewItem.Icon><FontIcon Glyph="&#xE95E;" /></NavigationViewItem.Icon>
                     <NavigationViewItem.InfoBadge><InfoBadge x:Name="HealthBadge" Visibility="Collapsed" Background="{StaticResource ApexWarningBrush}" /></NavigationViewItem.InfoBadge>
                 </NavigationViewItem>
@@ -632,6 +633,7 @@
                         <StackPanel x:Name="ScreenHealth" Spacing="24" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenNews" Spacing="16" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenSettings" Spacing="10" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenGallery" Spacing="16" Visibility="Collapsed" />
 
                         <!-- 6 About -->
                         <StackPanel x:Name="ScreenAbout" Spacing="14" Visibility="Collapsed">

@@ -69,7 +69,7 @@ public sealed partial class MainWindow
     {
         // (out to the edges of the scrolling area: the picture is not boxed in)
         var grid = new Grid { Height = 640, Margin = new Thickness(-32, -28, -32, 0) };
-        if (Screenshots(1).FirstOrDefault() is { } shot)
+        if (HomePicture() is { } shot)
             grid.Children.Add(new Image { Source = new BitmapImage(new Uri(shot)) { DecodePixelWidth = 1920 }, Stretch = Stretch.UniformToFill });
         grid.Children.Add(Shade(new(0, 0), new(0, 1), (0, 0x8C), (0.22, 0), (0.5, 0), (0.82, 0xE6), (1, 0xFF)));
         grid.Children.Add(Shade(new(0, 0.5), new(1, 0.5), (0, 0xBF), (0.5, 0)));

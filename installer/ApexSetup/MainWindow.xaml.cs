@@ -55,7 +55,7 @@ public sealed partial class MainWindow : Window
         // (the version under the sidebar only fits it expanded)
         Nav.DisplayModeChanged += (_, _) => ShowSetupVersion();
         _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer,
-            ScreenHome, ScreenMods, ScreenWorlds, ScreenSaves, ScreenHealth, ScreenNews, ScreenSettings };
+            ScreenHome, ScreenMods, ScreenWorlds, ScreenSaves, ScreenHealth, ScreenNews, ScreenSettings, ScreenGallery };
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
         // 1180 x 760 at the monitor's scale, never past its work area (a small laptop screen)

@@ -13,4 +13,5 @@ namespace ApexSetup;
 [JsonSerializable(typeof(List<SessionInfo>))]
 [JsonSerializable(typeof(Dictionary<string, List<SizePoint>>))]
 [JsonSerializable(typeof(ConflictResult))]
+[JsonSerializable(typeof(GalleryData))]
 public partial class SetupJson : JsonSerializerContext;
