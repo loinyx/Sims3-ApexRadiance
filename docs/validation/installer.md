@@ -24,6 +24,9 @@ described in [features/installer.md](../features/installer.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-20 | `4fd4114b` | `installer/ApexSetup.Tests` | All passed three runs in a row; file-timing tests (merge, split, caches, uninstall) fail now and then and pass on a rerun | none |
+| 2026-11-20 | `4fd4114b` | `installer/ui-smoke/Run-UiSmoke.ps1` (dry run, Steam test game) | 432 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-20 | `4fd4114b` | Published exe in a sandbox: every screen in light and dark, at 1600x1000 and 900x760, Portuguese and English | Rendered as expected; captures reviewed | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-20 | `84cc0fc2` | `installer/ApexSetup.Tests` | All passed (merge and split checks rerun when flaky) | none |
 | 2026-11-20 | `84cc0fc2` | Published exe in a sandbox (fake Documents and data, `APEX_LAUNCHER_THEME`): every screen in light and dark, the Gallery's board, viewer, videos and search | Rendered as expected; captures reviewed | Windows 11, RTX 4070 Ti SUPER |
 
@@ -51,4 +54,4 @@ described in [features/installer.md](../features/installer.md).
 - Steps 1 to 6 of the in-game test plan on a real install, including the EA app edition.
 - `ui-smoke` on the published 2.0.0 exe.
 - Dragging a picture onto another to make or join an album, with a real mouse.
-- The newest Gallery texts in the 20 languages other than English.
+- The texts new in 4.1.0 in the 19 languages other than English and Portuguese.
