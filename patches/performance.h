@@ -30,6 +30,7 @@ inline constexpr const char* kObjectIndexName = "ObjectLookupIndex";
 inline constexpr const char* kRoomLightQueueName = "RoomLightQueue";
 inline constexpr const char* kPickSkipName = "PickSkipWhenStill";
 inline constexpr const char* kDeadlineSlicingName = "DeadlineSlicing";
+inline constexpr const char* kStringTableIndexName = "StringTableIndex";
 inline constexpr int kLotLightingBudgetDefault = 3; // ms, the registered default of budgetWhileMovingMs
 
 // "Lot lighting time while moving" (ms, 1..15): the saved setting; Set saves it and applies it at once
@@ -74,5 +75,6 @@ std::string ScriptMathStatus();
 std::string SceneBudgetStatus();
 std::string ObjectIndexStatus();
 std::string RoomLightQueueStatus();
+std::string StringTableIndexStatus();
 
 } // namespace Performance

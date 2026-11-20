@@ -892,6 +892,10 @@ const I18n::Entry kEntries[] = {
     {"Fewer hitches when lot lights update; less script work", "Menos travadas quando as luzes do lote atualizam; menos trabalho de script",
      "Menos tirones al actualizarse las luces del solar; menos trabajo de scripts",
      "Moins de saccades quand les lumières du terrain se mettent à jour ; moins de travail de script"},
+    {"Faster text lookups", "Busca de textos mais rápida", "Búsqueda de textos más rápida", "Recherche de textes plus rapide"},
+    {"Pie menus and names show faster with a lot of custom content", "Menus de ações e nomes aparecem mais rápido com muito conteúdo personalizado",
+     "Los menús de acciones y los nombres aparecen más rápido con mucho contenido personalizado",
+     "Les menus d'actions et les noms s'affichent plus vite avec beaucoup de contenu personnalisé"},
 
     // ---- Settings > Menu ----
     {"Menu key", "Tecla do menu", "Tecla del menú", "Touche du menu"},

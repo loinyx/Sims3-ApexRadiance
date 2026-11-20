@@ -1555,6 +1555,7 @@ void PerformanceCard() {
             FeatureSwitchRow(Performance::kLookupMissesName, "Remember missing files", "Skips repeated searches for files no package has");
         FeatureSwitchRow(Performance::kFileListName, "Faster file lists", "Fewer stutters when Sims load outfits and shapes");
         FeatureSwitchRow(Performance::kObjectIndexName, "Faster object lookups", "Fewer hitches when lot lights update; less script work");
+        FeatureSwitchRow(Performance::kStringTableIndexName, "Faster text lookups", "Pie menus and names show faster with a lot of custom content", true);
         ApexUi::CardGroup("Textures and Sims");
         if (FeatureSwitchRow(Performance::kFastTextureName, "Faster texture compression", "Fewer hitches when the game builds terrain, Sim and lot textures")) {
             bool cores = Performance::FastTextureSeveralCores();
