@@ -903,10 +903,13 @@ public sealed partial class MainWindow
     }
 
     // while a picture is dragged: the picture whose middle it is over grows a little, ready to make an album with it
+    double Moved(FrameworkElement el) => Math.Abs(Canvas.GetLeft(el) - _dragFrom.X) + Math.Abs(Canvas.GetTop(el) - _dragFrom.Y);
+
     void MarkUnder(FrameworkElement? me)
     {
         FrameworkElement? hit = null;
-        if (me is not null)
+        // (only a picture carried somewhere is put into an album, not one nudged where it lies)
+        if (me is not null && Moved(me) > 40)
         {
             var cx = Canvas.GetLeft(me) + me.ActualWidth / 2;
             var cy = Canvas.GetTop(me) + me.ActualHeight / 2;
@@ -1761,7 +1764,7 @@ public sealed partial class MainWindow
         {
             var path = pics[i].Path;
             var jitter = new Random(Stable(path) + look.Seed);
-            var phase = (slotOf[i] - look.SlotLead) * 1.1 + look.Seed % 7;
+            var phase = (i - lead) * 1.1 + look.Seed % 7;
             var h = ((Kind(i) == 0 ? 194 : 154) * s * look.Size) + 70;
             var heap = _boardPiled.GetValueOrDefault(path);
             var auto = new Placed
@@ -2214,7 +2217,7 @@ public sealed partial class MainWindow
         // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
         outer.PointerEntered += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
         outer.PointerExited += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, _restZ.GetValueOrDefault(outer, order * 10)); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
-        if (pile is null && !still) Draggable(outer, () => CardDropped(p, place, outer, pile), () => MarkUnder(outer));
+        if (pile is null && !still) Draggable(outer, () => CardDropped(p, place, outer, pile), () => MarkUnder(outer), shut ? null : () => OpenViewer(pics, pics.IndexOf(p), outer));
         if (pile is null && !shut) outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
         caption.Tapped += (_, e) =>
         {
@@ -2307,12 +2310,14 @@ public sealed partial class MainWindow
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, string> CardPaths = new();
     readonly Dictionary<FrameworkElement, int> _restZ = [];
     // moved with the pointer (or a finger), lifted while it moves, kept where it is let go
-    void Draggable(FrameworkElement el, Action dropped, Action? moving = null)
+    Windows.Foundation.Point _dragFrom;
+    void Draggable(FrameworkElement el, Action dropped, Action? moving = null, Action? tapped = null)
     {
         el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY;
         Microsoft.UI.Dispatching.DispatcherQueueTimer? edge = null;
         el.ManipulationStarted += (_, _) =>
         {
+            _dragFrom = new Windows.Foundation.Point(Canvas.GetLeft(el), Canvas.GetTop(el));
             _dragging = true;
             Canvas.SetZIndex(el, Math.Max(Canvas.GetZIndex(el), 1000));
             el.Scale = new Vector3(1.06f, 1.06f, 1);
@@ -2342,7 +2347,21 @@ public sealed partial class MainWindow
             Canvas.SetTop(el, Math.Clamp(Canvas.GetTop(el) + e.Delta.Translation.Y, 8, Math.Max(8, BoardHeight - el.ActualHeight - 8)));
             moving?.Invoke();
         };
-        el.ManipulationCompleted += (_, _) => { _dragging = false; el.Scale = Vector3.One; if (edge is not null) { edge.Stop(); _timers.Remove(edge); edge = null; } dropped(); };
+        el.ManipulationCompleted += (_, _) =>
+        {
+            _dragging = false;
+            el.Scale = Vector3.One;
+            if (edge is not null) { edge.Stop(); _timers.Remove(edge); edge = null; }
+            // (a press that barely moved is a click: the card goes back where it was and opens)
+            if (Moved(el) < 8)
+            {
+                Canvas.SetLeft(el, _dragFrom.X);
+                Canvas.SetTop(el, _dragFrom.Y);
+                MarkUnder(null);
+                if (tapped is not null) { tapped(); return; }
+            }
+            dropped();
+        };
     }
 
     // the caption written a letter at a time
@@ -2560,9 +2579,12 @@ public sealed partial class MainWindow
     static double CardTurn(FrameworkElement card) => card is Border { Child: FrameworkElement { RenderTransform: CompositeTransform t } } ? t.Rotation : 0;
 
     // A picture large, with what can be done with it beside. Opened from a card or a tile it grows out of it.
+    bool _viewing;
     void OpenViewer(List<Picture> pics, int at, FrameworkElement? from = null)
     {
-        if (pics.Count == 0 || Content.XamlRoot is not { } root) return;
+        // (one viewer at a time: a click can arrive both as a tap and as a press that barely moved)
+        if (_viewing || pics.Count == 0 || Content.XamlRoot is not { } root) return;
+        _viewing = true;
         // (the board is laid again on closing only when something was changed here, so an open album stays open)
         var opened = _gal is null ? null : System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         var culture = LangCulture();
@@ -2739,6 +2761,7 @@ public sealed partial class MainWindow
                 if (from is not null) from.Opacity = 1;
                 if (home is not null) home.Opacity = 1;
                 popup.IsOpen = false;
+                _viewing = false;
                 if (_gal is not null && opened == System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData)) return;
                 if (stay && _galBook) RefreshBoard(page: true); else BuildGallery();
             };
