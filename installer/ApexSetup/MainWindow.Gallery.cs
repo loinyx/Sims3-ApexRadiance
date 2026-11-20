@@ -393,15 +393,73 @@ public sealed partial class MainWindow
         return s;
     }
 
+    // A picture read only as large as it is shown: the game's pictures are 4K, and a board of sixty read whole is gigabytes.
+    // (the width must be set before the file, or the whole picture is read)
+    // The picture comes from a small JPEG made once and kept under the launcher's data (a 4K PNG read by an Image keeps its
+    // whole file in memory, half a gigabyte for a board); until it is made the image is empty and fills in when ready.
+    static readonly SemaphoreSlim ThumbMakers = new(3);
+    static BitmapImage Thumb(string path, double width)
+    {
+        var px = width * 1.5 <= 560 ? 560 : width * 1.5 <= 1100 ? 1100 : 2200;
+        var b = new BitmapImage { DecodePixelType = DecodePixelType.Logical, DecodePixelWidth = (int)Math.Ceiling(Math.Max(64, width)) };
+        string file;
+        try
+        {
+            var info = new FileInfo(path);
+            file = Path.Combine(Paths.Data, "thumbs", $"{Stable(path.ToLowerInvariant()) & 0x7fffffff:x8}-{info.Length:x}-{info.LastWriteTimeUtc.Ticks:x}-{px}.jpg");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { b.UriSource = new Uri(path); return b; }
+        if (File.Exists(file)) { b.UriSource = new Uri(file); return b; }
+        var queue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        _ = Task.Run(async () =>
+        {
+            var made = await MakeThumb(path, file, px) ? file : path;
+            queue.TryEnqueue(() => b.UriSource = new Uri(made));
+        });
+        return b;
+    }
+
+    static async Task<bool> MakeThumb(string path, string file, int px)
+    {
+        await ThumbMakers.WaitAsync();
+        try
+        {
+            if (File.Exists(file)) return true;
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            using var source = File.OpenRead(path);
+            var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(source.AsRandomAccessStream());
+            var scale = Math.Min(1.0, px / (double)decoder.PixelWidth);
+            var transform = new Windows.Graphics.Imaging.BitmapTransform
+            {
+                ScaledWidth = (uint)Math.Max(1, decoder.PixelWidth * scale), ScaledHeight = (uint)Math.Max(1, decoder.PixelHeight * scale),
+                InterpolationMode = Windows.Graphics.Imaging.BitmapInterpolationMode.Fant,
+            };
+            using var pixels = await decoder.GetSoftwareBitmapAsync(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Ignore, transform,
+                Windows.Graphics.Imaging.ExifOrientationMode.RespectExifOrientation, Windows.Graphics.Imaging.ColorManagementMode.DoNotColorManage);
+            var temp = file + ".part";
+            using (var target = File.Create(temp))
+            {
+                var output = target.AsRandomAccessStream();
+                var quality = new Windows.Graphics.Imaging.BitmapPropertySet { ["ImageQuality"] = new Windows.Graphics.Imaging.BitmapTypedValue(0.86, Windows.Foundation.PropertyType.Single) };
+                var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(Windows.Graphics.Imaging.BitmapEncoder.JpegEncoderId, output, quality);
+                encoder.SetSoftwareBitmap(pixels);
+                await encoder.FlushAsync();
+            }
+            File.Move(temp, file, true);
+            return true;
+        }
+        catch (Exception e) { App.Log(e); return false; }
+        finally { ThumbMakers.Release(); }
+    }
+
     // a picture in the grid: it fades in once read, rises and grows a touch under the pointer with its time showing, a star
     // when it is a favourite
     UIElement Tile(Picture p, Action<FrameworkElement> open)
     {
         var g = new Grid { CornerRadius = new CornerRadius(12), Background = Res("ApexPillBrush") };
         var image = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(320) } };
-        var bmp = new BitmapImage { DecodePixelWidth = 480 };
+        var bmp = Thumb(p.Path, 420);
         bmp.ImageOpened += (_, _) => image.Opacity = 1;
-        bmp.UriSource = new Uri(p.Path);
         image.Source = bmp;
         g.Children.Add(image);
         var when = new Border { VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(12, 18, 12, 9), Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) },
@@ -1430,7 +1488,7 @@ public sealed partial class MainWindow
         var xs = new double[pics.Count];
         var slotOf = new int[pics.Count];
         var days = new List<(double X, DateTime Day)>();
-        var x = 110 * s;
+        var x = 40 * s;
         double last = 0;
         var slot = 0;
         for (int i = 0; i < pics.Count; i++)
@@ -1439,7 +1497,7 @@ public sealed partial class MainWindow
             if (heap is not null && firstOf.TryGetValue(heap, out var head)) { xs[i] = xs[head]; slotOf[i] = slotOf[head]; continue; }
             if (heap is not null) firstOf[heap] = i;
             if (heap is not null && look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved) { xs[i] = parked.X; slotOf[i] = slot; continue; }
-            if (i == 0 || pics[i].Taken.Date != pics[i - 1].Taken.Date) { if (i > 0) x += 90 * s * look.Spacing; days.Add((x, pics[i].Taken.Date)); }
+            if (i == 0 || pics[i].Taken.Date != pics[i - 1].Taken.Date) { if (i > 0) x += 40 * s * look.Spacing; days.Add((x, pics[i].Taken.Date)); x += 150 * s; }
             xs[i] = x;
             slotOf[i] = slot++;
             last = ((i % 4 == 0 ? 290 : 230) * s * look.Size + 24);
@@ -1504,7 +1562,7 @@ public sealed partial class MainWindow
             _boardPlaces[path] = place;
             // (the newest fall in first, the ones further back already lie there when scrolled to)
             var delay = 120 + Math.Min(slotOf[i], 10) * 130;
-            var card = Framed(pics[i], place, look, ink, i, delay, pics, heap);
+            var card = Framed(pics[i], place, look, ink, i, delay, pics, heap, bare: heap is not null && inPile[heap] > 1);
             if (heap is not null) Canvas.SetZIndex(card, firstOf[heap] * 10 + 9 - inPile[heap]);
             canvas.Children.Add(card);
             _boardCards.Add((pics[i], card, i));
@@ -1535,7 +1593,6 @@ public sealed partial class MainWindow
             var tagName = new TextBlock { Text = c.Name, FontFamily = new FontFamily(look.Font), FontSize = 20, Foreground = ink, VerticalAlignment = VerticalAlignment.Center };
             row.Children.Add(tagName);
             row.Children.Add(new TextBlock { Text = members.Count.ToString(), FontSize = 12, Foreground = ink, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 0) });
-            row.Children.Add(new FontIcon { Glyph = "\uE8B9", FontSize = 11, Foreground = ink, Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
             HyperlinkButton TagButton(UIElement content, Thickness pad)
             {
                 var b = new HyperlinkButton { Content = content, Padding = pad, Background = pill, CornerRadius = new CornerRadius(15), Height = 30 };
@@ -1677,26 +1734,26 @@ public sealed partial class MainWindow
         var strip = new Grid { Height = 40, Margin = new Thickness(32, 4, 32, 18), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
         var track = new Canvas();
         strip.Children.Add(track);
-        var window = new Border { Height = 30, CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 0x7F, 0x77, 0xDD)), BorderBrush = Res("ApexAccentBrush"), BorderThickness = new Thickness(1) };
-        Canvas.SetTop(window, 5);
+        var window = new Border { Height = 8, CornerRadius = new CornerRadius(4), Background = Res("ApexAccentBrush"), Opacity = 0.9 };
+        Canvas.SetTop(window, 23);
         void Lay()
         {
             var tw = strip.ActualWidth;
             if (tw <= 0) return;
             track.Children.Clear();
-            var rule = new Border { Width = tw, Height = 1, Background = ink, Opacity = 0.25 };
-            Canvas.SetTop(rule, 20);
+            var rule = new Border { Width = tw, Height = 4, CornerRadius = new CornerRadius(2), Background = ink, Opacity = 0.16 };
+            Canvas.SetTop(rule, 25);
             track.Children.Add(rule);
             var lastRight = -1000.0;
             foreach (var (dx, d) in days)
             {
                 var at = dx / width * tw;
-                var tick = new Border { Width = 2, Height = 10, CornerRadius = new CornerRadius(1), Background = ink, Opacity = 0.6 };
-                Canvas.SetLeft(tick, at); Canvas.SetTop(tick, 15);
+                var tick = new Border { Width = 2, Height = 8, CornerRadius = new CornerRadius(1), Background = ink, Opacity = 0.5 };
+                Canvas.SetLeft(tick, at); Canvas.SetTop(tick, 23);
                 track.Children.Add(tick);
                 if (at < lastRight + 8) continue;  // (labels that would touch stay ticks)
                 var label = new TextBlock { Text = d.ToString("d MMM", LangCulture()), FontSize = 11, Foreground = ink, Opacity = 0.75 };
-                Canvas.SetLeft(label, at + 5); Canvas.SetTop(label, 0);
+                Canvas.SetLeft(label, at - 2); Canvas.SetTop(label, 2);
                 track.Children.Add(label);
                 lastRight = at + 5 + d.ToString("d MMM", LangCulture()).Length * 6.5;
             }
@@ -1732,12 +1789,12 @@ public sealed partial class MainWindow
 
     // a picture in the album's frame: it falls in turning and bounces, its tape sticks, its caption writes itself; dragged
     // to move, lifted under the pointer, its caption written on with a click, opened with a double-click
-    FrameworkElement Framed(Picture p, Placed place, AlbumLook look, Brush ink, int order, int delay, List<Picture> pics, CustomAlbum? pile = null, bool still = false)
+    FrameworkElement Framed(Picture p, Placed place, AlbumLook look, Brush ink, int order, int delay, List<Picture> pics, CustomAlbum? pile = null, bool still = false, bool bare = false)
     {
         var info = Gallery.Peek(_gal!, p.Path);
         var big = order % 4 == 0;
         double w = (big ? 290 : 230) * _boardScale * look.Size, h = (big ? 194 : 154) * _boardScale * look.Size;
-        var source = new BitmapImage(new Uri(p.Path)) { DecodePixelWidth = 600 };
+        var source = Thumb(p.Path, w);
         var dark = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
         var caption = new TextBlock { FontFamily = new FontFamily(look.Font), FontSize = (big ? 24 : 20) * Math.Max(0.85, _boardScale), TextTrimming = TextTrimming.CharacterEllipsis, MinHeight = 28, HorizontalAlignment = HorizontalAlignment.Left };
         var stack = new StackPanel();
@@ -1805,7 +1862,7 @@ public sealed partial class MainWindow
                 var washPaper = new Border { Background = new SolidColorBrush(Microsoft.UI.Colors.White), Padding = new Thickness(8), Child = new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h } };
                 washPaper.Shadow = new ThemeShadow();
                 wash.Children.Add(washPaper);
-                for (int q = 0; q < 4; q++) wash.Children.Add(WashiStrip(q, order, _boardScale));
+                if (!bare) for (int q = 0; q < 4; q++) wash.Children.Add(WashiStrip(q, order, _boardScale));
                 stack.Children.Add(wash);
                 caption.Foreground = ink;
                 caption.Margin = new Thickness(4, 12, 0, 0);
@@ -1883,7 +1940,7 @@ public sealed partial class MainWindow
         holder.Children.Add(body);
         if (look.Frame is not ("film" or "print" or "washi" or "doodle")) body.Shadow = new ThemeShadow();
         Border? strip = null;
-        if (tape && look.Tape != "none")
+        if (tape && look.Tape != "none" && !bare)
         {
             strip = new Border { Width = 96, Height = 22, Background = TapeBrush(look, order), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -22, 0, 0),
                 RenderTransform = new CompositeTransform { Rotation = (order % 3 - 1) * 4, ScaleX = _boardCalm ? 1 : 0 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
@@ -1907,6 +1964,9 @@ public sealed partial class MainWindow
             Play(tapeIn);
         }
         if (_boardCalm) caption.Text = text; else After(delay + 820, () => Write(caption, text));
+        var blank = info.Caption is not { Length: > 0 };
+        if (blank) caption.Opacity = bare ? 0 : 0.35;
+        if (blank && !bare) { outer.PointerEntered += (_, _) => caption.Opacity = 1; outer.PointerExited += (_, _) => caption.Opacity = 0.35; }
 
         // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
         outer.PointerEntered += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
@@ -2191,7 +2251,7 @@ public sealed partial class MainWindow
             image.Opacity = 0;
             if (grow is not { } src)
             {
-                image.Source = new BitmapImage(new Uri(path));
+                image.Source = Thumb(path, root.Size.Width);
                 DispatcherQueue.TryEnqueue(() => Settle(0.94, 0, 0, 360));
                 return;
             }
@@ -2208,7 +2268,7 @@ public sealed partial class MainWindow
                 Settle(k, src.X + src.Width / 2 - (dst.X + dst.Width / 2), src.Y + src.Height / 2 - (dst.Y + dst.Height / 2), 520);
             };
             image.ImageOpened += opened;
-            image.Source = new BitmapImage(new Uri(path));
+            image.Source = Thumb(path, root.Size.Width);
         }
 
         // an action tile: an icon over its name

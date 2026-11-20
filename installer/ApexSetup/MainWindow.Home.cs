@@ -70,7 +70,7 @@ public sealed partial class MainWindow
         // (out to the edges of the scrolling area: the picture is not boxed in)
         var grid = new Grid { Height = 640, Margin = new Thickness(-32, -28, -32, 0) };
         if (HomePicture() is { } shot)
-            grid.Children.Add(new Image { Source = new BitmapImage(new Uri(shot)) { DecodePixelWidth = 1920 }, Stretch = Stretch.UniformToFill });
+            grid.Children.Add(new Image { Source = Thumb(shot, 1600), Stretch = Stretch.UniformToFill });
         grid.Children.Add(Shade(new(0, 0), new(0, 1), (0, 0x8C), (0.22, 0), (0.5, 0), (0.82, 0xE6), (1, 0xFF)));
         grid.Children.Add(Shade(new(0, 0.5), new(1, 0.5), (0, 0xBF), (0.5, 0)));
 
@@ -529,7 +529,7 @@ public sealed partial class MainWindow
         (int Col, int Row, int ColSpan, int RowSpan)[] spots = [(0, 0, 1, 2), (1, 0, 1, 1), (2, 0, 1, 1), (1, 1, 2, 1)];
         for (int i = 0; i < shots.Count; i++)
         {
-            var b = new Border { CornerRadius = new CornerRadius(14), Background = Res("ApexPillBrush"), Child = new Image { Source = new BitmapImage(new Uri(shots[i])) { DecodePixelWidth = i == 0 ? 960 : 640 }, Stretch = Stretch.UniformToFill } };
+            var b = new Border { CornerRadius = new CornerRadius(14), Background = Res("ApexPillBrush"), Child = new Image { Source = Thumb(shots[i], i == 0 ? 640 : 420), Stretch = Stretch.UniformToFill } };
             Grid.SetColumn(b, spots[i].Col); Grid.SetRow(b, spots[i].Row); Grid.SetColumnSpan(b, spots[i].ColSpan); Grid.SetRowSpan(b, spots[i].RowSpan);
             grid.Children.Add(b);
         }
