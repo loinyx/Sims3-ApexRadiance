@@ -1,7 +1,9 @@
-# Apex Radiance Setup
+# Apex Launcher (Apex Radiance Setup)
 
-A Windows program, `ApexRadianceSetup.exe`, that installs Apex Radiance and the mods it works with into The Sims 3,
-keeps them up to date, checks the installation and repairs or removes it. The player picks the game and the components;
+A Windows program, `ApexLauncher.exe` (Apex Radiance Setup up to 1.2.x, `ApexRadianceSetup.exe`), that installs Apex
+Radiance and the mods it works with into The Sims 3, keeps them up to date, checks the installation and repairs or
+removes it. From 2.0.0 it is also the place the game is started from: Play, the game's health, the player's mods,
+worlds, saves and pictures, and what is new. The player picks the game and the components;
 Setup downloads each file from its author's own release and changes only what differs from that choice. Every change
 Setup makes can be undone from a restore point. It is optional: the manual install in the
 [README](../../README.md#installation) gives the same result.
@@ -10,10 +12,10 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Unreleased, planned for 4.0.3 (Setup 1.2.0). Sims 3 Modernization's experimental channel: Unreleased |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Unreleased, planned for 4.0.3 (Setup 1.2.0). Sims 3 Modernization's experimental channel: Unreleased. Apex Launcher 2.0.0 (the launcher below): Unreleased, planned for 4.1.0 |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
-| Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup; also Sims 3 Modernization's channel, `ModernizationChannel`); restore points in `Game\Bin\Apex Radiance backup\restore`; language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
+| Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup; also Sims 3 Modernization's channel, `ModernizationChannel`); restore points in `Game\Bin\Apex Radiance backup\restore`; the launcher's own files in `%LOCALAPPDATA%\Apex Launcher` (`settings.json`, `gallery.json`, `language.txt`, mod notes, picture thumbnails, `ApexLauncher.log`); the program in `%LOCALAPPDATA%\Programs\Apex Launcher` |
 | Source | [`installer/`](../../installer/) ([installer/README.md](../../installer/README.md)) |
 
 ## The problem
@@ -159,11 +161,49 @@ the edition's Documents folder; AFMF needs nothing per edition.
 When the renderer changes the graphics card the game sees, the game resets its graphics options once: Setup says so
 and keeps a copy of `Options.ini`, restored when the player goes back to the game's own Direct3D 9.
 
+## The launcher (2.0.0)
+
+Apex Launcher keeps everything above as its *Components* screen and adds the screens a player uses every day. It runs
+as the signed-in user, not as administrator: a change to the game folder or to a driver setting is written as a plan
+(`%LOCALAPPDATA%\Apex Launcher\ops`) and applied by the same exe started once with administrator rights
+(`Elevation.cs`), one prompt per change. A game folder the user can write to needs no prompt.
+
+- **Install and uninstall.** The first run copies the exe to `%LOCALAPPDATA%\Programs\Apex Launcher`, adds Start menu
+  and desktop shortcuts and an *Installed apps* entry. *Uninstall* there (or in Settings) removes what the launcher
+  installed in every game it knows and its own files; saves, mods put in by hand and `Resource.cfg`
+  stay. Settings from Apex Radiance Setup's data folder move to the launcher's on first start.
+- **Home and Play.** The game, its newest save, the installed versions and the expansion packs. *Play* starts the
+  game's exe directly (`TS3W.exe` or `TS3.exe`), installs downloaded updates first when *Install updates when I press
+  Play* is on, and follows the session; a crash or low memory offers *Start again into this save*. *Hide while
+  playing* sends the launcher to the notification area until the game closes.
+- **Health.** A crystal in the state's colour and the checks grouped by area (Apex Radiance, loaders, graphics, game
+  settings, mods), with *Automatic fixes*, *Restore points* and *Last session* tabs. *Fix safe things without asking*
+  applies the fixes that keep a copy of each file.
+- **Mods.** Every package and script mod with its kind, folder, size and an on/off switch (off moves it to
+  `Mods\Disabled (Apex Launcher)`), a gallery view, tags, notes, merge and split, a finder for the mod behind a
+  problem, and the mod checks contributed through `ModChecks.cs` (`IModCheck`). Files the launcher installed are
+  locked.
+- **Worlds and Saves.** The worlds the player can start a game in, by pack, and every save with its household photo
+  (resource `0x6B6D837E`), *Play this save* and a zip backup.
+- **Gallery.** The pictures and videos Apex Radiance and the game save, from the folders `ApexRadiance.toml` names
+  (`[ui] screenshot_folder`, `[capture.video] folder`: the game's, Apex's own or a chosen one), all of them at once so
+  changing the setting hides nothing. *Albums* lists them by day or by household (the save written soonest after a
+  picture), with favourites, captions, a search and the player's own albums; *Scrapbook* lays them on a timeline
+  board with frames, tape, notes, stickers and albums as piles that open in place. The viewer zooms, plays a
+  slideshow, plays videos and moves a picture to the Recycle Bin. Changes can be undone with Ctrl+Z and redone with
+  Ctrl+Y.
+- **What's new.** The release notes of each component, read from its GitHub releases.
+- **Look.** Light or dark and the accent colour follow Windows, also while the launcher is open.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Language (title bar button) | None (`language.txt`) | choice | Windows' display language | The 21 languages of The Sims 3, as the in-game menu | Setup's language; a text without a translation shows in English |
+| Language (title bar button) | None (`language.txt`) | choice | Windows' display language | The 21 languages of The Sims 3, as the in-game menu | The launcher's language; a text without a translation shows in English |
+| Start with Windows | None (Windows' *Run* key) | switch | Off | | Opens quietly in the notification area at sign-in |
+| Hide while playing | None (`settings.json` `HideWhilePlaying`) | switch | On | | The launcher goes to the notification area while the game runs |
+| Fix safe things without asking | None (`settings.json` `FixSafeAutomatically`) | switch | On | | Health applies the fixes that keep a copy of each file |
+| Install updates when I press Play | None (`settings.json` `InstallUpdatesOnPlay`) | switch | On | | Downloaded updates go in before the game starts |
 
 ## Compatibility and interactions
 
@@ -194,6 +234,12 @@ folder*; the log is in the player's `%LOCALAPPDATA%\Apex Radiance Setup\`. The f
 ## Limitations
 
 - Windows 10 version 1809 or later, 64-bit.
+- Apex Launcher 2.0.0, not yet verified on a real install: the upgrade from Apex Radiance Setup 1.2.x, a full uninstall,
+  the administrator window on a game under Program Files, Play and the session with the EA app edition, the tray.
+- The newest texts of the Gallery (search, album menu, videos) show in English in every language until they are
+  translated.
+- The game's own `Video.avi` recordings show without a picture when Windows has no decoder for them; they play when
+  Windows can.
 - Ultimate ASI Loader 10 (the latest release, which Setup installs) can open a *Select Override (Update) Folder* dialog at
   start: one player on the EA app saw it, with an empty button, before the launcher opened; 9.7.4 has no such dialog. What
   triggers it is unverified, so Setup does not change anything for it yet.
@@ -222,7 +268,9 @@ folder*; the log is in the player's `%LOCALAPPDATA%\Apex Radiance Setup\`. The f
   [ApexSetup.Core](../../installer/ApexSetup.Core/) (`Engine.cs`, `Compat.cs`); restore points in `RestorePoints.cs`
   (`Fs` is the one place that writes).
 - Each language is a `Strings.<code>.cs` table with the English text as key; `ApexSetup.Tests` checks every table.
-- Errors are logged to `%LOCALAPPDATA%\Apex Radiance Setup\ApexRadianceSetup.log`. `APEX_SETUP_DRY_RUN=1` shows what Setup finds and would change
+- Errors are logged to `%LOCALAPPDATA%\Apex Launcher\ApexLauncher.log` (Setup 1.2.x: `%LOCALAPPDATA%\Apex Radiance Setup\ApexRadianceSetup.log`).
+  `APEX_LAUNCHER_LANG`, `APEX_LAUNCHER_THEME` (`light` or `dark`), `APEX_LAUNCHER_LOCALAPPDATA` and `APEX_SETUP_DOCUMENTS`
+  point a test run at a language, a theme and fake data and Documents folders. `APEX_SETUP_DRY_RUN=1` shows what Setup finds and would change
   while writing nothing.
 - Build and tests: [installer/README.md](../../installer/README.md#build-and-test); the release step is in
   [release-process.md](../release-process.md#4-build-and-publish).
@@ -230,5 +278,6 @@ folder*; the log is in the player's `%LOCALAPPDATA%\Apex Radiance Setup\`. The f
 ## See also
 
 - [installer/README.md](../../installer/README.md): components, compatibility fixes, suggestions, build and test
+- [Validation](../validation/installer.md): tests, results and open checks
 - [README installation](../../README.md#installation): the manual install
 - [RTX Remix bridge](rtx-remix-bridge.md), [Display](display.md)

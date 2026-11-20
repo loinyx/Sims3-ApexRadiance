@@ -1,6 +1,12 @@
-# Apex Radiance Setup
+# Apex Launcher (Apex Radiance Setup)
 
-A Windows installer (WinUI 3, one self-contained exe) for Apex Radiance and the mods it works with. It finds The Sims 3
+Apex Launcher 2.0.0 (`ApexLauncher.exe`; Apex Radiance Setup up to 1.2.x) is a Windows program (WinUI 3, one
+self-contained exe) that installs Apex Radiance and the mods it works with and starts the game: Home and Play, Health,
+Mods, Worlds, Saves, a Gallery of pictures and videos, and What's new. The screens are described in
+[docs/features/installer.md](../docs/features/installer.md#the-launcher-200); this page covers the installing part
+(the *Components* screen) and the build.
+
+The installing part is the installer for Apex Radiance and the mods it works with. It finds The Sims 3
 (Steam 1.67.2 `TS3W.exe`, EA app 1.69.47 `TS3.exe`, or a folder the player picks), shows what is installed, and applies
 only what differs from the player's choice.
 
