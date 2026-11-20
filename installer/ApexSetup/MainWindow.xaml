@@ -836,6 +836,7 @@
                         <Border x:Name="ModSelectionBar" Grid.Row="4" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="12,0,12,14" Padding="14,6,6,6"
                                 CornerRadius="12" Background="#1C1D22" BorderBrush="#2A2B31" BorderThickness="1" Visibility="Collapsed" Translation="0,0,24">
                             <Border.Shadow><ThemeShadow /></Border.Shadow>
+                            <Border.TranslationTransition><Vector3Transition Duration="0:0:0.25" /></Border.TranslationTransition>
                             <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
                                 <StackPanel x:Name="ModSelectionActions" Tag="dyn" Orientation="Horizontal" Spacing="6" />
                             </ScrollViewer>

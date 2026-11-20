@@ -1089,10 +1089,21 @@ public sealed partial class MainWindow
 
     // ---------- the selection bar, the row menu and keys ----------
 
+    // while the details float over the list (a medium window), the bar slides into the free part on their left and fits
+    // its width there; it slides back when they close
+    void PlaceSelectionBar()
+    {
+        if (ModSelectionBar.Parent is not FrameworkElement list) return;
+        var over = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
+        ModSelectionBar.MaxWidth = over > 0 ? Math.Max(160, list.ActualWidth - over - 24) : double.PositiveInfinity;
+        ModSelectionBar.Translation = new System.Numerics.Vector3((float)(-over / 2), 0, 24);
+    }
+
     void FillSelectionBar(List<ModRow> picked)
     {
         var mine = picked.Where(Mine).ToList();
         ModSelectionBar.Visibility = picked.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        PlaceSelectionBar();
         if (picked.Count < 2) return;
         var a = ModSelectionActions;
         a.Children.Clear();
@@ -1205,6 +1216,7 @@ public sealed partial class MainWindow
         var w = e.NewSize.Width;
         var narrow = w < 1100;
         var compact = w < 780;
+        DispatcherQueue.TryEnqueue(PlaceSelectionBar);
         if (narrow == _modsNarrow && compact == _modsCompact && e.PreviousSize.Width > 0) return;
         _modsNarrow = narrow;
         _modsCompact = compact;
@@ -1315,6 +1327,7 @@ public sealed partial class MainWindow
         ModDetailsFoot.Visibility = Visibility.Collapsed;
         var picked = Picked();
         ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        PlaceSelectionBar();
         if (picked.Count == 0)
         {
             var empty = new StackPanel { Spacing = 12, Margin = new Thickness(0, 56, 0, 0), HorizontalAlignment = HorizontalAlignment.Center };
