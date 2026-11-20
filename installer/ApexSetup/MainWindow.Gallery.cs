@@ -559,6 +559,29 @@ public sealed partial class MainWindow
     static readonly (string Key, string Name, string Glyph)[] Entrances =
         [("soft", "Soft", "\uE7B3"), ("float", "Float", "\uE753"), ("zoom", "Zoom", "\uE8A3"), ("slide", "Slide", "\uE76C"), ("playful", "Playful", "\uE76E"), ("none", "None", "\uE711")];
 
+    // a little picture that comes in the way it names: once when shown, again under the pointer
+    static FrameworkElement EntranceArt(string mode, bool chosen)
+    {
+        var card = new Border
+        {
+            Width = 96, Height = 66, Padding = new Thickness(6), CornerRadius = new CornerRadius(9),
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xE6, 0xEC, 0xE7, 0xDA)),
+            Child = new Border { CornerRadius = new CornerRadius(5), Background = new LinearGradientBrush(new GradientStopCollection { new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x8E, 0x86, 0xD8), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x4A, 0x55, 0x7A), Offset = 1 } }, 60) },
+        };
+        var room = new Grid { Width = 160, Height = 100, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        room.Children.Add(card);
+        var art = new Viewbox { Width = 36, Height = 22, Child = room };
+        void Go() { var calm = _boardCalm; _boardCalm = false; Land(card, -4, 0, -40, mode); _boardCalm = calm; }
+        // (the chosen one plays when shown; any of them plays while the pointer is on its tile)
+        art.Loaded += (_, _) =>
+        {
+            if (chosen) Go();
+            for (var up = VisualTreeHelper.GetParent(art); up is not null; up = VisualTreeHelper.GetParent(up))
+                if (up is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase tile) { tile.PointerEntered += (_, _) => Go(); break; }
+        };
+        return art;
+    }
+
     static CompositeTransform Land(FrameworkElement el, double angle, int delay, double fromX, string mode = "soft")
     {
         var t = new CompositeTransform { Rotation = angle };
@@ -1280,7 +1303,7 @@ public sealed partial class MainWindow
             for (int i = 0; i < Entrances.Length; i++)
             {
                 var (key, name, glyph) = Entrances[i];
-                var art = new FontIcon { Glyph = glyph, FontSize = 22 };
+                var art = EntranceArt(key, look.Entrance == key);
                 PutAt(ways, Choice(art, T(name), look.Entrance == key, () =>
                 {
                     look.Entrance = key;
@@ -1289,7 +1312,7 @@ public sealed partial class MainWindow
                     FillCustomize();
                     // (played straight away, the board kept where it is)
                     if (_boardHost is not null) { _boardKeep = _boardScroll is { ScrollableWidth: > 0 } sv ? sv.HorizontalOffset / sv.ScrollableWidth : null; _boardHost.Child = GalleryBoard(); }
-                }, 74), i, 3);
+                }, 60), i, 3);
             }
             body.Children.Add(ways);
         }
@@ -1729,7 +1752,8 @@ public sealed partial class MainWindow
                 var shift = PileShift[k % PileShift.Length];
                 place = new Placed { X = under.X + shift.X * s, Y = under.Y + shift.Y * s + 24 * s, Angle = PileTurns[k % PileTurns.Length] };
             }
-            else place = look.Places.TryGetValue(path, out var own) && own.Moved ? new Placed { X = xs[i] + own.X, Y = own.Y, Angle = own.Angle, Moved = true } : auto;
+            // (a picture put somewhere always lies whole on the board, whatever its height since)
+            else place = look.Places.TryGetValue(path, out var own) && own.Moved ? new Placed { X = Math.Max(8, xs[i] + own.X), Y = Math.Clamp(own.Y, roof, Math.Max(roof, BoardHeight - h - 14)), Angle = own.Angle, Moved = true } : auto;
             _boardAnchor[path] = xs[i];
             _boardPlaces[path] = place;
             // (the newest fall in first, the ones further back already lie there when scrolled to)
@@ -2133,6 +2157,7 @@ public sealed partial class MainWindow
             holder.Children.Add(strip);
         }
         var outer = new Border { Child = holder };
+        CardPaths.AddOrUpdate(outer, p.Path);
         Canvas.SetLeft(outer, place.X);
         Canvas.SetTop(outer, place.Y);
         Canvas.SetZIndex(outer, order * 10);
@@ -2251,6 +2276,7 @@ public sealed partial class MainWindow
     }
 
     bool _dragging;
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, string> CardPaths = new();
     readonly Dictionary<FrameworkElement, int> _restZ = [];
     // moved with the pointer (or a finger), lifted while it moves, kept where it is let go
     void Draggable(FrameworkElement el, Action dropped, Action? moving = null)
@@ -2283,8 +2309,9 @@ public sealed partial class MainWindow
         el.ManipulationDelta += (_, e) =>
         {
             var w = _boardCanvas?.Width ?? 2000;
-            Canvas.SetLeft(el, Math.Clamp(Canvas.GetLeft(el) + e.Delta.Translation.X, -40, Math.Max(0, w - 120)));
-            Canvas.SetTop(el, Math.Clamp(Canvas.GetTop(el) + e.Delta.Translation.Y, -20, BoardHeight - 120));
+            // (kept whole on the board)
+            Canvas.SetLeft(el, Math.Clamp(Canvas.GetLeft(el) + e.Delta.Translation.X, 8, Math.Max(8, w - el.ActualWidth - 8)));
+            Canvas.SetTop(el, Math.Clamp(Canvas.GetTop(el) + e.Delta.Translation.Y, 8, Math.Max(8, BoardHeight - el.ActualHeight - 8)));
             moving?.Invoke();
         };
         el.ManipulationCompleted += (_, _) => { _dragging = false; el.Scale = Vector3.One; if (edge is not null) { edge.Stop(); _timers.Remove(edge); edge = null; } dropped(); };
@@ -2512,7 +2539,10 @@ public sealed partial class MainWindow
         var opened = _gal is null ? null : System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         var culture = LangCulture();
         var popup = new Popup { XamlRoot = root, IsLightDismissEnabled = false };
-        var shell = new Grid { Width = root.Size.Width, Height = root.Size.Height, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08)), OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) }, Opacity = 0 };
+        var shell = new Grid { Width = root.Size.Width, Height = root.Size.Height, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) }, Opacity = 0 };
+        var dim = new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08)) };
+        Grid.SetColumnSpan(dim, 2);
+        shell.Children.Add(dim);
         shell.ColumnDefinitions.Add(new ColumnDefinition());
         shell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(372) });
         var stage = new Grid { Padding = new Thickness(56, 48, 56, 48) };
@@ -2633,6 +2663,9 @@ public sealed partial class MainWindow
         panel.Children.Add(foot);
         Grid.SetColumn(panel, 1);
         shell.Children.Add(panel);
+        var flight = new Canvas { IsHitTestVisible = false };
+        Grid.SetColumnSpan(flight, 2);
+        shell.Children.Add(flight);
         popup.Child = shell;
 
         // (back on the scrapbook at the same stretch of the timeline, nothing falling in again; another album opens at its start)
@@ -2650,21 +2683,22 @@ public sealed partial class MainWindow
             if (wide) Wide(false);
             zoomer.ChangeView(0, 0, 1, true);
             var away = new Storyboard();
-            var back = pics[at].Path == first && from is { ActualWidth: > 0 } && shown is { ActualWidth: > 0 } ? Bounds(from) : (Windows.Foundation.Rect?)null;
+            var home = pics[at].Path == first ? from
+                : (from?.Parent as Panel)?.Children.OfType<FrameworkElement>().FirstOrDefault(c => CardPaths.TryGetValue(c, out var cp) && string.Equals(cp, pics[at].Path, StringComparison.OrdinalIgnoreCase) && c.Visibility == Visibility.Visible);
+            if (home != from && from is not null) from.Opacity = 1;
+            if (home is not null && home != from) home.Opacity = 0;
+            var back = home is { ActualWidth: > 0 } && shown is { ActualWidth: > 0 } ? Bounds(home) : (Windows.Foundation.Rect?)null;
+            panel.Translation = new Vector3(372, 0, 0);
+            islandFrame.Translation = new Vector3(0, 40, 32);
             if (back is { } b)
             {
                 // (the picture shrinks back into the card it came from; the rest of the viewer fades around it)
-                var dst = Bounds(shown!);
-                var ease = new ExponentialEase { EasingMode = EasingMode.EaseInOut, Exponent = 4 };
-                var k = b.Width / dst.Width;
-                Tween(away, zt, "ScaleX", k, 380, ease);
-                Tween(away, zt, "ScaleY", k, 380, ease);
-                Tween(away, zt, "TranslateX", b.X + b.Width / 2 - (dst.X + dst.Width / 2), 380, ease);
-                Tween(away, zt, "TranslateY", b.Y + b.Height / 2 - (dst.Y + dst.Height / 2), 380, ease);
-                Tween(away, zt, "Rotation", CardTurn(from!), 380, ease);
-                Tween(away, panel, "Opacity", 0, 180);
-                foreach (var c in new UIElement[] { prev, next, close }) Tween(away, c, "Opacity", 0, 140);
-                shell.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                Fly(pics[at], Bounds(shown!), b, CardTurn(home!), false, 380, null);
+                photo.Opacity = 0;
+                Tween(away, flight, "Opacity", 1, 400);
+                Tween(away, panel, "Opacity", 0, 260);
+                foreach (var c in new UIElement[] { prev, next, close, islandFrame }) Tween(away, c, "Opacity", 0, 140);
+                Tween(away, dim, "Opacity", 0, 340);
             }
             else
             {
@@ -2675,6 +2709,7 @@ public sealed partial class MainWindow
             away.Completed += (_, _) =>
             {
                 if (from is not null) from.Opacity = 1;
+                if (home is not null) home.Opacity = 1;
                 popup.IsOpen = false;
                 if (_gal is not null && opened == System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData)) return;
                 if (stay && _galBook) RefreshBoard(page: true); else BuildGallery();
@@ -2687,6 +2722,66 @@ public sealed partial class MainWindow
         void Resized(XamlRoot sender, XamlRootChangedEventArgs e) { shell.Width = root.Size.Width; shell.Height = root.Size.Height; }
         root.Changed += Resized;
 
+        // the card for a picture, as large as the room allows
+        FrameworkElement CardFor(Picture pic)
+        {
+                var light = new SolidColorBrush(Rgb(0xEC, 0xE7, 0xDA));
+                var keepScale = _boardScale;
+                var keepCalm = _boardCalm;
+                FrameworkElement card;
+                var look = Gallery.Look(_gal!, _galAlbum);
+                try
+                {
+                    // (measured once at the board's scale, then made again at the scale that fills the room)
+                    _boardCalm = true;
+                    _boardScale = 1;
+                    var probe = Framed(pic, new Placed(), look, light, 1, 0, pics, null, still: true, read: 64, shut: true);
+                    probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+                    var nat = probe.DesiredSize.Width > 1 ? probe.DesiredSize : new Windows.Foundation.Size(260, 230);
+                    var room = new Windows.Foundation.Size(Math.Max(200, zoomer.ActualWidth > 0 ? zoomer.ActualWidth : root.Size.Width - 480), Math.Max(200, zoomer.ActualHeight > 0 ? zoomer.ActualHeight : root.Size.Height - 100));
+                    _boardScale = Math.Min(room.Width * 0.94 / nat.Width, room.Height * 0.92 / nat.Height);
+                    card = Framed(pic, new Placed(), look, light, 1, 0, pics, null, still: true, read: 700, shut: true, captionMax: 28);
+                }
+                finally { _boardScale = keepScale; _boardCalm = keepCalm; }
+            return card;
+        }
+        // a copy of a picture's card flown between its place in the room (big) and a card's place (small), above all
+        void Fly(Picture pic, Windows.Foundation.Rect big, Windows.Foundation.Rect small, double turn, bool open, int ms, Action? done)
+        {
+            var copy = CardFor(pic);
+            // (the copy carries no empty caption: that only shows under the pointer)
+            void Hush(DependencyObject d)
+            {
+                for (int i = 0; i < VisualTreeHelper.GetChildrenCount(d); i++)
+                {
+                    var c = VisualTreeHelper.GetChild(d, i);
+                    if (c is TextBlock { Text: var tx } tb && tx == T("+ write something")) ((tb.Parent as UIElement) ?? tb).Visibility = Visibility.Collapsed;
+                    else Hush(c);
+                }
+            }
+            copy.Loaded += (_, _) => Hush(copy);
+            copy.HorizontalAlignment = HorizontalAlignment.Center;
+            copy.VerticalAlignment = VerticalAlignment.Center;
+            var t = new CompositeTransform();
+            var wing = new Grid { Width = big.Width, Height = big.Height, RenderTransform = t, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
+            wing.Children.Add(copy);
+            Canvas.SetLeft(wing, big.X);
+            Canvas.SetTop(wing, big.Y);
+            flight.Children.Add(wing);
+            var k = small.Width / Math.Max(1, big.Width);
+            var dx = small.X + small.Width / 2 - (big.X + big.Width / 2);
+            var dy = small.Y + small.Height / 2 - (big.Y + big.Height / 2);
+            if (open) { t.ScaleX = t.ScaleY = k; t.TranslateX = dx; t.TranslateY = dy; t.Rotation = turn; }
+            EasingFunctionBase ease = open ? new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 5 } : new ExponentialEase { EasingMode = EasingMode.EaseInOut, Exponent = 4 };
+            var sb = new Storyboard();
+            Tween(sb, t, "ScaleX", open ? 1 : k, ms, ease);
+            Tween(sb, t, "ScaleY", open ? 1 : k, ms, ease);
+            Tween(sb, t, "TranslateX", open ? 0 : dx, ms, ease);
+            Tween(sb, t, "TranslateY", open ? 0 : dy, ms, ease);
+            Tween(sb, t, "Rotation", open ? 0 : turn, ms, ease);
+            sb.Completed += (_, _) => { done?.Invoke(); flight.Children.Remove(wing); };
+            Play(sb);
+        }
         // (the first picture grows out of what was clicked; the next ones settle in place)
         var grow = from is { ActualWidth: > 0 };
         var dir = 0;
@@ -2716,23 +2811,7 @@ public sealed partial class MainWindow
                 grow = false;
                 return;
             }
-            var light = new SolidColorBrush(Rgb(0xEC, 0xE7, 0xDA));
-            var keepScale = _boardScale;
-            var keepCalm = _boardCalm;
-            FrameworkElement card;
-            try
-            {
-                // (measured once at the board's scale, then made again at the scale that fills the room)
-                _boardCalm = true;
-                _boardScale = 1;
-                var probe = Framed(pic, new Placed(), look, light, 1, 0, pics, null, still: true, read: 64, shut: true);
-                probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-                var nat = probe.DesiredSize.Width > 1 ? probe.DesiredSize : new Windows.Foundation.Size(260, 230);
-                var room = new Windows.Foundation.Size(Math.Max(200, zoomer.ActualWidth > 0 ? zoomer.ActualWidth : root.Size.Width - 480), Math.Max(200, zoomer.ActualHeight > 0 ? zoomer.ActualHeight : root.Size.Height - 100));
-                _boardScale = Math.Min(room.Width * 0.94 / nat.Width, room.Height * 0.92 / nat.Height);
-                card = Framed(pic, new Placed(), look, light, 1, 0, pics, null, still: true, read: 700, shut: true, captionMax: 28);
-            }
-            finally { _boardScale = keepScale; _boardCalm = keepCalm; }
+            var card = CardFor(pic);
             card.HorizontalAlignment = HorizontalAlignment.Center;
             card.VerticalAlignment = VerticalAlignment.Center;
             var old = shown;
@@ -2797,7 +2876,8 @@ public sealed partial class MainWindow
                 if (card.ActualWidth <= 0) { photo.Opacity = 1; return; }
                 var dst = Bounds(card);
                 from!.Opacity = 0;
-                Settle(src.Width / dst.Width, src.X + src.Width / 2 - (dst.X + dst.Width / 2), src.Y + src.Height / 2 - (dst.Y + dst.Height / 2), 600, turn);
+                photo.Opacity = 0;
+                Fly(pic, dst, src, turn, true, 600, () => photo.Opacity = 1);
             }
             if (card.ActualWidth > 0) Rise(); else { void Once(object o, SizeChangedEventArgs e) { card.SizeChanged -= Once; Rise(); } card.SizeChanged += Once; }
         }
@@ -2965,7 +3045,7 @@ public sealed partial class MainWindow
             shell.ColumnDefinitions[1].Width = new GridLength(on ? 0 : 372);
             panel.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
             stage.Padding = on ? new Thickness(0) : new Thickness(56, 48, 56, 48);
-            shell.Background = new SolidColorBrush(on ? Microsoft.UI.Colors.Black : Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08));
+            dim.Background = new SolidColorBrush(on ? Microsoft.UI.Colors.Black : Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08));
             close.Margin = on ? new Thickness(0, 64, 24, 0) : new Thickness(0, -32, -40, 0);
             prev.Margin = on ? new Thickness(16, 0, 0, 0) : new Thickness(-36, 0, 0, 0);
             next.Margin = on ? new Thickness(0, 0, 16, 0) : new Thickness(0, 0, -36, 0);
@@ -2993,8 +3073,18 @@ public sealed partial class MainWindow
             else if (e.Key == Windows.System.VirtualKey.Right) { dir = 1; at = (at + 1) % pics.Count; Fill(); }
         };
         Fill();
+        panel.Translation = new Vector3(372, 0, 0);
+        panel.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(420) };
+        islandFrame.Translation = new Vector3(0, 40, 32);
+        islandFrame.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(420) };
         popup.IsOpen = true;
-        DispatcherQueue.TryEnqueue(() => { shell.Opacity = 1; next.Focus(FocusState.Programmatic); });
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            shell.Opacity = 1;
+            panel.Translation = Vector3.Zero;
+            islandFrame.Translation = new Vector3(0, 0, 32);
+            next.Focus(FocusState.Programmatic);
+        });
     }
 
     // a message line over the gallery (made once, kept on top of its screen)
