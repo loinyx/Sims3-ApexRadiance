@@ -477,7 +477,7 @@ public sealed partial class MainWindow
     ScrollViewer? _boardScroll;
     readonly List<(Picture Pic, FrameworkElement Card, int Index)> _boardCards = [];
     static readonly (string Key, string Name)[] Frames =
-        [("polaroid", "Polaroid"), ("print", "Print"), ("rounded", "Rounded"), ("kraft", "Kraft"), ("mat", "Gallery mat"), ("corners", "Photo corners"), ("stamp", "Stamp"), ("film", "Film"), ("slide", "Slide")];
+        [("polaroid", "Polaroid"), ("print", "Print"), ("rounded", "Rounded"), ("kraft", "Kraft"), ("stamp", "Stamp"), ("film", "Film")];
 
     static Windows.UI.Color Hex(string? hex, Windows.UI.Color fallback)
     {
@@ -868,34 +868,14 @@ public sealed partial class MainWindow
                 f.Children.Add(Holes()); f.Children.Add(Photo(50, 30)); f.Children.Add(Holes());
                 return f;
             }
-            case "corners":
-            {
-                var g = new Grid { Width = 54, Height = 40 };
-                g.Children.Add(Photo(54, 40));
-                foreach (var (ha, va, pts) in Corners(12)) g.Children.Add(new Microsoft.UI.Xaml.Shapes.Polygon { Points = pts, Fill = new SolidColorBrush(Rgb(0x26, 0x22, 0x1E)), HorizontalAlignment = ha, VerticalAlignment = va, Margin = new Thickness(-2) });
-                return g;
-            }
-            case "mat":
-                return new Border { BorderBrush = new SolidColorBrush(Rgb(0x2E, 0x2A, 0x26)), BorderThickness = new Thickness(3), Child = new Border { Background = new SolidColorBrush(Rgb(0xFA, 0xF8, 0xF3)), Padding = new Thickness(8, 8, 8, 10), Child = new Border { BorderBrush = new SolidColorBrush(Rgb(0xD0, 0xC9, 0xBB)), BorderThickness = new Thickness(1), Child = Photo(36, 26) } } };
             case "kraft":
                 return new Border { Background = new SolidColorBrush(Rgb(0xC4, 0xA2, 0x7A)), Padding = new Thickness(4, 4, 4, 12), Child = Photo(40, 32) };
-            case "slide":
-                return new Border { Background = new SolidColorBrush(Rgb(0xEF, 0xE9, 0xDC)), CornerRadius = new CornerRadius(6), Padding = new Thickness(9, 8, 9, 14), Child = Photo(34, 26, 2) };
             case "print":
                 return new Border { BorderBrush = paper, BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(5), Child = Photo(48, 34, 2) };
             default:
                 return new Border { Background = paper, Padding = new Thickness(4, 4, 4, 12), Child = Photo(40, 34) };
         }
     }
-
-    // the four photo corners of an album page, each a small triangle of the given size
-    static (HorizontalAlignment, VerticalAlignment, PointCollection)[] Corners(double s) =>
-    [
-        (HorizontalAlignment.Left, VerticalAlignment.Top, new PointCollection { new(0, 0), new(s, 0), new(0, s) }),
-        (HorizontalAlignment.Right, VerticalAlignment.Top, new PointCollection { new(0, 0), new(s, 0), new(s, s) }),
-        (HorizontalAlignment.Left, VerticalAlignment.Bottom, new PointCollection { new(0, 0), new(0, s), new(s, s) }),
-        (HorizontalAlignment.Right, VerticalAlignment.Bottom, new PointCollection { new(s, 0), new(s, s), new(0, s) }),
-    ];
 
     // ---------- the paper and the stickers ----------
 
@@ -1325,29 +1305,6 @@ public sealed partial class MainWindow
                 stack.Children.Add(caption);
                 body = stack;
                 break;
-            case "corners":
-                // (held on the page by four black photo corners)
-                var held = new Grid { Width = w, Height = h };
-                held.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
-                foreach (var (ha, va, pts) in Corners(30 * _boardScale))
-                    held.Children.Add(new Microsoft.UI.Xaml.Shapes.Polygon { Points = pts, Fill = new SolidColorBrush(Rgb(0x26, 0x22, 0x1E)), HorizontalAlignment = ha, VerticalAlignment = va, Margin = new Thickness(-6) });
-                held.Shadow = new ThemeShadow();
-                stack.Children.Add(held);
-                caption.Foreground = ink;
-                caption.Margin = new Thickness(4, 12, 0, 0);
-                stack.Children.Add(caption);
-                body = stack;
-                break;
-            case "mat":
-                // (a framed print: a dark frame, a white mat, a thin line round the picture, the caption on the mat)
-                var mat = new StackPanel { Background = new SolidColorBrush(Rgb(0xFA, 0xF8, 0xF3)), Padding = new Thickness(22, 22, 22, 12) };
-                mat.Children.Add(new Border { BorderBrush = new SolidColorBrush(Rgb(0xD0, 0xC9, 0xBB)), BorderThickness = new Thickness(1), Child = new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h } });
-                caption.Foreground = dark;
-                caption.HorizontalAlignment = HorizontalAlignment.Center;
-                caption.Margin = new Thickness(0, 10, 0, 0);
-                mat.Children.Add(caption);
-                body = new Border { BorderBrush = new SolidColorBrush(Rgb(0x2E, 0x2A, 0x26)), BorderThickness = new Thickness(7), Child = mat };
-                break;
             case "kraft":
                 // (brown paper, taped on)
                 stack.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
@@ -1356,17 +1313,6 @@ public sealed partial class MainWindow
                 stack.Children.Add(caption);
                 body = new Border { Background = new SolidColorBrush(Rgb(0xC4, 0xA2, 0x7A)), Padding = new Thickness(12, 12, 12, 13), Child = stack };
                 tape = true;
-                break;
-            case "slide":
-                // (a 35 mm slide mount, the caption small on its lower edge)
-                var mount = new StackPanel { Background = new SolidColorBrush(Rgb(0xEF, 0xE9, 0xDC)), Padding = new Thickness(24, 22, 24, 8), CornerRadius = new CornerRadius(12) };
-                mount.Children.Add(new Border { Width = w, Height = h, CornerRadius = new CornerRadius(4), Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill } });
-                caption.Foreground = dark;
-                caption.FontSize *= 0.8;
-                caption.HorizontalAlignment = HorizontalAlignment.Center;
-                caption.Margin = new Thickness(0, 6, 0, 0);
-                mount.Children.Add(caption);
-                body = mount;
                 break;
             default:
                 stack.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
@@ -1379,7 +1325,7 @@ public sealed partial class MainWindow
         }
         var holder = new Grid();
         holder.Children.Add(body);
-        if (look.Frame is not ("film" or "print" or "corners")) body.Shadow = new ThemeShadow();
+        if (look.Frame is not ("film" or "print")) body.Shadow = new ThemeShadow();
         Border? strip = null;
         if (tape && look.Tape != "none")
         {
