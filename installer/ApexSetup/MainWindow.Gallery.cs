@@ -120,6 +120,9 @@ public sealed partial class MainWindow
             RefreshBoard();
         };
         var book = new Grid { Background = BoardBrush(look) };
+        var ctrlZ = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Z, Modifiers = Windows.System.VirtualKeyModifiers.Control };
+        ctrlZ.Invoked += (_, e) => { if (_undo is { } u) { _undo = null; u(); e.Handled = true; } };
+        book.KeyboardAccelerators.Add(ctrlZ);
         _boardFrame = book;
         _boardLight = new Border { IsHitTestVisible = false, Background = LightBrush(look) };
         book.Children.Add(_boardLight);
@@ -286,7 +289,7 @@ public sealed partial class MainWindow
             add.Flyout = menu;
             tools.Children.Add(custom);
             tools.Children.Add(add);
-            var shuffle = Round(new Button(), "\uE8B1", T("Shuffle"));
+            var shuffle = Round(new Button(), "\uE8B1", T("Rearrange"));
             shuffle.Click += (_, _) => ShuffleBoard();
             tools.Children.Add(shuffle);
         }
@@ -706,11 +709,12 @@ public sealed partial class MainWindow
             {
                 var card = Framed(members[i], new Placed { Angle = rnd.NextDouble() * 5 - 2.5 }, look, light, 1, 0, members, null, still: true);
                 card.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-                ch = Math.Max(ch, card.DesiredSize.Height);
+                ch = Math.Max(ch, card.DesiredSize.Height > 0 ? card.DesiredSize.Height : cw * 0.8);
                 cards.Add(card);
             }
         }
         finally { _boardScale = keepScale; _boardCalm = keepCalm; }
+        Windows.Foundation.Size Fit(FrameworkElement c) => c.DesiredSize.Width > 1 ? c.DesiredSize : new Windows.Foundation.Size(cw, ch);
         var top0 = 128.0;
         var left0 = (w - (cols * cw + (cols - 1) * gap)) / 2;
         var tall = top0 + rows * ch + (rows - 1) * gap + 60;
@@ -720,7 +724,7 @@ public sealed partial class MainWindow
         for (int i = 0; i < cards.Count; i++)
         {
             var card = cards[i];
-            var x = left0 + (i % cols) * (cw + gap) + (cw - card.DesiredSize.Width) / 2;
+            var x = left0 + (i % cols) * (cw + gap) + (cw - Fit(card).Width) / 2;
             var y = top0 + (i / cols) * (ch + gap);
             Canvas.SetLeft(card, x);
             Canvas.SetTop(card, y);
@@ -737,7 +741,7 @@ public sealed partial class MainWindow
         {
             var (card, t, x, y) = shown[i];
             var settle = t.Rotation;
-            var size = card.DesiredSize;
+            var size = Fit(card);
             if (i < from.Count && from[i].ActualWidth > 0)
             {
                 var b0 = from[i].TransformToVisual(stage).TransformBounds(new Windows.Foundation.Rect(0, 0, from[i].ActualWidth, from[i].ActualHeight));
@@ -770,7 +774,7 @@ public sealed partial class MainWindow
                 var (card, t, x, y) = shown[i];
                 if (open || i >= from.Count) { Tween(fall, card, "Opacity", 0, 200); continue; }
                 var b = from[i].TransformToVisual(stage).TransformBounds(new Windows.Foundation.Rect(0, 0, from[i].ActualWidth, from[i].ActualHeight));
-                var size = card.DesiredSize;
+                var size = Fit(card);
                 var sy = roomScroll.VerticalOffset;
                 var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
                 Tween(fall, t, "ScaleX", b.Width / Math.Max(1, size.Width), 360, ease);
@@ -832,7 +836,12 @@ public sealed partial class MainWindow
         MarkUnder(null);
         if (target is not null && _boardCards.FirstOrDefault(c => c.Card == target) is { Pic: not null } hit)
         {
-            var into = _boardPiled.GetValueOrDefault(hit.Pic.Path) ?? await AlbumDialog(null, Gallery.HouseholdOf(hit.Pic, _gal!, _galSaves));
+            var into = _boardPiled.GetValueOrDefault(hit.Pic.Path);
+            if (into is null && await AlbumDialog(null, Gallery.HouseholdOf(hit.Pic, _gal!, _galSaves)) is { } made)
+            {
+                into = made;
+                look.Places[made.Key] = new Placed { X = Canvas.GetLeft(target), Y = Canvas.GetTop(target), Moved = true };
+            }
             if (into is not null)
             {
                 foreach (var path in new[] { hit.Pic.Path, p.Path })
@@ -1558,8 +1567,8 @@ public sealed partial class MainWindow
         for (int i = 0; i < pics.Count; i++)
         {
             var path = pics[i].Path;
-            var jitter = new Random(Stable(path));
-            var phase = slotOf[i] * 1.1;
+            var jitter = new Random(Stable(path) + look.Seed);
+            var phase = slotOf[i] * 1.1 + look.Seed % 7;
             var h = ((i % 4 == 0 ? 194 : 154) * s * look.Size) + 70;
             var heap = _boardPiled.GetValueOrDefault(path);
             var auto = new Placed
@@ -1643,6 +1652,12 @@ public sealed partial class MainWindow
             Canvas.SetTop(tags, gathered ? Math.Min(anchor.Y + cardH + 34 * s, BoardHeight - 38) : Math.Max(6, anchor.Y - 42));
             Canvas.SetZIndex(tags, 950);
             canvas.Children.Add(tags);
+            // (under a pile the tag sits just below its top picture, whatever the frame's height)
+            if (gathered && albumCards.Count > 0)
+            {
+                var top = albumCards[0];
+                top.SizeChanged += (_, e) => Canvas.SetTop(tags, Math.Min(Canvas.GetTop(top) + e.NewSize.Height + 12, BoardHeight - 38));
+            }
             if (!_boardCalm)
             {
                 tags.Opacity = 0;
@@ -2106,33 +2121,53 @@ public sealed partial class MainWindow
     }
 
     // every picture somewhere new along its stretch of the timeline, above or below the line, flying there with an overshoot
+    // the timeline laid again along another wave: pictures the player moved go back to it, piles too; Undo puts them back
     void ShuffleBoard()
     {
         if (_boardCanvas is null || _gal is null) return;
         var look = Gallery.Look(_gal, _galAlbum);
-        var rnd = new Random();
-        var mid = BoardHeight / 2;
-        var sb = new Storyboard();
-        foreach (var (pic, card, i) in _boardCards)
-        {
-            if (_boardPiled.ContainsKey(pic.Path)) continue;
-            var place = new Placed { Moved = true };
-            look.Places[pic.Path] = _boardPlaces[pic.Path] = place;
-            place.X = 90 + i * Step + rnd.Next(-40, 40);
-            place.Y = rnd.Next(2) == 0 ? rnd.Next(10, 70) : mid + rnd.Next(20, 80);
-            place.Angle = rnd.Next(-10, 11);
-            foreach (var (prop, to) in new[] { ("(Canvas.Left)", place.X), ("(Canvas.Top)", place.Y) })
-            {
-                var a = new DoubleAnimation { To = to, Duration = TimeSpan.FromMilliseconds(760), EnableDependentAnimation = true, EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.35 } };
-                Storyboard.SetTarget(a, card);
-                Storyboard.SetTargetProperty(a, prop);
-                sb.Children.Add(a);
-            }
-            Tween(sb, ((Border)card).Child.RenderTransform, "Rotation", place.Angle * look.Tilt, 1100, new ElasticEase { EasingMode = EasingMode.EaseOut, Oscillations = 1, Springiness = 4 });
-        }
-        sb.Completed += (_, _) => { foreach (var (pic, card, _) in _boardCards) { Canvas.SetLeft(card, _boardPlaces[pic.Path].X); Canvas.SetTop(card, _boardPlaces[pic.Path].Y); } };
-        Play(sb);
+        var places = look.Places.ToDictionary(kv => kv.Key, kv => new Placed { X = kv.Value.X, Y = kv.Value.Y, Angle = kv.Value.Angle, Moved = kv.Value.Moved }, StringComparer.OrdinalIgnoreCase);
+        var seed = look.Seed;
+        look.Seed = Random.Shared.Next(1, 10000);
+        look.Places.Clear();
         Gallery.Save(_gal);
+        FlipBoard();
+        ShowUndo(T("Board rearranged"), () =>
+        {
+            look.Seed = seed;
+            look.Places.Clear();
+            foreach (var (k, v) in places) look.Places[k] = v;
+            Gallery.Save(_gal);
+            FlipBoard();
+        });
+    }
+
+    // a note at the foot of the board with an Undo (Ctrl+Z too), gone after a few seconds
+    Action? _undo;
+    int _undoShown;
+    void ShowUndo(string what, Action undo)
+    {
+        if (_boardFrame is not Grid stage) return;
+        _undo = undo;
+        var mine = ++_undoShown;
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+        row.Children.Add(new TextBlock { Text = what, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Rgb(0xEC, 0xE7, 0xDA)) });
+        var back = new HyperlinkButton { Content = T("Undo"), Padding = new Thickness(8, 2, 8, 3), FontWeight = FontWeights.SemiBold };
+        row.Children.Add(back);
+        var note = new Border
+        {
+            Child = row, Padding = new Thickness(18, 8, 10, 8), CornerRadius = new CornerRadius(20), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 74), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xEE, 0x1E, 0x1F, 0x25)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x30, 255, 255, 255)),
+            BorderThickness = new Thickness(1), Shadow = new ThemeShadow(), Translation = new Vector3(0, 30, 24), Opacity = 0,
+            TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(260) }, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(200) },
+        };
+        foreach (var old in stage.Children.OfType<Border>().Where(x => x.Tag as string == "undo").ToList()) stage.Children.Remove(old);
+        note.Tag = "undo";
+        stage.Children.Add(note);
+        DispatcherQueue.TryEnqueue(() => { note.Opacity = 1; note.Translation = new Vector3(0, 0, 24); });
+        void Gone() { note.Opacity = 0; note.Translation = new Vector3(0, 30, 24); After(260, () => stage.Children.Remove(note)); if (mine == _undoShown) _undo = null; }
+        back.Click += (_, _) => { if (_undo is { } u) { _undo = null; u(); } Gone(); };
+        After(8000, () => { if (mine == _undoShown) Gone(); });
     }
 
     // a new note where the board is being looked at

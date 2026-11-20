@@ -40,6 +40,7 @@ public sealed class AlbumLook
     public double Spacing { get; set; } = 1.25;            // how far apart the pictures lie along the timeline, 0.6 to 1.7
     public Dictionary<string, Placed> Places { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<StickyNote> Notes { get; set; } = [];
+    public int Seed { get; set; }                          // varies the timeline's wave; Rearrange picks another
     public string Pattern { get; set; } = "none";        // none, lines, grid or dots: the paper under the pictures
     public List<Sticker> Stickers { get; set; } = [];
 }
