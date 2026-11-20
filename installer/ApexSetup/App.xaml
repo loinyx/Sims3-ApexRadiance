@@ -11,32 +11,32 @@
             <!-- the Launcher's colours, dark and light as Windows is set; the accent is the one chosen in Windows -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
-                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D90B0C0E" />
-                    <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#1F2025" />
-                    <SolidColorBrush x:Key="ApexContentBrush" Color="#E60B0C0E" />
-                    <SolidColorBrush x:Key="ApexPageBrush" Color="#0B0C0E" />
-                    <SolidColorBrush x:Key="ApexCardBrush" Color="#131417" />
-                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#1F2025" />
-                    <SolidColorBrush x:Key="ApexMutedBrush" Color="#8B8C96" />
-                    <SolidColorBrush x:Key="ApexSoftTextBrush" Color="#B9BAC2" />
+                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D90C0C0C" />
+                    <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#202020" />
+                    <SolidColorBrush x:Key="ApexContentBrush" Color="#E60C0C0C" />
+                    <SolidColorBrush x:Key="ApexPageBrush" Color="#0C0C0C" />
+                    <SolidColorBrush x:Key="ApexCardBrush" Color="#141414" />
+                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#202020" />
+                    <SolidColorBrush x:Key="ApexMutedBrush" Color="#8E8E8E" />
+                    <SolidColorBrush x:Key="ApexSoftTextBrush" Color="#BDBDBD" />
                     <SolidColorBrush x:Key="ApexSuccessBrush" Color="#7DBE9A" />
                     <SolidColorBrush x:Key="ApexWarningBrush" Color="#E0A84F" />
                     <SolidColorBrush x:Key="ApexErrorBrush" Color="#E8716B" />
-                    <SolidColorBrush x:Key="ApexPillBrush" Color="#1C1D22" />
-                    <SolidColorBrush x:Key="ApexRaisedBrush" Color="#1C1D22" />
-                    <SolidColorBrush x:Key="ApexInputBorderBrush" Color="#2A2B31" />
-                    <SolidColorBrush x:Key="ApexHoverBrush" Color="#222329" />
-                    <SolidColorBrush x:Key="ApexStripBrush" Color="#0F1013" />
+                    <SolidColorBrush x:Key="ApexPillBrush" Color="#1E1E1E" />
+                    <SolidColorBrush x:Key="ApexRaisedBrush" Color="#1E1E1E" />
+                    <SolidColorBrush x:Key="ApexInputBorderBrush" Color="#2C2C2C" />
+                    <SolidColorBrush x:Key="ApexHoverBrush" Color="#232323" />
+                    <SolidColorBrush x:Key="ApexStripBrush" Color="#101010" />
                     <SolidColorBrush x:Key="ApexDangerSoftBrush" Color="#2A1615" />
                     <SolidColorBrush x:Key="ApexDangerTextBrush" Color="#F2B6B2" />
                     <SolidColorBrush x:Key="ApexSuccessSoftBrush" Color="#1A2A22" />
                     <SolidColorBrush x:Key="ApexWarningSoftBrush" Color="#1F1A12" />
                     <SolidColorBrush x:Key="ApexWarningLineBrush" Color="#4A3A1E" />
                     <SolidColorBrush x:Key="ApexWarningTextBrush" Color="#D9C39A" />
-                    <SolidColorBrush x:Key="ApexIconMutedBrush" Color="#4A4B55" />
+                    <SolidColorBrush x:Key="ApexIconMutedBrush" Color="#4C4C4C" />
                     <SolidColorBrush x:Key="ApexFooterBrush" Color="#40000000" />
                     <SolidColorBrush x:Key="ApexHairlineBrush" Color="#12FFFFFF" />
-                    <SolidColorBrush x:Key="ApexGlassBrush" Color="#EB131417" />
+                    <SolidColorBrush x:Key="ApexGlassBrush" Color="#EB141414" />
                     <SolidColorBrush x:Key="ApexGlassLineBrush" Color="#10FFFFFF" />
                     <SolidColorBrush x:Key="ApexAccentBrush" Color="{ThemeResource SystemAccentColorLight2}" />
                     <SolidColorBrush x:Key="ApexAccentTextBrush" Color="{ThemeResource SystemAccentColorLight3}" />
@@ -44,29 +44,29 @@
                     <SolidColorBrush x:Key="ApexAccentLineBrush" Color="{ThemeResource SystemAccentColor}" Opacity="0.4" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D9FBFBFC" />
-                    <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#E2E2E8" />
-                    <SolidColorBrush x:Key="ApexContentBrush" Color="#E6FBFBFC" />
-                    <SolidColorBrush x:Key="ApexPageBrush" Color="#F6F6F8" />
+                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D9FBFBFB" />
+                    <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#E2E2E2" />
+                    <SolidColorBrush x:Key="ApexContentBrush" Color="#E6FBFBFB" />
+                    <SolidColorBrush x:Key="ApexPageBrush" Color="#F6F6F6" />
                     <SolidColorBrush x:Key="ApexCardBrush" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#E2E2E8" />
-                    <SolidColorBrush x:Key="ApexMutedBrush" Color="#6A6B75" />
-                    <SolidColorBrush x:Key="ApexSoftTextBrush" Color="#43444C" />
+                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#E2E2E2" />
+                    <SolidColorBrush x:Key="ApexMutedBrush" Color="#6E6E6E" />
+                    <SolidColorBrush x:Key="ApexSoftTextBrush" Color="#454545" />
                     <SolidColorBrush x:Key="ApexSuccessBrush" Color="#2F8A5B" />
                     <SolidColorBrush x:Key="ApexWarningBrush" Color="#B5771C" />
                     <SolidColorBrush x:Key="ApexErrorBrush" Color="#C53A35" />
-                    <SolidColorBrush x:Key="ApexPillBrush" Color="#EEEEF2" />
+                    <SolidColorBrush x:Key="ApexPillBrush" Color="#EFEFEF" />
                     <SolidColorBrush x:Key="ApexRaisedBrush" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="ApexInputBorderBrush" Color="#D4D4DB" />
-                    <SolidColorBrush x:Key="ApexHoverBrush" Color="#F1F1F5" />
-                    <SolidColorBrush x:Key="ApexStripBrush" Color="#F1F1F4" />
+                    <SolidColorBrush x:Key="ApexInputBorderBrush" Color="#D6D6D6" />
+                    <SolidColorBrush x:Key="ApexHoverBrush" Color="#F2F2F2" />
+                    <SolidColorBrush x:Key="ApexStripBrush" Color="#F2F2F2" />
                     <SolidColorBrush x:Key="ApexDangerSoftBrush" Color="#FBE8E7" />
                     <SolidColorBrush x:Key="ApexDangerTextBrush" Color="#A22F2A" />
                     <SolidColorBrush x:Key="ApexSuccessSoftBrush" Color="#E2F2E8" />
                     <SolidColorBrush x:Key="ApexWarningSoftBrush" Color="#FCF3E2" />
                     <SolidColorBrush x:Key="ApexWarningLineBrush" Color="#E6CF9F" />
                     <SolidColorBrush x:Key="ApexWarningTextBrush" Color="#74561C" />
-                    <SolidColorBrush x:Key="ApexIconMutedBrush" Color="#A3A4AD" />
+                    <SolidColorBrush x:Key="ApexIconMutedBrush" Color="#A6A6A6" />
                     <SolidColorBrush x:Key="ApexFooterBrush" Color="#0D000000" />
                     <SolidColorBrush x:Key="ApexHairlineBrush" Color="#14000000" />
                     <SolidColorBrush x:Key="ApexGlassBrush" Color="#EBFFFFFF" />

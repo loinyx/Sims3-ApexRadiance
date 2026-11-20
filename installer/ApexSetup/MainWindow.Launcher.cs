@@ -124,7 +124,7 @@ public sealed partial class MainWindow
     {
         var t = StateTint(255);
         byte Mix(byte card, byte c) => (byte)Math.Round(card + (c - card) * amount);
-        var card = Pick(0xFF131417, 0xFFFFFFFF);
+        var card = Pick(0xFF141414, 0xFFFFFFFF);
         return Windows.UI.Color.FromArgb(255, Mix(card.R, t.R), Mix(card.G, t.G), Mix(card.B, t.B));
     }
 

@@ -1385,7 +1385,7 @@ public sealed partial class MainWindow
         var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         s.Children.Add(Lucide.Icon(icon, 13));
         s.Children.Add(new TextBlock { Text = text, FontSize = 12 });
-        var b = new Button { Content = s, Padding = new Thickness(10, 4, 10, 5), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(210, 0x13, 0x14, 0x17)) };
+        var b = new Button { Content = s, Padding = new Thickness(10, 4, 10, 5), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(210, 0x14, 0x14, 0x14)) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
         b.Click += (_, _) => click();
         return Dims(b);

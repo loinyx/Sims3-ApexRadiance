@@ -562,7 +562,7 @@ public sealed partial class MainWindow : Window
     // the status bars in a tint of their colour and the window's caption buttons, for the theme in use
     void ThemeChrome()
     {
-        foreach (var (key, dark, light) in new[] { ("Success", 0xFF14231Bu, 0xFFE4F3EAu), ("Warning", 0xFF2A2214u, 0xFFFBF1DFu), ("Error", 0xFF2C1718u, 0xFFFBE6E5u), ("Informational", 0xFF17172Au, 0xFFECECF8u) })
+        foreach (var (key, dark, light) in new[] { ("Success", 0xFF14231Bu, 0xFFE4F3EAu), ("Warning", 0xFF2A2214u, 0xFFFBF1DFu), ("Error", 0xFF2C1718u, 0xFFFBE6E5u), ("Informational", 0xFF1E1E1Eu, 0xFFEFEFEFu) })
             Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = new SolidColorBrush(Pick(dark, light));
         if (AppWindow?.TitleBar is { } bar)
         {
@@ -570,7 +570,7 @@ public sealed partial class MainWindow : Window
             bar.ButtonForegroundColor = fg;
             bar.ButtonHoverForegroundColor = fg;
             bar.ButtonPressedForegroundColor = fg;
-            bar.ButtonInactiveForegroundColor = Pick(0xFF8B8C96, 0xFF8A8B94);
+            bar.ButtonInactiveForegroundColor = Pick(0xFF8E8E8E, 0xFF8C8C8C);
             bar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
             bar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
             bar.ButtonHoverBackgroundColor = Pick(0x1AFFFFFF, 0x12000000);
@@ -1995,12 +1995,12 @@ public sealed partial class MainWindow : Window
         static SolidColorBrush B(uint argb) => new(Windows.UI.Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
         // (light: Windows' own dialog colours)
         if (_light) return;
-        d.Resources["ContentDialogTopOverlay"] = B(0xFF15161A);
-        d.Resources["ContentDialogBackground"] = B(0xFF0F1013);
-        d.Resources["ContentDialogBorderBrush"] = B(0xFF2A2B33);
+        d.Resources["ContentDialogTopOverlay"] = B(0xFF161616);
+        d.Resources["ContentDialogBackground"] = B(0xFF101010);
+        d.Resources["ContentDialogBorderBrush"] = B(0xFF2C2C2C);
         d.Resources["ContentDialogSmokeFill"] = B(0xB3050507);
-        d.Background = B(0xFF0F1013);
-        d.BorderBrush = B(0xFF2A2B33);
+        d.Background = B(0xFF101010);
+        d.BorderBrush = B(0xFF2C2C2C);
     }
 
     // WinUI allows one open ContentDialog: a newer one closes the open one (a Confirm closed so reads as Cancel)

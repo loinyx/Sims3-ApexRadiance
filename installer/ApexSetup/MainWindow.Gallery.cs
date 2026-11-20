@@ -70,11 +70,17 @@ public sealed partial class MainWindow
         page.ColumnDefinitions.Add(new ColumnDefinition());
         var albums = new ScrollViewer { Content = GalleryAlbums(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         _galSide = albums;
-        page.Children.Add(albums);
+        var sideColumn = new Grid();
+        sideColumn.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        sideColumn.RowDefinitions.Add(new RowDefinition());
+        sideColumn.Children.Add(GallerySearch());
+        Grid.SetRow(albums, 1);
+        sideColumn.Children.Add(albums);
+        page.Children.Add(sideColumn);
         var side = 220.0;
         var main = new StackPanel { Spacing = 18 };
         var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = Visibility.Collapsed,
-            Flyout = new Flyout { Content = new ScrollViewer { Content = GalleryAlbums(), MaxHeight = 560, Width = 260 } } };
+            Flyout = new Flyout { Content = new StackPanel { Width = 260, Children = { GallerySearch(), new ScrollViewer { Content = GalleryAlbums(), MaxHeight = 520 } } } } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, T("Albums"));
         main.Children.Add(picker);
         page.SizeChanged += (_, e) =>
@@ -82,7 +88,7 @@ public sealed partial class MainWindow
             var narrow = e.NewSize.Width < (_galBook ? 900 : 980);
             page.ColumnDefinitions[0].Width = new GridLength(narrow ? 0 : side);
             page.ColumnSpacing = narrow || _galBook ? 0 : 28;
-            albums.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
+            sideColumn.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
             picker.Visibility = narrow ? Visibility.Visible : Visibility.Collapsed;
         };
         main.Children.Add(GalleryHead());
@@ -91,7 +97,8 @@ public sealed partial class MainWindow
         _boardPaper = null;
         if (!_galBook)
         {
-            main.Children.Add(GalleryRows());
+            _galRowsHost = new Border { Child = GalleryRows() };
+            main.Children.Add(_galRowsHost);
             Grid.SetColumn(main, 1);
             page.Children.Add(main);
             host.Children.Add(page);
@@ -148,7 +155,42 @@ public sealed partial class MainWindow
         host.Children.Add(page);
     }
 
-    List<Picture> InAlbum() => _galPics.Where(p => Gallery.InAlbum(p, _galAlbum, _gal!, _galSaves)).ToList();
+    List<Picture> InAlbum() => Found.Where(p => Gallery.InAlbum(p, _galAlbum, _gal!, _galSaves)).ToList();
+
+    // the pictures the search finds (all of them with no search)
+    string _galQuery = "";
+    Border? _galRowsHost;
+    IEnumerable<Picture> Found => _galQuery.Length == 0 ? _galPics : _galPics.Where(Matches);
+    bool Matches(Picture p)
+    {
+        bool Has(string? text) => text is { Length: > 0 } && text.Contains(_galQuery, StringComparison.CurrentCultureIgnoreCase);
+        var culture = LangCulture();
+        return Has(Gallery.Peek(_gal!, p.Path).Caption) || Has(Gallery.HouseholdOf(p, _gal!, _galSaves)) || Has(Path.GetFileNameWithoutExtension(p.Path))
+            || Has(p.Taken.ToString("D", culture)) || Has(p.Taken.ToString("MMMM yyyy", culture))
+            || _gal!.Custom.Any(c => Has(c.Name) && c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase));
+    }
+
+    // the search box over the albums: kept while the list and the pictures under it are laid again as it is typed in
+    FrameworkElement GallerySearch()
+    {
+        var box = new TextBox { PlaceholderText = T("Search pictures"), Text = _galQuery, Margin = new Thickness(0, 0, 0, 14) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Search pictures"));
+        var typed = 0;
+        box.TextChanged += (_, _) =>
+        {
+            var mine = ++typed;
+            After(220, () =>
+            {
+                if (mine != typed || box.Text.Trim() == _galQuery) return;
+                _galQuery = box.Text.Trim();
+                if (_galSide is not null) _galSide.Content = GalleryAlbums();
+                if (!_galBook && _galRowsHost is not null) { _galLimit = 60; _galRowsHost.Child = GalleryRows(); }
+                else RefreshBoard();
+            });
+        };
+        box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Escape && box.Text.Length > 0) { box.Text = ""; e.Handled = true; } };
+        return box;
+    }
     string AlbumName(string a) => a == Gallery.All ? T("All pictures") : a == Gallery.Favourites ? T("Favourites")
         : Gallery.CustomOf(_gal!, a) is { } c ? c.Name : a;
 
@@ -157,10 +199,13 @@ public sealed partial class MainWindow
     UIElement GalleryAlbums()
     {
         var s = new StackPanel { Spacing = 2 };
+        var found = Found.ToList();
         Button Album(string key, string name, int count, Windows.UI.Color dot, string? glyph = null)
         {
             var on = key == _galAlbum;
             var g = new Grid { ColumnSpacing = 12 };
+            // (searching: what holds nothing found stays out of the list)
+            var none = _galQuery.Length > 0 && count == 0 && !on;
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -171,15 +216,16 @@ public sealed partial class MainWindow
             g.Children.Add(t);
             if (count > 0) { var n = new TextBlock { Text = count.ToString(), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(n, 2); g.Children.Add(n); }
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 38, Padding = new Thickness(12, 0, 12, 0), BorderThickness = new Thickness(0),
-                Background = on ? new SolidColorBrush(Pick(0xFF22232A, 0xFFE7E7ED)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-            b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Pick(0xFF1C1D22, 0xFFF0F0F4));
+                Background = on ? new SolidColorBrush(Pick(0xFF232323, 0xFFE8E8E8)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Pick(0xFF1E1E1E, 0xFFF1F1F1));
             b.Click += (_, _) => { _galAlbum = key; _galLimit = 60; BuildGallery(); };
+            if (none) b.Visibility = Visibility.Collapsed;
             return b;
         }
-        Windows.UI.Color[] dots = [Rgb(0x7D, 0xBE, 0x9A), Rgb(0x57, 0xB6, 0xE8), Rgb(0xE0, 0xA8, 0x4F), Rgb(0xE8, 0x6F, 0xB8), Rgb(0xB4, 0xAE, 0xF2), Rgb(0x8B, 0x8C, 0x96)];
+        Windows.UI.Color[] dots = [Rgb(0x7D, 0xBE, 0x9A), Rgb(0x57, 0xB6, 0xE8), Rgb(0xE0, 0xA8, 0x4F), Rgb(0xE8, 0x6F, 0xB8), Rgb(0xB4, 0xAE, 0xF2), Rgb(0x8E, 0x8E, 0x8E)];
         s.Children.Add(Eyebrow(T("LIBRARY")));
         s.Children.Add(Album(Gallery.All, T("All pictures"), _galPics.Count, AccentInk));
-        s.Children.Add(Album(Gallery.Favourites, T("Favourites"), _galPics.Count(p => Gallery.InAlbum(p, Gallery.Favourites, _gal!, _galSaves)), Rgb(0xF2, 0xC9, 0x4C)));
+        s.Children.Add(Album(Gallery.Favourites, T("Favourites"), found.Count(p => Gallery.InAlbum(p, Gallery.Favourites, _gal!, _galSaves)), Rgb(0xF2, 0xC9, 0x4C)));
         var head = Eyebrow(T("HOUSEHOLDS"));
         head.Margin = new Thickness(0, 18, 0, 0);
         s.Children.Add(head);
@@ -189,7 +235,7 @@ public sealed partial class MainWindow
         var i = 0;
         foreach (var save in _galSaves)
         {
-            var hb = Album(save.Name, save.Name, _galPics.Count(p => Gallery.InAlbum(p, save.Name, _gal!, _galSaves)), dots[i++ % dots.Length]);
+            var hb = Album(save.Name, save.Name, found.Count(p => Gallery.InAlbum(p, save.Name, _gal!, _galSaves)), dots[i++ % dots.Length]);
             var here = new MenuFlyoutItem { Text = T("New album in {0}", save.Name), Icon = new FontIcon { Glyph = "\uE710" } };
             var home = save.Name;
             here.Click += async (_, _) => { if (await AlbumDialog(null, home) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
@@ -201,7 +247,7 @@ public sealed partial class MainWindow
         var loose = _gal.Custom.Where(c => !_galSaves.Any(v => string.Equals(homes[c], v.Name, StringComparison.OrdinalIgnoreCase))).ToList();
         Button Mine(CustomAlbum c, bool inside)
         {
-            var b = Album(c.Key, c.Name, _galPics.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), AccentInk, c.Icon);
+            var b = Album(c.Key, c.Name, found.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), AccentInk, c.Icon);
             if (inside) { b.Margin = new Thickness(18, 0, 0, 0); b.Height = 34; }
             var menu = new MenuFlyout();
             var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = new FontIcon { Glyph = "\uE70F" } };
@@ -340,7 +386,7 @@ public sealed partial class MainWindow
         var track = new Grid { Padding = new Thickness(3), CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center };
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
-        var pill = new Border { CornerRadius = new CornerRadius(7), Background = new SolidColorBrush(Pick(0xFF2A2B31, 0xFFE4E4EA)), Width = 118, HorizontalAlignment = HorizontalAlignment.Left,
+        var pill = new Border { CornerRadius = new CornerRadius(7), Background = new SolidColorBrush(Pick(0xFF2C2C2C, 0xFFE5E5E5)), Width = 118, HorizontalAlignment = HorizontalAlignment.Left,
             TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, Translation = new Vector3(_galBook ? 0 : 118, 0, 0) };
         Grid.SetColumnSpan(pill, 2);
         track.Children.Add(pill);
@@ -372,6 +418,7 @@ public sealed partial class MainWindow
     {
         var s = new StackPanel { Spacing = 26 };
         var pics = InAlbum();
+        if (pics.Count == 0 && _galQuery.Length > 0) { s.Children.Add(Muted(T("Nothing found for “{0}”.", _galQuery))); return s; }
         if (pics.Count == 0) { s.Children.Add(Muted(_galAlbum == Gallery.Favourites ? T("No favourites yet: open a picture and add it.") : T("No pictures here yet."))); return s; }
         var shown = pics.Take(_galLimit).ToList();
         var groups = _galByHome
@@ -525,7 +572,7 @@ public sealed partial class MainWindow
         g.Children.Add(when);
         if (Gallery.Peek(_gal!, p.Path).Favourite)
             g.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Margin = new Thickness(8), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0B, 0x0C, 0x0E)), Child = new FontIcon { Glyph = "", FontSize = 13, Foreground = new SolidColorBrush(Rgb(0xF2, 0xC9, 0x4C)) } });
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0C, 0x0C, 0x0C)), Child = new FontIcon { Glyph = "", FontSize = 13, Foreground = new SolidColorBrush(Rgb(0xF2, 0xC9, 0x4C)) } });
         var b = new Button { Content = g, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Shadow = new ThemeShadow(), Translation = new Vector3(0, 0, 8) };
         b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -1054,7 +1101,7 @@ public sealed partial class MainWindow
         var d = new Border
         {
             Width = 372, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 14, 14), CornerRadius = new CornerRadius(18),
-            Background = new AcrylicBrush { TintColor = Pick(0xFF17181C, 0xFFF7F7F9), TintOpacity = 0.82, TintLuminosityOpacity = 0.9, FallbackColor = Pick(0xFF1C1D22, 0xFFF7F7F9) },
+            Background = new AcrylicBrush { TintColor = Pick(0xFF181818, 0xFFF7F7F7), TintOpacity = 0.82, TintLuminosityOpacity = 0.9, FallbackColor = Pick(0xFF1E1E1E, 0xFFF7F7F7) },
             BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)), BorderThickness = new Thickness(1),
             Shadow = new ThemeShadow(), Translation = new Vector3(420, 0, 40), Opacity = 0, IsHitTestVisible = false,
             TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) },
@@ -1691,7 +1738,7 @@ public sealed partial class MainWindow
                 foreach (var path in c.Pictures) _boardPiled.TryAdd(path, c);
         // (pictures taken since the board was last laid; each one's look is counted from the oldest picture, so they
         // change no other picture's size or place on the wave)
-        var fresh = look.Seen == default ? 0 : pics.TakeWhile(pc => pc.Taken > look.Seen).Count();
+        var fresh = look.Seen == default || _galQuery.Length > 0 ? 0 : pics.TakeWhile(pc => pc.Taken > look.Seen).Count();
         var lead = look.Lead + fresh;
         var firstOf = new Dictionary<CustomAlbum, int>();
         var xs = new double[pics.Count];
@@ -1789,7 +1836,7 @@ public sealed partial class MainWindow
                 LayTimeline();
             }
         }
-        if (pics.Count > 0)
+        if (pics.Count > 0 && _galQuery.Length == 0)
         {
             look.Seen = pics.Max(pc => pc.Taken);
             look.SeenX = rawX[0];
@@ -1820,7 +1867,7 @@ public sealed partial class MainWindow
         foreach (var under in canvas.Children) under.IsHitTestVisible = false;
         if (pics.Count == 0)
         {
-            var empty = new TextBlock { Text = T("no pictures here yet"), FontFamily = new FontFamily(look.Font), FontSize = 30, Foreground = ink };
+            var empty = new TextBlock { Text = _galQuery.Length > 0 ? T("nothing found for “{0}”", _galQuery) : T("no pictures here yet"), FontFamily = new FontFamily(look.Font), FontSize = 30, Foreground = ink };
             Canvas.SetLeft(empty, 140); Canvas.SetTop(empty, mid - 90);
             canvas.Children.Add(empty);
         }
@@ -2754,7 +2801,7 @@ public sealed partial class MainWindow
         var islandFrame = new Border
         {
             Child = island, CornerRadius = new CornerRadius(26), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, -30),
-            Background = new AcrylicBrush { TintColor = Rgb(0x16, 0x17, 0x1B), TintOpacity = 0.7, TintLuminosityOpacity = 0.85, FallbackColor = Rgb(0x1C, 0x1D, 0x22) },
+            Background = new AcrylicBrush { TintColor = Rgb(0x16, 0x17, 0x1B), TintOpacity = 0.7, TintLuminosityOpacity = 0.85, FallbackColor = Rgb(0x1E, 0x1E, 0x1E) },
             BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x24, 255, 255, 255)), BorderThickness = new Thickness(1), Shadow = new ThemeShadow(), Translation = new Vector3(0, 0, 32),
         };
         island.Margin = new Thickness(0);

@@ -122,7 +122,7 @@ public sealed partial class MainWindow
         foot.Background = new LinearGradientBrush
         {
             StartPoint = new Windows.Foundation.Point(0, 1), EndPoint = new Windows.Foundation.Point(0, 0),
-            GradientStops = { new GradientStop { Color = Pick(0xFF0F1013, 0xFFFFFFFF), Offset = 0 }, new GradientStop { Color = Pick(0x000F1013, 0x00FFFFFF), Offset = 1 } },
+            GradientStops = { new GradientStop { Color = Pick(0xFF101010, 0xFFFFFFFF), Offset = 0 }, new GradientStop { Color = Pick(0x00101010, 0x00FFFFFF), Offset = 1 } },
         };
         foot.ColumnDefinitions.Add(new ColumnDefinition());
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });

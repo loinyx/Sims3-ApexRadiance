@@ -14,7 +14,7 @@ namespace ApexSetup;
 // the saves as covers, the mods by folder beside health, what's new, the pictures and, quietly, the game's packs.
 public sealed partial class MainWindow
 {
-    static Windows.UI.Color PageColor => Pick(0xFF0B0C0E, 0xFFF6F6F8);
+    static Windows.UI.Color PageColor => Pick(0xFF0C0C0C, 0xFFF6F6F6);
 
     void BuildHome()
     {
@@ -87,13 +87,13 @@ public sealed partial class MainWindow
             {
                 Child = tag, Padding = new Thickness(12, 7, 16, 7), CornerRadius = new CornerRadius(18), Margin = new Thickness(56, 26, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
-                Background = new SolidColorBrush(Pick(0x990B0C0E, 0xD9FFFFFF)), BorderBrush = new SolidColorBrush(Pick(0x1AFFFFFF, 0x14000000)), BorderThickness = new Thickness(1),
+                Background = new SolidColorBrush(Pick(0x990C0C0C, 0xD9FFFFFF)), BorderBrush = new SolidColorBrush(Pick(0x1AFFFFFF, 0x14000000)), BorderThickness = new Thickness(1),
             });
         }
         var versions = new TextBlock
         {
             Text = "Apex Radiance " + (_state?.ApexVersion ?? "?") + (Known(Components.Modernization) is { Length: > 0 } mv ? " · Modernization " + mv : ""),
-            FontSize = 12, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0x99, 0xED, 0xED, 0xF0)),
+            FontSize = 12, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0x99, 0xED, 0xED, 0xED)),
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 34, 40, 0),
         };
         grid.Children.Add(versions);
@@ -128,7 +128,7 @@ public sealed partial class MainWindow
         if (WelcomeUpdates() is { Count: > 0 } ups)
         {
             var up = new Button { Height = 60, Padding = new Thickness(22, 0, 18, 0), CornerRadius = new CornerRadius(10), IsEnabled = !_busy && !Maintenance,
-                BorderBrush = Res("ApexAccentBrush"), Background = new SolidColorBrush(Pick(0x8C0B0C0E, 0xD9FFFFFF)) };
+                BorderBrush = Res("ApexAccentBrush"), Background = new SolidColorBrush(Pick(0x8C0C0C0C, 0xD9FFFFFF)) };
             var uc = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
             uc.Children.Add(new TextBlock { Text = T("Update and play"), FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
             uc.Children.Add(new Border { MinWidth = 22, Height = 22, CornerRadius = new CornerRadius(11), Background = Res("ApexAccentBrush"), Padding = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center,
@@ -187,11 +187,11 @@ public sealed partial class MainWindow
             var card = new Grid { CornerRadius = new CornerRadius(14), Background = new LinearGradientBrush
             {
                 StartPoint = new(0, 0), EndPoint = new(1, 1),
-                GradientStops = { new GradientStop { Color = Pick(0xFF23242B, 0xFFF0F0F4), Offset = 0 }, new GradientStop { Color = Pick(0xFF15161A, 0xFFE4E4EA), Offset = 1 } },
+                GradientStops = { new GradientStop { Color = Pick(0xFF242424, 0xFFF1F1F1), Offset = 0 }, new GradientStop { Color = Pick(0xFF161616, 0xFFE5E5E5), Offset = 1 } },
             } };
             if (first) { card.BorderBrush = Res("ApexAccentBrush"); card.BorderThickness = new Thickness(2); }
             var photo = new Grid();
-            photo.Children.Add(new TextBlock { Text = Initials(save.Name), FontSize = first ? 64 : 48, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Pick(0xFF2E2F37, 0xFFC9CAD2)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 60) });
+            photo.Children.Add(new TextBlock { Text = Initials(save.Name), FontSize = first ? 64 : 48, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Pick(0xFF303030, 0xFFCACACA)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 60) });
             photo.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(280) };
             card.SizeChanged += (_, e) => photo.CenterPoint = new Vector3((float)e.NewSize.Width / 2, (float)e.NewSize.Height / 2, 0);
             card.Children.Add(photo);
@@ -306,11 +306,11 @@ public sealed partial class MainWindow
                 {
                     HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch,
                     Padding = new Thickness(14, 12, 14, 12), CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(0),
-                    Background = new SolidColorBrush(Mix(Pick(0xFF131417, 0xFFFFFFFF), Accent(), (shade - 0x16) / 64.0 * (_light ? 0.55 : 0.75))),
+                    Background = new SolidColorBrush(Mix(Pick(0xFF141414, 0xFFFFFFFF), Accent(), (shade - 0x16) / 64.0 * (_light ? 0.55 : 0.75))),
                 };
                 // (a shade of the accent, lighter under the pointer, not the grey of a plain button)
-                block.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Mix(Pick(0xFF131417, 0xFFFFFFFF), Accent(), ((shade - 0x16) / 64.0 + 0.12) * (_light ? 0.55 : 0.75)));
-                block.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Mix(Pick(0xFF131417, 0xFFFFFFFF), Accent(), ((shade - 0x16) / 64.0 - 0.05) * (_light ? 0.55 : 0.75)));
+                block.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Mix(Pick(0xFF141414, 0xFFFFFFFF), Accent(), ((shade - 0x16) / 64.0 + 0.12) * (_light ? 0.55 : 0.75)));
+                block.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Mix(Pick(0xFF141414, 0xFFFFFFFF), Accent(), ((shade - 0x16) / 64.0 - 0.05) * (_light ? 0.55 : 0.75)));
                 block.Resources["ButtonForegroundPointerOver"] = Res("TextFillColorPrimaryBrush");
                 var inside = new Grid();
                 inside.RowDefinitions.Add(new RowDefinition());

@@ -153,7 +153,7 @@ public sealed partial class MainWindow
         names.Background = new LinearGradientBrush
         {
             StartPoint = new Windows.Foundation.Point(0, 1), EndPoint = new Windows.Foundation.Point(0, 0),
-            GradientStops = { new GradientStop { Color = Pick(0xFF0F1013, 0xFFFFFFFF), Offset = 0 }, new GradientStop { Color = Pick(0x000F1013, 0x00FFFFFF), Offset = 1 } },
+            GradientStops = { new GradientStop { Color = Pick(0xFF101010, 0xFFFFFFFF), Offset = 0 }, new GradientStop { Color = Pick(0x00101010, 0x00FFFFFF), Offset = 1 } },
         };
         var t = new TextBlock { Text = title, FontSize = 18, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
         ToolTipService.SetToolTip(t, title);

@@ -84,8 +84,8 @@
                             <local:LucideIcon Kind="{x:Bind KindIcon, Mode=OneWay}" Size="40" Stroke="{x:Bind GlyphBrush}" StrokeWidth="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"
                                               Visibility="{x:Bind Placeholder, Mode=OneWay}" />
                             <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="UniformToFill" />
-                            <Border Visibility="{x:Bind NewVisible, Mode=OneWay}" Background="#CC1C1B2E" CornerRadius="8" Padding="6,1,7,2" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top">
-                                <TextBlock Text="{x:Bind NewText}" FontSize="10" Foreground="#CECBF6" />
+                            <Border Visibility="{x:Bind NewVisible, Mode=OneWay}" Background="#CC1E1E1E" CornerRadius="8" Padding="6,1,7,2" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                <TextBlock Text="{x:Bind NewText}" FontSize="10" Foreground="#EDEDED" />
                             </Border>
                         </Grid>
                     </Border>
@@ -845,7 +845,7 @@
                         </Grid>
                     </Grid>
                     <!-- the chosen mod (or several) -->
-                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="340" HorizontalAlignment="Right" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1,0,0,0" Background="#0F1013">
+                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="340" HorizontalAlignment="Right" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1,0,0,0" Background="#101010">
                         <Grid>
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                             <StackPanel x:Name="ModDetailsHead" />
@@ -881,7 +881,7 @@
             </Grid.ColumnDefinitions>
             <!-- an aurora over the whole panel: three soft bands of light drifting and fading at their own pace (FirstRunGlow,
                  started in code); the panel clips them -->
-            <Grid x:Name="GlowPanel" Background="#07080B" BorderBrush="#1A1B20" BorderThickness="0,0,1,0" SizeChanged="OnGlowPanelSize">
+            <Grid x:Name="GlowPanel" Background="#080808" BorderBrush="#1B1B1B" BorderThickness="0,0,1,0" SizeChanged="OnGlowPanelSize">
                 <Grid.Resources>
                     <Storyboard x:Name="FirstRunGlow">
                         <DoubleAnimation Storyboard.TargetName="AuroraGreenMove" Storyboard.TargetProperty="TranslateX" From="-60" To="60" Duration="0:0:11" AutoReverse="True" RepeatBehavior="Forever">
