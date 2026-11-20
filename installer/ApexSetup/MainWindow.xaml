@@ -800,7 +800,7 @@
                             <TextBlock Grid.Column="4" Text="ON" FontSize="11" CharacterSpacing="60" Foreground="{ThemeResource ApexMutedBrush}" />
                         </Grid>
                         <ListView x:Name="ModList" Grid.Row="4" ItemTemplate="{StaticResource ModRowTemplate}" SelectionMode="Extended"
-                                  SelectionChanged="OnModPicked" CanDragItems="True" DragItemsStarting="OnModDragStart" Margin="0,0,-24,0" Padding="0,0,24,72"
+                                  SelectionChanged="OnModPicked" CanDragItems="True" DragItemsStarting="OnModDragStart" DragItemsCompleted="OnModDragDone" Margin="0,0,-24,0" Padding="0,0,24,72"
                                   RightTapped="OnModRightTapped" KeyDown="OnModListKey" AllowDrop="True" DragOver="OnModFilesOver" Drop="OnModFilesDrop"
                                   AutomationProperties.Name="Mods">
                             <ListView.ItemContainerTransitions>
@@ -811,7 +811,7 @@
                             </ListView.ItemContainerTransitions>
                         </ListView>
                         <GridView x:Name="ModGrid" Grid.Row="3" Grid.RowSpan="2" ItemTemplate="{StaticResource ThumbTemplate}" SelectionMode="Extended"
-                                  SelectionChanged="OnModPicked" CanDragItems="True" DragItemsStarting="OnModDragStart" Margin="0,0,-24,0" Padding="0,0,24,72"
+                                  SelectionChanged="OnModPicked" CanDragItems="True" DragItemsStarting="OnModDragStart" DragItemsCompleted="OnModDragDone" Margin="0,0,-24,0" Padding="0,0,24,72"
                                   RightTapped="OnModRightTapped" KeyDown="OnModListKey" AllowDrop="True" DragOver="OnModFilesOver" Drop="OnModFilesDrop"
                                   Visibility="Collapsed" AutomationProperties.Name="Mods">
                             <GridView.ItemContainerTransitions>
