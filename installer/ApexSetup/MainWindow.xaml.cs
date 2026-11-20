@@ -44,31 +44,48 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // (a test run can pick the theme; otherwise it is Windows')
+        if (Environment.GetEnvironmentVariable("APEX_LAUNCHER_THEME") is { } pick) Root.RequestedTheme = pick == "light" ? ElementTheme.Light : ElementTheme.Dark;
+        _light = Root.ActualTheme == ElementTheme.Light;
+        ThemeChrome();
+        Root.ActualThemeChanged += (_, _) => ThemeChanged();
+        _ui.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(ThemeChanged);
+        // status bars in a dark tint of their colour (the window's own resources: read before any bar draws), not the default
+        // olive and brown
         // the log's context line: the game, its edition and version, the renderer and the loaders Setup found
         App.Context = () => _game is not { } cg ? "no game chosen"
             : $"game {cg.Root} ({cg.Label} {cg.Version}, {cg.Exe}); renderer {_state?.Layer.ToString() ?? "?"}; loaders {(Scan.Loaders(cg.Bin) is { Count: > 0 } ls ? string.Join(", ", ls) : "none")}";
-        _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer };
+        Root.SizeChanged += (_, _) => QueueAudit();
+        // (the version under the sidebar only fits it expanded)
+        Nav.DisplayModeChanged += (_, _) => ShowSetupVersion();
+        _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer,
+            ScreenHome, ScreenMods, ScreenWorlds, ScreenSaves, ScreenHealth, ScreenNews, ScreenSettings, ScreenGallery };
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
-        void Size(double scale) => AppWindow.Resize(new SizeInt32((int)(980 * scale), (int)(680 * scale)));
+        // 1180 x 760 at the monitor's scale, never past its work area (a small laptop screen)
+        void Size(double scale)
+        {
+            var area = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+            AppWindow.Resize(new SizeInt32(Math.Min((int)(1180 * scale), area.Width), Math.Min((int)(760 * scale), area.Height)));
+        }
         Size(GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0);
         ((FrameworkElement)Content).Loaded += (_, _) => Size(Content.XamlRoot.RasterizationScale); // the monitor's real scale
-        if (AppWindow.Presenter is OverlappedPresenter p) { p.IsResizable = false; p.IsMaximizable = false; }
+        if (AppWindow.Presenter is OverlappedPresenter p) { p.PreferredMinimumWidth = 760; p.PreferredMinimumHeight = 560; }
         var ico = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "apex.ico");
         if (File.Exists(ico)) AppWindow.SetIcon(ico);
-        SetupVersion.Text = "Setup " + Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
+        SetupVersion.Text = "Apex Launcher " + Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
 
         // the player's choice (the title bar's language button), else Windows' display language, as the mod's menu
-        Lang = SavedChoice() ?? SystemLanguage(System.Globalization.CultureInfo.CurrentUICulture);
+        Lang = Environment.GetEnvironmentVariable("APEX_LAUNCHER_LANG") ?? SavedChoice() ?? SystemLanguage(System.Globalization.CultureInfo.CurrentUICulture); // (the variable: UI tests in one language)
         Root.Language = Bcp47(Lang);
         // every screen's buttons follow the game starting or closing (the status and Manage rows are built with that state)
         _timer.Tick += (_, _) => { var r = Games.IsRunning(); if (r != _running) { _running = r; RefreshAll(); } };
         // closing in the middle of an install or a removal would leave the game half changed
         AppWindow.Closing += (w, a) =>
         {
-            if (!_busy) return;
+            if (!_busy) { _tray?.Dispose(); return; }
             a.Cancel = true;
-            _ = Message(T("Setup is applying changes"), T("Wait until it finishes before closing."));
+            _ = Message(T("The launcher is applying changes"), T("Wait until it finishes before closing."));
         };
         ((FrameworkElement)Content).Loaded += async (_, _) => await StartAsync();
     }
@@ -89,18 +106,29 @@ public sealed partial class MainWindow : Window
             _games.Insert(0, item);
         }
         // a game folder on the command line (or a shortcut) comes first
-        if (Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() is { } arg && Games.FromFolder(arg) is { } given
+        if (Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() is { } arg && !arg.StartsWith("--") && Games.FromFolder(arg) is { } given
             && !_games.Any(x => x.Game.Bin.Equals(given.Bin, StringComparison.OrdinalIgnoreCase)))
             _games.Insert(0, Item(given));
+        // the administrator window (--maintain): the game it was opened for
+        if (Elevation.Parse(Environment.GetCommandLineArgs()).Bin is { } mb && Games.FromFolder(mb) is { } mg)
+        {
+            _games.RemoveAll(x => x.Game.Bin.Equals(mg.Bin, StringComparison.OrdinalIgnoreCase));
+            _games.Insert(0, Item(mg));
+        }
         GameList.ItemsSource = _games;
         if (_games.Count > 0) GameList.SelectedIndex = 0;
         NoGames.Visibility = _games.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         _running = Games.IsRunning();
         _timer.Start();
         Localize();
-        Show(Welcome);
+        RefreshGame();
+        Show(Maintenance ? MaintenanceScreen(Elevation.Parse(Environment.GetCommandLineArgs()).Screen) : FirstInstall ? Welcome : Home);
         _ = DetectVulkanAsync();
         await LoadReleasesAsync();
+        if (AuditFile is not null && Environment.GetEnvironmentVariable("APEX_LAUNCHER_AUDIT_TOUR") == "1") _ = AuditTourAsync();
+        else { await AskInstallModeAsync(); await OpenPendingAsync(); }
+        // (the launcher's choices, applied as if Apply was clicked: the player already did, before Windows asked)
+        if (Maintenance && TakeChoices()) OnNext(NextButton, new RoutedEventArgs());
         await CheckSetupUpdateAsync();
     }
 
@@ -114,13 +142,13 @@ public sealed partial class MainWindow : Window
         {
             if (await SelfUpdate.DownloadIfNewerAsync(apex, self) is not { } file) return;
             var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(file).FileVersion is { } fv && Version.TryParse(fv, out var pv) ? pv.ToString(3) : "";
-            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new Setup is available"),
-                T("Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again.", v), T("Update Setup"), () =>
+            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new Apex Launcher is available"),
+                T("Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again.", v), T("Update the launcher"), () =>
                 {
                     if (_busy) return; // (an install in progress finishes first)
                     try
                     {
-                        SelfUpdate.ReplaceAndStart(file, self, Environment.GetCommandLineArgs().Skip(1));
+                        SelfUpdate.ReplaceAndStart(file, self, LauncherInstall.HandoverArgs(Environment.GetCommandLineArgs().Skip(1)));
                         Application.Current.Exit();
                     }
                     catch (Exception e)
@@ -130,7 +158,7 @@ public sealed partial class MainWindow : Window
                         // (the new exe quarantined or blocked by an antivirus: said as such)
                         var shown = e is FileNotFoundException || e is System.ComponentModel.Win32Exception { NativeErrorCode: 2 or 225 or 226 } || Engine.IsVirusBlock(e)
                             ? Engine.Antivirus(SelfUpdate.AssetName, Path.GetDirectoryName(file) ?? "") : e;
-                        _ = ShowDialog(new ContentDialog { Title = T("Setup could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
+                        _ = ShowDialog(new ContentDialog { Title = T("The launcher could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
                     }
                 });
         }
@@ -251,6 +279,9 @@ public sealed partial class MainWindow : Window
     {
         _step = step;
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
+        if (step != GalleryScreen) FullBleed(false);
+        Scroller.Visibility = step == ModsScreen ? Visibility.Collapsed : Visibility.Visible; // (Mods scrolls in its own panes)
+        QueueAudit();
         Animate(_screens[step]);
         Scroller.ChangeView(null, 0, null, true);
         SyncNav();
@@ -261,7 +292,7 @@ public sealed partial class MainWindow : Window
     void SyncNav()
     {
         _syncNav = true;
-        var tag = (_step == RendererStep ? ComponentsStep : _step).ToString();
+        var tag = (_step == RendererStep ? ComponentsStep : _step is Welcome or Manage or About or GameStep ? (_step == Welcome ? Home : SettingsScreen) : _step).ToString();
         Nav.SelectedItem = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().FirstOrDefault(n => (string)n.Tag == tag);
         _syncNav = false;
     }
@@ -281,12 +312,27 @@ public sealed partial class MainWindow : Window
         sb.Begin();
     }
 
+    // the side pane: wide windows keep it open unless the player folded it to its icons with the toggle (remembered);
+    // narrow ones fold it on their own, which is not a choice to remember
+    void OnNavLoaded(object sender, RoutedEventArgs e) { if (_settings.NavCompact) Nav.IsPaneOpen = false; ShowSetupVersion(); }
+    void OnNavPaneOpening(NavigationView sender, object args) => NavFolded(false);
+    void OnNavPaneClosing(NavigationView sender, NavigationViewPaneClosingEventArgs args) => NavFolded(true);
+    void NavFolded(bool folded)
+    {
+        SetupVersion.Visibility = !folded && Nav.DisplayMode == NavigationViewDisplayMode.Expanded ? Visibility.Visible : Visibility.Collapsed;
+        if (Nav.DisplayMode != NavigationViewDisplayMode.Expanded || _settings.NavCompact == folded) return;
+        _settings.NavCompact = folded;
+        _settings.Save();
+    }
+    // (the version line fits only the open pane: folded to icons it would wrap a letter at a time)
+    void ShowSetupVersion() => SetupVersion.Visibility = Nav.IsPaneOpen && Nav.DisplayMode == NavigationViewDisplayMode.Expanded ? Visibility.Visible : Visibility.Collapsed;
+
     void OnNavSelection(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (_syncNav || args.SelectedItem is not NavigationViewItem item) return;
         var to = int.Parse((string)item.Tag);
         // steps open in order; Install and Done only through the buttons; nothing moves while Setup works
-        bool ok = !_busy && (to is Welcome or About || to == GameStep || (to == ComponentsStep && CanLeaveGame()) || to == Manage);
+        bool ok = !_busy && (to is Welcome or About or >= Home || to == GameStep || (to == ComponentsStep && CanLeaveGame()) || to == Manage);
         if (!ok) { DispatcherQueue.TryEnqueue(SyncNav); return; }
         _backTo = -1;
         Show(to == Manage && _game is null ? GameStep : to);
@@ -301,7 +347,7 @@ public sealed partial class MainWindow : Window
     void OnBack(object sender, RoutedEventArgs e)
     {
         if (_step == RendererStep) { Show(ComponentsStep); return; }
-        var to = _backTo >= 0 ? _backTo : Math.Max(Welcome, _step - 1);
+        var to = _backTo >= 0 ? _backTo : _step == GameStep && !FirstInstall ? SettingsScreen : Math.Max(Welcome, _step - 1);
         _backTo = -1;
         Show(to);
     }
@@ -327,7 +373,7 @@ public sealed partial class MainWindow : Window
                 else if (SettingChanges().Count > 0) await InstallAsync(add, del, settingsOnly: true);
                 break;
             }
-            case DoneStep: Close(); break;
+            case DoneStep: if (Maintenance) Close(); else Show(FirstInstall ? Welcome : Home); break;
         }
     }
 
@@ -338,7 +384,7 @@ public sealed partial class MainWindow : Window
         // the glow moves only while it shows, and not when Windows' animation effects are off (started once, not on every refresh)
         var glow = FirstRun.Visibility == Visibility.Visible && new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
         if (glow != _glowOn) { _glowOn = glow; if (glow) FirstRunGlow.Begin(); else FirstRunGlow.Stop(); }
-        BackButton.Visibility = _step is GameStep or ComponentsStep or RendererStep ? Visibility.Visible : Visibility.Collapsed;
+        BackButton.Visibility = _step is GameStep or RendererStep || _step == ComponentsStep && FirstInstall ? Visibility.Visible : Visibility.Collapsed; // (in the launcher Components has no step before it)
         // a game with Apex and nothing to update: the status card's own buttons are the actions, no wizard to go into
         var settled = _step == Welcome && _state?.ApexVersion is not null && _game is not null && WelcomeUpdates().Count == 0 && _updated is null;
         NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or DoneStep or RendererStep ? Visibility.Visible : Visibility.Collapsed;
@@ -369,7 +415,7 @@ public sealed partial class MainWindow : Window
             GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."),
             ComponentsStep when _loading => T("Checking the latest versions\u2026"),
             ComponentsStep when _offline && wa.Count > 0 && _releaseError is { } le => T(le.Key, le.Args),
-            ComponentsStep when _offline && wa.Count > 0 => T("Setup needs the internet to download the files."),
+            ComponentsStep when _offline && wa.Count > 0 => T("The launcher needs the internet to download the files."),
             ComponentsStep when work.Count == 0 && !fixes => T("Everything is installed and up to date."),
             ComponentsStep when _state?.ApexVersion is null => T("Nothing changes until you click Install."),
             // what Apply will change in the drivers and Apex's settings (the components show theirs on their rows)
@@ -392,7 +438,7 @@ public sealed partial class MainWindow : Window
     {
         var latest = Latest(Components.Apex);
         FirstTitle.Text = "Apex Radiance" + (latest is null ? "" : " " + latest);
-        FirstGame.Text = _game is { } g ? T("The Sims 3 \u00b7 {0} found", g.Label) : T("Setup found no install. Browse for the game folder.");
+        FirstGame.Text = _game is { } g ? T("The Sims 3 \u00b7 {0} found", g.Label) : T("The launcher found no install. Browse for the game folder.");
         FirstGameIcon.Visibility = FirstNotThis.Visibility = _game is null ? Visibility.Collapsed : Visibility.Visible;
         FirstGamePath.Text = _game?.Root ?? "";
         FirstGamePath.Visibility = FirstGameIcon.Visibility;
@@ -416,23 +462,23 @@ public sealed partial class MainWindow : Window
         var names = new[] { T("Game"), T("Components"), T("Install") };
         for (int i = 1; i <= names.Length; i++)
         {
-            if (i > 1) host.Children.Add(new Border { Width = 40, Height = 1, VerticalAlignment = VerticalAlignment.Center, Background = (Brush)Application.Current.Resources["ApexCardBorderBrush"] });
+            if (i > 1) host.Children.Add(new Border { Width = 40, Height = 1, VerticalAlignment = VerticalAlignment.Center, Background = App.Brush("ApexCardBorderBrush") });
             var done = i < current;
             var on = i == current;
             var dot = new Border
             {
                 Width = 22, Height = 22, CornerRadius = new CornerRadius(11),
-                Background = on ? (Brush)Application.Current.Resources["ApexAccentBrush"] : done ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x1A, 0x2A, 0x22)) : null,
-                BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(on || done ? 0 : 1),
+                Background = on ? App.Brush("ApexAccentBrush") : done ? Res("ApexSuccessSoftBrush") : null,
+                BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(on || done ? 0 : 1),
                 Child = done
-                    ? new FontIcon { Glyph = "\uE73E", FontSize = 11, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] }
+                    ? new FontIcon { Glyph = "\uE73E", FontSize = 11, Foreground = App.Brush("ApexSuccessBrush") }
                     : new TextBlock { Text = i.ToString(), FontSize = 11, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                                      Foreground = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x0B, 0x0C, 0x0E)) : (Brush)Application.Current.Resources["ApexMutedBrush"] },
+                                      Foreground = on ? Res("TextOnAccentFillColorPrimaryBrush") : App.Brush("ApexMutedBrush") },
             };
             var label = new TextBlock
             {
                 Text = names[i - 1], FontSize = 13, VerticalAlignment = VerticalAlignment.Center, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
-                Foreground = (Brush)Application.Current.Resources[done ? "ApexSuccessBrush" : on ? "ApexSoftTextBrush" : "ApexMutedBrush"],
+                Foreground = App.Brush(done ? "ApexSuccessBrush" : on ? "ApexSoftTextBrush" : "ApexMutedBrush"),
             };
             var step = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             step.Children.Add(dot);
@@ -457,7 +503,7 @@ public sealed partial class MainWindow : Window
         WelcomeStatus.Visibility = show ? Visibility.Collapsed : WelcomeStatus.Visibility;
         UpdateList.Children.Clear();
         if (!show || _game is not { } g) return;
-        var muted = (Brush)Application.Current.Resources["ApexMutedBrush"];
+        var muted = App.Brush("ApexMutedBrush");
         if (_updated is { } done)
         {
             CardHeader(UpdateList, "\uE73E", "ApexSuccessBrush", T("Everything is updated"), T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."));
@@ -471,7 +517,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         CardHeader(UpdateList, "\uE896", "ApexAccentBrush", ups.Count == 1 ? T("1 update for The Sims 3 \u00b7 {0}", g.Label) : T("{0} updates for The Sims 3 \u00b7 {1}", ups.Count, g.Label),
-            T("Setup makes a restore point before it changes any file, so you can undo this."));
+            T("The launcher makes a restore point before it changes any file, so you can undo this."));
         foreach (var c in ups)
         {
             var box = new CheckBox { Content = Name(c), IsChecked = !_skipUpdate.Contains(c), MinWidth = 0, IsEnabled = !_busy };
@@ -490,7 +536,47 @@ public sealed partial class MainWindow : Window
 
     // ---------- card rows (the update card, the status card) ----------
 
-    static Brush Res(string key) => (Brush)Application.Current.Resources[key];
+    static Brush Res(string key) => App.Brush(key);
+
+    // Windows' light or dark and its accent colour: the window follows them as they change
+    static bool _light { get => App.Light; set => App.Light = value; }
+    readonly Windows.UI.ViewManagement.UISettings _ui = new();
+    static readonly Windows.UI.ViewManagement.UISettings Ui = new();
+    static Windows.UI.Color Accent(Windows.UI.ViewManagement.UIColorType kind = Windows.UI.ViewManagement.UIColorType.Accent) => Ui.GetColorValue(kind);
+    // a colour for the theme in use: its dark form, else its light one
+    static Windows.UI.Color Pick(uint dark, uint light) { var c = _light ? light : dark; return Windows.UI.Color.FromArgb((byte)(c >> 24), (byte)(c >> 16), (byte)(c >> 8), (byte)c); }
+    // the accent as text and icons: light on dark, deep on light
+    static Windows.UI.Color AccentInk => Accent(_light ? Windows.UI.ViewManagement.UIColorType.AccentDark2 : Windows.UI.ViewManagement.UIColorType.AccentLight2);
+    static Windows.UI.Color Mix(Windows.UI.Color a, Windows.UI.Color b, double k) =>
+        Windows.UI.Color.FromArgb(255, (byte)(a.R + (b.R - a.R) * k), (byte)(a.G + (b.G - a.G) * k), (byte)(a.B + (b.B - a.B) * k));
+
+    void ThemeChanged()
+    {
+        var light = Root.ActualTheme == ElementTheme.Light;
+        _light = light;
+        ThemeChrome();
+        RefreshAll();
+        if (_step == GalleryScreen) BuildGallery();
+    }
+
+    // the status bars in a tint of their colour and the window's caption buttons, for the theme in use
+    void ThemeChrome()
+    {
+        foreach (var (key, dark, light) in new[] { ("Success", 0xFF14231Bu, 0xFFE4F3EAu), ("Warning", 0xFF2A2214u, 0xFFFBF1DFu), ("Error", 0xFF2C1718u, 0xFFFBE6E5u), ("Informational", 0xFF1E1E1Eu, 0xFFEFEFEFu) })
+            Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = new SolidColorBrush(Pick(dark, light));
+        if (AppWindow?.TitleBar is { } bar)
+        {
+            var fg = _light ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
+            bar.ButtonForegroundColor = fg;
+            bar.ButtonHoverForegroundColor = fg;
+            bar.ButtonPressedForegroundColor = fg;
+            bar.ButtonInactiveForegroundColor = Pick(0xFF8E8E8E, 0xFF8C8C8C);
+            bar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+            bar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+            bar.ButtonHoverBackgroundColor = Pick(0x1AFFFFFF, 0x12000000);
+            bar.ButtonPressedBackgroundColor = Pick(0x10FFFFFF, 0x0C000000);
+        }
+    }
 
     static void CardHeader(Panel card, string glyph, string brush, string title, string sub)
     {
@@ -522,7 +608,7 @@ public sealed partial class MainWindow : Window
 
     static void CardStrip(Panel card, string text, FrameworkElement? action)
     {
-        var strip = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, Background = new SolidColorBrush(ColorHelper.FromArgb(255, 0x0F, 0x10, 0x13)),
+        var strip = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, Background = Res("ApexStripBrush"),
             BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
         strip.ColumnDefinitions.Add(new ColumnDefinition());
         strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -543,6 +629,7 @@ public sealed partial class MainWindow : Window
         RefreshComponents();
         RefreshManage();
         RefreshAbout();
+        RefreshLauncher();
         UpdateFooter();
     }
 
@@ -553,7 +640,7 @@ public sealed partial class MainWindow : Window
         var inst = _game is null ? null : _state?.ApexVersion;
         if (_offline)
         {
-            if (_releaseError is { } limit) SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("Setup can't reach GitHub"), T(limit.Key, limit.Args), T("Try again"), async () => await LoadReleasesAsync());
+            if (_releaseError is { } limit) SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("The launcher can't reach GitHub"), T(limit.Key, limit.Args), T("Try again"), async () => await LoadReleasesAsync());
             else SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("No internet connection"), T("Check your internet connection, then try again."), T("Try again"), async () => await LoadReleasesAsync());
         }
         else if (_loading && _game is not null)
@@ -584,9 +671,9 @@ public sealed partial class MainWindow : Window
         WelcomeIntro.Visibility = returning ? Visibility.Collapsed : Visibility.Visible;
         StatusList.Children.Clear();
         if (!returning || _state is not { } s || _game is not { } g) return;
-        var muted = (Brush)Application.Current.Resources["ApexMutedBrush"];
-        var ok = (Brush)Application.Current.Resources["ApexSuccessBrush"];
-        var accent = (Brush)Application.Current.Resources["ApexAccentBrush"];
+        var muted = App.Brush("ApexMutedBrush");
+        var ok = App.Brush("ApexSuccessBrush");
+        var accent = App.Brush("ApexAccentBrush");
         string State(string c) => Known(c) is not { Length: > 0 } v ? T("Installed") : Newer(Latest(c), v) ? T("{0} \u2192 {1}", v, Latest(c)!) : T("{0} \u00b7 up to date", v);
         var apexRelease = _latest.GetValueOrDefault(Repo[Components.Apex]);
         var test = Verify.TestBuild(g, s, apexRelease);
@@ -611,7 +698,7 @@ public sealed partial class MainWindow : Window
         {
             var bar = new InfoBar
             {
-                IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("Setup fixes this") : "",
+                IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("The launcher fixes this") : "",
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
             };
             if (x.Link is { } link) bar.ActionButton = new HyperlinkButton { Content = T("Read more"), NavigateUri = new Uri(link) };
@@ -692,8 +779,8 @@ public sealed partial class MainWindow : Window
         if (c.ContentTemplateRoot is not Border card) return;
         var on = c.IsSelected;
         card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
-        card.Background = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x16, 0x16, 0x1D))
-            : hover ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x22, 0x23, 0x29)) : Res("ApexCardBrush");
+        card.Background = on ? Res("ApexAccentSoftBrush")
+            : hover ? Res("ApexHoverBrush") : Res("ApexCardBrush");
     }
 
     void PaintGames()
@@ -735,6 +822,11 @@ public sealed partial class MainWindow : Window
         _state = _game is null ? null : Scan.Run(_game);
         // once per scan: Compat walks Mods and reads every Bin .asi, and the status and footer read it again
         _found = _state is null ? new() : Compat.Check(_game!, _state);
+        _health = _state is null ? [] : Verify.Files(_game!, _state, _latest.GetValueOrDefault(Releases.Apex)).Concat(_found)
+            .Select(f => new Health.Item(f, Health.AreaOf(f), [])).ToList();
+        CheckHealth(); // (the full check, off the window's thread; this quick list shows until it is done)
+        _healthState = Health.StateOf(_health);
+        _checked = DateTime.Now;
         GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;
         FillProblems();
     }
@@ -751,14 +843,14 @@ public sealed partial class MainWindow : Window
             {
                 IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args),
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
-                Title = x.CanFix ? T("Setup fixes this") : "",
+                Title = x.CanFix ? T("The launcher fixes this") : "",
             };
             if (x.Link is { } link) bar.ActionButton = new HyperlinkButton { Content = T("Read more"), NavigateUri = new Uri(link) };
             ProblemList.Children.Add(bar);
         }
         // (the fixes run with Install / Apply, or Fix settings when nothing else changes)
         if (found.Count == 0)
-            ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] });
+            ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = App.Brush("ApexSuccessBrush") });
         SuggestList.Children.Clear();
         FillSuggestions(SuggestList, GraphicsInfo, onStatus: false);
         SuggestList.Visibility = SuggestList.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed; // (an empty one still takes a gap)
@@ -970,6 +1062,10 @@ public sealed partial class MainWindow : Window
                   || AfmfCard.Visibility == Visibility.Visible && (AfmfToggle.IsEnabled || AfmfToggle.IsOn);
         var now = ReadFpsLimit(g);
         FpsCard.Visibility = usable && now is not null ? Visibility.Visible : Visibility.Collapsed;
+        // a divider above every row shown but the first; no section when no row shows
+        var rows = SmoothList.Children.OfType<Border>().Where(x => x.Visibility == Visibility.Visible).ToList();
+        for (int i = 0; i < rows.Count; i++) { rows[i].BorderBrush = App.Brush("ApexCardBorderBrush"); rows[i].BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0); }
+        SmoothSection.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (now is null) { _fpsWant = null; _fpsCustomOpen = false; return; }
         if (_fpsNow != now) _fpsWant = null; // (the file changed under the picker: start again from it)
         _fpsNow = now;
@@ -1148,7 +1244,7 @@ public sealed partial class MainWindow : Window
             var on = r == _renderer;
             radio.IsChecked = on;
             card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
-            card.Background = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x16, 0x16, 0x1D)) : Res("ApexCardBrush");
+            card.Background = on ? Res("ApexAccentSoftBrush") : Res("ApexCardBrush");
         }
         _fillingRenderer = false;
     }
@@ -1200,14 +1296,14 @@ public sealed partial class MainWindow : Window
         if (OldCard)
             BridgeDetail.Text = T("DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0}).", CardFound);
         else if (OldDriver)
-            BridgeDetail.Text = T("Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again.", MissingList);
+            BridgeDetail.Text = T("Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open the launcher again.", MissingList);
 
         // the game resets its graphics options when the card it sees changes: DXVK's TS3W profile and the bridge report a
         // GeForce GTX 580; the game's own D3D9 the real card (DXVK on TS3.exe: unverified, so treated as a change)
         string Card(string r) => r switch { RBridge => "580", RDxvk when g.Exe == "TS3W.exe" => "580", RNative => "real", _ => "?" };
         if (changed && (Card(_renderer) != Card(cur) || Card(cur) == "?"))
             SetInfo(GraphicsInfo, InfoBarSeverity.Warning, "",
-                T("Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."));
+                T("Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back."));
         else GraphicsInfo.IsOpen = false;
         RendererResetNote.Visibility = GraphicsInfo.IsOpen ? Visibility.Visible : Visibility.Collapsed;
 
@@ -1263,7 +1359,7 @@ public sealed partial class MainWindow : Window
     static void SetState(TextBlock line, (string Text, string Brush) state)
     {
         line.Text = state.Text;
-        line.Foreground = (Brush)Application.Current.Resources[state.Brush];
+        line.Foreground = App.Brush(state.Brush);
     }
 
     string RendererShort(string r) => r switch
@@ -1389,6 +1485,7 @@ public sealed partial class MainWindow : Window
     {
         if (_game is not { } g || _busy || _running) return;
         if (Preview is not null) { await Message(T("Preview"), T("This is a preview: nothing was installed.")); return; }
+        if (!await CanChangeHere(inline ? "welcome" : "components", drivers: !inline && SettingChanges(remove).Any(c => c.Kind is "nv" or "amd"))) return;
         var from = _step == InstallStep ? ComponentsStep : _step;
         // busy before the checks: a second click (or the Performance Patch watcher) during them starts nothing
         _busy = true;
@@ -1409,7 +1506,7 @@ public sealed partial class MainWindow : Window
             installBar = new ProgressBar { Maximum = 1 };
             head.Children.Add(installBar);
             UpdateList.Children.Add(head);
-            var list = new StackPanel { BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(0, 4, 0, 4) };
+            var list = new StackPanel { BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(0, 4, 0, 4) };
             UpdateList.Children.Add(list);
             host = list;
             UpdateFooter();
@@ -1509,13 +1606,13 @@ public sealed partial class MainWindow : Window
             App.Log(ex);
             AfterFrameGenOff(); // (the drivers read again, a removal's turn-off error taken once, not left for the next Apply)
             var net = Engine.IsNetwork(ex);
-            var title = net ? T("Setup can't reach GitHub") : T("Setup could not finish");
+            var title = net ? T("The launcher can't reach GitHub") : T("The launcher could not finish");
             var text = ErrorText(ex);
             // the files it changed before the error are put back: half an install is the worse state. Keeping them is the
             // second choice (Repair or remove sets them right later)
             if (!engineDone && point?.Committed is { } p)
             {
-                var keep = await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + "\n\n" + T("Setup puts back the files it changed.")),
+                var keep = await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + "\n\n" + T("The launcher puts back the files it changed.")),
                     PrimaryButtonText = T("Undo these changes"), SecondaryButtonText = T("Keep what was installed"),
                     DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Secondary;
                 if (!keep)
@@ -1524,7 +1621,7 @@ public sealed partial class MainWindow : Window
                     // (Restore needs the game, its launcher and the restart host closed: said, not skipped in silence)
                     if (_running || Games.IsRunning())
                     {
-                        await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(T("Setup could not put the files back while The Sims 3, its launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove.")),
+                        await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(T("The launcher could not put the files back while The Sims 3, the game's own launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove.")),
                             CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
                         _busy = false;
                         return;
@@ -1534,7 +1631,7 @@ public sealed partial class MainWindow : Window
                     await RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir);
                     // the driver's frame generation is not in a restore point: the removal turned it off, and it stays off
                     if (smoothOff || afmfOff)
-                        await Message(T("Setup could not finish"), T("Frame generation was turned off with the removal and stays off; turn it on again in Components if you want it."));
+                        await Message(T("The launcher could not finish"), T("Frame generation was turned off with the removal and stays off; turn it on again in Components if you want it."));
                     return;
                 }
             }
@@ -1563,8 +1660,8 @@ public sealed partial class MainWindow : Window
             ring.Visibility = state == 1 ? Visibility.Visible : Visibility.Collapsed;
             icon.Visibility = state == 1 ? Visibility.Collapsed : Visibility.Visible;
             icon.Glyph = state == 3 ? "" : state == 2 ?"" : "";
-            icon.Foreground = (Brush)Application.Current.Resources[state == 3 ? "ApexWarningBrush" : state == 2 ? "ApexSuccessBrush" : "ApexMutedBrush"];
-            label.Foreground = (Brush)Application.Current.Resources[state == 0 ? "ApexMutedBrush" : "ApexSoftTextBrush"];
+            icon.Foreground = App.Brush(state == 3 ? "ApexWarningBrush" : state == 2 ? "ApexSuccessBrush" : "ApexMutedBrush");
+            label.Foreground = App.Brush(state == 0 ? "ApexMutedBrush" : "ApexSoftTextBrush");
         };
     }
 
@@ -1576,16 +1673,16 @@ public sealed partial class MainWindow : Window
         DoneText.Text = apex ? T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu.") : "";
         DoneSummary.Children.Clear();
         foreach (var c in _lastInstall)
-            DoneSummary.Children.Add(new TextBlock { Text = T("Installed: {0} {1}", Name(c), _state?.Installed(c) ?? ""), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
+            DoneSummary.Children.Add(new TextBlock { Text = T("Installed: {0} {1}", Name(c), _state?.Installed(c) ?? ""), FontSize = 12, Foreground = App.Brush("ApexSoftTextBrush") });
         foreach (var c in _lastRemove)
-            DoneSummary.Children.Add(new TextBlock { Text = T("Removed: {0}", Name(c)), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
+            DoneSummary.Children.Add(new TextBlock { Text = T("Removed: {0}", Name(c)), FontSize = 12, Foreground = App.Brush("ApexSoftTextBrush") });
         // the driver and frame limit changes: done ones as their task, failed ones with the reason in the player's words
         foreach (var (label, kind, on, err) in _lastChanges)
             DoneSummary.Children.Add(new TextBlock
             {
                 Text = err is null ? label : T("Not changed: {0}", label) + "\n" + ChangeError(kind, on, err),
                 FontSize = 12, TextWrapping = TextWrapping.Wrap,
-                Foreground = (Brush)Application.Current.Resources[err is null ? "ApexSoftTextBrush" : "ApexWarningBrush"],
+                Foreground = App.Brush(err is null ? "ApexSoftTextBrush" : "ApexWarningBrush"),
             });
         if (_lastChanges.Any(p => p.Error is not null && p.Error != "Dry run: Setup changes nothing.")) { DoneTitle.Text = T("Some changes did not apply"); DoneText.Text = ""; }
         DoneSummaryCard.Visibility = DoneSummary.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -1616,7 +1713,7 @@ public sealed partial class MainWindow : Window
         if (s.S3ss) ManageRow("Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
         if (s.RestartHost) ManageRow(T("Restart host"), T("Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."), T("Remove"), () => RemoveAsync(Components.RestartHost));
         if (s.Modernization) ManageRow("Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
-        ManageRow(T("Uninstall everything"), T("Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."), T("Uninstall"), UninstallAll, danger: true);
+        ManageRow(T("Uninstall everything"), T("Removes what the launcher installed, and Apex Radiance, and puts back every file the launcher replaced."), T("Uninstall"), UninstallAll, danger: true);
 
         foreach (var p in RestorePoints.List(g.Bin))
         {
@@ -1625,8 +1722,8 @@ public sealed partial class MainWindow : Window
                 T("Restore"), () => RestoreAsync(p), list: RestoreList);
         }
         if (RestoreList.Children.Count == 0)
-            RestoreList.Children.Add(new TextBlock { Text = T("No restore points yet. Setup makes one before every change."), Margin = new Thickness(18, 14, 18, 14),
-                FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
+            RestoreList.Children.Add(new TextBlock { Text = T("No restore points yet. The launcher makes one before every change."), Margin = new Thickness(18, 14, 18, 14),
+                FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = App.Brush("ApexMutedBrush") });
     }
 
     // dates in Setup's language, not the format Windows uses
@@ -1643,15 +1740,15 @@ public sealed partial class MainWindow : Window
     {
         var restore = list is not null;
         list ??= ManageList;
-        var row = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 14, BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
+        var row = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 14, BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
         row.ColumnDefinitions.Add(new ColumnDefinition());
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var text = new StackPanel { Spacing = 2 };
         text.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        text.Children.Add(new TextBlock { Text = desc, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
+        text.Children.Add(new TextBlock { Text = desc, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = App.Brush("ApexMutedBrush") });
         var b = new Button { Content = action, MinWidth = 96, VerticalAlignment = VerticalAlignment.Center, IsEnabled = !_running && !_busy };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, action + " " + title + (restore ? ", " + desc : "")); // (two points can share a title)
-        if (danger) { b.Background = new SolidColorBrush(ColorHelper.FromArgb(255, 0x2A, 0x16, 0x15)); b.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 0xF2, 0xB6, 0xB2)); }
+        if (danger) { b.Background = Res("ApexDangerSoftBrush"); b.Foreground = Res("ApexDangerTextBrush"); }
         b.Click += async (_, _) => await run();
         Grid.SetColumn(b, 1);
         row.Children.Add(text); row.Children.Add(b);
@@ -1663,18 +1760,18 @@ public sealed partial class MainWindow : Window
     {
         if (_game is not { } g || _busy) return;
         if (_running) { SetInfo(bar ?? ManageInfo, InfoBarSeverity.Warning, T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."), ""); return; }
-        if (ask && !await Confirm(T("Restore this point?"), T("Setup puts back the files as they were before this change, and undoes every change made after it. Close the game first."), T("Restore"))) return;
+        if (ask && !await Confirm(T("Restore this point?"), T("The launcher puts back the files as they were before this change, and undoes every change made after it. Close the game first."), T("Restore"))) return;
         await Guarded(() =>
         {
             if (RestorePoints.Restore(g.Bin, p) is { Count: > 0 } failed)
-                throw new IOException(T("Setup could not put back {0}.", string.Join(", ", failed)));
+                throw new IOException(T("The launcher could not put back {0}.", string.Join(", ", failed)));
         }, T("Changes undone."), bar);
     }
 
     async Task RemoveAsync(string c)
     {
         if (_game is not { } g || _busy || _running) return;
-        if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. Setup removes the files and puts back the ones it replaced."), T("Remove"))) return;
+        if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. The launcher removes the files and puts back the ones it replaced."), T("Remove"), danger: true)) return;
         await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)), label: "Remove {0}", args: Components.Name(c));
         AfterFrameGenOff();
         RefreshComponents();
@@ -1683,8 +1780,8 @@ public sealed partial class MainWindow : Window
     async Task UninstallAll()
     {
         if (_game is not { } g || _busy || _running) return;
-        if (!await Confirm(T("Uninstall everything?"), T("Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"))) return;
-        await Guarded(() => Engine.RemoveAll(g), T("Everything Setup installed was removed."), label: "Uninstall everything");
+        if (!await Confirm(T("Uninstall everything?"), T("The launcher removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"), danger: true)) return;
+        await Guarded(() => Engine.RemoveAll(g), T("Everything the launcher installed was removed."), label: "Uninstall everything");
         AfterFrameGenOff();
         RefreshComponents();
     }
@@ -1711,6 +1808,7 @@ public sealed partial class MainWindow : Window
     async Task<bool> Guarded(Action work, string done, InfoBar? bar = null, string? label = null, bool keepChoices = false, params string[] args)
     {
         if (_busy || _running || _game is not { } g) return false;
+        if (!await CanChangeHere(_step is HealthScreen or Home ? "health" : "manage")) return false;
         bar ??= ManageInfo;
         _busy = true;
         RefreshAll();
@@ -1732,10 +1830,10 @@ public sealed partial class MainWindow : Window
         // after the refresh, which rewrites the screens' bars; Components' bar open again holds the graphics-reset warning for
         // the choices kept, so it stays (the suggestion's card going shows the result)
         if (ok) { if (!(bar == GraphicsInfo && GraphicsInfo.IsOpen)) SetInfo(bar, InfoBarSeverity.Success, done, ""); }
-        else if (point?.Committed is { } p) SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!, T("Undo these changes"),
+        else if (point?.Committed is { } p) SetInfo(bar, InfoBarSeverity.Error, T("The launcher could not finish"), error!, T("Undo these changes"),
             // a change made since then would be undone too: asked first
             () => _ = RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir, bar));
-        else SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!);
+        else SetInfo(bar, InfoBarSeverity.Error, T("The launcher could not finish"), error!);
         if (!ok) bar.Content = ErrorLinks(inBar: true); // (Copy details, Open log folder, as the dialogs have)
         return ok;
     }
@@ -1759,13 +1857,13 @@ public sealed partial class MainWindow : Window
         if (LicenceList.Children.Count > 0) return;
         foreach (var (name, lic, file, url) in Credits)
         {
-            var row = new Grid { Padding = new Thickness(18, 8, 12, 8), ColumnSpacing = 8, BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, LicenceList.Children.Count == 0 ? 0 : 1, 0, 0) };
+            var row = new Grid { Padding = new Thickness(18, 8, 12, 8), ColumnSpacing = 8, BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(0, LicenceList.Children.Count == 0 ? 0 : 1, 0, 0) };
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.Children.Add(new TextBlock { Text = T(name), FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
-            var l = new TextBlock { Text = lic, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] };
+            var l = new TextBlock { Text = lic, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = App.Brush("ApexMutedBrush") };
             Grid.SetColumn(l, 1); row.Children.Add(l);
             if (file is not null)
             {
@@ -1803,7 +1901,7 @@ public sealed partial class MainWindow : Window
         _showingUnexpected = true;
         DispatcherQueue.TryEnqueue(async () =>
         {
-            try { await ShowDialog(new ContentDialog { Title = T("Setup could not finish"), Content = ErrorContent(ErrorText(e)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot }); }
+            try { await ShowDialog(new ContentDialog { Title = T("The launcher could not finish"), Content = ErrorContent(ErrorText(e)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot }); }
             catch (Exception x) { App.Log(x); }
             finally { _showingUnexpected = false; }
         });
@@ -1821,8 +1919,8 @@ public sealed partial class MainWindow : Window
         catch (Exception e) { App.Log(e); return true; } // (a check that cannot run is no reason to stop)
         if (found.Count == 0) return true;
         var text = string.Join("\n\n", found.Select(f => "• " + T(f.Key, f.Args)));
-        if (found.Any(f => f.Blocks)) { await Message(T("Before Setup can continue"), text); return false; }
-        return await Confirm(T("Before Setup continues"), text, T("Continue"));
+        if (found.Any(f => f.Blocks)) { await Message(T("Before the launcher can continue"), text); return false; }
+        return await Confirm(T("Before the launcher continues"), text, T("Continue"));
     }
 
     // an error in the player's words, then the raw text for a report
@@ -1832,12 +1930,12 @@ public sealed partial class MainWindow : Window
         {
             SetupException se => T(se.Key, se.Args),
             _ when Engine.IsNetwork(ex) => T("Check your internet connection, then try again."),
-            UnauthorizedAccessException => T("Windows did not let Setup change a file. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; a read-only or locked file can also cause this."),
-            IOException when Engine.IsVirusBlock(ex) => T("Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again.", GitHubSource.TempRoot + ", " + (_game?.Bin ?? "Game\\Bin")),
-            IOException => T("A file Setup needed is in use or could not be written. Close the game and other programs using it, then try again."),
+            UnauthorizedAccessException => T("Windows did not let the launcher change a file. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; a read-only or locked file can also cause this."),
+            IOException when Engine.IsVirusBlock(ex) => T("Your antivirus blocked a file the launcher needs; add an exception for {0} and open the launcher again.", GitHubSource.TempRoot + ", " + (_game?.Bin ?? "Game\\Bin")),
+            IOException => T("A file the launcher needed is in use or could not be written. Close the game and other programs using it, then try again."),
             // an English text Setup throws and translates (Close The Sims 3 first, the restart host's wait): that text alone
             _ when Has(ex.Message) => T(ex.Message),
-            _ => T("Setup ran into a problem it did not expect."),
+            _ => T("The launcher ran into a problem it did not expect."),
         };
         return ex is SetupException || Has(ex.Message) || plain == ex.Message ? plain : plain + "\n\n" + ex.Message;
     }
@@ -1865,7 +1963,7 @@ public sealed partial class MainWindow : Window
         var open = new HyperlinkButton { Content = T("Open log folder"), Padding = new Thickness(0) };
         open.Click += (_, _) =>
         {
-            try { Directory.CreateDirectory(App.LogDir); Process.Start(new ProcessStartInfo("explorer.exe", "\"" + App.LogDir + "\"") { UseShellExecute = true }); }
+            try { OpenFolder(App.LogDir); }
             catch (Exception e) { App.Log(e); }
         };
         links.Children.Add(copy);
@@ -1878,9 +1976,32 @@ public sealed partial class MainWindow : Window
     async Task Message(string title, string text) =>
         await ShowDialog(new ContentDialog { Title = title, Content = text, CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
 
-    async Task<bool> Confirm(string title, string text, string yes) =>
-        await ShowDialog(new ContentDialog { Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot })
-            == ContentDialogResult.Primary;
+    // a button whose action removes or deletes: its text in red
+    static Style DangerButton => new(typeof(Button)) { BasedOn = (Style)Application.Current.Resources["DefaultButtonStyle"], Setters = { new Setter(Control.ForegroundProperty, Res("ApexErrorBrush")) } };
+
+    // the action in the accent colour; one that deletes or removes says so in red and lights neither button (Enter does nothing)
+    async Task<bool> Confirm(string title, string text, string yes, bool danger = false)
+    {
+        var d = new ContentDialog { Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot,
+            DefaultButton = danger ? ContentDialogButton.None : ContentDialogButton.Primary };
+        if (danger) d.PrimaryButtonStyle = DangerButton;
+        return await ShowDialog(d) == ContentDialogResult.Primary;
+    }
+
+    // every dialog in the launcher's near-black instead of Windows' grey: the body a step above the button strip, a quiet
+    // border, a deeper shade behind (the dialog's template reads these from its own resources first)
+    static void DarkDialog(ContentDialog d)
+    {
+        static SolidColorBrush B(uint argb) => new(Windows.UI.Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
+        // (light: Windows' own dialog colours)
+        if (_light) return;
+        d.Resources["ContentDialogTopOverlay"] = B(0xFF161616);
+        d.Resources["ContentDialogBackground"] = B(0xFF101010);
+        d.Resources["ContentDialogBorderBrush"] = B(0xFF2C2C2C);
+        d.Resources["ContentDialogSmokeFill"] = B(0xB3050507);
+        d.Background = B(0xFF101010);
+        d.BorderBrush = B(0xFF2C2C2C);
+    }
 
     // WinUI allows one open ContentDialog: a newer one closes the open one (a Confirm closed so reads as Cancel)
     ContentDialog? _dialog;
@@ -1890,6 +2011,7 @@ public sealed partial class MainWindow : Window
         while (_dialog is { } open) { open.Hide(); await _dialogShown!; }
         _dialog = d;
         d.Language = Root.Language; // (a dialog is a popup: it does not inherit the window's language)
+        DarkDialog(d);
         _dialogShown = d.ShowAsync().AsTask();
         try { return await _dialogShown; }
         finally { if (_dialog == d) _dialog = null; }

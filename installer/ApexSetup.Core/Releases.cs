@@ -14,7 +14,7 @@ public sealed class SetupException(string key, params string[] args) : InvalidOp
     public string Key { get; } = key;
     public string[] Args { get; } = args;
 }
-public sealed record Release(string Repo, string Tag, IReadOnlyList<Asset> Assets)
+public sealed record Release(string Repo, string Tag, IReadOnlyList<Asset> Assets, string? Body = null)
 {
     public string Version => Tag.TrimStart('v', 'V');
     public Asset Find(Func<string, bool> match) =>
@@ -24,6 +24,9 @@ public sealed record Release(string Repo, string Tag, IReadOnlyList<Asset> Asset
 // Every download comes from the latest release of the project's own GitHub repository.
 public static class Releases
 {
+    // the release notes (Markdown), for What's new
+    static string? Body(JsonElement r) => r.TryGetProperty("body", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : null;
+
     public const string Apex = "loinyx/Sims3-ApexRadiance";
     public const string S3ss = "sims3fiend/Sims3SettingsSetter";
     public const string Modernization = "rodneypantonial/sims3-modernization";
@@ -48,13 +51,33 @@ public static class Releases
         using (var api = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
             api.CancelAfter(TimeSpan.FromSeconds(15));
-            try { return await FromApiAsync(repo, api.Token); }
+            try { return Remember(await FromApiAsync(repo, api.Token)); }
             catch (Exception e) when (!ct.IsCancellationRequested) { apiError = e; } // the API allows 60 calls an hour per address; a portal may answer HTML
         }
         using var page = CancellationTokenSource.CreateLinkedTokenSource(ct);
         page.CancelAfter(TimeSpan.FromSeconds(20));
-        try { return await FromPageAsync(repo, page.Token); }
+        try { return Recall(await FromPageAsync(repo, page.Token)); }
         catch (Exception) when (apiError is SetupException limit && !ct.IsCancellationRequested) { throw limit; } // (the page failing too: the limit is the news)
+    }
+
+    // The release page carries no notes: the ones the API gave for the same tag are kept and used then (GitHub limits the API
+    // to 60 reads an hour per address, so a busy day falls back to the page)
+    public static string NotesDir => Path.Combine(Paths.Data, "release-notes");
+    static string NotesFile(string repo, string tag) => Path.Combine(NotesDir, repo.Replace('/', '_') + "_" + string.Concat(tag.Split(Path.GetInvalidFileNameChars())) + ".md");
+
+    public static Release Remember(Release r)
+    {
+        if (r.Body is { Length: > 0 } body)
+            try { Directory.CreateDirectory(NotesDir); Fs.WriteAtomic(NotesFile(r.Repo, r.Tag), body); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        return r;
+    }
+
+    public static Release Recall(Release r)
+    {
+        if (r.Body is not null) return r;
+        try { return File.Exists(NotesFile(r.Repo, r.Tag)) ? r with { Body = File.ReadAllText(NotesFile(r.Repo, r.Tag)) } : r; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); return r; }
     }
 
     // GitHub's answer to a refused API call: its rate limit (403 or 429 with no calls left) says when it opens again
@@ -115,7 +138,7 @@ public static class Releases
                 a.GetProperty("name").GetString()!,
                 a.GetProperty("browser_download_url").GetString()!,
                 a.TryGetProperty("digest", out var d) && d.GetString() is { } s && s.StartsWith("sha256:") ? s[7..] : null,
-                a.TryGetProperty("size", out var z) ? z.GetInt64() : 0)).ToList()))
+                a.TryGetProperty("size", out var z) ? z.GetInt64() : 0)).ToList(), Body(r)))
             .ToList();
     }
 
@@ -173,7 +196,7 @@ public static class Releases
             a.GetProperty("browser_download_url").GetString()!,
             a.TryGetProperty("digest", out var d) && d.GetString() is { } s && s.StartsWith("sha256:") ? s[7..] : null,
             a.TryGetProperty("size", out var z) ? z.GetInt64() : 0)).ToList();
-        return new Release(repo, root.GetProperty("tag_name").GetString()!, assets);
+        return new Release(repo, root.GetProperty("tag_name").GetString()!, assets, Body(root));
     }
 
     // Downloads to a temp folder; checks GitHub's SHA-256 digest when the release has one.

@@ -141,7 +141,7 @@ public static class RestorePoints
     public static List<string> Restore(string bin, RestorePoint point)
     {
         Engine.CheckWritable();
-        if (_open is not null) throw new InvalidOperationException("Setup is applying changes");
+        if (_open is not null) throw new InvalidOperationException("The launcher is applying changes");
         var points = List(bin);
         if (!points.Any(p => p.Dir == point.Dir)) throw new InvalidOperationException("This restore point is gone.");
         var failed = new List<string>();
@@ -240,14 +240,16 @@ public static class Fs
     public static void Move(string from, string to) { RestorePoints.Touch(from); RestorePoints.Touch(to); Retry(() => File.Move(from, to, true)); }
     public static void Write(string path, string text) { RestorePoints.Touch(path); Retry(() => WriteAtomic(path, text)); }
 
-    // a file an antivirus scan or the game's launcher holds a moment: tried again 3 times, 500 ms apart (a missing file fails at once)
+    // a file an antivirus scan or the game's launcher holds a moment: tried again 4 times, waiting 0.5, 1, 2 and 4 s (a scan of
+    // a large package just written can take seconds); a missing file fails at once
     public static TimeSpan RetryDelay = TimeSpan.FromMilliseconds(500);
+    public const int RetryTimes = 4;
     public static void Retry(Action io)
     {
         for (var i = 0; ; i++)
             try { io(); return; }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not FileNotFoundException && e is not DirectoryNotFoundException && i < 3)
-            { Thread.Sleep(RetryDelay); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not FileNotFoundException && e is not DirectoryNotFoundException && i < RetryTimes)
+            { Thread.Sleep(RetryDelay * (1 << i)); }
     }
     // ApexRadiance.toml with [ui] restart_host changed from keyWas: a restore point puts back only that key
     public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); Retry(() => WriteAtomic(path, text)); }

@@ -1,12 +1,13 @@
 ﻿<#
-UI smoke run for Apex Radiance Setup: starts the published exe in a dry run (APEX_SETUP_DRY_RUN=1, nothing is written to the
+UI smoke run for Apex Launcher: starts the published exe in a dry run (APEX_SETUP_DRY_RUN=1, nothing is written to the
 game or the drivers) against a game folder and drives every interactive control through UI Automation. After each step it
-checks that Setup still runs and that the player log has no new error other than the dry run's own refusal.
+checks that the launcher still runs and that the player log has no new error other than the dry run's own refusals.
+The dry run also keeps it portable: it does not install itself, add shortcuts or start with Windows.
 
-  powershell -ExecutionPolicy Bypass -File installer\ui-smoke\Run-UiSmoke.ps1 -Exe installer\publish\ApexRadianceSetup.exe `
+  powershell -ExecutionPolicy Bypass -File installer\ui-smoke\Run-UiSmoke.ps1 -Exe installer\publish\ApexLauncher.exe `
       -Game "C:\Games\The Sims 3" [-FakeNv "NVIDIA GeForce RTX 4070|62124|0|"] [-FakeAmd "1|0"] [-Runs 3]
 
-Setup's language choice (language.txt) is put back as it was. Explorer windows the log folder opens are closed again.
+The language choice (language.txt) is put back as it was. Explorer windows the log folder opens are closed again.
 Exit code: the number of failed steps.
 #>
 param(
@@ -35,8 +36,8 @@ $TS = [System.Windows.Automation.TreeScope]
 function Cond($prop, $val) { New-Object System.Windows.Automation.PropertyCondition($prop, $val) }
 function And($a, $b) { New-Object System.Windows.Automation.AndCondition($a, $b) }
 
-$appData = Join-Path $env:LOCALAPPDATA 'Apex Radiance Setup'
-$log = Join-Path $appData 'ApexRadianceSetup.log'
+$appData = Join-Path $env:LOCALAPPDATA 'Apex Launcher'
+$log = Join-Path $appData 'ApexLauncher.log'
 $langFile = Join-Path $appData 'language.txt'
 $langSaved = if (Test-Path $langFile) { [IO.File]::ReadAllText($langFile) } else { $null }
 $script:failures = New-Object System.Collections.Generic.List[string]
@@ -75,7 +76,7 @@ function Step([string]$what, [scriptblock]$do) {
         try { $fs.Position = $before; $new = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
         $entries = $new -split "(?m)^(?=\d{4}-\d\d-\d\dT)" | Where-Object { $_.Trim() }
         foreach ($e in $entries) {
-            if ($e -match 'Dry run: Setup changes nothing') { continue }
+            if ($e -match 'Dry run: (Setup changes nothing|the game is not started)') { continue }
             $script:failures.Add("${what}: LOG $($e.Trim() -replace '\s+', ' ' | ForEach-Object { $_.Substring(0, [Math]::Min(600, $_.Length)) })")
         }
     }
@@ -93,9 +94,19 @@ function Nav([string]$idOrName) {
     try { Sel $el } catch { Invoke $el }
     Start-Sleep -Milliseconds 600
 }
+# a screen that is no longer in the sidebar: opened from Settings' rows
+function Open([string]$screen) {
+    $id = @{ 'Game' = 'SettingsGame'; 'Repair or remove' = 'SettingsManage'; 'About and licences' = 'SettingsAbout' }[$screen]
+    if (-not $id) { Nav $screen; return }
+    Nav 'Settings'
+    $b = ById $id
+    if (-not $b) { throw "settings row $id not found" }
+    Invoke $b
+    Start-Sleep -Milliseconds 600
+}
 function Buttons { (Root).FindAll($TS::Descendants, (Cond $A::IsInvokePatternAvailableProperty $true)) }
 
-# an open ContentDialog: Copy details and Open log folder once, then its primary choice (the dry run refuses it) or OK
+# an open ContentDialog: Copy details once, then its primary choice (the dry run refuses it) or OK
 function Dialogs([switch]$Links) {
     for ($i = 0; $i -lt 4; $i++) {
         $b = Buttons | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button }
@@ -103,8 +114,7 @@ function Dialogs([switch]$Links) {
         if ($Links) {
             $copy = Buttons | Where-Object { $_.Current.Name -eq 'Copy details' } | Select-Object -First 1
             if ($copy) { Invoke $copy; Start-Sleep -Milliseconds 300 }
-            $open = Buttons | Where-Object { $_.Current.Name -eq 'Open log folder' } | Select-Object -First 1
-            if ($open) { Invoke $open; Start-Sleep -Seconds 2; CloseExplorer }
+            # (Open log folder is not pressed: it would open a window on the player's screen)
         }
         $pick = $null
         foreach ($n in 'Remove', 'Restore', 'Uninstall', 'Undo these changes', 'Continue', 'OK') {
@@ -173,7 +183,6 @@ function FrameLimitPicker([string]$label) {
 
 function OneRun([int]$run) {
     $script:run = $run
-    $env:__COMPAT_LAYER = 'RunAsInvoker'
     $env:APEX_SETUP_DRY_RUN = '1'
     $env:APEX_SETUP_FAKE_NV = $FakeNv
     $env:APEX_SETUP_FAKE_AMD = $FakeAmd
@@ -184,10 +193,21 @@ function OneRun([int]$run) {
     Start-Sleep -Seconds 8 # (the release check and the drivers' first read)
     try {
         Step "run ${run}: start" { }
-        # Welcome, Game: each listed game, then the first again
-        Nav 'Welcome'
-        Step "welcome" { Shot 'welcome' }
-        Nav 'Game'
+        # the launcher's own screens: each one, Play (refused by the dry run), a mod search, Health's Check now and its tabs
+        foreach ($n in 'Home', 'Mods', 'Worlds', 'Saves', 'Health', "What's new", 'Settings') {
+            Nav $n
+            Step "screen $n" { Shot ("screen-" + ($n -replace '[^A-Za-z]', '')) }
+        }
+        Nav 'Home'
+        Step "play" { $p = ById 'PlayButton'; if ($p -and $p.Current.IsEnabled) { Invoke $p; Start-Sleep -Seconds 2; Dialogs } }
+        Nav 'Mods'
+        Step "mods search" { $box = (ById 'ModSearch').FindFirst($TS::Descendants, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::Edit))); if ($box) { $box.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Packages'); Start-Sleep -Seconds 1; $box.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('') } }
+        Step "mods gallery" { $g = ByName 'Gallery'; if ($g) { Sel $g; Start-Sleep -Seconds 2; Shot 'mods-gallery'; Sel (ByName 'List') } }
+        Nav 'Health'
+        Step "health check now" { Invoke (ById 'HealthCheckNow'); Start-Sleep -Seconds 2 }
+        foreach ($t in 'Automatic fixes', 'Restore points', 'Last session', 'Overview') { Step "health tab $t" { $x = ByName $t; if ($x) { Sel $x; Start-Sleep -Milliseconds 800 } } }
+        # Game: each listed game, then the first again
+        Open 'Game'
         $games = (ById 'GameList').FindAll($TS::Descendants, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::ListItem)))
         for ($g = $games.Count - 1; $g -ge 0; $g--) { Step "game $g" { Sel $games[$g]; $games[$g].SetFocus() } }
         # Components: every switch three times (on, off, on) and once more back, the renderer cards
@@ -230,14 +250,14 @@ function OneRun([int]$run) {
         Nav 'NavComponents'
         Step "back button" { $b = ById 'BackButton'; if ($b -and -not $b.Current.IsOffscreen) { Invoke $b } }
         # Repair or remove: every action (each refused by the dry run), the restore points
-        Nav 'Repair or remove'
+        Open 'Repair or remove'
         Step "manage" { }
         $acts = Buttons | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -match '^(Repair|Remove|Restore|Uninstall) ' }
         $labels = @($acts | ForEach-Object { $_.Current.Name })
         if ($Trace) { Write-Output "  manage actions: $($labels -join ', ')" }
         for ($k = 0; $k -lt $labels.Count; $k++) {
             Step "manage action $k ($($labels[$k]))" {
-                Nav 'Repair or remove'
+                Open 'Repair or remove'
                 $all = @(Buttons | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.Name -match '^(Repair|Remove|Restore|Uninstall) ' })
                 if ($k -lt $all.Count) { Invoke $all[$k]; Start-Sleep -Seconds 3; if ($k -le 1) { Shot "manage-confirm-$k" }; Dialogs -Links:($k -eq 0); Start-Sleep -Milliseconds 800; Shot "manage-result-$k" }
                 $copy = Buttons | Where-Object { $_.Current.Name -eq 'Copy details' } | Select-Object -First 1
@@ -245,7 +265,7 @@ function OneRun([int]$run) {
             }
         }
         # About and licences: each licence (the GitHub links open a browser: left alone)
-        Nav 'About and licences'
+        Open 'About and licences'
         $reads = @(Buttons | Where-Object { $_.Current.Name -eq 'Read' })
         for ($k = 0; $k -lt $reads.Count; $k++) { Step "licence $k" { (@(Buttons | Where-Object { $_.Current.Name -eq 'Read' }))[$k] | ForEach-Object { Invoke $_ } } }
         # every language on the Components step, then English
@@ -269,12 +289,15 @@ function OneRun([int]$run) {
             }
         }
         # narrow and wide
-        Step "narrow" { [void][SmokeWin]::SetWindowPos($script:hwnd, [IntPtr]::Zero, 80, 60, 640, 900, 0x14); Start-Sleep -Seconds 1; Nav 'Repair or remove'; Shot 'manage-narrow' }
+        Step "narrow" { [void][SmokeWin]::SetWindowPos($script:hwnd, [IntPtr]::Zero, 80, 60, 640, 900, 0x14); Start-Sleep -Seconds 1; Open 'Repair or remove'; Shot 'manage-narrow' }
         Step "wide" { [void][SmokeWin]::SetWindowPos($script:hwnd, [IntPtr]::Zero, 40, 40, 1600, 1000, 0x14); Start-Sleep -Seconds 1 }
         Step "run ${run}: end" { }
     }
     finally {
         if (-not $script:proc.HasExited) { Stop-Process -Id $script:proc.Id -Force }
+        # (no launcher left behind: the notification area icon and the single-instance lock go with it; Windows can take
+        # more than a second to end it after the kill, so wait for the exit itself)
+        if (-not $script:proc.WaitForExit(15000)) { $script:failures.Add("run ${run}: the launcher was still running after it was closed") }
         CloseExplorer
     }
 }

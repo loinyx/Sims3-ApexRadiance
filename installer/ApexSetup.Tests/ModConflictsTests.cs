@@ -16,7 +16,7 @@ static class ModConflictsTests
 
     // An assembly with one method, Fixture.Entry.Init, whose body runs ops: ("call", ns, type, member, 0), ("stsfld", ...),
     // ("listen", "", "", "", event id) as EventTracker.AddListener(id, new ProcessEventDelegate(...)). events: an EventTypeId enum.
-    static byte[] Asm(string name, Guid mvid, (string Op, string Ns, string Type, string Member, int Id)[] ops, (string Name, int Value)[]? events = null)
+    internal static byte[] Asm(string name, Guid mvid, (string Op, string Ns, string Type, string Member, int Id)[] ops, (string Name, int Value)[]? events = null)
     {
         var mb = new MetadataBuilder();
         StringHandle S(string s) => mb.GetOrAddString(s);
@@ -181,6 +181,18 @@ static class ModConflictsTests
             var ag = r2.Warnings.FirstOrDefault(w => w.Area == "aging");
             check(ag is not null && ag.Parties.All(p => p.Calls[0] == "listens kSimDied x1"), "mod conflicts: AddListener(kSimDied) counts in aging, by the game's event name");
             check(Kind(r2, "core mod").Count == 0 && r2.Info.Any(i => i.Text.StartsWith("duplicate copy: 1 identical")), "mod conflicts: the game's own build is no core mod; identical copies are INFO");
+
+            // two mods blanking the same video with their own small placeholders: the same fix twice, no conflict; a real
+            // resource in one of them still is one
+            var blanks = Path.Combine(tmp, "Blanks");
+            Directory.CreateDirectory(blanks);
+            File.WriteAllBytes(Path.Combine(blanks, "nointro.package"), Pkg((0xB1CC1AF6, 0, 0x4E5D8B03C2FF9DFC, new byte[32])));
+            File.WriteAllBytes(Path.Combine(blanks, "nointromaxis.package"), Pkg((0xB1CC1AF6, 0, 0x4E5D8B03C2FF9DFC, Enumerable.Repeat((byte)1, 72).ToArray()), (0x73E93EEB, 0, 0, "<manifest/>"u8.ToArray())));
+            var rb = ModConflicts.Scan(new() { Roots = { blanks }, Rules = rules });
+            File.WriteAllBytes(Path.Combine(blanks, "nointromaxis.package"), Pkg((0xB1CC1AF6, 0, 0x4E5D8B03C2FF9DFC, new byte[5000])));
+            var rb2 = ModConflicts.Scan(new() { Roots = { blanks }, Rules = rules });
+            check(Kind(rb, "resource key").Count == 0 && rb.Info.Any(i => i.Text.StartsWith("the same fix twice")) && Kind(rb2, "resource key").Count == 1,
+                "mod conflicts: the same small placeholders twice are no conflict, and package manifests never are; a real resource still is");
 
             // one build stored twice (a duplicate copy) is no interaction conflict
             var dup = Path.Combine(tmp, "Dup");

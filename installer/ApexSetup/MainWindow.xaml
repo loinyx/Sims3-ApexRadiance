@@ -3,12 +3,126 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:ApexSetup"
-    Title="Apex Radiance Setup">
+    Title="Apex Launcher">
     <Window.SystemBackdrop>
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
     <Grid x:Name="Root">
+        <Grid.Resources>
+            <!-- a mod's row in Mods (list view): picture or kind icon, name with its New mark, tags and a line (what needs a look,
+                 notes, or where it is), what it is with its icon, size, on/off -->
+            <DataTemplate x:Key="ModRowTemplate" x:DataType="local:ModRow">
+                <Grid ColumnSpacing="12" Padding="0,8" Background="Transparent" ToolTipService.ToolTip="{x:Bind FullName, Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="64" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="{x:Bind local:ModRow.KindColumn, Mode=OneWay}" />
+                        <ColumnDefinition Width="{x:Bind local:ModRow.SizeColumn, Mode=OneWay}" />
+                        <ColumnDefinition Width="44" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                        <CheckBox IsChecked="{x:Bind Picked, Mode=OneWay}" Click="{x:Bind OnCheck}" MinWidth="0" Width="20" Padding="0" VerticalAlignment="Center"
+                                  AutomationProperties.Name="{x:Bind Name, Mode=OneWay}" />
+                        <Border Width="32" Height="32" CornerRadius="8" Background="{x:Bind TileBrush}" Opacity="{x:Bind TextOpacity, Mode=OneWay}">
+                            <Grid>
+                                <local:LucideIcon Kind="{x:Bind KindIcon, Mode=OneWay}" Size="16" Stroke="{x:Bind GlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  Visibility="{x:Bind Placeholder, Mode=OneWay}" />
+                                <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="UniformToFill" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3" Opacity="{x:Bind TextOpacity, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="{x:Bind local:ModRow.NameMax, Mode=OneWay}" />
+                            <Border Visibility="{x:Bind NewVisible, Mode=OneWay}" Background="{ThemeResource ApexAccentSoftBrush}" CornerRadius="8" Padding="6,1,7,2" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <local:LucideIcon Kind="sparkles" Size="10" Stroke="{ThemeResource ApexAccentTextBrush}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind NewText}" FontSize="10" Foreground="{ThemeResource ApexAccentTextBrush}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <Grid Visibility="{x:Bind SubVisible, Mode=OneWay}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <ItemsControl ItemsSource="{x:Bind TagPills, Mode=OneWay}" Visibility="{x:Bind TagsVisible, Mode=OneWay}" Margin="0,0,6,0" VerticalAlignment="Center">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="local:TagDot">
+                                        <Border Background="{x:Bind Back}" CornerRadius="9" Padding="7,1,8,2">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <Ellipse Width="6" Height="6" Fill="{x:Bind Fill}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{x:Bind Name}" FontSize="11" Foreground="{x:Bind Fill}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5">
+                                <local:LucideIcon Kind="triangle-alert" Size="12" Stroke="{ThemeResource ApexWarningBrush}" VerticalAlignment="Center" Visibility="{x:Bind LookVisible, Mode=OneWay}" />
+                                <TextBlock Text="{x:Bind Sub, Mode=OneWay}" FontSize="12" Foreground="{x:Bind SubBrush, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Opacity="{x:Bind TextOpacity, Mode=OneWay}">
+                        <local:LucideIcon Kind="{x:Bind KindIcon, Mode=OneWay}" Size="14" Stroke="{ThemeResource ApexMutedBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="{x:Bind Kind, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource ApexSoftTextBrush}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="3" Text="{x:Bind Size}" FontSize="12" Foreground="{x:Bind SizeBrush}" VerticalAlignment="Center" Opacity="{x:Bind TextOpacity, Mode=OneWay}" />
+                    <Grid Grid.Column="4">
+                        <ToggleSwitch IsOn="{x:Bind IsOn, Mode=OneWay}" Visibility="{x:Bind ToggleVisible, Mode=OneWay}" Toggled="{x:Bind OnToggled}"
+                                      OnContent="" OffContent="" MinWidth="0" Width="40" AutomationProperties.Name="{x:Bind Name, Mode=OneWay}" />
+                        <local:LucideIcon Kind="lock" Size="14" Stroke="{ThemeResource ApexMutedBrush}" Visibility="{x:Bind LockVisible, Mode=OneWay}"
+                                          ToolTipService.ToolTip="{x:Bind LockTip}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Grid>
+                </Grid>
+            </DataTemplate>
+            <!-- a mod in Mods (grid view): its picture (or kind icon), name on two lines, tag dots -->
+            <DataTemplate x:Key="ThumbTemplate" x:DataType="local:ModRow">
+                <StackPanel Width="148" Spacing="6" Padding="0,0,0,8" Opacity="{x:Bind TextOpacity, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind FullName, Mode=OneWay}">
+                    <Border Width="148" Height="148" CornerRadius="10" Background="{x:Bind TileBrush}">
+                        <Grid>
+                            <local:LucideIcon Kind="{x:Bind KindIcon, Mode=OneWay}" Size="40" Stroke="{x:Bind GlyphBrush}" StrokeWidth="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Visibility="{x:Bind Placeholder, Mode=OneWay}" />
+                            <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="UniformToFill" />
+                            <Border Visibility="{x:Bind NewVisible, Mode=OneWay}" Background="#CC1E1E1E" CornerRadius="8" Padding="6,1,7,2" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                <TextBlock Text="{x:Bind NewText}" FontSize="10" Foreground="#EDEDED" />
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+                    <ItemsControl ItemsSource="{x:Bind TagPills, Mode=OneWay}">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="local:TagDot"><Ellipse Width="8" Height="8" Fill="{x:Bind Fill}" ToolTipService.ToolTip="{x:Bind Name}" /></DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </DataTemplate>
+            <!-- a save in Saves: the household photo, its name, when it was played, and what to do with it -->
+            <DataTemplate x:Key="SaveTemplate" x:DataType="local:SaveCard">
+                <Border Style="{StaticResource ApexCard}" Padding="0">
+                    <StackPanel>
+                        <Border Height="150" CornerRadius="8,8,0,0" Background="{ThemeResource ApexPillBrush}">
+                            <Grid>
+                                <FontIcon Glyph="&#xE716;" FontSize="30" Foreground="{ThemeResource ApexIconMutedBrush}" Visibility="{x:Bind Placeholder, Mode=OneWay}" />
+                                <Image Source="{x:Bind Photo, Mode=OneWay}" Stretch="Uniform" />
+                            </Grid>
+                        </Border>
+                        <StackPanel Padding="14,10,14,12" Spacing="4">
+                            <TextBlock Text="{x:Bind Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{x:Bind When}" Style="{StaticResource ApexMuted}" />
+                            <Grid Margin="0,6,0,0" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <HyperlinkButton Content="{x:Bind PlayText}" Click="{x:Bind OnPlay}" Padding="0" />
+                                <Button Grid.Column="1" Click="{x:Bind OnBackup}" Padding="8,4" AutomationProperties.Name="{x:Bind BackupText}" ToolTipService.ToolTip="{x:Bind BackupText}">
+                                    <FontIcon Glyph="&#xE896;" FontSize="13" />
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </DataTemplate>
+        </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="40" />
             <RowDefinition Height="*" />
@@ -24,7 +138,7 @@
             <Grid x:Name="DragArea" Background="Transparent">
                 <StackPanel Orientation="Horizontal" Spacing="10" Margin="14,0,0,0" VerticalAlignment="Center">
                     <Image Source="ms-appx:///Assets/apex_logo.png" Width="18" Height="18" />
-                    <TextBlock Text="Apex Radiance Setup" FontSize="12" Foreground="{StaticResource ApexSoftTextBrush}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="WindowTitle" Tag="dyn" Text="Apex Launcher" FontSize="12" Foreground="{ThemeResource ApexSoftTextBrush}" VerticalAlignment="Center" />
                 </StackPanel>
             </Grid>
             <Button x:Name="LangButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Padding="10,4" Click="OnLanguage"
@@ -36,21 +150,24 @@
             </Button>
         </Grid>
 
-        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Left" IsPaneToggleButtonVisible="False"
+        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Auto" CompactModeThresholdWidth="0" ExpandedModeThresholdWidth="1100" IsPaneToggleButtonVisible="True"
                         IsBackButtonVisible="Collapsed" IsSettingsVisible="False" OpenPaneLength="232"
-                        IsTitleBarAutoPaddingEnabled="False" SelectionChanged="OnNavSelection">
-            <NavigationView.Resources>
-                <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D90B0C0E" />
-                <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#1F2025" />
-            </NavigationView.Resources>
+                        IsTitleBarAutoPaddingEnabled="False" SelectionChanged="OnNavSelection" ItemInvoked="OnNavInvoked"
+                        Loaded="OnNavLoaded" PaneOpening="OnNavPaneOpening" PaneClosing="OnNavPaneClosing">
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="Welcome" Tag="0"><NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="Game" Tag="1"><NavigationViewItem.Icon><FontIcon Glyph="&#xE7FC;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Home" Tag="8"><NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem x:Name="NavComponents" Content="Components" Tag="2"><NavigationViewItem.Icon><FontIcon Glyph="&#xE74C;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Mods" Tag="9"><NavigationViewItem.Icon><FontIcon Glyph="&#xF0E2;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Worlds" Tag="10"><NavigationViewItem.Icon><FontIcon Glyph="&#xE909;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Saves" Tag="11"><NavigationViewItem.Icon><FontIcon Glyph="&#xE74E;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Gallery" Tag="15"><NavigationViewItem.Icon><FontIcon Glyph="&#xE91B;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem x:Name="NavHealth" Content="Health" Tag="12"><NavigationViewItem.Icon><FontIcon Glyph="&#xE95E;" /></NavigationViewItem.Icon>
+                    <NavigationViewItem.InfoBadge><InfoBadge x:Name="HealthBadge" Visibility="Collapsed" Background="{ThemeResource ApexWarningBrush}" /></NavigationViewItem.InfoBadge>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>
-                <NavigationViewItem Content="Repair or remove" Tag="5"><NavigationViewItem.Icon><FontIcon Glyph="&#xE90F;" /></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="About and licences" Tag="6"><NavigationViewItem.Icon><FontIcon Glyph="&#xE946;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="What's new" Tag="13"><NavigationViewItem.Icon><FontIcon Glyph="&#xE789;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Settings" Tag="14"><NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon></NavigationViewItem>
             </NavigationView.FooterMenuItems>
             <NavigationView.PaneFooter>
                 <TextBlock x:Name="SetupVersion" Tag="dyn" Margin="16,4,0,12" Style="{StaticResource ApexMuted}" />
@@ -70,7 +187,7 @@
                                 <Image Source="ms-appx:///Assets/apex_logo.png" Width="88" Height="88" />
                                 <StackPanel VerticalAlignment="Center" Spacing="4">
                                     <TextBlock x:Name="WelcomeTitle" Tag="dyn" FontSize="28" FontWeight="SemiBold" />
-                                    <TextBlock Text="Lighting, picture and performance for The Sims 3." Foreground="{StaticResource ApexMutedBrush}" FontSize="14" />
+                                    <TextBlock Text="Lighting, picture and performance for The Sims 3." Foreground="{ThemeResource ApexMutedBrush}" FontSize="14" />
                                 </StackPanel>
                             </StackPanel>
                             <!-- a newer Setup in the latest Apex Radiance release, downloaded and checked (CheckSetupUpdateAsync) -->
@@ -86,18 +203,18 @@
                             </Border>
                             <Border x:Name="WelcomeIntro" Style="{StaticResource ApexCard}">
                                 <StackPanel Spacing="12">
-                                    <TextBlock Text="What Setup does" Style="{StaticResource ApexStrong}" FontSize="13" />
+                                    <TextBlock Text="What the launcher does" Style="{StaticResource ApexStrong}" FontSize="13" />
                                     <StackPanel Orientation="Horizontal" Spacing="12">
-                                        <FontIcon Glyph="&#xE721;" FontSize="16" Foreground="{StaticResource ApexAccentBrush}" />
-                                        <TextBlock Text="Finds your The Sims 3 (Steam or EA app)." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" />
+                                        <FontIcon Glyph="&#xE721;" FontSize="16" Foreground="{ThemeResource ApexAccentBrush}" />
+                                        <TextBlock Text="Finds your The Sims 3 (Steam or EA app)." Style="{StaticResource ApexBody}" Foreground="{ThemeResource ApexSoftTextBrush}" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="12">
-                                        <FontIcon Glyph="&#xE896;" FontSize="16" Foreground="{StaticResource ApexAccentBrush}" />
-                                        <TextBlock Text="Installs Apex Radiance and the fixes you choose." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" MaxWidth="560" />
+                                        <FontIcon Glyph="&#xE896;" FontSize="16" Foreground="{ThemeResource ApexAccentBrush}" />
+                                        <TextBlock Text="Installs Apex Radiance and the fixes you choose." Style="{StaticResource ApexBody}" Foreground="{ThemeResource ApexSoftTextBrush}" MaxWidth="560" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="12">
-                                        <FontIcon Glyph="&#xE83D;" FontSize="16" Foreground="{StaticResource ApexAccentBrush}" />
-                                        <TextBlock Text="Keeps a copy of every file it changes, so you can undo everything." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" MaxWidth="560" />
+                                        <FontIcon Glyph="&#xE83D;" FontSize="16" Foreground="{ThemeResource ApexAccentBrush}" />
+                                        <TextBlock Text="Keeps a copy of every file it changes, so you can undo everything." Style="{StaticResource ApexBody}" Foreground="{ThemeResource ApexSoftTextBrush}" MaxWidth="560" />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
@@ -108,7 +225,7 @@
                         <StackPanel x:Name="ScreenGame" Spacing="12" Visibility="Collapsed">
                             <StackPanel x:Name="StepsGame" Tag="dyn" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8" />
                             <TextBlock Text="Choose your game" Style="{StaticResource ApexTitle}" />
-                            <TextBlock Text="Setup found these installs. Pick the one you play." Style="{StaticResource ApexMuted}" FontSize="13" />
+                            <TextBlock Text="The launcher found these installs. Pick the one you play." Style="{StaticResource ApexMuted}" FontSize="13" />
                             <ListView x:Name="GameList" SelectionMode="Single" SelectionChanged="OnGamePicked" ContainerContentChanging="OnGameCard">
                                 <!-- the card is the item: no list chrome (selection box, left bar); the chosen game shows by the card's
                                      accent outline, as the renderer cards, and keyboard focus by the system focus rectangle -->
@@ -138,20 +255,20 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <FontIcon Glyph="&#xE7FC;" FontSize="20" Foreground="{StaticResource ApexAccentBrush}" />
+                                            <FontIcon Glyph="&#xE7FC;" FontSize="20" Foreground="{ThemeResource ApexAccentBrush}" />
                                             <StackPanel Grid.Column="1" Spacing="2">
                                                 <TextBlock Text="{x:Bind Name}" Style="{StaticResource ApexStrong}" />
                                                 <TextBlock Text="{x:Bind Path}" Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                             </StackPanel>
                                             <Border Grid.Column="2" Style="{StaticResource ApexPill}">
-                                                <TextBlock Text="{x:Bind Badge}" FontSize="11" Foreground="{StaticResource ApexSoftTextBrush}" />
+                                                <TextBlock Text="{x:Bind Badge}" FontSize="11" Foreground="{ThemeResource ApexSoftTextBrush}" />
                                             </Border>
                                         </Grid>
                                         </Border>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
-                            <TextBlock x:Name="NoGames" Text="Setup found no install. Browse for the game folder." Style="{StaticResource ApexBody}" Visibility="Collapsed" />
+                            <TextBlock x:Name="NoGames" Text="The launcher found no install. Browse for the game folder." Style="{StaticResource ApexBody}" Visibility="Collapsed" />
                             <Button Click="OnBrowse">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon Glyph="&#xE838;" FontSize="14" />
@@ -163,236 +280,279 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <!-- 2 Components -->
-                        <StackPanel x:Name="ScreenComponents" Spacing="12" Visibility="Collapsed">
-                            <StackPanel x:Name="StepsComponents" Tag="dyn" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8" />
-                            <TextBlock Text="Components" Style="{StaticResource ApexTitle}" />
-                            <Border Style="{StaticResource ApexCard}">
-                                <Grid ColumnSpacing="14">
+                        <!-- 2 Components: Apex and Modernization, graphics, the other mods, smoothness -->
+                        <StackPanel x:Name="ScreenComponents" Spacing="24" Visibility="Collapsed">
+                            <StackPanel x:Name="StepsComponents" Tag="dyn" Orientation="Horizontal" Spacing="12" />
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Components" Style="{StaticResource ApexTitle}" />
+                                <TextBlock Text="What runs with your game. Nothing changes until you apply." Style="{StaticResource ApexMuted}" FontSize="13" />
+                            </StackPanel>
+                            <!-- Apex Radiance and Sims 3 Modernization: one card, two halves -->
+                            <Border CornerRadius="12" BorderBrush="{ThemeResource ApexAccentLineBrush}" BorderThickness="1" Background="{ThemeResource ApexCardBrush}">
+                                <Grid x:Name="CoreGrid" SizeChanged="OnCoreSized">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="1" />
+                                        <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Image Source="ms-appx:///Assets/apex_logo.png" Width="36" Height="36" />
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="Apex Radiance" Style="{StaticResource ApexStrong}" />
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <StackPanel Padding="24" Spacing="14">
+                                        <Grid Height="44">
+                                            <Image Source="ms-appx:///Assets/apex_logo.png" Width="44" Height="44" HorizontalAlignment="Left" />
+                                            <Border Style="{StaticResource ApexPill}" HorizontalAlignment="Right">
+                                                <TextBlock Text="Required" FontSize="11" Foreground="{ThemeResource ApexMutedBrush}" />
+                                            </Border>
+                                        </Grid>
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Apex Radiance" FontSize="17" FontWeight="SemiBold" />
+                                            <TextBlock Text="Lighting, picture and performance for The Sims 3." Style="{StaticResource ApexMuted}" />
+                                        </StackPanel>
                                         <TextBlock x:Name="ApexDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
                                     </StackPanel>
-                                    <Border Grid.Column="2" Style="{StaticResource ApexPill}">
-                                        <TextBlock Text="Required" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" />
-                                    </Border>
-                                </Grid>
-                            </Border>
-                            <Border Style="{StaticResource ApexCard}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE950;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock x:Name="RendererName" Tag="dyn" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock x:Name="RendererState" Tag="dyn" Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <Button Grid.Column="2" Content="Change" MinWidth="96" VerticalAlignment="Center" Click="OnChangeRenderer" />
-                                </Grid>
-                            </Border>
-                            <InfoBar x:Name="GraphicsInfo" IsClosable="False" />
-                            <StackPanel x:Name="SuggestList" Tag="dyn" Spacing="8" />
-                            <TextBlock Text="Optional mods" Style="{StaticResource ApexStrong}" FontSize="13" Margin="0,8,0,0" />
-                            <Border Style="{StaticResource ApexCard}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE90F;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="Sims 3 Modernization" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock x:Name="ModDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
+                                    <Border x:Name="CoreDivider" Grid.Column="1" Background="{ThemeResource ApexAccentLineBrush}" />
+                                    <StackPanel x:Name="CoreModernization" Grid.Column="2" Padding="24" Spacing="14">
+                                        <Grid Height="44">
+                                            <Border Width="44" Height="44" CornerRadius="10" Background="{ThemeResource ApexPillBrush}" HorizontalAlignment="Left">
+                                                <TextBlock Text="S3M" FontSize="13" FontWeight="Bold" Foreground="{ThemeResource ApexAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                <Border Style="{StaticResource ApexPill}" Background="{ThemeResource ApexAccentSoftBrush}">
+                                                    <TextBlock Text="Recommended" FontSize="11" Foreground="{ThemeResource ApexAccentTextBrush}" />
+                                                </Border>
+                                                <ToggleSwitch x:Name="ModToggle" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Center" Toggled="OnToggle"
+                                                              AutomationProperties.Name="Sims 3 Modernization" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Sims 3 Modernization" FontSize="17" FontWeight="SemiBold" />
+                                            <TextBlock x:Name="ModDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
+                                        </StackPanel>
                                         <TextBlock x:Name="ModPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
-                                        <StackPanel x:Name="ModChannel" Margin="0,4,0,0">
+                                        <StackPanel x:Name="ModChannel" Spacing="4">
                                             <StackPanel Orientation="Horizontal" Spacing="12">
                                                 <RadioButton x:Name="ModStable" GroupName="modchannel" Content="Stable" MinWidth="0" Checked="OnModChannel" />
                                                 <RadioButton x:Name="ModExperimental" GroupName="modchannel" Content="Experimental" MinWidth="0" Checked="OnModChannel" />
                                             </StackPanel>
-                                            <TextBlock Text="Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it." Style="{StaticResource ApexMuted}" FontSize="12" TextWrapping="Wrap" />
+                                            <TextBlock Text="Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it." Style="{StaticResource ApexMuted}" />
                                         </StackPanel>
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="ModToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
-                                                  AutomationProperties.Name="Sims 3 Modernization" />
                                 </Grid>
                             </Border>
-                            <Border Style="{StaticResource ApexCard}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE713;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="Sims3SettingsSetter" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" />
-                                        <TextBlock x:Name="S3ssPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <ToggleSwitch x:Name="S3ssToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
-                                                  AutomationProperties.Name="Sims3SettingsSetter" />
-                                </Grid>
-                            </Border>
-                            <Border x:Name="MonoCard" Style="{StaticResource ApexCard}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE943;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="MonoPatcher" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="Needed only by some script mods; turn it on if a mod asks for it." Style="{StaticResource ApexMuted}" />
-                                        <TextBlock x:Name="MonoPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <ToggleSwitch x:Name="MonoToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
-                                                  AutomationProperties.Name="MonoPatcher" />
-                                </Grid>
-                            </Border>
-                            <Border Style="{StaticResource ApexCard}">
-                                <StackPanel Spacing="10">
+                            <StackPanel Spacing="12">
+                                <Border Style="{StaticResource ApexCard}" Padding="20,16">
                                     <Grid ColumnSpacing="14">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                            <FontIcon Glyph="&#xEC4A;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                        <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}">
+                                            <FontIcon Glyph="&#xE950;" FontSize="16" Foreground="{ThemeResource ApexAccentBrush}" />
                                         </Border>
-                                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                            <TextBlock Text="Sims 3 Performance Patch" Style="{StaticResource ApexStrong}" />
-                                            <TextBlock Text="Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes." Style="{StaticResource ApexMuted}" />
-                                            <TextBlock x:Name="S3ppPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                        <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                            <TextBlock x:Name="RendererName" Tag="dyn" Style="{StaticResource ApexStrong}" />
+                                            <TextBlock x:Name="RendererState" Tag="dyn" Style="{StaticResource ApexMuted}" />
                                         </StackPanel>
-                                        <ToggleSwitch x:Name="S3ppToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
-                                                      AutomationProperties.Name="Sims 3 Performance Patch" />
+                                        <Button Grid.Column="2" Content="Change" MinWidth="96" VerticalAlignment="Center" Click="OnChangeRenderer" />
                                     </Grid>
-                                    <StackPanel x:Name="S3ppGet" Orientation="Horizontal" Spacing="8" Margin="50,0,0,0">
-                                        <Button Click="OnS3ppDownload">
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <FontIcon Glyph="&#xE896;" FontSize="14" />
-                                                <TextBlock Text="Download on Nexus Mods" />
-                                            </StackPanel>
-                                        </Button>
-                                        <Button Content="Choose the downloaded file" Click="OnS3ppPick" />
-                                    </StackPanel>
-                                    <StackPanel x:Name="S3ppWait" Orientation="Horizontal" Spacing="10" Margin="50,0,0,0" Visibility="Collapsed">
-                                        <ProgressRing Width="16" Height="16" IsActive="True" />
-                                        <TextBlock x:Name="S3ppWaitText" Tag="dyn" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
-                                    </StackPanel>
+                                </Border>
+                                <InfoBar x:Name="GraphicsInfo" IsClosable="False" />
+                                <StackPanel x:Name="SuggestList" Tag="dyn" Spacing="8" />
+                            </StackPanel>
+                            <StackPanel Spacing="12">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="Other mods" Style="{StaticResource ApexSection}" />
+                                    <TextBlock Text="Made by other modders. The launcher installs and updates them for you." Style="{StaticResource ApexMuted}" />
                                 </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource ApexCard}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE72C;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="Restart host" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="After a save made low on memory, offers to start the game again into that save when you quit." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-                                        <TextBlock x:Name="RestartPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                <Border Style="{StaticResource ApexCard}" Padding="0">
+                                    <StackPanel>
+                                        <Border Padding="20,16">
+                                            <StackPanel Spacing="12">
+                                                <Grid ColumnSpacing="14">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Top">
+                                                        <TextBlock Text="S3S" FontSize="12" FontWeight="Bold" Foreground="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                                        <TextBlock Text="Sims3SettingsSetter" Style="{StaticResource ApexStrong}" />
+                                                        <TextBlock Text="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" />
+                                                        <TextBlock x:Name="S3ssPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <ToggleSwitch x:Name="S3ssToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Center" Toggled="OnToggle"
+                                                                  AutomationProperties.Name="Sims3SettingsSetter" />
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Padding="20,16" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0">
+                                            <StackPanel Spacing="12">
+                                                <Grid ColumnSpacing="14">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Top">
+                                                        <TextBlock Text="PP" FontSize="12" FontWeight="Bold" Foreground="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                                        <TextBlock Text="Sims 3 Performance Patch" Style="{StaticResource ApexStrong}" />
+                                                        <TextBlock Text="Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes." Style="{StaticResource ApexMuted}" />
+                                                        <TextBlock x:Name="S3ppPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                                        <StackPanel x:Name="S3ppGet" Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                                            <Button Click="OnS3ppDownload">
+                                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                    <FontIcon Glyph="&#xE896;" FontSize="14" />
+                                                                    <TextBlock Text="Download on Nexus Mods" />
+                                                                </StackPanel>
+                                                            </Button>
+                                                            <Button Content="Choose the downloaded file" Click="OnS3ppPick" />
+                                                        </StackPanel>
+                                                        <StackPanel x:Name="S3ppWait" Orientation="Horizontal" Spacing="10" Margin="0,4,0,0" Visibility="Collapsed">
+                                                            <ProgressRing Width="16" Height="16" IsActive="True" />
+                                                            <TextBlock x:Name="S3ppWaitText" Tag="dyn" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                    <ToggleSwitch x:Name="S3ppToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Center" Toggled="OnToggle"
+                                                                  AutomationProperties.Name="Sims 3 Performance Patch" />
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Padding="20,16" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0">
+                                            <StackPanel Spacing="12">
+                                                <Grid ColumnSpacing="14">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Top">
+                                                        <TextBlock Text="RH" FontSize="12" FontWeight="Bold" Foreground="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                                        <TextBlock Text="Restart host" Style="{StaticResource ApexStrong}" />
+                                                        <TextBlock Text="After a save made low on memory, offers to start the game again into that save when you quit." Style="{StaticResource ApexMuted}" />
+                                                        <TextBlock x:Name="RestartPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                <Border Grid.Column="2" Style="{StaticResource ApexPill}">
+                                                    <TextBlock Text="Experimental" FontSize="11" Foreground="{ThemeResource ApexMutedBrush}" />
+                                                </Border>
+                                                    <ToggleSwitch x:Name="RestartToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Center" Toggled="OnToggle"
+                                                                  AutomationProperties.Name="Restart host" />
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border x:Name="MonoCard" Padding="20,16" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0">
+                                            <StackPanel Spacing="12">
+                                                <Grid ColumnSpacing="14">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Top">
+                                                        <TextBlock Text="MP" FontSize="12" FontWeight="Bold" Foreground="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                                        <TextBlock Text="MonoPatcher" Style="{StaticResource ApexStrong}" />
+                                                        <TextBlock Text="Needed only by some script mods; turn it on if a mod asks for it." Style="{StaticResource ApexMuted}" />
+                                                        <TextBlock x:Name="MonoPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <ToggleSwitch x:Name="MonoToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Center" Toggled="OnToggle"
+                                                                  AutomationProperties.Name="MonoPatcher" />
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
                                     </StackPanel>
-                                    <Border Grid.Column="2" Style="{StaticResource ApexPill}" VerticalAlignment="Center">
-                                        <TextBlock Text="Experimental" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" />
-                                    </Border>
-                                    <ToggleSwitch x:Name="RestartToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
-                                                  AutomationProperties.Name="Restart host" />
-                                </Grid>
-                            </Border>
-                            <Border x:Name="SmoothCard" Style="{StaticResource ApexCard}" Visibility="Collapsed">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE8B2;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="NVIDIA Smooth Motion" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-                                        <TextBlock x:Name="SmoothPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
-                                        <HyperlinkButton x:Name="SmoothHelp" Content="How to do it by hand" Padding="0" FontSize="12" Visibility="Collapsed" />
+                                </Border>
+                            </StackPanel>
+                            <StackPanel x:Name="SmoothSection" Spacing="12">
+                                <TextBlock Text="Smoothness" Style="{StaticResource ApexSection}" />
+                                <Border Style="{StaticResource ApexCard}" Padding="0">
+                                    <StackPanel x:Name="SmoothList">
+                                        <Border x:Name="SmoothCard" Padding="20,16" Visibility="Collapsed">
+                                            <StackPanel Spacing="12">
+                                                <Grid ColumnSpacing="14">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Top">
+                                                        <TextBlock Text="SM" FontSize="12" FontWeight="Bold" Foreground="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                                        <TextBlock Text="NVIDIA Smooth Motion" Style="{StaticResource ApexStrong}" />
+                                                        <TextBlock Text="Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps." Style="{StaticResource ApexMuted}" />
+                                                        <TextBlock Text="While it is on, recording with the NVIDIA app freezes the game. To record, use OBS or Apex&apos;s recorder." Style="{StaticResource ApexMuted}" FontSize="12" />
+                                                        <TextBlock x:Name="SmoothPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                                        <HyperlinkButton x:Name="SmoothHelp" Content="How to do it by hand" Padding="0" FontSize="12" Visibility="Collapsed" />
+                                                    </StackPanel>
+                                                    <ToggleSwitch x:Name="SmoothToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Center" Toggled="OnSmoothToggle"
+                                                                  AutomationProperties.Name="NVIDIA Smooth Motion" />
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border x:Name="AfmfCard" Padding="20,16" Visibility="Collapsed">
+                                            <StackPanel Spacing="12">
+                                                <Grid ColumnSpacing="14">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Top">
+                                                        <TextBlock Text="AF" FontSize="12" FontWeight="Bold" Foreground="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                                        <TextBlock Text="AMD Fluid Motion Frames" Style="{StaticResource ApexStrong}" />
+                                                        <TextBlock Text="The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC." Style="{StaticResource ApexMuted}" />
+                                                        <TextBlock x:Name="AfmfPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <ToggleSwitch x:Name="AfmfToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Center" Toggled="OnAfmfToggle"
+                                                                  AutomationProperties.Name="AMD Fluid Motion Frames" />
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border x:Name="FpsCard" Padding="20,16" Visibility="Collapsed">
+                                            <StackPanel Spacing="12">
+                                                <Grid ColumnSpacing="14">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Top">
+                                                        <TextBlock Text="FPS" FontSize="12" FontWeight="Bold" Foreground="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                                        <TextBlock Text="Apex frame limit" Style="{StaticResource ApexStrong}" />
+                                                        <TextBlock x:Name="FpsDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
+                                                        <TextBlock x:Name="FpsPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                        <ComboBox x:Name="FpsCombo" Tag="dyn" MinWidth="200" SelectionChanged="OnFpsPicked" AutomationProperties.Name="Apex frame limit" />
+                                                        <NumberBox x:Name="FpsCustom" Minimum="20" Maximum="1000" SpinButtonPlacementMode="Compact" Visibility="Collapsed"
+                                                                   ValueChanged="OnFpsCustom" AutomationProperties.Name="Custom" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="SmoothToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnSmoothToggle"
-                                                  AutomationProperties.Name="NVIDIA Smooth Motion" />
-                                </Grid>
-                            </Border>
-                            <Border x:Name="AfmfCard" Style="{StaticResource ApexCard}" Visibility="Collapsed">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE8B2;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="AMD Fluid Motion Frames" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-                                        <TextBlock x:Name="AfmfPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <ToggleSwitch x:Name="AfmfToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnAfmfToggle"
-                                                  AutomationProperties.Name="AMD Fluid Motion Frames" />
-                                </Grid>
-                            </Border>
-                            <Border x:Name="FpsCard" Style="{StaticResource ApexCard}" Visibility="Collapsed">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xEC49;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="Apex frame limit" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock x:Name="FpsDesc" Tag="dyn" Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-                                        <TextBlock x:Name="FpsPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                        <ComboBox x:Name="FpsCombo" Tag="dyn" MinWidth="200" SelectionChanged="OnFpsPicked" AutomationProperties.Name="Apex frame limit" />
-                                        <NumberBox x:Name="FpsCustom" Minimum="20" Maximum="1000" SpinButtonPlacementMode="Compact" Visibility="Collapsed"
-                                                   ValueChanged="OnFpsCustom" AutomationProperties.Name="Custom" />
-                                    </StackPanel>
-                                </Grid>
-                            </Border>
+                                </Border>
+                            </StackPanel>
                         </StackPanel>
+
 
                         <!-- 3 Install -->
                         <StackPanel x:Name="ScreenInstall" Spacing="18" Visibility="Collapsed">
@@ -406,11 +566,11 @@
 
                         <!-- 4 Done -->
                         <StackPanel x:Name="ScreenDone" Spacing="14" Visibility="Collapsed" HorizontalAlignment="Center" Padding="0,24,0,0">
-                            <Border Width="72" Height="72" CornerRadius="36" Background="#1A2A22" HorizontalAlignment="Center">
-                                <FontIcon Glyph="&#xE73E;" FontSize="32" Foreground="{StaticResource ApexSuccessBrush}" />
+                            <Border Width="72" Height="72" CornerRadius="36" Background="{ThemeResource ApexSuccessSoftBrush}" HorizontalAlignment="Center">
+                                <FontIcon Glyph="&#xE73E;" FontSize="32" Foreground="{ThemeResource ApexSuccessBrush}" />
                             </Border>
                             <TextBlock x:Name="DoneTitle" Tag="dyn" FontSize="26" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                            <TextBlock x:Name="DoneText" Tag="dyn" Style="{StaticResource ApexBody}" FontSize="14" Foreground="{StaticResource ApexSoftTextBrush}"
+                            <TextBlock x:Name="DoneText" Tag="dyn" Style="{StaticResource ApexBody}" FontSize="14" Foreground="{ThemeResource ApexSoftTextBrush}"
                                        TextAlignment="Center" MaxWidth="480" HorizontalAlignment="Center" />
                             <Border x:Name="DoneSummaryCard" Style="{StaticResource ApexCard}" MinWidth="520" Margin="0,8,0,0">
                                 <StackPanel x:Name="DoneSummary" Tag="dyn" Spacing="6" />
@@ -427,7 +587,7 @@
                             </Border>
                             <StackPanel Spacing="2" Margin="0,8,0,0">
                                 <TextBlock Text="Restore points" Style="{StaticResource ApexStrong}" FontSize="13" />
-                                <TextBlock Text="Setup keeps a copy of every file it changes. Restoring a point undoes that change and every later one." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                <TextBlock Text="The launcher keeps a copy of every file it changes. Restoring a point undoes that change and every later one." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
                             </StackPanel>
                             <Border Style="{StaticResource ApexCard}" Padding="0">
                                 <StackPanel x:Name="RestoreList" Tag="dyn" />
@@ -441,13 +601,35 @@
                             <TextBlock x:Name="GpuLine" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" />
                             <StackPanel x:Name="RendererCards" Tag="dyn" Spacing="8" />
                             <TextBlock x:Name="BridgeDetail" Tag="dyn" Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="RendererResetNote" Text="Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" Foreground="{StaticResource ApexWarningBrush}" />
+                            <TextBlock x:Name="RendererResetNote" Text="Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" Foreground="{ThemeResource ApexWarningBrush}" />
                         </StackPanel>
+
+                        <!-- 8..14 the launcher's own screens, filled in code (MainWindow.Launcher.cs) -->
+                        <StackPanel x:Name="ScreenHome" Spacing="16" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenWorlds" Spacing="16" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenSaves" Spacing="16" Visibility="Collapsed">
+                            <Grid>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="Saves" Style="{StaticResource ApexTitle}" />
+                                    <TextBlock Text="Each card shows the household photo stored in the save." Style="{StaticResource ApexMuted}" />
+                                </StackPanel>
+                                <Button x:Name="SavesBackupAll" Content="Back up all" HorizontalAlignment="Right" VerticalAlignment="Center" Click="OnBackupAll" />
+                            </Grid>
+                            <InfoBar x:Name="SavesInfo" IsClosable="True" />
+                            <ItemsControl x:Name="SaveGrid" ItemTemplate="{StaticResource SaveTemplate}">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><local:CardGrid MinItemWidth="220" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                            <TextBlock x:Name="SavesEmpty" Tag="dyn" Style="{StaticResource ApexMuted}" Visibility="Collapsed" />
+                        </StackPanel>
+                        <StackPanel x:Name="ScreenHealth" Spacing="24" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenNews" Spacing="16" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenSettings" Spacing="10" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenGallery" Spacing="16" Visibility="Collapsed" />
 
                         <!-- 6 About -->
                         <StackPanel x:Name="ScreenAbout" Spacing="14" Visibility="Collapsed">
                             <TextBlock Text="About and licences" Style="{StaticResource ApexTitle}" />
-                            <TextBlock Text="Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases." Style="{StaticResource ApexMuted}" FontSize="13" />
+                            <TextBlock Text="Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: the launcher downloads them from their own GitHub releases." Style="{StaticResource ApexMuted}" FontSize="13" />
                             <Border Style="{StaticResource ApexCard}" Padding="0">
                                 <StackPanel x:Name="LicenceList" Tag="dyn" />
                             </Border>
@@ -457,8 +639,225 @@
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
+                <!-- 9 Mods: its own full-height page (the side pane, the list, the chosen mods), each part scrolling on its own -->
+                <Grid x:Name="ScreenMods" Visibility="Collapsed" SizeChanged="OnModsSized">
+                    <Grid.KeyboardAccelerators>
+                        <KeyboardAccelerator Modifiers="Control" Key="F" Invoked="OnModsFind" />
+                    </Grid.KeyboardAccelerators>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="ModColFolders" Width="248" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="ModColDetails" Width="340" />
+                    </Grid.ColumnDefinitions>
+                    <!-- side pane: library, folders, tags, game -->
+                    <Grid x:Name="ModSide" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,0,1,0" Padding="0,16,0,10">
+                        <ListView x:Name="ModFolders" SelectionMode="Single" SelectionChanged="OnModFolderPicked" AutomationProperties.Name="Folders" Padding="10,0,10,0"
+                                  CanDragItems="True" DragItemsStarting="OnFolderDragStart" DragItemsCompleted="OnFolderDragDone">
+                            <!-- a place is a row that lights up and can be picked; a group heading (LIBRARY, FOLDERS...) is plain -->
+                            <ListView.ItemContainerStyleSelector>
+                                <local:SideStyleSelector>
+                                    <local:SideStyleSelector.Item>
+                                        <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                            <Setter Property="MinHeight" Value="32" />
+                                            <Setter Property="Padding" Value="10,0,10,0" />
+                                        </Style>
+                                    </local:SideStyleSelector.Item>
+                                    <local:SideStyleSelector.Header>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="IsTabStop" Value="False" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListViewItem">
+                                                        <ContentPresenter HorizontalContentAlignment="Stretch" />
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </local:SideStyleSelector.Header>
+                                </local:SideStyleSelector>
+                            </ListView.ItemContainerStyleSelector>
+                        </ListView>
+                    </Grid>
+                    <!-- the list -->
+                    <Grid Grid.Column="1" Padding="24,20,24,0" RowSpacing="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel Spacing="2">
+                                <Button x:Name="ModsPlaces" Visibility="Collapsed" Padding="10,4" Margin="0,0,0,6" Click="OnModsPlaces" AutomationProperties.Name="Folders">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <local:LucideIcon Kind="folder" Size="15" />
+                                        <TextBlock x:Name="ModsPlacesText" Tag="dyn" />
+                                        <local:LucideIcon Kind="chevron-down" Size="14" />
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock x:Name="ModsCrumb" Tag="dyn" Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="ModsTitle" Tag="dyn" Style="{StaticResource ApexTitle}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="ModsSummary" Tag="dyn" Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+                                <Button x:Name="ModsHunt" Click="OnModsHunt" AutomationProperties.Name="Find a problem mod" ToolTipService.ToolTip="Find a problem mod">
+                                    <StackPanel Orientation="Horizontal" Spacing="8"><local:LucideIcon Kind="bug" Size="15" /><TextBlock x:Name="ModsHuntText" Text="Find a problem mod" /></StackPanel>
+                                </Button>
+                                <Button x:Name="ModsOpenFolder" Click="OnModsOpenFolder" AutomationProperties.Name="Open folder" ToolTipService.ToolTip="Open folder">
+                                    <local:LucideIcon Kind="folder-search" Size="16" />
+                                </Button>
+                                <Button x:Name="ModsAdd" Click="OnModsAdd" Style="{StaticResource AccentButtonStyle}" AutomationProperties.Name="Add mods">
+                                    <StackPanel Orientation="Horizontal" Spacing="8"><local:LucideIcon Kind="plus" Size="15" Stroke="{ThemeResource TextOnAccentFillColorPrimaryBrush}" /><TextBlock Text="Add mods" /></StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                        <!-- search with the filters in use as removable chips, then Filters, Sort and the view -->
+                        <Grid Grid.Row="1" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="ModSearchBox" Height="36" CornerRadius="8" BorderThickness="1" BorderBrush="{ThemeResource ApexInputBorderBrush}" Background="{ThemeResource ApexCardBrush}" Padding="10,0,6,0">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <local:LucideIcon Kind="search" Size="16" Stroke="{ThemeResource ApexMutedBrush}" VerticalAlignment="Center" />
+                                    <ScrollViewer x:Name="ModChipsScroll" Grid.Column="1" Visibility="Collapsed" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" MaxWidth="360">
+                                        <StackPanel x:Name="ModChips" Tag="dyn" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" />
+                                    </ScrollViewer>
+                                    <!-- one box: the field draws no background or underline of its own, the border around it shows focus -->
+                                    <TextBox x:Name="ModSearch" Grid.Column="2" PlaceholderText="Search mods" TextChanged="OnModSearch" BorderThickness="0" Background="Transparent"
+                                             VerticalAlignment="Center" MinWidth="80" AutomationProperties.Name="Search mods" KeyDown="OnModSearchKey"
+                                             GotFocus="OnModSearchFocus" LostFocus="OnModSearchFocus">
+                                        <TextBox.Resources>
+                                            <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                            <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                            <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                                        </TextBox.Resources>
+                                    </TextBox>
+                                </Grid>
+                            </Border>
+                            <Button x:Name="ModFilterButton" Grid.Column="1" Height="36" AutomationProperties.Name="Filters">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <local:LucideIcon Kind="sliders-horizontal" Size="15" />
+                                    <TextBlock x:Name="ModFilterText" Text="Filters" />
+                                    <Border x:Name="ModFilterCount" Tag="dyn" MinWidth="18" Height="18" CornerRadius="9" Background="{ThemeResource ApexAccentBrush}" Visibility="Collapsed">
+                                        <TextBlock x:Name="ModFilterCountText" Tag="dyn" FontSize="11" FontWeight="Bold" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                </StackPanel>
+                                <Button.Flyout>
+                                    <Flyout x:Name="ModFilterFlyout" Placement="BottomEdgeAlignedRight" Opening="OnModFiltersOpening">
+                                        <Flyout.FlyoutPresenterStyle>
+                                            <Style TargetType="FlyoutPresenter">
+                                                <Setter Property="Padding" Value="0" />
+                                                <Setter Property="MaxWidth" Value="560" />
+                                                <Setter Property="CornerRadius" Value="12" />
+                                            </Style>
+                                        </Flyout.FlyoutPresenterStyle>
+                                        <Grid x:Name="ModFilterPanel" Tag="dyn" Width="520" />
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+                            <Button x:Name="ModSortButton" Grid.Column="2" Height="36" AutomationProperties.Name="Sort by">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <local:LucideIcon Kind="arrow-up-down" Size="15" />
+                                    <TextBlock x:Name="ModSortText" Tag="dyn" />
+                                </StackPanel>
+                            </Button>
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2">
+                                <ToggleButton x:Name="ModsViewList" Width="36" Height="36" Padding="0" IsChecked="True" Click="OnModsView" AutomationProperties.Name="List" ToolTipService.ToolTip="List">
+                                    <local:LucideIcon x:Name="ModsViewListIcon" Kind="list" Size="16" />
+                                </ToggleButton>
+                                <ToggleButton x:Name="ModsViewGallery" Width="36" Height="36" Padding="0" Click="OnModsView" AutomationProperties.Name="Grid" ToolTipService.ToolTip="Grid">
+                                    <local:LucideIcon x:Name="ModsViewGalleryIcon" Kind="layout-grid" Size="16" />
+                                </ToggleButton>
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Grid.Row="2" Spacing="10">
+                            <Border x:Name="ModHuntBar" Visibility="Collapsed" Padding="16,14" CornerRadius="10" Background="{ThemeResource ApexAccentSoftBrush}" BorderBrush="{ThemeResource ApexAccentLineBrush}" BorderThickness="1">
+                                <StackPanel x:Name="ModHuntContent" Tag="dyn" Spacing="10" />
+                            </Border>
+                            <InfoBar x:Name="ModsInfo" IsClosable="True" />
+                        </StackPanel>
+                        <Grid x:Name="ModListHead" Grid.Row="3" ColumnSpacing="12" Padding="12,0,12,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="64" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition x:Name="ModHeadKind" Width="140" />
+                                <ColumnDefinition x:Name="ModHeadSize" Width="72" />
+                                <ColumnDefinition Width="44" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="1" Text="NAME" FontSize="11" CharacterSpacing="60" Foreground="{ThemeResource ApexMutedBrush}" />
+                            <TextBlock x:Name="ModHeadKindText" Grid.Column="2" Text="TYPE" FontSize="11" CharacterSpacing="60" Foreground="{ThemeResource ApexMutedBrush}" />
+                            <TextBlock x:Name="ModHeadSizeText" Grid.Column="3" Text="SIZE" FontSize="11" CharacterSpacing="60" Foreground="{ThemeResource ApexMutedBrush}" />
+                            <TextBlock Grid.Column="4" Text="ON" FontSize="11" CharacterSpacing="60" Foreground="{ThemeResource ApexMutedBrush}" />
+                        </Grid>
+                        <ListView x:Name="ModList" Grid.Row="4" ItemTemplate="{StaticResource ModRowTemplate}" SelectionMode="Extended"
+                                  SelectionChanged="OnModPicked" CanDragItems="True" DragItemsStarting="OnModDragStart" DragItemsCompleted="OnModDragDone" Margin="0,0,-24,0" Padding="0,0,24,72"
+                                  RightTapped="OnModRightTapped" KeyDown="OnModListKey" AllowDrop="True" DragOver="OnModFilesOver" Drop="OnModFilesDrop"
+                                  AutomationProperties.Name="Mods">
+                            <ListView.ItemContainerTransitions>
+                                <TransitionCollection>
+                                    <AddDeleteThemeTransition />
+                                    <RepositionThemeTransition />
+                                </TransitionCollection>
+                            </ListView.ItemContainerTransitions>
+                        </ListView>
+                        <GridView x:Name="ModGrid" Grid.Row="3" Grid.RowSpan="2" ItemTemplate="{StaticResource ThumbTemplate}" SelectionMode="Extended"
+                                  SelectionChanged="OnModPicked" CanDragItems="True" DragItemsStarting="OnModDragStart" DragItemsCompleted="OnModDragDone" Margin="0,0,-24,0" Padding="0,0,24,72"
+                                  RightTapped="OnModRightTapped" KeyDown="OnModListKey" AllowDrop="True" DragOver="OnModFilesOver" Drop="OnModFilesDrop"
+                                  Visibility="Collapsed" AutomationProperties.Name="Mods">
+                            <GridView.ItemContainerTransitions>
+                                <TransitionCollection>
+                                    <AddDeleteThemeTransition />
+                                    <RepositionThemeTransition />
+                                </TransitionCollection>
+                            </GridView.ItemContainerTransitions>
+                        </GridView>
+                        <StackPanel x:Name="ModsEmpty" Grid.Row="4" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,56,0,0" Visibility="Collapsed">
+                            <local:LucideIcon x:Name="ModsEmptyIcon" Kind="folder-open" Size="32" HorizontalAlignment="Center" Stroke="{ThemeResource ApexMutedBrush}" />
+                            <TextBlock x:Name="ModsEmptyText" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" TextAlignment="Center" MaxWidth="320" />
+                        </StackPanel>
+                        <!-- what is chosen: a floating bar for two or more -->
+                        <!-- (the actions scroll when the list column is narrower than the bar: it never spills under the details pane) -->
+                        <Border x:Name="ModSelectionBar" Grid.Row="4" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="12,0,12,14" Padding="14,6,6,6"
+                                CornerRadius="12" Background="{ThemeResource ApexRaisedBrush}" BorderBrush="{ThemeResource ApexInputBorderBrush}" BorderThickness="1" Visibility="Collapsed" Translation="0,0,24">
+                            <Border.Shadow><ThemeShadow /></Border.Shadow>
+                            <Border.TranslationTransition><Vector3Transition Duration="0:0:0.25" /></Border.TranslationTransition>
+                            <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                                <StackPanel x:Name="ModSelectionActions" Tag="dyn" Orientation="Horizontal" Spacing="6" />
+                            </ScrollViewer>
+                        </Border>
+                        <Grid Grid.Row="5" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0" Padding="0,8,0,10" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ModsFooter" Tag="dyn" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+                                <HyperlinkButton x:Name="ModsSelectAll" Content="Select all" Padding="0" FontSize="12" Click="OnModsSelectAll" />
+                                <HyperlinkButton x:Name="ModsSelectNone" Content="Clear" Padding="0" FontSize="12" Click="OnModsSelectNone" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                    <!-- the chosen mod (or several) -->
+                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="340" HorizontalAlignment="Right" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1,0,0,0" Background="#101010">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <StackPanel x:Name="ModDetailsHead" />
+                            <ScrollViewer Grid.Row="1">
+                                <StackPanel x:Name="ModDetails" Tag="dyn" Padding="20,18,20,24" Spacing="18" />
+                            </ScrollViewer>
+                            <Grid x:Name="ModDetailsFoot" Grid.Row="2" Padding="20,14,20,18" ColumnSpacing="8" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0" Visibility="Collapsed" />
+                        </Grid>
+                    </Border>
+                </Grid>
 
-                <Grid x:Name="Footer" Grid.Row="1" Height="64" Padding="24,0" ColumnSpacing="8" BorderBrush="#1F2025" BorderThickness="0,1,0,0" Background="#40000000">
+                <Grid x:Name="Footer" Grid.Row="1" Height="64" Padding="24,0" ColumnSpacing="8" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource ApexFooterBrush}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -475,14 +874,14 @@
         </NavigationView>
 
         <!-- a first install opens here, over the window (no sidebar until Apex Radiance is installed) -->
-        <Grid x:Name="FirstRun" Grid.Row="1" Visibility="Collapsed" Background="#0B0C0E">
+        <Grid x:Name="FirstRun" Grid.Row="1" Visibility="Collapsed" Background="{ThemeResource ApexPageBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="400" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <!-- an aurora over the whole panel: three soft bands of light drifting and fading at their own pace (FirstRunGlow,
                  started in code); the panel clips them -->
-            <Grid x:Name="GlowPanel" Background="#07080B" BorderBrush="#1A1B20" BorderThickness="0,0,1,0" SizeChanged="OnGlowPanelSize">
+            <Grid x:Name="GlowPanel" Background="#080808" BorderBrush="#1B1B1B" BorderThickness="0,0,1,0" SizeChanged="OnGlowPanelSize">
                 <Grid.Resources>
                     <Storyboard x:Name="FirstRunGlow">
                         <DoubleAnimation Storyboard.TargetName="AuroraGreenMove" Storyboard.TargetProperty="TranslateX" From="-60" To="60" Duration="0:0:11" AutoReverse="True" RepeatBehavior="Forever">
@@ -563,11 +962,11 @@
                     <StackPanel Spacing="10">
                         <TextBlock Text="WELCOME" FontSize="13" FontWeight="SemiBold" CharacterSpacing="40" Foreground="#A9A3EE" />
                         <TextBlock x:Name="FirstTitle" Tag="dyn" FontSize="40" FontWeight="Bold" />
-                        <TextBlock Text="Lighting, picture and performance for The Sims 3." FontSize="16" Foreground="{StaticResource ApexSoftTextBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="Lighting, picture and performance for The Sims 3." FontSize="16" Foreground="{ThemeResource ApexSoftTextBrush}" TextWrapping="Wrap" />
                     </StackPanel>
                     <StackPanel Spacing="2">
                         <StackPanel Orientation="Horizontal" Spacing="10">
-                            <FontIcon x:Name="FirstGameIcon" Glyph="&#xE73E;" FontSize="16" Foreground="{StaticResource ApexSuccessBrush}" VerticalAlignment="Center" />
+                            <FontIcon x:Name="FirstGameIcon" Glyph="&#xE73E;" FontSize="16" Foreground="{ThemeResource ApexSuccessBrush}" VerticalAlignment="Center" />
                             <TextBlock x:Name="FirstGame" Tag="dyn" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="330" />
                             <HyperlinkButton x:Name="FirstNotThis" Content="Not this one?" Padding="4,2" VerticalAlignment="Center" Click="OnNotThisGame" />
                         </StackPanel>
@@ -580,7 +979,7 @@
                         <TextBlock Text="Game, components and installation" Style="{StaticResource ApexMuted}" />
                     </StackPanel>
                 </StackPanel>
-                <TextBlock Grid.Row="1" Text="Close the game before you start. Everything comes from each author's official GitHub, and Setup keeps a copy of every file it changes."
+                <TextBlock Grid.Row="1" Text="Close the game before you start. Everything comes from each author's official GitHub, and the launcher keeps a copy of every file it changes."
                            Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
             </Grid>
         </Grid>

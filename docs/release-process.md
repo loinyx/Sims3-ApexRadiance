@@ -71,30 +71,32 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
    asset is this build: developer mode ships off (`developer_mode = false`, enabling it asks for confirmation), and while it
    is off the build runs and logs as the players' build. (2.13.1 testing: a game session with the `APEX_NO_DEV_TOOLS` build
    behaved differently from the standard one with developer mode off; the cause was not found.)
-   Every change to Setup raises `<Version>` in `installer/ApexSetup/ApexSetup.csproj` in the same change (patch for fixes
+   Every change to Apex Launcher (formerly Apex Radiance Setup) raises `<Version>` in `installer/ApexSetup/ApexSetup.csproj` in the same change (patch for fixes
    and texts, minor for features): Setup 1.1.0 and later offer a newer version of themselves from the latest release by
    that version, so a change without it never reaches players who already have Setup.
-   Build Apex Radiance Setup from the same commit: `dotnet run --project installer/ApexSetup.Tests`, then
+   Build Apex Launcher from the same commit: `dotnet run --project installer/ApexSetup.Tests`, then
    `dotnet publish installer/ApexSetup -c Release -o installer/publish` (one self-contained exe,
-   [installer.md](features/installer.md)); `installer/publish/ApexRadianceSetup.exe` is attached to the release.
+   [installer.md](features/installer.md)); `installer/publish/ApexLauncher.exe` is attached to the release twice, as
+   `ApexLauncher.exe` and as `ApexRadianceSetup.exe` (the same bytes): Setups before the launcher update themselves only
+   to an asset of that name whose product name is "Apex Radiance Setup", which the launcher keeps in 2.0.x.
 2. Test the build in game and record the results in the validation pages.
 3. The release PR is titled `release: X.Y.Z`; merging and publishing are maintainer actions.
-4. Publish to `loinyx/Sims3-ApexRadiance` as `Apex Radiance X.Y.Z` with two files, each labelled: `ApexRadianceSetup.exe`
-   (the installer, recommended) and `Apex-Radiance-X.Y.Z-Manual-install.zip`, one folder `Apex Radiance X.Y.Z - Manual install`
+4. Publish to `loinyx/Sims3-ApexRadiance` as `Apex Radiance X.Y.Z` with these files, each labelled: `ApexLauncher.exe`
+   (Apex Launcher, recommended), the same exe as `ApexRadianceSetup.exe` (for Setups before the launcher) and `Apex-Radiance-X.Y.Z-Manual-install.zip`, one folder `Apex Radiance X.Y.Z - Manual install`
    with `How to install.txt` (`.github/scripts/manual-install.txt`, version filled, CRLF), `ApexRadiance.asi`, `ts3wrap.exe`
    and `RTX Remix bridge\` (the bridge package of `native/remix-bridge/package.ps1`, unzipped, `.trex` included). Setup 1.1.2
    and later install the ASI, `ts3wrap.exe` and the bridge from that zip; Setups before it need loose files and fail on these
    releases, so the notes ask for the new Setup. The release goes out with
    player-facing notes checked with `python tools/public_text_check.py --text-file`. The Nexus workflow derives its
-   changelog and file description from that body, and zips the main Nexus file: `READ ME.txt` (`.github/scripts/nexus-readme.txt`) and `ApexRadianceSetup.exe` at the top
+   changelog and file description from that body, and zips the main Nexus file: `READ ME.txt` (`.github/scripts/nexus-readme.txt`) and `ApexLauncher.exe` at the top
    and a `Manual install` folder with `ApexRadiance.asi` and `How to install.txt` (`.github/scripts/manual-install.txt`;
    a release without the exe zips the ASI alone). When the release also carries `Apex-Radiance-RTX-Remix-bridge.zip`
    (`native/remix-bridge/package.ps1`) and the repository variable `NEXUS_BRIDGE_FILE_ID` is set, the workflow uploads
    the zip as a new version of the bridge's own Nexus file; without the variable the zip stays on GitHub only. The notes
    open with a bold headline (the release's theme in a few words) and one short paragraph on what the player will
    notice, then one `## ` section per menu area the release changes (for example `## Banding Fix`, `## Night Lights`,
-   `## Performance`), then `## Fixes`, and end with `## Install`: Apex Radiance Setup first (download
-   `ApexRadianceSetup.exe` from the release, run it, pick the game, click Install), then the manual steps of the
+   `## Performance`), then `## Fixes`, and end with `## Install`: Apex Launcher first (download
+   `ApexLauncher.exe` from the release, run it, pick the game, click Install), then the manual steps of the
    [README](../README.md#installation) (the ASI loader, `ApexRadiance.asi` into `Game\Bin`, the optional renderer,
    updating by replacing the file). No upgrade section; the release title carries the version:
 
