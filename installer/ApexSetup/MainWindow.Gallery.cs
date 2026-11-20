@@ -111,7 +111,9 @@ public sealed partial class MainWindow
         room.SizeChanged += (_, e) =>
         {
             _boardRoom = e.NewSize.Height;
-            if (Math.Abs(BoardFits() - BoardHeight) > 8) RefreshBoard();
+            if (Math.Abs(BoardFits() - BoardHeight) <= 8) return;
+            if (_boardFrom == 0) _boardFrom = BoardHeight;
+            RefreshBoard();
         };
         var book = new Grid { Background = BoardBrush(look) };
         _boardFrame = book;
@@ -632,7 +634,7 @@ public sealed partial class MainWindow
         },
     };
 
-    double _boardRoom;
+    double _boardRoom, _boardFrom;
     Grid? _galPage;
     double BoardFits() => Math.Clamp((_boardRoom > 0 ? _boardRoom : Scroller.ActualHeight - 120) - 62, 170, 1400);
 
@@ -787,11 +789,20 @@ public sealed partial class MainWindow
         var opened = false;
         var keep = _boardKeep;
         _boardKeep = null;
+        var zoom = _boardCalm && _boardFrom > 0 ? _boardFrom / BoardHeight : 1;
+        _boardFrom = 0;
         scroll.LayoutUpdated += (_, _) =>
         {
             if (opened || scroll.ScrollableWidth <= 0) return;
             opened = true;
             scroll.ChangeView((keep ?? 0) * scroll.ScrollableWidth, null, null, true);
+            if (Math.Abs(zoom - 1) < 0.01) return;
+            var z = new CompositeTransform { ScaleX = zoom, ScaleY = zoom, CenterX = (keep ?? 0) * scroll.ScrollableWidth + scroll.ViewportWidth / 2, CenterY = mid };
+            canvas.RenderTransform = z;
+            var grow = new Storyboard();
+            Tween(grow, z, "ScaleX", 1, 520, new CubicEase { EasingMode = EasingMode.EaseOut });
+            Tween(grow, z, "ScaleY", 1, 520, new CubicEase { EasingMode = EasingMode.EaseOut });
+            grow.Begin();
         };
         var panning = false;
         double grabX = 0, grabOffset = 0;
@@ -808,15 +819,6 @@ public sealed partial class MainWindow
         canvas.PointerCaptureLost += (_, _) => panning = false;
         var inside = new Grid();
         inside.Children.Add(scroll);
-        Border Edge(bool left) => new()
-        {
-            Width = 90, HorizontalAlignment = left ? HorizontalAlignment.Left : HorizontalAlignment.Right, IsHitTestVisible = false, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(250) },
-            Background = new LinearGradientBrush { StartPoint = new(left ? 0 : 1, 0.5), EndPoint = new(left ? 1 : 0, 0.5), GradientStops = { new GradientStop { Color = Windows.UI.Color.FromArgb(0xD0, BoardColor(look).R, BoardColor(look).G, BoardColor(look).B), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 1 } } },
-        };
-        var leftEdge = Edge(true);
-        var rightEdge = Edge(false);
-        inside.Children.Add(leftEdge);
-        inside.Children.Add(rightEdge);
         var frame = new Border { Height = BoardHeight, Child = inside };
 
         // the strip of dates under the board: each day where it lies, the part in view lit; a click goes there
@@ -855,8 +857,6 @@ public sealed partial class MainWindow
             if (tw <= 0 || scroll.ExtentWidth <= 0) return;
             window.Width = Math.Max(24, scroll.ViewportWidth / scroll.ExtentWidth * tw);
             Canvas.SetLeft(window, scroll.HorizontalOffset / scroll.ExtentWidth * tw);
-            leftEdge.Opacity = scroll.HorizontalOffset > 4 ? 1 : 0;
-            rightEdge.Opacity = scroll.HorizontalOffset < scroll.ScrollableWidth - 4 ? 1 : 0;
         }
         strip.SizeChanged += (_, _) => Lay();
         scroll.ViewChanged += (_, _) => Place();
