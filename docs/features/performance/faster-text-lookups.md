@@ -10,7 +10,7 @@ text after one probe.
 
 | | |
 |---|---|
-| Availability | In development (marked Experimental in the menu) |
+| Availability | Released in 4.0.13, off by default (marked Experimental in the menu) |
 | Default | Off |
 | Menu | System > Performance > Files and objects > *Faster text lookups* |
 | Configuration | `[patches.StringTableIndex]` in `ApexRadiance.toml` |

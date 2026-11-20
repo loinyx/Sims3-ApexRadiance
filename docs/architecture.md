@@ -708,6 +708,19 @@ exception on (to the game's filter, else Windows Error Reporting). Both files ar
 filter uses no heap, only stack buffers and Win32 calls. The pump thread takes the filter back once a second if another
 module replaced it (that one then runs after the report).
 
+**Session trace** ([framework/gpu_trace.h](../framework/gpu_trace.h)): a GPU hang (a driver fault; under the RTX Remix
+bridge its server loses the device, `VK_ERROR_DEVICE_LOST`) freezes the game with no exception, so no crash report is
+written and the log just stops. `ApexRadiance_Trace.bin` is a mapped file (about 16 KB) that keeps the session's start
+time, frame count and its last 256 steps: each HookGuard step, each post-scene effect, each Looks shader, each Present;
+a step repeated at once is one entry with a count; once frames start, only the render thread's steps. Windows writes the
+mapped pages out even when the process is ended from the Task Manager. A normal exit marks the session closed and a
+crash report marks it reported. At the next start a session still marked running (another process) is logged as
+`[Session] The last session ... did not close`: its last 48 steps, the graphics driver's System log events since it
+started (nvlddmkm, amdkmdag, amdwddmg, igfx, igfxn, Display, Kernel-LiveDump), Windows' Application Hang / Error
+events for TS3, and the last errors and warnings of `Game\Bin\NvRemixBridge_d3d9.log` when that log was written during
+that session and not yet over by this start. Offline tools that share Apex's sources do not link `gpu_trace.cpp`: the
+inline hooks check a function pointer that only `Start()` sets.
+
 **Other outputs** in the same folder: `ApexRadiance_Hitches.txt` (profiler writer thread), `ApexRadiance_FrameCapture.txt`,
 `ApexRadiance_LightDiag.txt`, `ApexRadiance_LightProbe.txt` and `LightProbe\`, `ApexRadiance_Censo.txt` and `Censo\`,
 `ShadersRecusados\`, `Captures\` (Report a problem), `Profiles\`.

@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [4.0.13](4.0.13.md): Video up to 4K with NV12 made on the GPU and an even frame rate; Shaders: ReShade Effect Shader Toggler files and On Sims' hair; Faster text lookups; a frozen session explained at the next start.
 - [4.0.12](4.0.12.md): Shaders: big looks in full under the RTX Remix bridge, loop shaders such as SlowSharp and MicrocontrastReducer run, an effect left out for memory starts again.
 - [4.0.11](4.0.11.md): System > Display no longer crashes with Turbo Simulation Engine whenever its device comes; Turbo under the RTX Remix bridge also before the game's first frame.
 - [4.0.10](4.0.10.md): opening System > Display no longer crashes the game when another mod made a device of its own.
