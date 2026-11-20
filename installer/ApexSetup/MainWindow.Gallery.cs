@@ -1628,6 +1628,11 @@ public sealed partial class MainWindow
         var look = Gallery.Look(_gal!, _galAlbum);
         // (boards laid out before the timeline get the timeline's layout once)
         if (look.Layout < 6) { look.Places.Clear(); look.Gaps.Clear(); look.Layout = 6; }
+        if (look.Layout < 7)
+        {
+            foreach (var (key, pl) in look.Places) if (key.StartsWith(Gallery.Mine, StringComparison.Ordinal) && pl.Moved) pl.X = 0;
+            look.Layout = 7;
+        }
         _boardAnchor.Clear();
         var ink = Ink(look);
         // as tall as the window allows, the pictures sized with it
@@ -1667,7 +1672,30 @@ public sealed partial class MainWindow
         double x = 0;
         var slot = 0;
         var freshSlots = 0;
-        double Wide(int i) => (Kind(i) % 4 == 0 ? 290 : 230) * s * look.Size + 24;
+        (double W, double H) Measured(int kind)
+        {
+            if (pics.Count == 0) return (0, 0);
+            var calm = _boardCalm;
+            _boardCalm = true;
+            try
+            {
+                var probe = Framed(pics[0], new Placed(), look, ink, 0, 0, pics, null, still: true, kind: kind);
+                probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+                return (probe.DesiredSize.Width, probe.DesiredSize.Height);
+            }
+            finally { _boardCalm = calm; }
+        }
+        var bigCard = Measured(0);
+        var smallCard = Measured(1);
+        // how wide a picture (or a pile) lies, turned as far as it may be
+        double Footprint(int i, bool pile)
+        {
+            var (w, h) = Kind(i) == 0 ? bigCard : smallCard;
+            if (w <= 0) { w = (Kind(i) == 0 ? 290 : 230) * s * look.Size; h = w * 0.8; }
+            var turned = w + h * Math.Sin(Math.Min(10, 5 * look.Tilt) * Math.PI / 180);
+            return pile ? turned + 32 * s + h * 0.12 : turned;
+        }
+        double Wide(int i) => Footprint(i, _boardPiled.ContainsKey(pics[i].Path)) + 24;
         void LayTimeline()
         {
             firstOf.Clear();
@@ -1688,7 +1716,11 @@ public sealed partial class MainWindow
                 xs[i] = rawX[i] = x;
                 if (i < fresh) freshSlots = slot + 1;
                 slotOf[i] = slot++;
-                x += Wide(i) * (heap is null ? 0.95 : 1.2) * look.Spacing;
+                var pinned = look.Places.TryGetValue(heap?.Key ?? pics[i].Path, out var pin) && pin.Moved;
+                var next = x + Wide(i) * 0.95 * look.Spacing;
+                if (look.Spacing >= 1 && (heap is not null || !pinned))
+                    next = Math.Max(next, x + (pinned ? pin!.X : 12) + Footprint(i, heap is not null) + 18 * s * look.Spacing);
+                x = next;
             }
             // (the other pictures of a pile lie on its place)
             for (int i = 0; i < pics.Count; i++)
@@ -1710,7 +1742,7 @@ public sealed partial class MainWindow
             foreach (var sk in look.Stickers) sk.X += along;
             // and when something the player put there lies where the new pictures go, room opens for them in front of it
             // (the room ends where the next picture would lie on its own, so the new ones sit as far apart as any others)
-            var newRight = Enumerable.Range(0, fresh).Max(i => xs[i] + Wide(i) * (_boardPiled.ContainsKey(pics[i].Path) ? 1.2 : 0.95) * look.Spacing + 12);
+            var newRight = Enumerable.Range(0, fresh).Max(i => xs[i] + Wide(i) * 0.95 * look.Spacing + 12);
             var oldLeft = double.MaxValue;
             for (int i = fresh; i < pics.Count; i++)
             {
@@ -1832,6 +1864,9 @@ public sealed partial class MainWindow
         {
             var members = pics.Where(pc => c.Pictures.Contains(pc.Path, StringComparer.OrdinalIgnoreCase)).ToList();
             var gathered = members.Any(m => _boardPiled.GetValueOrDefault(m.Path) == c);
+            // (a picture in two albums lies in one pile: the other album's tag goes with its own pictures, or not at all)
+            if (gathered) members = members.Where(m => _boardPiled.GetValueOrDefault(m.Path) == c).ToList();
+            else if (!_spread.Contains(c.Key)) continue;
             var anchor = _boardPlaces[members[0].Path];
             var at = pics.IndexOf(members[0]);
             var cardH = ((at % 4 == 0 ? 194 : 154) * s * look.Size) + 70;
