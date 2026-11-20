@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         if (_healthState == HealthState.Blocked)
             host.Children.Add(Banner(InfoBarSeverity.Error, T("Apex Radiance can't start"), T("The game still starts, but without Apex Radiance until this is fixed."), T("Open Health"), () => Show(HealthScreen)));
         host.Children.Add(HomeTop(g, saves));
-        var page = new StackPanel { Spacing = 48, Margin = new Thickness(0, 40, 0, 40) };
+        var page = new StackPanel { Spacing = 40, Margin = new Thickness(0, 32, 0, 32) };
         page.Children.Add(HomeSaves(saves));
         if (HomeNews() is { } news) page.Children.Add(news);
         page.Children.Add(HomePictures());
@@ -44,7 +44,7 @@ public sealed partial class MainWindow
 
     UIElement HomeTop(Game g, List<Save> saves)
     {
-        var top = new Grid { ColumnSpacing = 18, RowSpacing = 18 };
+        var top = new Grid { ColumnSpacing = 12, RowSpacing = 12 };
         top.ColumnDefinitions.Add(new ColumnDefinition());
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
         top.RowDefinitions.Add(new RowDefinition { Height = new GridLength(520) });
@@ -86,7 +86,7 @@ public sealed partial class MainWindow
         top.Children.Add(hero);
 
         // beside it: health with its crystal, and how the last session went
-        var side = new Grid { RowSpacing = 14 };
+        var side = new Grid { RowSpacing = 12 };
         side.RowDefinitions.Add(new RowDefinition());
         side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var health = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -133,7 +133,7 @@ public sealed partial class MainWindow
         top.Children.Add(side);
 
         // the counts: mods, packs, saves, pictures; each opens its screen
-        var counts = new Grid { ColumnSpacing = 14 };
+        var counts = new Grid { ColumnSpacing = 12 };
         for (int i = 0; i < 4; i++) counts.ColumnDefinitions.Add(new ColumnDefinition());
         var mods = _mods.Where(m => m.FileType == "package").ToList();
         var asi = _mods.Count(m => m.FileType == "asi");

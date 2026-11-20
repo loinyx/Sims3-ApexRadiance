@@ -11,12 +11,12 @@
             <!-- the Launcher's colours, dark and light as Windows is set; the accent is the one chosen in Windows -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
-                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D90C0C0C" />
+                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#0E0E0E" />
                     <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#202020" />
-                    <SolidColorBrush x:Key="ApexContentBrush" Color="#E60C0C0C" />
+                    <SolidColorBrush x:Key="ApexContentBrush" Color="#0E0E0E" />
                     <SolidColorBrush x:Key="ApexPageBrush" Color="#0C0C0C" />
-                    <SolidColorBrush x:Key="ApexCardBrush" Color="#141414" />
-                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#202020" />
+                    <SolidColorBrush x:Key="ApexCardBrush" Color="#171717" />
+                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#222222" />
                     <SolidColorBrush x:Key="ApexMutedBrush" Color="#8E8E8E" />
                     <SolidColorBrush x:Key="ApexSoftTextBrush" Color="#BDBDBD" />
                     <SolidColorBrush x:Key="ApexSuccessBrush" Color="#7DBE9A" />

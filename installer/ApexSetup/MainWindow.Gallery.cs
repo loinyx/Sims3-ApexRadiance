@@ -1935,7 +1935,7 @@ public sealed partial class MainWindow
 
     void FullBleed(bool on)
     {
-        Scroller.Padding = on ? new Thickness(0) : new Thickness(32, 28, 32, 0);
+        Scroller.Padding = on ? new Thickness(0) : new Thickness(24, 20, 24, 0);
         Screens.Margin = on ? new Thickness(0) : new Thickness(0, 0, 0, 32);
         Scroller.VerticalScrollBarVisibility = on ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
         Scroller.VerticalScrollMode = on ? ScrollMode.Disabled : ScrollMode.Enabled;
