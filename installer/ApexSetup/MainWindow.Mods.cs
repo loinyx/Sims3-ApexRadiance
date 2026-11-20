@@ -1286,6 +1286,18 @@ public sealed partial class MainWindow
         FillModDetails();
     }
 
+    // the tiles fill the row: as many columns of at least 168 px as fit, sharing the width, the picture square
+    void OnModGridSized(object sender, SizeChangedEventArgs e) => FitModGrid();
+    void FitModGrid()
+    {
+        if (ModGrid.ItemsPanelRoot is not ItemsWrapGrid panel) return;
+        var width = ModGrid.ActualWidth - ModGrid.Padding.Left - ModGrid.Padding.Right - 2;
+        if (width <= 0) return;
+        var cell = Math.Floor(width / Math.Max(1, (int)(width / 168)));
+        panel.ItemWidth = cell;
+        panel.ItemHeight = cell + 52;
+    }
+
     void CloseModDetails() { ModList.SelectedItems.Clear(); ModGrid.SelectedItems.Clear(); FillModDetails(); FillFooter(); }
 
     // the player's choice of type, else the package's own
@@ -1367,6 +1379,9 @@ public sealed partial class MainWindow
         ModDetailsFoot.Visibility = Visibility.Collapsed;
         var picked = Picked();
         ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        // (over the grid the pane would hide whole columns of tiles: the grid makes room for it instead)
+        var room = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
+        if (ModGrid.Padding.Right != 24 + room) { ModGrid.Padding = new Thickness(0, 0, 24 + room, 72); FitModGrid(); }
         PlaceSelectionBar();
         if (picked.Count == 0)
         {

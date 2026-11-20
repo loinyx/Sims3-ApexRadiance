@@ -55,6 +55,8 @@ public sealed class ModRow : INotifyPropertyChanged
     }
     public bool IsOn => File.Enabled;
     public double TextOpacity => File.Enabled ? 1 : 0.5;
+    public Visibility OffVisible => File.Enabled ? Visibility.Collapsed : Visibility.Visible;
+    public string OffText => T("Off");
     public Visibility ToggleVisible => File.Locked ? Visibility.Collapsed : Visibility.Visible;
     public Visibility LockVisible => File.Locked ? Visibility.Visible : Visibility.Collapsed;
     public string LockTip => LockText(File);
@@ -133,7 +135,7 @@ public sealed class ModRow : INotifyPropertyChanged
     public void Update(ModFile f)
     {
         File = f;
-        Changed(nameof(Name), nameof(FullName), nameof(Sub), nameof(SubVisible), nameof(IsOn), nameof(TextOpacity), nameof(ToggleVisible), nameof(LockVisible), nameof(TagPills), nameof(TagsVisible));
+        Changed(nameof(Name), nameof(FullName), nameof(Sub), nameof(SubVisible), nameof(IsOn), nameof(TextOpacity), nameof(OffVisible), nameof(ToggleVisible), nameof(LockVisible), nameof(TagPills), nameof(TagsVisible));
     }
 
     public void SetFindings(IReadOnlyList<string> findings) { Findings = findings; Refresh(); }

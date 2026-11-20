@@ -190,7 +190,7 @@ public sealed partial class MainWindow
     static Button StripButton(string icon, string tip)
     {
         var b = new Button { Content = Lucide.Icon(icon, 15, Res("ApexSoftTextBrush")), Width = 32, Height = 32, Padding = new Thickness(0), CornerRadius = new CornerRadius(8),
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x99, 11, 12, 14)), BorderThickness = new Thickness(0) };
+            Background = new SolidColorBrush(Pick(0x990B0C0E, 0xCCFFFFFF)), BorderThickness = new Thickness(0) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
         ToolTipService.SetToolTip(b, tip);
         return b;

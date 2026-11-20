@@ -14,6 +14,7 @@
                     <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#0E0E0E" />
                     <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#202020" />
                     <SolidColorBrush x:Key="ApexContentBrush" Color="#0E0E0E" />
+                    <SolidColorBrush x:Key="ApexPaneBrush" Color="#101010" />
                     <SolidColorBrush x:Key="ApexPageBrush" Color="#0C0C0C" />
                     <SolidColorBrush x:Key="ApexCardBrush" Color="#171717" />
                     <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#2C2C2C" />
@@ -47,6 +48,7 @@
                     <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D9FBFBFB" />
                     <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#E2E2E2" />
                     <SolidColorBrush x:Key="ApexContentBrush" Color="#E6FBFBFB" />
+                    <SolidColorBrush x:Key="ApexPaneBrush" Color="#FBFBFB" />
                     <SolidColorBrush x:Key="ApexPageBrush" Color="#F6F6F6" />
                     <SolidColorBrush x:Key="ApexCardBrush" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#D4D4D4" />

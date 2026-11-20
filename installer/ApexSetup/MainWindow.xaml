@@ -77,9 +77,11 @@
                 </Grid>
             </DataTemplate>
             <!-- a mod in Mods (grid view): its picture (or kind icon), name on two lines, tag dots -->
+            <!-- a mod in the grid: a square picture that grows with the window, one line of name, its type and tags under it -->
             <DataTemplate x:Key="ThumbTemplate" x:DataType="local:ModRow">
-                <StackPanel Width="148" Spacing="6" Padding="0,0,0,8" Opacity="{x:Bind TextOpacity, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind FullName, Mode=OneWay}">
-                    <Border Width="148" Height="148" CornerRadius="10" Background="{x:Bind TileBrush}">
+                <Grid Margin="6,6,6,4" RowSpacing="8" ToolTipService.ToolTip="{x:Bind FullName, Mode=OneWay}">
+                    <Grid.RowDefinitions><RowDefinition /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Border CornerRadius="10" Background="{x:Bind TileBrush}" Opacity="{x:Bind TextOpacity, Mode=OneWay}">
                         <Grid>
                             <local:LucideIcon Kind="{x:Bind KindIcon, Mode=OneWay}" Size="40" Stroke="{x:Bind GlyphBrush}" StrokeWidth="1.5" HorizontalAlignment="Center" VerticalAlignment="Center"
                                               Visibility="{x:Bind Placeholder, Mode=OneWay}" />
@@ -89,14 +91,23 @@
                             </Border>
                         </Grid>
                     </Border>
-                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
-                    <ItemsControl ItemsSource="{x:Bind TagPills, Mode=OneWay}">
-                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="local:TagDot"><Ellipse Width="8" Height="8" Fill="{x:Bind Fill}" ToolTipService.ToolTip="{x:Bind Name}" /></DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
+                    <Border Visibility="{x:Bind OffVisible, Mode=OneWay}" Background="#E61E1E1E" CornerRadius="8" Padding="7,1,7,2" Margin="8" HorizontalAlignment="Right" VerticalAlignment="Top">
+                        <TextBlock Text="{x:Bind OffText}" FontSize="10" FontWeight="SemiBold" Foreground="#EDEDED" />
+                    </Border>
+                    <StackPanel Grid.Row="1" Spacing="1" Opacity="{x:Bind TextOpacity, Mode=OneWay}">
+                        <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                        <Grid ColumnSpacing="6">
+                            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="{x:Bind Kind, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource ApexMutedBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                            <ItemsControl Grid.Column="1" ItemsSource="{x:Bind TagPills, Mode=OneWay}" VerticalAlignment="Center">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="local:TagDot"><Ellipse Width="8" Height="8" Fill="{x:Bind Fill}" ToolTipService.ToolTip="{x:Bind Name}" /></DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Grid>
+                    </StackPanel>
+                </Grid>
             </DataTemplate>
             <!-- a save in Saves: the household photo, its name, when it was played, and what to do with it -->
             <DataTemplate x:Key="SaveTemplate" x:DataType="local:SaveCard">
@@ -827,7 +838,15 @@
                         <GridView x:Name="ModGrid" Grid.Row="3" Grid.RowSpan="2" ItemTemplate="{StaticResource ThumbTemplate}" SelectionMode="Extended"
                                   SelectionChanged="OnModPicked" CanDragItems="True" DragItemsStarting="OnModDragStart" DragItemsCompleted="OnModDragDone" Margin="0,0,-24,0" Padding="0,0,24,72"
                                   RightTapped="OnModRightTapped" KeyDown="OnModListKey" AllowDrop="True" DragOver="OnModFilesOver" Drop="OnModFilesDrop"
-                                  Visibility="Collapsed" AutomationProperties.Name="Mods">
+                                  Visibility="Collapsed" AutomationProperties.Name="Mods" SizeChanged="OnModGridSized">
+                            <GridView.ItemContainerStyle>
+                                <Style TargetType="GridViewItem" BasedOn="{StaticResource DefaultGridViewItemStyle}">
+                                    <Setter Property="Margin" Value="0" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </GridView.ItemContainerStyle>
                             <GridView.ItemContainerTransitions>
                                 <TransitionCollection>
                                     <AddDeleteThemeTransition />
@@ -859,7 +878,7 @@
                         </Grid>
                     </Grid>
                     <!-- the chosen mod (or several) -->
-                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="340" HorizontalAlignment="Right" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1,0,0,0" Background="#101010">
+                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="340" HorizontalAlignment="Right" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1,0,0,0" Background="{ThemeResource ApexPaneBrush}">
                         <Grid>
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                             <StackPanel x:Name="ModDetailsHead" />
