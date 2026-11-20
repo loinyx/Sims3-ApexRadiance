@@ -426,8 +426,32 @@ public sealed partial class MainWindow
     }
 
     // a storyboard step: one property of one element to a value, over a time, with an ease
+    // (a finished storyboard otherwise keeps holding what it animated, and nothing set afterwards shows)
+    static readonly Dictionary<Storyboard, List<(DependencyObject Target, string Property, double To)>> Ends = [];
+    static void Play(Storyboard sb)
+    {
+        sb.Completed += (_, _) =>
+        {
+            if (!Ends.Remove(sb, out var ends)) return;
+            foreach (var (t, p, v) in ends)
+                switch (t)
+                {
+                    case CompositeTransform c when p == "TranslateX": c.TranslateX = v; break;
+                    case CompositeTransform c when p == "TranslateY": c.TranslateY = v; break;
+                    case CompositeTransform c when p == "Rotation": c.Rotation = v; break;
+                    case CompositeTransform c when p == "ScaleX": c.ScaleX = v; break;
+                    case CompositeTransform c when p == "ScaleY": c.ScaleY = v; break;
+                    case UIElement e when p == "Opacity": e.Opacity = v; break;
+                }
+            sb.Stop();
+        };
+        sb.Begin();
+    }
+
     static void Tween(Storyboard sb, DependencyObject target, string property, double to, int ms, EasingFunctionBase? ease = null, int begin = 0)
     {
+        if (!Ends.TryGetValue(sb, out var ends)) Ends[sb] = ends = [];
+        ends.Add((target, property, to));
         var a = new DoubleAnimation { To = to, Duration = TimeSpan.FromMilliseconds(ms), EasingFunction = ease, BeginTime = TimeSpan.FromMilliseconds(begin) };
         Storyboard.SetTarget(a, target);
         Storyboard.SetTargetProperty(a, property);
@@ -449,7 +473,7 @@ public sealed partial class MainWindow
         Tween(sb, t, "ScaleX", 1, 640, new CubicEase { EasingMode = EasingMode.EaseOut });
         Tween(sb, t, "ScaleY", 1, 640, new CubicEase { EasingMode = EasingMode.EaseOut });
         Tween(sb, el, "Opacity", 1, 240);
-        sb.Begin();
+        Play(sb);
         return t;
     }
 
@@ -458,7 +482,7 @@ public sealed partial class MainWindow
     {
         var sb = new Storyboard();
         Tween(sb, t, "Rotation", to, ms, ease ?? new CubicEase { EasingMode = EasingMode.EaseOut });
-        sb.Begin();
+        Play(sb);
     }
 
     // the tape's colour: bright, or the board's own hue made paler
@@ -538,6 +562,18 @@ public sealed partial class MainWindow
     // ---------- Customize: a panel that slides in over the board's right side, the board changing behind it ----------
 
     Border? _custDrawer;
+    double _boardBuiltSize = 1;
+
+    // the pictures on the board turned to the tilt and scaled to the size being chosen, without laying the board again
+    void LiveCards(AlbumLook look)
+    {
+        foreach (var (pic, card, _) in _boardCards)
+            if (card is Border { Child: FrameworkElement { RenderTransform: CompositeTransform t } } && look.Places.TryGetValue(pic.Path, out var at))
+            {
+                t.Rotation = at.Angle * look.Tilt;
+                t.ScaleX = t.ScaleY = look.Size / _boardBuiltSize;
+            }
+    }
     TextBlock? _boardHint;
     readonly List<Button> _boardTools = [];
 
@@ -872,7 +908,7 @@ public sealed partial class MainWindow
                 g.Children.Add(new TextBlock { Text = left, FontSize = 12, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
                 var s = new Slider { Minimum = min, Maximum = max, StepFrequency = 0.05, Value = value };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(s, name);
-                s.ValueChanged += (_, e) => { set(e.NewValue); Changed(); };
+                s.ValueChanged += (_, e) => { set(e.NewValue); _custChanged = true; LiveCards(look); };
                 Grid.SetColumn(s, 1);
                 g.Children.Add(s);
                 var r = new TextBlock { Text = right, FontSize = 12, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center };
@@ -1127,6 +1163,7 @@ public sealed partial class MainWindow
         Scroller.Padding = on ? new Thickness(0) : new Thickness(32, 28, 32, 0);
         Screens.Margin = on ? new Thickness(0) : new Thickness(0, 0, 0, 32);
         Scroller.VerticalScrollBarVisibility = on ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
+        Scroller.VerticalScrollMode = on ? ScrollMode.Disabled : ScrollMode.Enabled;
     }
 
     bool _boardWatched;
@@ -1162,6 +1199,7 @@ public sealed partial class MainWindow
         }
         look.Height = BoardHeight;
         var s = _boardScale = BoardHeight / 660;
+        _boardBuiltSize = look.Size;
         var mid = BoardHeight / 2;
         // the newest sixty, laid newest first along a gentle wave around the line, a breath of room where a day begins
         var pics = InAlbum().Take(60).ToList();
@@ -1238,25 +1276,39 @@ public sealed partial class MainWindow
             var lane = lanes.FindIndex(end => end < from - 16);
             if (lane < 0) { lane = lanes.Count; lanes.Add(0); }
             lanes[lane] = to;
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            row.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 15, Foreground = ink, VerticalAlignment = VerticalAlignment.Center });
-            row.Children.Add(new TextBlock { Text = c.Name, FontFamily = new FontFamily(look.Font), FontSize = 19, Foreground = ink, VerticalAlignment = VerticalAlignment.Center });
-            row.Children.Add(new TextBlock { Text = spots.Count.ToString(), FontSize = 12, Foreground = ink, Opacity = 0.65, VerticalAlignment = VerticalAlignment.Center });
-            var ribbon = new Button { Content = row, Width = to - from, Height = 34, Padding = new Thickness(16, 0, 16, 0), CornerRadius = new CornerRadius(17), HorizontalContentAlignment = HorizontalAlignment.Left,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x40, 0x7F, 0x77, 0xDD)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x99, 0xB4, 0xAE, 0xF2)), BorderThickness = new Thickness(1),
-                Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(400) } };
-            ribbon.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x70, 0x7F, 0x77, 0xDD));
-            ribbon.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x90, 0x7F, 0x77, 0xDD));
-            ribbon.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Rgb(0xB4, 0xAE, 0xF2));
-            ToolTipService.SetToolTip(ribbon, T("Open the album {0}", c.Name));
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ribbon, T("Open the album {0}", c.Name));
+            // (a bracket drawn in the board's ink over the album's pictures, its name on a tag that opens it)
+            var chapter = new Grid { Width = to - from, Height = 30 };
+            chapter.Children.Add(new Border { Height = 12, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 14, 0, 0), BorderBrush = ink, BorderThickness = new Thickness(1.5, 1.5, 1.5, 0),
+                CornerRadius = new CornerRadius(6, 6, 0, 0), Opacity = 0.5, IsHitTestVisible = false });
+            var tagRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            tagRow.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 14, Foreground = ink, VerticalAlignment = VerticalAlignment.Center });
+            var tagName = new TextBlock { Text = c.Name, FontFamily = new FontFamily(look.Font), FontSize = 20, Foreground = ink, VerticalAlignment = VerticalAlignment.Center };
+            tagRow.Children.Add(tagName);
+            tagRow.Children.Add(new TextBlock { Text = spots.Count.ToString(), FontSize = 12, Foreground = ink, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 0) });
+            var tag = new HyperlinkButton { Content = tagRow, Padding = new Thickness(12, 0, 14, 2), Margin = new Thickness(18, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+                Background = pill, CornerRadius = new CornerRadius(14), Height = 30 };
+            tag.Resources["HyperlinkButtonBackgroundPointerOver"] = pill;
+            tag.Resources["HyperlinkButtonBackgroundPressed"] = pill;
+            tag.Resources["HyperlinkButtonForegroundPointerOver"] = ink;
+            tag.Resources["HyperlinkButtonForegroundPressed"] = ink;
+            tag.PointerEntered += (_, _) => tagName.TextDecorations = Windows.UI.Text.TextDecorations.Underline;
+            tag.PointerExited += (_, _) => tagName.TextDecorations = Windows.UI.Text.TextDecorations.None;
+            ToolTipService.SetToolTip(tag, T("Open the album {0}", c.Name));
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(tag, T("Open the album {0}", c.Name));
             var key = c.Key;
-            ribbon.Click += (_, _) => { _galAlbum = key; BuildGallery(); };
-            Canvas.SetLeft(ribbon, from);
-            Canvas.SetTop(ribbon, 10 + lane * 40);
-            Canvas.SetZIndex(ribbon, 950);
-            canvas.Children.Add(ribbon);
-            if (_boardCalm) ribbon.Opacity = 1; else After(700, () => ribbon.Opacity = 1);
+            tag.Click += (_, _) => { _galAlbum = key; BuildGallery(); };
+            chapter.Children.Add(tag);
+            Canvas.SetLeft(chapter, from);
+            Canvas.SetTop(chapter, 10 + lane * 40);
+            Canvas.SetZIndex(chapter, 950);
+            canvas.Children.Add(chapter);
+            if (!_boardCalm)
+            {
+                chapter.Opacity = 0;
+                var show = new Storyboard { BeginTime = TimeSpan.FromMilliseconds(700) };
+                Tween(show, chapter, "Opacity", 1, 400);
+                Play(show);
+            }
         }
         var n = 0;
         foreach (var note in look.Notes) canvas.Children.Add(Sticky(note, look, n++));
@@ -1267,10 +1319,14 @@ public sealed partial class MainWindow
             VerticalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, ZoomMode = ZoomMode.Disabled };
         _boardScroll = scroll;
         // the mouse wheel moves along the timeline
+        double heading = -1;
         scroll.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) =>
         {
-            var d = e.GetCurrentPoint(scroll).Properties.MouseWheelDelta;
-            scroll.ChangeView(scroll.HorizontalOffset - d * 1.4, null, null, false);
+            var w = e.GetCurrentPoint(scroll).Properties;
+            var d = w.IsHorizontalMouseWheel ? -w.MouseWheelDelta : w.MouseWheelDelta;
+            var from = heading >= 0 && Math.Abs(heading - scroll.HorizontalOffset) > 2 ? heading : scroll.HorizontalOffset;
+            heading = Math.Clamp(from - d * 1.6, 0, scroll.ScrollableWidth);
+            scroll.ChangeView(heading, null, null, false);
             e.Handled = true;
         }), true);
         var opened = false;
@@ -1289,7 +1345,7 @@ public sealed partial class MainWindow
             var grow = new Storyboard();
             Tween(grow, z, "ScaleX", 1, 520, new CubicEase { EasingMode = EasingMode.EaseOut });
             Tween(grow, z, "ScaleY", 1, 520, new CubicEase { EasingMode = EasingMode.EaseOut });
-            grow.Begin();
+            Play(grow);
         };
         var panning = false;
         double grabX = 0, grabOffset = 0;
@@ -1539,13 +1595,13 @@ public sealed partial class MainWindow
         {
             var tapeIn = new Storyboard { BeginTime = TimeSpan.FromMilliseconds(delay + 640) };
             Tween(tapeIn, strip.RenderTransform, "ScaleX", 1, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.6 });
-            tapeIn.Begin();
+            Play(tapeIn);
         }
         if (_boardCalm) caption.Text = text; else After(delay + 820, () => Write(caption, text));
 
         // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
-        outer.PointerEntered += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, angle * 0.25); };
-        outer.PointerExited += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, order); Turn(turn, angle, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
+        outer.PointerEntered += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
+        outer.PointerExited += (_, _) => { if (_dragging) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, order); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
         Draggable(outer, () => { place.X = Canvas.GetLeft(outer); place.Y = Canvas.GetTop(outer); Gallery.Save(_gal!); });
         outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
         caption.Tapped += (_, e) =>
@@ -1613,7 +1669,7 @@ public sealed partial class MainWindow
             Tween(away, tilt.RenderTransform, "TranslateY", 60, 300, new CubicEase { EasingMode = EasingMode.EaseIn });
             Tween(away, tilt.RenderTransform, "Rotation", note.Angle + 14, 300);
             away.Completed += (_, _) => _boardCanvas?.Children.Remove(outer);
-            away.Begin();
+            Play(away);
         };
         Draggable(outer, () => { note.X = Canvas.GetLeft(outer); note.Y = Canvas.GetTop(outer); Gallery.Save(_gal!); });
         return outer;
@@ -1683,7 +1739,7 @@ public sealed partial class MainWindow
             Tween(sb, ((Border)card).Child.RenderTransform, "Rotation", place.Angle * look.Tilt, 1100, new ElasticEase { EasingMode = EasingMode.EaseOut, Oscillations = 1, Springiness = 4 });
         }
         sb.Completed += (_, _) => { foreach (var (pic, card, _) in _boardCards) { Canvas.SetLeft(card, look.Places[pic.Path].X); Canvas.SetTop(card, look.Places[pic.Path].Y); } };
-        sb.Begin();
+        Play(sb);
         Gallery.Save(_gal);
     }
 
@@ -1770,7 +1826,7 @@ public sealed partial class MainWindow
             Tween(sb, zt, "TranslateX", 0, ms, ease);
             Tween(sb, zt, "TranslateY", 0, ms, ease);
             Tween(sb, image, "Opacity", 1, 220);
-            sb.Begin();
+            Play(sb);
         }
         stage.Children.Add(image);
         Button Round(string glyph, string name, double size = 46)
@@ -1811,7 +1867,7 @@ public sealed partial class MainWindow
             var away = new Storyboard();
             Tween(away, zt, "ScaleX", 0.96, 220);
             Tween(away, zt, "ScaleY", 0.96, 220);
-            away.Begin();
+            Play(away);
             After(220, () => { popup.IsOpen = false; if (stay && _galBook) RefreshBoard(page: true); else BuildGallery(); });
         }
         close.Click += (_, _) => Close();
