@@ -251,28 +251,25 @@ public sealed partial class MainWindow
     // ---------- the sections ----------
 
     // a section's head: a small number, its title, a note and a link on the right
-    static UIElement SectionHead(string number, string title, string? note = null, string? link = null, Action? go = null, string brush = "ApexAccentBrush")
+    static UIElement SectionHead(string title, string? note = null, string? link = null, Action? go = null)
     {
         var g = new Grid { ColumnSpacing = 14, Margin = new Thickness(0, 0, 0, 16) };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.Children.Add(new TextBlock { Text = number, FontSize = 12, FontWeight = FontWeights.Bold, CharacterSpacing = 160, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Center });
         var t = new TextBlock { Text = title, FontSize = 22, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(t, 1);
         g.Children.Add(t);
-        if (note is not null) { var n = new TextBlock { Text = note, FontSize = 14, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis }; Grid.SetColumn(n, 2); g.Children.Add(n); }
-        if (link is not null && go is not null) { var l = Link(link, go); l.Padding = new Thickness(0); l.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(l, 3); g.Children.Add(l); }
+        if (note is not null) { var n = new TextBlock { Text = note, FontSize = 14, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis }; Grid.SetColumn(n, 1); g.Children.Add(n); }
+        if (link is not null && go is not null) { var l = Link(link, go); l.Padding = new Thickness(0); l.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(l, 2); g.Children.Add(l); }
         return g;
     }
 
-    // 01 · the saves as covers: the one Play starts wide, with a ring; the covers come in one after another, lean in under
+    // the saves as covers: the one Play starts wide, with a ring; the covers come in one after another, lean in under
     // the pointer, and Back up turns into a ring and then a tick
     UIElement HomeSaves(List<Save> saves)
     {
         var s = new StackPanel();
-        s.Children.Add(SectionHead("01", T("Your households"), null, T("All saves"), () => Show(SavesScreen)));
+        s.Children.Add(SectionHead(T("Your households"), null, T("All saves"), () => Show(SavesScreen)));
         if (saves.Count == 0) { s.Children.Add(Muted(T("No saves yet: they show here once you save a game."))); return s; }
         var docs = Docs;
         var shelf = new Grid { ColumnSpacing = 16, Height = 300, ChildrenTransitions = new TransitionCollection { new EntranceThemeTransition { IsStaggeringEnabled = true, FromHorizontalOffset = 40, FromVerticalOffset = 0 } } };
@@ -382,7 +379,7 @@ public sealed partial class MainWindow
 
     static string Initials(string name) => string.Concat(name.Split([' ', '-', '_'], StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
 
-    // 03 · updates and what's new: every part with an update ready (Apex Radiance, Sims 3 Modernization and the rest), its
+    // updates and what's new: every part with an update ready (Apex Radiance, Sims 3 Modernization and the rest), its
     // installed and new version and its release's headline; with none, the newest Apex Radiance notes
     Release? ReleaseOf(string c) => c == Components.Modernization ? ModRelease() : Repo.TryGetValue(c, out var repo) ? _latest.GetValueOrDefault(repo) : null;
     string? InstalledOf(string c) => c == Components.Apex ? _state?.ApexVersion : Known(c) is { Length: > 0 } v ? v : _state?.Installed(c);
@@ -404,7 +401,7 @@ public sealed partial class MainWindow
         var right = new StackPanel { Spacing = 14, VerticalAlignment = VerticalAlignment.Center };
         if (ups.Count > 0)
         {
-            left.Children.Add(new TextBlock { Text = "03 · " + T("UPDATES"), FontSize = 12, FontWeight = FontWeights.Bold, CharacterSpacing = 160, Foreground = lilac });
+            left.Children.Add(new TextBlock { Text = T("UPDATES"), FontSize = 12, FontWeight = FontWeights.Bold, CharacterSpacing = 160, Foreground = lilac });
             left.Children.Add(new TextBlock { Text = ups.Count == 1 ? T("1 update ready") : T("{0} updates ready", ups.Count), FontSize = 28, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             left.Children.Add(new TextBlock { Text = T("Nothing changes until you choose; your settings stay."), FontSize = 14, Foreground = soft, TextWrapping = TextWrapping.Wrap });
             foreach (var c in ups)
@@ -424,7 +421,7 @@ public sealed partial class MainWindow
         else
         {
             var paras = Paragraphs(apex!.Body);
-            left.Children.Add(new TextBlock { Text = "03 · " + T("WHAT'S NEW"), FontSize = 12, FontWeight = FontWeights.Bold, CharacterSpacing = 160, Foreground = lilac });
+            left.Children.Add(new TextBlock { Text = T("WHAT'S NEW"), FontSize = 12, FontWeight = FontWeights.Bold, CharacterSpacing = 160, Foreground = lilac });
             left.Children.Add(new TextBlock { Text = "Apex Radiance " + apex.Version, FontSize = 28, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             left.Children.Add(new TextBlock { Text = T("installed"), FontSize = 14, Foreground = soft });
             if (paras.Count > 0) right.Children.Add(new TextBlock { Text = paras[0], FontSize = 20, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
@@ -453,7 +450,7 @@ public sealed partial class MainWindow
         return band;
     }
 
-    // 05 · the pictures, a collage of the newest four
+    // the pictures, a collage of the newest four
     UIElement HomePictures()
     {
         var s = new StackPanel();
@@ -462,7 +459,7 @@ public sealed partial class MainWindow
         try { if (Directory.Exists(dir)) count = Directory.EnumerateFiles(dir).Count(f => Path.GetExtension(f).ToLowerInvariant() is ".jpg" or ".jpeg" or ".png"); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         var shots = Screenshots(4);
-        s.Children.Add(SectionHead("04", T("Your pictures"), count == 0 ? null : count == 1 ? T("1 picture") : T("{0} pictures", count), count == 0 ? null : T("Screenshots folder"), () => OpenFolder(dir)));
+        s.Children.Add(SectionHead(T("Your pictures"), count == 0 ? null : count == 1 ? T("1 picture") : T("{0} pictures", count), count == 0 ? null : T("Screenshots folder"), () => OpenFolder(dir)));
         if (shots.Count == 0) { s.Children.Add(Muted(T("Pictures you take in the game show here."))); return s; }
         var grid = new Grid { ColumnSpacing = 12, RowSpacing = 12 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
