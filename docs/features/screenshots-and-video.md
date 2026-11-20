@@ -31,7 +31,7 @@ Reset and Undo work.
 | Part | Screenshots | Video |
 |---|---|---|
 | Visible | Save to (Game / Apex / Other; the folder in use as its description; an Open the folder icon button beside the choices); with Other, Folder (Change: Windows' folder dialog; the typed path, with tokens, under a *Type a folder* arrow); Hide game UI; Look (With / Without / Both, only while a ReShade look is on); Format (PNG / JPG) | Save to and Folder as for screenshots; Hide game UI; Game sound; Quality (Smaller / Balanced / Best / Custom; description "<size>p · <fps> fps · about N MB a minute") |
-| Advanced: File / Picture | File: JPG quality (JPG only), Size (%), File name (token help on hover) | Picture: Look (With / Without, only while a look is on), Size (720p / 1080p / 1440p), Frames per second (24 / 30 / 60), Custom bitrate (Custom only); File: Format (MP4 / Crash-safe MP4 / MKV), Keep the MP4 too (MKV only), Compression (H.264 / HEVC), File name |
+| Advanced: File / Picture | File: JPG quality (JPG only), Size (%), File name (token help on hover) | Picture: Look (With / Without, only while a look is on), Size (720p / 1080p / 1440p / 4K), Frames per second (24 / 30 / 60), Custom bitrate (Custom only); File: Format (MP4 / Crash-safe MP4 / MKV), Keep the MP4 too (MKV only), Compression (H.264 / HEVC), File name |
 | Advanced: Also in the picture / video | Include the Apex menu, Include the mouse pointer, Save the look's preset too | the same |
 | Advanced: Series / Length | Pictures per press, Time between pictures (more than one picture) | New clip every, Stop after, Stop at file size, Warn before the limit |
 | Advanced: Timer on screen | | Show a recording timer (then Timer position, Timer size, Timer opacity, Pulse the red dot, Show the file size, Show the stop key, Always show hours), Red frame while recording, Timer in the video too |
@@ -67,9 +67,9 @@ true; see [ui.md](../ui.md#shortcuts)). Every value is clamped when read; missin
 | capture.video | include_pointer | false | |
 | capture.video | look | with | with / without |
 | capture.video | save_preset | false | |
-| capture.video | size | 1080 | 720 / 1080 / 1440 lines at most |
+| capture.video | size | 1080 | 720 / 1080 / 1440 / 2160 lines at most |
 | capture.video | fps | 30 | 24 / 30 / 60 |
-| capture.video | quality | balanced | smaller / balanced / best / custom (balanced: 720p 8, 1080p 16, 1440p 28 Mbit/s at 30 fps; x1.6 at 60 fps) |
+| capture.video | quality | balanced | smaller / balanced / best / custom (balanced: 720p 8, 1080p 16, 1440p 28, 2160p 52 Mbit/s at 30 fps; x1.6 at 60 fps) |
 | capture.video | custom_mbps | 20 | 1-200 (menu 1-100) |
 | capture.video | container | mp4-safe | mp4 / mp4-safe (fragmented) / mkv (made from the MP4 when the video stops) |
 | capture.video | keep_mp4 | false | with mkv |
@@ -103,8 +103,16 @@ colour but not the menu or the notes (include_menu grabs at Present instead). Th
 only while a screenshot asks for it. With "Keep UI text sharp" on in a world that first part runs before the HUD, so
 the "before" picture has no HUD; this only shows when Hide game UI is off.
 
-Video: the frame is scaled on the GPU to `size` lines, read back through a ring of 3 slots without waiting (a frame with no
-free slot is dropped and counted), and encoded by Media Foundation (hardware encoder when present). Start refuses when
+Video: the frame is scaled on the GPU to `size` lines (the width a multiple of 4), turned into NV12 there by one pixel
+shader pass (BT.709, 16-235, chroma the 2 x 2 average; the file is tagged so), read back through a ring of 4 slots
+without waiting (a frame with no free slot is dropped and counted), and encoded by Media Foundation (hardware encoder
+when present) from a reused set of input buffers. NV12 is 1.5 bytes a pixel against 4 for B G R X and needs no colour
+conversion on the CPU: a 4K frame is 12 MB to read back. When the pass cannot be set up (its shader, its targets), the
+recorder falls back to B G R X slots that Media Foundation converts, and says so in the log. The mouse pointer is
+blended into the NV12 bytes with the same formula. One frame a period is taken (a frame up to 1/8 period early counts
+for the period ahead), stamped on the period's even grid, so the file plays at a constant rate; none is copied before
+the encoder runs (about 2 s after the key). HEVC is always a plain MP4: Media Foundation's fragmented (crash-safe) MP4
+sink refuses HEVC at any size. Start refuses when
 the largest free address-space block is under 192 MB, with multisampling, or when the GPU cannot copy the back buffer
 into the 8-bit slots. A device reset stops the recording.
 

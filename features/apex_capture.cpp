@@ -73,7 +73,7 @@ Settings Clamped(Settings s) {
     if (Trim(v.fileName).empty()) v.fileName = def.fileName;
     v.folder = std::clamp(v.folder, 0, 2);
     v.look = std::clamp(v.look, 0, 1);
-    v.size = v.size >= 1300 ? 1440 : v.size >= 900 ? 1080 : 720;
+    v.size = v.size >= 1800 ? 2160 : v.size >= 1300 ? 1440 : v.size >= 900 ? 1080 : 720;
     v.fps = v.fps >= 50 ? 60 : v.fps >= 27 ? 30 : 24;
     v.quality = std::clamp(v.quality, 0, 3);
     v.customMbps = std::clamp(v.customMbps, 1, 200);
@@ -348,7 +348,7 @@ int KbpsFor(const VideoSettings& v) {
     if (v.quality == kQualityCustom) return v.customMbps * 1000;
     static const int kQuality[] = {60, 80, 95};
     const int q = kQuality[std::clamp(v.quality, 0, 2)];
-    const double base = v.size <= 720 ? 8000.0 : v.size <= 1080 ? 16000.0 : 28000.0; // kbit/s at 30 fps, Quality 80
+    const double base = v.size <= 720 ? 8000.0 : v.size <= 1080 ? 16000.0 : v.size <= 1440 ? 28000.0 : 52000.0; // kbit/s at 30 fps, Quality 80
     const double fps = v.fps >= 50 ? 1.6 : v.fps / 30.0;
     return std::clamp(static_cast<int>(base * fps * q / 80.0), 1000, 200000);
 }
@@ -1403,10 +1403,10 @@ void VideoCard(bool lookOn, bool gameAa) {
         if (ApexUi::BeginAdvanced("##VideoAdvanced", "Advanced", summary.c_str())) {
           if (own) { // what only Apex's own recorder uses
             ApexUi::CardGroup("Picture");
-            static const char* const kSize[] = {"720p", "1080p", "1440p"};
-            static const int kSizeV[] = {720, 1080, 1440};
-            int si = v.size >= 1440 ? 2 : v.size >= 1080 ? 1 : 0;
-            if (Pick("Size", "Larger looks sharper and costs more speed", "##CapSize", si, kSize, 3, 1)) { v.size = kSizeV[si]; ch = true; }
+            static const char* const kSize[] = {"720p", "1080p", "1440p", "4K"};
+            static const int kSizeV[] = {720, 1080, 1440, 2160};
+            int si = v.size >= 2160 ? 3 : v.size >= 1440 ? 2 : v.size >= 1080 ? 1 : 0;
+            if (Pick("Size", "Larger looks sharper and costs more speed", "##CapSize", si, kSize, 4, 1)) { v.size = kSizeV[si]; ch = true; }
             static const char* const kFps[] = {"24", "30", "60"};
             static const int kFpsV[] = {24, 30, 60};
             int fi = v.fps >= 60 ? 2 : v.fps >= 30 ? 1 : 0;

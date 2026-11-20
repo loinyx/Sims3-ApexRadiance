@@ -1,7 +1,7 @@
 #pragma once
 // The player's video recorder: the finished frame (ReShade/GShade look and Apex colour included, the Apex
-// menu and notes left out unless asked) is scaled on the GPU to at most MaxHeight lines, read back through a ring of 3
-// slots without waiting, and encoded by Windows Media Foundation (H.264 or HEVC, hardware encoder when present) into an
+// menu and notes left out unless asked) is scaled on the GPU to at most MaxHeight lines and turned into NV12 there, read
+// back through a ring of 4 slots without waiting, and encoded by Windows Media Foundation (H.264 or HEVC, hardware encoder when present) into an
 // MP4, with the game's own sound (WASAPI process loopback, Windows 10 2004+) as AAC. The render thread never waits: a
 // frame with no free slot is dropped and counted.
 #include <d3d9.h>

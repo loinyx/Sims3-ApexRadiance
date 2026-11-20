@@ -371,8 +371,8 @@ HWND GameWindow(IDirect3DDevice9* dev) {
     return wnd;
 }
 
-void DrawPointerInto(IDirect3DDevice9* dev, BYTE* px, UINT w, UINT h, UINT bytesPerPixel) {
-    if (!dev || !px || !w || !h || bytesPerPixel < 3) return;
+// Each pixel of the image at w x h the pointer covers: f(x, y, its premultiplied B G R A), alpha above 0 only
+template <class F> void ForPointerPixels(IDirect3DDevice9* dev, UINT w, UINT h, F&& f) {
     CURSORINFO ci{};
     ci.cbSize = sizeof(ci);
     if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) return;
@@ -389,15 +389,44 @@ void DrawPointerInto(IDirect3DDevice9* dev, BYTE* px, UINT w, UINT h, UINT bytes
     const int dw = std::max(1, static_cast<int>(g_pointer.w * sx + 0.5)), dh = std::max(1, static_cast<int>(g_pointer.h * sy + 0.5));
     for (int y = std::max(0, y0); y < std::min(static_cast<int>(h), y0 + dh); y++) {
         const int srcY = std::min(g_pointer.h - 1, (y - y0) * g_pointer.h / dh);
-        BYTE* row = px + static_cast<size_t>(y) * w * bytesPerPixel;
         for (int x = std::max(0, x0); x < std::min(static_cast<int>(w), x0 + dw); x++) {
             const int srcX = std::min(g_pointer.w - 1, (x - x0) * g_pointer.w / dw);
             const BYTE* s = g_pointer.bgra.data() + (static_cast<size_t>(srcY) * g_pointer.w + srcX) * 4;
-            const int a = s[3];
-            if (!a) continue;
-            BYTE* d = row + static_cast<size_t>(x) * bytesPerPixel;
-            for (int c = 0; c < 3; c++) d[c] = static_cast<BYTE>(std::min(255, s[c] + d[c] * (255 - a) / 255));
+            if (s[3]) f(x, y, s);
         }
+    }
+}
+
+void DrawPointerInto(IDirect3DDevice9* dev, BYTE* px, UINT w, UINT h, UINT bytesPerPixel) {
+    if (!dev || !px || !w || !h || bytesPerPixel < 3) return;
+    ForPointerPixels(dev, w, h, [&](int x, int y, const BYTE* s) {
+        BYTE* d = px + (static_cast<size_t>(y) * w + x) * bytesPerPixel;
+        for (int c = 0; c < 3; c++) d[c] = static_cast<BYTE>(std::min(255, s[c] + d[c] * (255 - s[3]) / 255));
+    });
+}
+
+// The same blend in NV12 (BT.709, 16-235). YUV is affine in RGB, so the pointer over d is M*s + a*offset + (1 - a)*YUV(d);
+// the chroma of a 2 x 2 block takes the pointer's average over the block (a pixel it does not cover counts as a = 0)
+void DrawPointerIntoNv12(IDirect3DDevice9* dev, BYTE* nv12, UINT w, UINT h) {
+    if (!dev || !nv12 || w < 2 || h < 2) return;
+    struct Block { float b = 0, g = 0, r = 0, a = 0; };
+    std::map<std::pair<int, int>, Block> blocks;
+    ForPointerPixels(dev, w, h, [&](int x, int y, const BYTE* s) {
+        const float a = s[3] / 255.0f;
+        BYTE& yv = nv12[static_cast<size_t>(y) * w + x];
+        const float ys = (0.2126f * s[2] + 0.7152f * s[1] + 0.0722f * s[0]) * (219.0f / 255.0f) + 16.0f * a;
+        yv = static_cast<BYTE>(std::clamp(ys + (1.0f - a) * yv + 0.5f, 0.0f, 255.0f));
+        Block& b = blocks[{x / 2, y / 2}];
+        b.b += s[0], b.g += s[1], b.r += s[2], b.a += a;
+    });
+    for (const auto& [k, b] : blocks) {
+        if (static_cast<UINT>(k.first) * 2 + 1 >= w || static_cast<UINT>(k.second) * 2 + 1 >= h) continue;
+        const float a = b.a / 4.0f, r = b.r / 4.0f, g = b.g / 4.0f, bl = b.b / 4.0f;
+        BYTE* uv = nv12 + static_cast<size_t>(w) * h + static_cast<size_t>(k.second) * w + static_cast<size_t>(k.first) * 2;
+        const float u = (-0.1146f * r - 0.3854f * g + 0.5f * bl) * (224.0f / 255.0f) + 128.0f * a;
+        const float v = (0.5f * r - 0.4542f * g - 0.0458f * bl) * (224.0f / 255.0f) + 128.0f * a;
+        uv[0] = static_cast<BYTE>(std::clamp(u + (1.0f - a) * uv[0] + 0.5f, 0.0f, 255.0f));
+        uv[1] = static_cast<BYTE>(std::clamp(v + (1.0f - a) * uv[1] + 0.5f, 0.0f, 255.0f));
     }
 }
 
@@ -755,6 +784,7 @@ void PruneLater() {
 } // namespace
 
 void DrawMousePointer(IDirect3DDevice9* dev, BYTE* px, UINT w, UINT h, UINT bytesPerPixel) { DrawPointerInto(dev, px, w, h, bytesPerPixel); }
+void DrawMousePointerNv12(IDirect3DDevice9* dev, BYTE* nv12, UINT w, UINT h) { DrawPointerIntoNv12(dev, nv12, w, h); }
 
 void Prune() { PruneLater(); }
 
