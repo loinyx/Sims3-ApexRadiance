@@ -28,83 +28,171 @@ public sealed partial class MainWindow
             return;
         }
         var saves = Saves.List(Docs);
-        host.Children.Add(HomeHero(g, saves.FirstOrDefault()));
         if (_running) host.Children.Add(Banner(InfoBarSeverity.Success, T("The Sims 3 is running"), _session is { } ss ? T("Playing for {0}.", Duration(ss.Played)) : ""));
         if (_offline) host.Children.Add(Banner(InfoBarSeverity.Warning, T("No internet"), T("You can still play. Updates wait until you're back online."), T("Try again"), async () => await LoadReleasesAsync()));
         if (_healthState == HealthState.Blocked)
             host.Children.Add(Banner(InfoBarSeverity.Error, T("Apex Radiance can't start"), T("The game still starts, but without Apex Radiance until this is fixed."), T("Open Health"), () => Show(HealthScreen)));
-
-        var page = new StackPanel { Spacing = 48, Margin = new Thickness(8, -70, 8, 40) };
-        // health and the saves side by side, right under the picture (the crystal sits on the seam); one above the other
-        // on a narrow window
-        var top = new Grid { ColumnSpacing = 32, RowSpacing = 40 };
-        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.3, GridUnitType.Star) });
-        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        top.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        top.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var health = (FrameworkElement)HomeHealth();
-        var shelf = (FrameworkElement)HomeSaves(saves);
-        shelf.Margin = new Thickness(0, 70, 0, 0);
-        Grid.SetColumn(health, 1);
-        top.Children.Add(health);
-        top.Children.Add(shelf);
-        top.SizeChanged += (_, e) =>
-        {
-            var one = e.NewSize.Width < 900;
-            top.ColumnDefinitions[1].Width = one ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-            Grid.SetColumn(health, one ? 0 : 1);
-            Grid.SetRow(health, one ? 1 : 0);
-            shelf.Margin = new Thickness(0, one ? 0 : 70, 0, 0);
-        };
-        page.Children.Add(top);
-        page.Children.Add(HomeMods());
+        host.Children.Add(HomeTop(g, saves));
+        var page = new StackPanel { Spacing = 48, Margin = new Thickness(0, 40, 0, 40) };
+        page.Children.Add(HomeSaves(saves));
         if (HomeNews() is { } news) page.Children.Add(news);
         page.Children.Add(HomePictures());
-        page.Children.Add(HomeGame(g));
         host.Children.Add(page);
     }
 
-    // ---------- the picture, running into the page ----------
+    // ---------- the top: the picture with Play, health and the last session beside it, and the counts under them ----------
 
-    UIElement HomeHero(Game g, Save? next)
+    UIElement HomeTop(Game g, List<Save> saves)
     {
-        // (out to the edges of the scrolling area: the picture is not boxed in)
-        var grid = new Grid { Height = 640, Margin = new Thickness(-32, -28, -32, 0) };
-        if (HomePicture() is { } shot)
-            grid.Children.Add(new Image { Source = Thumb(shot, 1600), Stretch = Stretch.UniformToFill });
-        grid.Children.Add(Shade(new(0, 0), new(0, 1), (0, 0x8C), (0.22, 0), (0.5, 0), (0.82, 0xE6), (1, 0xFF)));
-        grid.Children.Add(Shade(new(0, 0.5), new(1, 0.5), (0, 0xBF), (0.5, 0)));
+        var top = new Grid { ColumnSpacing = 18, RowSpacing = 18 };
+        top.ColumnDefinitions.Add(new ColumnDefinition());
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
+        top.RowDefinitions.Add(new RowDefinition { Height = new GridLength(520) });
+        top.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        if (next is not null)
+        // the picture: rounded, fading into the page at its foot so the buttons sit on it
+        // (the picture keeps a dark look in both themes: a light fade over a game picture only washes it out)
+        var hero = new Grid { CornerRadius = new CornerRadius(26), BorderBrush = Res("ApexGlassLineBrush"), BorderThickness = new Thickness(1), RequestedTheme = ElementTheme.Dark, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x10, 0x10, 0x10)) };
+        if (HomePicture() is { } shot) hero.Children.Add(new Image { Source = Thumb(shot, 1600), Stretch = Stretch.UniformToFill });
+        Border Dark(Windows.Foundation.Point from, Windows.Foundation.Point to, params (double At, byte Alpha)[] stops)
+        {
+            var b = new LinearGradientBrush { StartPoint = from, EndPoint = to };
+            foreach (var (at, a) in stops) b.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(a, 0x0C, 0x0C, 0x0C), Offset = at });
+            return new Border { Background = b, IsHitTestVisible = false };
+        }
+        hero.Children.Add(Dark(new(0, 0), new(0, 1), (0, 0x73), (0.25, 0), (0.55, 0), (0.85, 0xB3), (1, 0xE6)));
+        hero.Children.Add(Dark(new(0, 0.5), new(1, 0.5), (0, 0x8C), (0.55, 0)));
+        if (saves.FirstOrDefault() is { } next)
         {
             var tag = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            var pin = Lucide.Icon("map-pin", 16, Res("ApexAccentBrush"));
+            var pin = Lucide.Icon("map-pin", 15, Res("ApexAccentBrush"));
             pin.VerticalAlignment = VerticalAlignment.Center;
             tag.Children.Add(pin);
             tag.Children.Add(new TextBlock { Text = next.Name, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
-            tag.Children.Add(new TextBlock { Text = T("saved {0}", next.LastPlayed.ToString("d MMM")), Foreground = Res("ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center });
-            grid.Children.Add(new Border
+            tag.Children.Add(new TextBlock { Text = T("saved {0}", next.LastPlayed.ToString("d MMM", LangCulture())), Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0xBD, 0xBD, 0xBD)), VerticalAlignment = VerticalAlignment.Center });
+            var change = Link(T("Change"), () => Show(SavesScreen));
+            change.Padding = new Thickness(8, 2, 8, 2);
+            tag.Children.Add(change);
+            hero.Children.Add(new Border
             {
-                Child = tag, Padding = new Thickness(12, 7, 16, 7), CornerRadius = new CornerRadius(18), Margin = new Thickness(56, 26, 0, 0),
+                Child = tag, Padding = new Thickness(14, 6, 6, 6), CornerRadius = new CornerRadius(20), Margin = new Thickness(26, 24, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
-                Background = new SolidColorBrush(Pick(0x990C0C0C, 0xD9FFFFFF)), BorderBrush = new SolidColorBrush(Pick(0x1AFFFFFF, 0x14000000)), BorderThickness = new Thickness(1),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x99, 0x0C, 0x0C, 0x0C)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 255, 255, 255)), BorderThickness = new Thickness(1),
             });
         }
-        var versions = new TextBlock
-        {
-            Text = "Apex Radiance " + (_state?.ApexVersion ?? "?") + (Known(Components.Modernization) is { Length: > 0 } mv ? " · Modernization " + mv : ""),
-            FontSize = 12, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0x99, 0xED, 0xED, 0xED)),
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 34, 40, 0),
-        };
-        grid.Children.Add(versions);
+        var buttons = PlayButtons();
+        if (buttons is FrameworkElement fb) { fb.Margin = new Thickness(36, 0, 36, 34); fb.HorizontalAlignment = HorizontalAlignment.Left; fb.VerticalAlignment = VerticalAlignment.Bottom; }
+        hero.Children.Add(buttons);
+        top.Children.Add(hero);
 
-        var corner = new StackPanel { Spacing = 24, Margin = new Thickness(56, 0, 0, 120), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom };
-        corner.Children.Add(new TextBlock { Text = "The Sims 3", FontSize = 72, FontWeight = FontWeights.Bold, CharacterSpacing = -30, LineHeight = 72 });
-        corner.Children.Add(PlayButtons());
-        grid.Children.Add(corner);
-        grid.SizeChanged += (_, e) => versions.Visibility = e.NewSize.Width < 640 ? Visibility.Collapsed : Visibility.Visible;
-        return grid;
+        // beside it: health with its crystal, and how the last session went
+        var side = new Grid { RowSpacing = 14 };
+        side.RowDefinitions.Add(new RowDefinition());
+        side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var health = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        _homeCrystal = new Crystal(130); // (a new one each time: a XAML element cannot move between rebuilt screens)
+        _homeCrystal.SetLevel(HealthLevel, animate: false);
+        _homeCrystal.HorizontalAlignment = HorizontalAlignment.Center;
+        health.Children.Add(_homeCrystal);
+        health.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 20, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap });
+        var healthNote = Muted(_healthState switch
+        {
+            HealthState.Blocked => T("Apex Radiance can't start until this is fixed."),
+            HealthState.Ready => T("Everything is in place."),
+            _ => T("Nothing stops the game from starting. Take a look when you have a minute."),
+        });
+        healthNote.HorizontalAlignment = HorizontalAlignment.Center;
+        healthNote.TextAlignment = TextAlignment.Center;
+        healthNote.FontSize = 13;
+        healthNote.MaxWidth = 260;
+        health.Children.Add(healthNote);
+        var glow = new LinearGradientBrush { StartPoint = new(0.5, 0), EndPoint = new(0.5, 1) };
+        glow.GradientStops.Add(new GradientStop { Color = StateTint(0x22), Offset = 0 });
+        glow.GradientStops.Add(new GradientStop { Color = StateTint(0x08), Offset = 0.55 });
+        glow.GradientStops.Add(new GradientStop { Color = StateTint(0), Offset = 1 });
+        var healthCard = new Grid { CornerRadius = new CornerRadius(22), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(22) };
+        healthCard.Children.Add(new Border { Background = glow, Margin = new Thickness(-22), IsHitTestVisible = false });
+        healthCard.Children.Add(health);
+        side.Children.Add(Tile(healthCard, T("Open Health"), () => Show(HealthScreen)));
+
+        var last = SessionHistory.List().FirstOrDefault();
+        var lastBody = new StackPanel { Spacing = 4 };
+        lastBody.Children.Add(new TextBlock { Text = T("LAST TIME"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 140, Foreground = Res("ApexMutedBrush") });
+        lastBody.Children.Add(new TextBlock { Text = last is null ? T("No game played yet") : Played(last.Played), FontSize = 18, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+        lastBody.Children.Add(new TextBlock
+        {
+            Text = last is null ? T("Press Play to start") : (last.End switch { SessionEnd.Crash => T("The game closed on its own"), SessionEnd.LowMemory => T("Ran out of memory"), _ => T("Ended well") })
+                + (last is null ? "" : " · " + last.Started.ToString("dddd HH:mm", LangCulture())),
+            FontSize = 13, Foreground = last?.End is SessionEnd.Crash or SessionEnd.LowMemory ? Res("ApexWarningBrush") : Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        var lastCard = new Border { CornerRadius = new CornerRadius(22), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(22, 18, 22, 18), Child = lastBody };
+        var lastTile = Tile(lastCard, T("Open Health"), () => Show(HealthScreen));
+        Grid.SetRow(lastTile, 1);
+        side.Children.Add(lastTile);
+        Grid.SetColumn(side, 1);
+        top.Children.Add(side);
+
+        // the counts: mods, packs, saves, pictures; each opens its screen
+        var counts = new Grid { ColumnSpacing = 14 };
+        for (int i = 0; i < 4; i++) counts.ColumnDefinitions.Add(new ColumnDefinition());
+        var mods = _mods.Where(m => m.FileType == "package").ToList();
+        var asi = _mods.Count(m => m.FileType == "asi");
+        var off = mods.Count(m => !m.Enabled);
+        var packs = Expansions.Installed(g);
+        var eps = packs.Count(x => x.Pack.Expansion);
+        var noBackup = _health.Count(h => h.Finding.Text == "The save {0} has no backup yet.");
+        var pictures = Gallery.List(Docs).Where(pc => !pc.Video).ToList();
+        void Count(int col, string number, string name, string note, bool warn, Action go)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+            row.Children.Add(new TextBlock { Text = number, FontSize = 26, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center });
+            var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            words.Children.Add(new TextBlock { Text = name, FontSize = 13, FontWeight = FontWeights.SemiBold });
+            words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = warn ? Res("ApexWarningBrush") : Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+            row.Children.Add(words);
+            var card = new Border { CornerRadius = new CornerRadius(16), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), Padding = new Thickness(20, 14, 20, 14), Child = row };
+            var tile = Tile(card, name, go);
+            Grid.SetColumn(tile, col);
+            counts.Children.Add(tile);
+        }
+        Count(0, mods.Count.ToString(), T("Mods"), (off == 0 ? T("all on") : T("{0} off", off)) + (asi > 0 ? " · " + (asi == 1 ? T("1 game plugin") : T("{0} game plugins", asi)) : ""), false, () => Show(ModsScreen));
+        Count(1, packs.Count.ToString(), T("Packs"), (eps == 1 ? T("1 expansion") : T("{0} expansions", eps)) + " · " + T("{0} stuff", packs.Count - eps), false, () => Show(WorldsScreen));
+        Count(2, saves.Count.ToString(), T("Saves"), noBackup == 0 ? T("all backed up") : noBackup == 1 ? T("1 without a backup") : T("{0} without a backup", noBackup), noBackup > 0, () => Show(SavesScreen));
+        Count(3, pictures.Count.ToString(), T("Pictures"), pictures.Count == 0 ? T("none yet") : T("latest {0}", pictures[0].Taken.ToString("d MMM", LangCulture())), false, () => Show(GalleryScreen));
+        Grid.SetRow(counts, 1);
+        Grid.SetColumnSpan(counts, 2);
+        top.Children.Add(counts);
+
+        // a narrow window: the side column goes under the picture
+        top.SizeChanged += (_, e) =>
+        {
+            var one = e.NewSize.Width < 820;
+            top.ColumnDefinitions[1].Width = one ? new GridLength(0) : new GridLength(340);
+            side.Visibility = one ? Visibility.Collapsed : Visibility.Visible;
+        };
+        return top;
     }
+
+    // a card that is a button: the whole of it opens its screen, lifting a little under the pointer
+    Button Tile(FrameworkElement content, string name, Action go)
+    {
+        var b = new Button { Content = content, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch,
+            CornerRadius = new CornerRadius(22) };
+        b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        b.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(180) };
+        b.PointerEntered += (_, _) => b.Translation = new Vector3(0, -2, 0);
+        b.PointerExited += (_, _) => b.Translation = Vector3.Zero;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
+        b.Click += (_, _) => go();
+        return b;
+    }
+
+    // how long a session was, in words
+    string Played(TimeSpan t) => t.TotalHours >= 1 ? T("{0} h {1} min played", (int)t.TotalHours, t.Minutes) : T("{0} min played", Math.Max(1, (int)t.TotalMinutes));
+
+    // ---------- the picture, running into the page ----------
 
     // Play starts the game as it is; Update and play puts the ready updates in first (the player chooses, nothing is forced)
     UIElement PlayButtons()
@@ -112,32 +200,30 @@ public sealed partial class MainWindow
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         if (_running)
         {
-            row.Children.Add(new Border { Background = Res("ApexSuccessSoftBrush"), CornerRadius = new CornerRadius(10), Padding = new Thickness(24, 18, 24, 18),
+            row.Children.Add(new Border { Background = Res("ApexSuccessSoftBrush"), CornerRadius = new CornerRadius(16), Padding = new Thickness(26, 18, 26, 18),
                 Child = new TextBlock { Text = _session is { } s ? T("Playing · {0}", Duration(s.Played)) : T("Playing"), Foreground = Res("ApexSuccessBrush"), FontWeight = FontWeights.SemiBold } });
             return row;
         }
-        var play = new Button { Style = (Style)Application.Current.Resources["AccentButtonStyle"], Height = 60, Padding = new Thickness(52, 0, 52, 0), CornerRadius = new CornerRadius(10), IsEnabled = !_busy && !Maintenance };
-        var pc = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        pc.Children.Add(new FontIcon { Glyph = "", FontSize = 14 });
-        pc.Children.Add(new TextBlock { Text = _healthState == HealthState.Blocked ? T("Play anyway") : T("Play"), FontSize = 18, FontWeight = FontWeights.SemiBold });
+        var ups = WelcomeUpdates();
+        var play = new Button { Style = (Style)Application.Current.Resources["AccentButtonStyle"], Height = 62, Padding = new Thickness(32, 0, 40, 0), CornerRadius = new CornerRadius(16), IsEnabled = !_busy && !Maintenance };
+        var pc = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+        pc.Children.Add(new FontIcon { Glyph = "\uF5B0", FontSize = 15, VerticalAlignment = VerticalAlignment.Center });
+        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        words.Children.Add(new TextBlock { Text = _healthState == HealthState.Blocked ? T("Play anyway") : T("Play"), FontSize = 18, FontWeight = FontWeights.SemiBold });
+        if (ups.Count > 0) words.Children.Add(new TextBlock { Text = ups.Count == 1 ? T("1 update goes in first") : T("{0} updates go in first", ups.Count), FontSize = 12, Opacity = 0.75 });
+        pc.Children.Add(words);
         play.Content = pc;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(play, "PlayButton");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(play, T("Play"));
-        play.Click += async (_, _) => await PlayAsync(null);
+        if (ups.Count > 0) ToolTipService.SetToolTip(play, string.Join("\n", ups.Select(c => c + " " + (_latest.GetValueOrDefault(c)?.Version ?? ""))));
+        play.Click += async (_, _) => await PlayAsync(null, update: ups.Count > 0);
         row.Children.Add(play);
-        if (WelcomeUpdates() is { Count: > 0 } ups)
+        if (ups.Count > 0)
         {
-            var up = new Button { Height = 60, Padding = new Thickness(22, 0, 18, 0), CornerRadius = new CornerRadius(10), IsEnabled = !_busy && !Maintenance,
-                BorderBrush = Res("ApexAccentBrush"), Background = new SolidColorBrush(Pick(0x8C0C0C0C, 0xD9FFFFFF)) };
-            var uc = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            uc.Children.Add(new TextBlock { Text = T("Update and play"), FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
-            uc.Children.Add(new Border { MinWidth = 22, Height = 22, CornerRadius = new CornerRadius(11), Background = Res("ApexAccentBrush"), Padding = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock { Text = ups.Count.ToString(), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("TextOnAccentFillColorPrimaryBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } });
-            up.Content = uc;
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(up, T("Update and play"));
-            ToolTipService.SetToolTip(up, string.Join("\n", ups.Select(c => c + " " + (_latest.GetValueOrDefault(c)?.Version ?? ""))));
-            up.Click += async (_, _) => await PlayAsync(null, update: true);
-            row.Children.Add(up);
+            var asIs = new Button { Content = T("Play without updating"), Height = 62, Padding = new Thickness(22, 0, 22, 0), CornerRadius = new CornerRadius(16), IsEnabled = !_busy && !Maintenance,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x73, 0x0C, 0x0C, 0x0C)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x29, 255, 255, 255)), Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) };
+            asIs.Click += async (_, _) => await PlayAsync(null);
+            row.Children.Add(asIs);
         }
         return row;
     }
@@ -230,8 +316,18 @@ public sealed partial class MainWindow
                 card.Children.Add(new Border { Background = Res("ApexAccentBrush"), CornerRadius = new CornerRadius(11), Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(14),
                     HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
                     Child = new TextBlock { Text = T("PLAY STARTS HERE"), FontSize = 11, FontWeight = FontWeights.Bold, CharacterSpacing = 60, Foreground = new SolidColorBrush(PageColor) } });
-            card.PointerEntered += (_, _) => photo.Scale = new Vector3(1.06f, 1.06f, 1);
-            card.PointerExited += (_, _) => photo.Scale = Vector3.One;
+            // straight into this save: always shown on the first, under the pointer on the others
+            var name = save.Name;
+            var go = new Button { Style = (Style)Application.Current.Resources["AccentButtonStyle"], Width = first ? 52 : 44, Height = first ? 52 : 44, Padding = new Thickness(0),
+                CornerRadius = new CornerRadius(first ? 26 : 22), Margin = new Thickness(14), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
+                IsEnabled = !_busy && !Maintenance && !_running, Opacity = first ? 1 : 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) },
+                Content = new FontIcon { Glyph = "", FontSize = first ? 16 : 14, Margin = new Thickness(2, 0, 0, 0) } };
+            ToolTipService.SetToolTip(go, T("Play this save"));
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(go, T("Play {0}", name));
+            go.Click += async (_, _) => await PlayAsync(name);
+            card.Children.Add(go);
+            card.PointerEntered += (_, _) => { photo.Scale = new Vector3(1.06f, 1.06f, 1); go.Opacity = 1; };
+            card.PointerExited += (_, _) => { photo.Scale = Vector3.One; if (!first) go.Opacity = 0; };
             Grid.SetColumn(card, i);
             shelf.Children.Add(card);
             covers.Add((save, photo, meta, backup));
@@ -273,171 +369,6 @@ public sealed partial class MainWindow
 
     static string Initials(string name) => string.Concat(name.Split([' ', '-', '_'], StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
 
-    // 02 · the mods: a map of their folders, the biggest first (turning mods on and off stays in Mods)
-    UIElement HomeMods()
-    {
-        var s = new StackPanel();
-        var mods = _mods.Where(m => m.FileType == "package").ToList();
-        var asi = _mods.Count(m => m.FileType == "asi");
-        var off = mods.Count(m => !m.Enabled);
-        s.Children.Add(SectionHead("02", mods.Count == 1 ? T("1 mod") : T("{0} mods", mods.Count),
-            mods.Count == 0 ? null : ModRow.SizeText(mods.Sum(m => m.Size)) + " · " + (off == 0 ? T("all on") : T("{0} off", off)) + (asi > 0 ? " · " + (asi == 1 ? T("1 game plugin") : T("{0} game plugins", asi)) : ""),
-            T("Open Mods"), () => Show(ModsScreen)));
-        if (mods.Count == 0) { s.Children.Add(Muted(_checked == default ? T("Counting your mods…") : T("No mods yet. Add them in Mods."))); return s; }
-        var groups = mods.GroupBy(m => DirOf(m).Replace(Path.DirectorySeparatorChar.ToString(), " › ")).Select(x => (Dir: x.Key.Length == 0 ? "Mods" : x.Key, N: x.Count()))
-            .OrderByDescending(x => x.N).ToList();
-        var top = groups.Take(4).ToList();
-        var next = groups.Skip(4).Take(3).ToList();
-        var rest = groups.Skip(7).ToList();
-        if (rest.Count > 0) next.Add((rest.Count == 1 ? rest[0].Dir : T("{0} more places", rest.Count), rest.Sum(x => x.N)));
-        var map = new Grid { RowSpacing = 6, Height = 260 };
-        map.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1.4, GridUnitType.Star) });
-        if (next.Count > 0) map.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        byte[] shades = [0x3B, 0x33, 0x2C, 0x27, 0x24, 0x21, 0x21, 0x1F];
-        var k = 0;
-        Grid Row(List<(string Dir, int N)> items, int row)
-        {
-            var r = new Grid { ColumnSpacing = 6 };
-            for (int i = 0; i < items.Count; i++)
-            {
-                r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(items[i].N, GridUnitType.Star) });
-                var shade = shades[Math.Min(k++, shades.Length - 1)];
-                var block = new Button
-                {
-                    HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch,
-                    Padding = new Thickness(14, 12, 14, 12), CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(0),
-                    Background = new SolidColorBrush(Mix(Pick(0xFF141414, 0xFFFFFFFF), Accent(), (shade - 0x16) / 64.0 * (_light ? 0.55 : 0.75))),
-                };
-                // (a shade of the accent, lighter under the pointer, not the grey of a plain button)
-                block.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Mix(Pick(0xFF141414, 0xFFFFFFFF), Accent(), ((shade - 0x16) / 64.0 + 0.12) * (_light ? 0.55 : 0.75)));
-                block.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Mix(Pick(0xFF141414, 0xFFFFFFFF), Accent(), ((shade - 0x16) / 64.0 - 0.05) * (_light ? 0.55 : 0.75)));
-                block.Resources["ButtonForegroundPointerOver"] = Res("TextFillColorPrimaryBrush");
-                var inside = new Grid();
-                inside.RowDefinitions.Add(new RowDefinition());
-                inside.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                inside.Children.Add(new TextBlock { Text = items[i].Dir, FontSize = 13, Foreground = Res("ApexAccentTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
-                var n = new TextBlock { Text = items[i].N.ToString(), FontSize = 15, FontWeight = FontWeights.SemiBold };
-                Grid.SetRow(n, 1);
-                inside.Children.Add(n);
-                block.Content = inside;
-                var dir = items[i].Dir;
-                block.Click += (_, _) => Show(ModsScreen);
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(block, $"{dir}: {items[i].N}");
-                Grid.SetColumn(block, i);
-                r.Children.Add(block);
-            }
-            Grid.SetRow(r, row);
-            return r;
-        }
-        map.Children.Add(Row(top, 0));
-        if (next.Count > 0) map.Children.Add(Row(next, 1));
-        s.Children.Add(map);
-        var lately = mods.Select(m => (m, Added(m))).OrderByDescending(x => x.Item2).Take(3).ToList();
-        var line = new TextBlock { FontSize = 13, Margin = new Thickness(0, 14, 0, 0), TextWrapping = TextWrapping.Wrap };
-        line.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = T("Added lately") + "   ", Foreground = Res("ApexMutedBrush") });
-        foreach (var (m, when) in lately)
-        {
-            line.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Path.GetFileNameWithoutExtension(m.Name) + " " });
-            line.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = when.ToString("d MMM") + "    ", Foreground = Res("ApexMutedBrush") });
-        }
-        s.Children.Add(line);
-        return s;
-    }
-
-    // health, under the crystal: the crystal stands mostly in the picture with its tip on the card; the card says the state
-    // and lists the notes, one line each with an icon and a quiet action (the saves without a backup gathered in one line)
-    UIElement HomeHealth()
-    {
-        var wrap = new Grid();
-        var all = _health.Where(i => i.Finding.Text != "{0} may overlap in {1}: {2}").OrderByDescending(i => i.Finding.Severity).ToList();
-        const string NoBackup = "The save {0} has no backup yet.";
-        var unsaved = all.Where(i => i.Finding.Text == NoBackup).ToList();
-        var rows = all.Where(i => i.Finding.Text != NoBackup).Take(unsaved.Count > 0 ? 3 : 4).ToList();
-        var body = new StackPanel { Padding = new Thickness(24, 64, 24, 16) };
-        var title = new TextBlock { Text = HealthTitle(), FontSize = 20, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, Foreground = new SolidColorBrush(StateTint(255)) };
-        body.Children.Add(title);
-        var sub = Muted(_checked == default ? T("Checked when you press Play") : T("Checked {0}", _checked.ToString("t")));
-        sub.HorizontalAlignment = HorizontalAlignment.Center;
-        sub.Margin = new Thickness(0, 2, 0, 16);
-        body.Children.Add(sub);
-        var line = Res("ApexHairlineBrush");
-        void Note(bool warn, string text, string? tip, FrameworkElement? action)
-        {
-            var row = new Grid { ColumnSpacing = 12, Padding = new Thickness(0, 11, 0, 11), BorderBrush = line, BorderThickness = new Thickness(0, 1, 0, 0) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            FrameworkElement mark = warn ? Lucide.Icon("triangle-alert", 15, Res("ApexWarningBrush"))
-                : new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 6, Height = 6, Fill = Res("ApexMutedBrush"), Margin = new Thickness(4, 0, 5, 0) };
-            mark.VerticalAlignment = VerticalAlignment.Center;
-            row.Children.Add(mark);
-            var t = new TextBlock { Text = text, FontSize = 13, Foreground = warn ? Res("ApexWarningBrush") : Res("ApexSoftTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-            if (tip is not null) ToolTipService.SetToolTip(t, tip);
-            Grid.SetColumn(t, 1);
-            row.Children.Add(t);
-            if (action is not null) { action.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(action, 2); row.Children.Add(action); }
-            body.Children.Add(row);
-        }
-        // (an action as a quiet link in the accent colour, not a grey button)
-        static FrameworkElement Quiet(Button b)
-        {
-            b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            b.BorderThickness = new Thickness(0);
-            b.Padding = new Thickness(6, 2, 0, 2);
-            b.MinHeight = 0;
-            b.FontSize = 13;
-            b.Foreground = Res("ApexAccentBrush");
-            return b;
-        }
-        foreach (var it in rows)
-        {
-            var full = T(it.Finding.Text, it.Finding.Args);
-            var (short1, _) = Sentences(full);
-            Note(it.Finding.Severity != Severity.Info, short1, full, FindingAction(it) is { } act ? Quiet(act) : null);
-        }
-        if (unsaved.Count > 0)
-        {
-            var names = string.Join(", ", unsaved.Select(i => i.Finding.Args.FirstOrDefault() ?? ""));
-            var docs = Docs;
-            var back = Button(T("Back up all"), async () =>
-            {
-                var list = Saves.List(docs).Where(x => unsaved.Any(u => u.Finding.Args.FirstOrDefault() == x.Name)).ToList();
-                await BackupAsync(list);
-                CheckHealth();
-            });
-            Note(false, unsaved.Count == 1 ? T("1 save has no backup yet") : T("{0} saves have no backup yet", unsaved.Count), names, Quiet(back));
-        }
-        if (all.Count == 0) Note(false, T("Every check passed"), null, null);
-        var open = Link(T("Open Health"), () => Show(HealthScreen));
-        open.HorizontalAlignment = HorizontalAlignment.Center;
-        open.Margin = new Thickness(0, 8, 0, 0);
-        body.Children.Add(open);
-        // (the colour from the top, faint and long, over the card's own grey)
-        var card = new Grid { Margin = new Thickness(0, 70, 0, 0), CornerRadius = new CornerRadius(16), Background = Res("ApexGlassBrush"),
-            BorderBrush = Res("ApexGlassLineBrush"), BorderThickness = new Thickness(1) };
-        var glow = new LinearGradientBrush { StartPoint = new(0.5, 0), EndPoint = new(0.5, 1) };
-        glow.GradientStops.Add(new GradientStop { Color = StateTint(0x14), Offset = 0 });
-        glow.GradientStops.Add(new GradientStop { Color = StateTint(0x06), Offset = 0.4 });
-        glow.GradientStops.Add(new GradientStop { Color = StateTint(0), Offset = 0.85 });
-        card.Children.Add(new Border { Background = glow, IsHitTestVisible = false });
-        card.Children.Add(body);
-        wrap.Children.Add(card);
-        // the crystal: mostly in the picture, its tip on the card, in a soft halo of its colour
-        var crystal = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -150, 0, 0) };
-        crystal.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse
-        {
-            Width = 300, Height = 300, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false,
-            Fill = new RadialGradientBrush { GradientStops = { new GradientStop { Color = StateTint(0x38), Offset = 0 }, new GradientStop { Color = StateTint(0x10), Offset = 0.45 }, new GradientStop { Color = StateTint(0), Offset = 1 } } },
-        });
-        _homeCrystal = new Crystal(190); // (a new one each time: a XAML element cannot move between rebuilt screens)
-        _homeCrystal.SetLevel(HealthLevel, animate: false);
-        crystal.Children.Add(_homeCrystal);
-        crystal.Tapped += (_, _) => Show(HealthScreen);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(crystal, T("Open Health"));
-        wrap.Children.Add(crystal);
-        return wrap;
-    }
-
     // 03 · updates and what's new: every part with an update ready (Apex Radiance, Sims 3 Modernization and the rest), its
     // installed and new version and its release's headline; with none, the newest Apex Radiance notes
     Release? ReleaseOf(string c) => c == Components.Modernization ? ModRelease() : Repo.TryGetValue(c, out var repo) ? _latest.GetValueOrDefault(repo) : null;
@@ -451,7 +382,7 @@ public sealed partial class MainWindow
         if (ups.Count == 0 && apex is null) return null;
         var band = new Grid { CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1), BorderBrush = Res("ApexAccentLineBrush"), Padding = new Thickness(44, 36, 44, 36), ColumnSpacing = 40 };
         band.Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(1, 1), GradientStops =
-            { new GradientStop { Color = Windows.UI.Color.FromArgb(255, 0x2A, 0x25, 0x60), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(255, 0x15, 0x15, 0x1F), Offset = 0.55 }, new GradientStop { Color = Windows.UI.Color.FromArgb(255, 0x12, 0x13, 0x18), Offset = 1 } } };
+            { new GradientStop { Color = Mix(Pick(0xFF141414, 0xFFFFFFFF), Accent(), _light ? 0.16 : 0.22), Offset = 0 }, new GradientStop { Color = Pick(0xFF161616, 0xFFFFFFFF), Offset = 0.55 }, new GradientStop { Color = Pick(0xFF131313, 0xFFFAFAFA), Offset = 1 } } };
         band.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
         band.ColumnDefinitions.Add(new ColumnDefinition());
         var lilac = Res("ApexAccentTextBrush");
@@ -535,34 +466,5 @@ public sealed partial class MainWindow
         }
         s.Children.Add(grid);
         return s;
-    }
-
-    // the game, quietly at the foot: its packs, edition and the parts the launcher put in
-    UIElement HomeGame(Game g)
-    {
-        var row = new Grid { ColumnSpacing = 24, Padding = new Thickness(0, 22, 0, 0), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var packs = Expansions.Installed(g);
-        var badges = new WrapPanel { Spacing = 5 };
-        foreach (var (p, dir) in packs) badges.Children.Add(PackBadge(p, dir, 20));
-        badges.VerticalAlignment = VerticalAlignment.Center;
-        row.Children.Add(badges);
-        var eps = packs.Count(x => x.Pack.Expansion);
-        var text = Muted(g.Label + " · " + T("base game") + (eps > 0 ? ", " + (eps == 1 ? T("1 expansion") : T("{0} expansions", eps)) : "")
-            + (packs.Count - eps is var sp and > 0 ? ", " + (sp == 1 ? T("1 stuff pack") : T("{0} stuff packs", sp)) : ""));
-        text.VerticalAlignment = VerticalAlignment.Center;
-        text.TextTrimming = TextTrimming.CharacterEllipsis;
-        Grid.SetColumn(text, 1);
-        row.Children.Add(text);
-        var links = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 20, VerticalAlignment = VerticalAlignment.Center };
-        var worlds = Link(T("Worlds"), () => Show(WorldsScreen)); worlds.Padding = new Thickness(0);
-        var comps = Link(T("Components"), () => Show(ComponentsStep)); comps.Padding = new Thickness(0);
-        links.Children.Add(worlds);
-        links.Children.Add(comps);
-        Grid.SetColumn(links, 2);
-        row.Children.Add(links);
-        return row;
     }
 }
