@@ -44,10 +44,14 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // (a test run can pick the theme; otherwise it is Windows')
+        if (Environment.GetEnvironmentVariable("APEX_LAUNCHER_THEME") is { } pick) Root.RequestedTheme = pick == "light" ? ElementTheme.Light : ElementTheme.Dark;
+        _light = Root.ActualTheme == ElementTheme.Light;
+        ThemeChrome();
+        Root.ActualThemeChanged += (_, _) => ThemeChanged();
+        _ui.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(ThemeChanged);
         // status bars in a dark tint of their colour (the window's own resources: read before any bar draws), not the default
         // olive and brown
-        foreach (var (key, c) in new[] { ("Success", 0xFF14231Bu), ("Warning", 0xFF2A2214u), ("Error", 0xFF2C1718u), ("Informational", 0xFF17172Au) })
-            Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, (byte)(c >> 16), (byte)(c >> 8), (byte)c));
         // the log's context line: the game, its edition and version, the renderer and the loaders Setup found
         App.Context = () => _game is not { } cg ? "no game chosen"
             : $"game {cg.Root} ({cg.Label} {cg.Version}, {cg.Exe}); renderer {_state?.Layer.ToString() ?? "?"}; loaders {(Scan.Loaders(cg.Bin) is { Count: > 0 } ls ? string.Join(", ", ls) : "none")}";
@@ -458,23 +462,23 @@ public sealed partial class MainWindow : Window
         var names = new[] { T("Game"), T("Components"), T("Install") };
         for (int i = 1; i <= names.Length; i++)
         {
-            if (i > 1) host.Children.Add(new Border { Width = 40, Height = 1, VerticalAlignment = VerticalAlignment.Center, Background = (Brush)Application.Current.Resources["ApexCardBorderBrush"] });
+            if (i > 1) host.Children.Add(new Border { Width = 40, Height = 1, VerticalAlignment = VerticalAlignment.Center, Background = App.Brush("ApexCardBorderBrush") });
             var done = i < current;
             var on = i == current;
             var dot = new Border
             {
                 Width = 22, Height = 22, CornerRadius = new CornerRadius(11),
-                Background = on ? (Brush)Application.Current.Resources["ApexAccentBrush"] : done ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x1A, 0x2A, 0x22)) : null,
-                BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(on || done ? 0 : 1),
+                Background = on ? App.Brush("ApexAccentBrush") : done ? Res("ApexSuccessSoftBrush") : null,
+                BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(on || done ? 0 : 1),
                 Child = done
-                    ? new FontIcon { Glyph = "\uE73E", FontSize = 11, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] }
+                    ? new FontIcon { Glyph = "\uE73E", FontSize = 11, Foreground = App.Brush("ApexSuccessBrush") }
                     : new TextBlock { Text = i.ToString(), FontSize = 11, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                                      Foreground = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x0B, 0x0C, 0x0E)) : (Brush)Application.Current.Resources["ApexMutedBrush"] },
+                                      Foreground = on ? Res("TextOnAccentFillColorPrimaryBrush") : App.Brush("ApexMutedBrush") },
             };
             var label = new TextBlock
             {
                 Text = names[i - 1], FontSize = 13, VerticalAlignment = VerticalAlignment.Center, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
-                Foreground = (Brush)Application.Current.Resources[done ? "ApexSuccessBrush" : on ? "ApexSoftTextBrush" : "ApexMutedBrush"],
+                Foreground = App.Brush(done ? "ApexSuccessBrush" : on ? "ApexSoftTextBrush" : "ApexMutedBrush"),
             };
             var step = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             step.Children.Add(dot);
@@ -499,7 +503,7 @@ public sealed partial class MainWindow : Window
         WelcomeStatus.Visibility = show ? Visibility.Collapsed : WelcomeStatus.Visibility;
         UpdateList.Children.Clear();
         if (!show || _game is not { } g) return;
-        var muted = (Brush)Application.Current.Resources["ApexMutedBrush"];
+        var muted = App.Brush("ApexMutedBrush");
         if (_updated is { } done)
         {
             CardHeader(UpdateList, "\uE73E", "ApexSuccessBrush", T("Everything is updated"), T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."));
@@ -532,7 +536,47 @@ public sealed partial class MainWindow : Window
 
     // ---------- card rows (the update card, the status card) ----------
 
-    static Brush Res(string key) => (Brush)Application.Current.Resources[key];
+    static Brush Res(string key) => App.Brush(key);
+
+    // Windows' light or dark and its accent colour: the window follows them as they change
+    static bool _light { get => App.Light; set => App.Light = value; }
+    readonly Windows.UI.ViewManagement.UISettings _ui = new();
+    static readonly Windows.UI.ViewManagement.UISettings Ui = new();
+    static Windows.UI.Color Accent(Windows.UI.ViewManagement.UIColorType kind = Windows.UI.ViewManagement.UIColorType.Accent) => Ui.GetColorValue(kind);
+    // a colour for the theme in use: its dark form, else its light one
+    static Windows.UI.Color Pick(uint dark, uint light) { var c = _light ? light : dark; return Windows.UI.Color.FromArgb((byte)(c >> 24), (byte)(c >> 16), (byte)(c >> 8), (byte)c); }
+    // the accent as text and icons: light on dark, deep on light
+    static Windows.UI.Color AccentInk => Accent(_light ? Windows.UI.ViewManagement.UIColorType.AccentDark2 : Windows.UI.ViewManagement.UIColorType.AccentLight2);
+    static Windows.UI.Color Mix(Windows.UI.Color a, Windows.UI.Color b, double k) =>
+        Windows.UI.Color.FromArgb(255, (byte)(a.R + (b.R - a.R) * k), (byte)(a.G + (b.G - a.G) * k), (byte)(a.B + (b.B - a.B) * k));
+
+    void ThemeChanged()
+    {
+        var light = Root.ActualTheme == ElementTheme.Light;
+        _light = light;
+        ThemeChrome();
+        RefreshAll();
+        if (_step == GalleryScreen) BuildGallery();
+    }
+
+    // the status bars in a tint of their colour and the window's caption buttons, for the theme in use
+    void ThemeChrome()
+    {
+        foreach (var (key, dark, light) in new[] { ("Success", 0xFF14231Bu, 0xFFE4F3EAu), ("Warning", 0xFF2A2214u, 0xFFFBF1DFu), ("Error", 0xFF2C1718u, 0xFFFBE6E5u), ("Informational", 0xFF17172Au, 0xFFECECF8u) })
+            Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = new SolidColorBrush(Pick(dark, light));
+        if (AppWindow?.TitleBar is { } bar)
+        {
+            var fg = _light ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
+            bar.ButtonForegroundColor = fg;
+            bar.ButtonHoverForegroundColor = fg;
+            bar.ButtonPressedForegroundColor = fg;
+            bar.ButtonInactiveForegroundColor = Pick(0xFF8B8C96, 0xFF8A8B94);
+            bar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+            bar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+            bar.ButtonHoverBackgroundColor = Pick(0x1AFFFFFF, 0x12000000);
+            bar.ButtonPressedBackgroundColor = Pick(0x10FFFFFF, 0x0C000000);
+        }
+    }
 
     static void CardHeader(Panel card, string glyph, string brush, string title, string sub)
     {
@@ -564,7 +608,7 @@ public sealed partial class MainWindow : Window
 
     static void CardStrip(Panel card, string text, FrameworkElement? action)
     {
-        var strip = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, Background = new SolidColorBrush(ColorHelper.FromArgb(255, 0x0F, 0x10, 0x13)),
+        var strip = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, Background = Res("ApexStripBrush"),
             BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
         strip.ColumnDefinitions.Add(new ColumnDefinition());
         strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -627,9 +671,9 @@ public sealed partial class MainWindow : Window
         WelcomeIntro.Visibility = returning ? Visibility.Collapsed : Visibility.Visible;
         StatusList.Children.Clear();
         if (!returning || _state is not { } s || _game is not { } g) return;
-        var muted = (Brush)Application.Current.Resources["ApexMutedBrush"];
-        var ok = (Brush)Application.Current.Resources["ApexSuccessBrush"];
-        var accent = (Brush)Application.Current.Resources["ApexAccentBrush"];
+        var muted = App.Brush("ApexMutedBrush");
+        var ok = App.Brush("ApexSuccessBrush");
+        var accent = App.Brush("ApexAccentBrush");
         string State(string c) => Known(c) is not { Length: > 0 } v ? T("Installed") : Newer(Latest(c), v) ? T("{0} \u2192 {1}", v, Latest(c)!) : T("{0} \u00b7 up to date", v);
         var apexRelease = _latest.GetValueOrDefault(Repo[Components.Apex]);
         var test = Verify.TestBuild(g, s, apexRelease);
@@ -735,8 +779,8 @@ public sealed partial class MainWindow : Window
         if (c.ContentTemplateRoot is not Border card) return;
         var on = c.IsSelected;
         card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
-        card.Background = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x16, 0x16, 0x1D))
-            : hover ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x22, 0x23, 0x29)) : Res("ApexCardBrush");
+        card.Background = on ? Res("ApexAccentSoftBrush")
+            : hover ? Res("ApexHoverBrush") : Res("ApexCardBrush");
     }
 
     void PaintGames()
@@ -806,7 +850,7 @@ public sealed partial class MainWindow : Window
         }
         // (the fixes run with Install / Apply, or Fix settings when nothing else changes)
         if (found.Count == 0)
-            ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] });
+            ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = App.Brush("ApexSuccessBrush") });
         SuggestList.Children.Clear();
         FillSuggestions(SuggestList, GraphicsInfo, onStatus: false);
         SuggestList.Visibility = SuggestList.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed; // (an empty one still takes a gap)
@@ -1020,7 +1064,7 @@ public sealed partial class MainWindow : Window
         FpsCard.Visibility = usable && now is not null ? Visibility.Visible : Visibility.Collapsed;
         // a divider above every row shown but the first; no section when no row shows
         var rows = SmoothList.Children.OfType<Border>().Where(x => x.Visibility == Visibility.Visible).ToList();
-        for (int i = 0; i < rows.Count; i++) { rows[i].BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"]; rows[i].BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0); }
+        for (int i = 0; i < rows.Count; i++) { rows[i].BorderBrush = App.Brush("ApexCardBorderBrush"); rows[i].BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0); }
         SmoothSection.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (now is null) { _fpsWant = null; _fpsCustomOpen = false; return; }
         if (_fpsNow != now) _fpsWant = null; // (the file changed under the picker: start again from it)
@@ -1200,7 +1244,7 @@ public sealed partial class MainWindow : Window
             var on = r == _renderer;
             radio.IsChecked = on;
             card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
-            card.Background = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x16, 0x16, 0x1D)) : Res("ApexCardBrush");
+            card.Background = on ? Res("ApexAccentSoftBrush") : Res("ApexCardBrush");
         }
         _fillingRenderer = false;
     }
@@ -1315,7 +1359,7 @@ public sealed partial class MainWindow : Window
     static void SetState(TextBlock line, (string Text, string Brush) state)
     {
         line.Text = state.Text;
-        line.Foreground = (Brush)Application.Current.Resources[state.Brush];
+        line.Foreground = App.Brush(state.Brush);
     }
 
     string RendererShort(string r) => r switch
@@ -1462,7 +1506,7 @@ public sealed partial class MainWindow : Window
             installBar = new ProgressBar { Maximum = 1 };
             head.Children.Add(installBar);
             UpdateList.Children.Add(head);
-            var list = new StackPanel { BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(0, 4, 0, 4) };
+            var list = new StackPanel { BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(0, 4, 0, 4) };
             UpdateList.Children.Add(list);
             host = list;
             UpdateFooter();
@@ -1616,8 +1660,8 @@ public sealed partial class MainWindow : Window
             ring.Visibility = state == 1 ? Visibility.Visible : Visibility.Collapsed;
             icon.Visibility = state == 1 ? Visibility.Collapsed : Visibility.Visible;
             icon.Glyph = state == 3 ? "" : state == 2 ?"" : "";
-            icon.Foreground = (Brush)Application.Current.Resources[state == 3 ? "ApexWarningBrush" : state == 2 ? "ApexSuccessBrush" : "ApexMutedBrush"];
-            label.Foreground = (Brush)Application.Current.Resources[state == 0 ? "ApexMutedBrush" : "ApexSoftTextBrush"];
+            icon.Foreground = App.Brush(state == 3 ? "ApexWarningBrush" : state == 2 ? "ApexSuccessBrush" : "ApexMutedBrush");
+            label.Foreground = App.Brush(state == 0 ? "ApexMutedBrush" : "ApexSoftTextBrush");
         };
     }
 
@@ -1629,16 +1673,16 @@ public sealed partial class MainWindow : Window
         DoneText.Text = apex ? T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu.") : "";
         DoneSummary.Children.Clear();
         foreach (var c in _lastInstall)
-            DoneSummary.Children.Add(new TextBlock { Text = T("Installed: {0} {1}", Name(c), _state?.Installed(c) ?? ""), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
+            DoneSummary.Children.Add(new TextBlock { Text = T("Installed: {0} {1}", Name(c), _state?.Installed(c) ?? ""), FontSize = 12, Foreground = App.Brush("ApexSoftTextBrush") });
         foreach (var c in _lastRemove)
-            DoneSummary.Children.Add(new TextBlock { Text = T("Removed: {0}", Name(c)), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
+            DoneSummary.Children.Add(new TextBlock { Text = T("Removed: {0}", Name(c)), FontSize = 12, Foreground = App.Brush("ApexSoftTextBrush") });
         // the driver and frame limit changes: done ones as their task, failed ones with the reason in the player's words
         foreach (var (label, kind, on, err) in _lastChanges)
             DoneSummary.Children.Add(new TextBlock
             {
                 Text = err is null ? label : T("Not changed: {0}", label) + "\n" + ChangeError(kind, on, err),
                 FontSize = 12, TextWrapping = TextWrapping.Wrap,
-                Foreground = (Brush)Application.Current.Resources[err is null ? "ApexSoftTextBrush" : "ApexWarningBrush"],
+                Foreground = App.Brush(err is null ? "ApexSoftTextBrush" : "ApexWarningBrush"),
             });
         if (_lastChanges.Any(p => p.Error is not null && p.Error != "Dry run: Setup changes nothing.")) { DoneTitle.Text = T("Some changes did not apply"); DoneText.Text = ""; }
         DoneSummaryCard.Visibility = DoneSummary.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -1679,7 +1723,7 @@ public sealed partial class MainWindow : Window
         }
         if (RestoreList.Children.Count == 0)
             RestoreList.Children.Add(new TextBlock { Text = T("No restore points yet. The launcher makes one before every change."), Margin = new Thickness(18, 14, 18, 14),
-                FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
+                FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = App.Brush("ApexMutedBrush") });
     }
 
     // dates in Setup's language, not the format Windows uses
@@ -1696,15 +1740,15 @@ public sealed partial class MainWindow : Window
     {
         var restore = list is not null;
         list ??= ManageList;
-        var row = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 14, BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
+        var row = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 14, BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
         row.ColumnDefinitions.Add(new ColumnDefinition());
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var text = new StackPanel { Spacing = 2 };
         text.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        text.Children.Add(new TextBlock { Text = desc, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
+        text.Children.Add(new TextBlock { Text = desc, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = App.Brush("ApexMutedBrush") });
         var b = new Button { Content = action, MinWidth = 96, VerticalAlignment = VerticalAlignment.Center, IsEnabled = !_running && !_busy };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, action + " " + title + (restore ? ", " + desc : "")); // (two points can share a title)
-        if (danger) { b.Background = new SolidColorBrush(ColorHelper.FromArgb(255, 0x2A, 0x16, 0x15)); b.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 0xF2, 0xB6, 0xB2)); }
+        if (danger) { b.Background = Res("ApexDangerSoftBrush"); b.Foreground = Res("ApexDangerTextBrush"); }
         b.Click += async (_, _) => await run();
         Grid.SetColumn(b, 1);
         row.Children.Add(text); row.Children.Add(b);
@@ -1813,13 +1857,13 @@ public sealed partial class MainWindow : Window
         if (LicenceList.Children.Count > 0) return;
         foreach (var (name, lic, file, url) in Credits)
         {
-            var row = new Grid { Padding = new Thickness(18, 8, 12, 8), ColumnSpacing = 8, BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, LicenceList.Children.Count == 0 ? 0 : 1, 0, 0) };
+            var row = new Grid { Padding = new Thickness(18, 8, 12, 8), ColumnSpacing = 8, BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(0, LicenceList.Children.Count == 0 ? 0 : 1, 0, 0) };
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.Children.Add(new TextBlock { Text = T(name), FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
-            var l = new TextBlock { Text = lic, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] };
+            var l = new TextBlock { Text = lic, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = App.Brush("ApexMutedBrush") };
             Grid.SetColumn(l, 1); row.Children.Add(l);
             if (file is not null)
             {
@@ -1949,6 +1993,8 @@ public sealed partial class MainWindow : Window
     static void DarkDialog(ContentDialog d)
     {
         static SolidColorBrush B(uint argb) => new(Windows.UI.Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
+        // (light: Windows' own dialog colours)
+        if (_light) return;
         d.Resources["ContentDialogTopOverlay"] = B(0xFF15161A);
         d.Resources["ContentDialogBackground"] = B(0xFF0F1013);
         d.Resources["ContentDialogBorderBrush"] = B(0xFF2A2B33);

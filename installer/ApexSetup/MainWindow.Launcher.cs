@@ -124,7 +124,8 @@ public sealed partial class MainWindow
     {
         var t = StateTint(255);
         byte Mix(byte card, byte c) => (byte)Math.Round(card + (c - card) * amount);
-        return Windows.UI.Color.FromArgb(255, Mix(0x13, t.R), Mix(0x14, t.G), Mix(0x17, t.B));
+        var card = Pick(0xFF131417, 0xFFFFFFFF);
+        return Windows.UI.Color.FromArgb(255, Mix(card.R, t.R), Mix(card.G, t.G), Mix(card.B, t.B));
     }
 
     string HealthTitle() => _healthState switch
@@ -367,7 +368,7 @@ public sealed partial class MainWindow
                     if (await SaveCard.ImageOf(t.Result) is { } img) { pic.Children.Add(new Image { Source = img, Stretch = Stretch.UniformToFill }); if (smallBadge is not null) smallBadge.Visibility = Visibility.Visible; }
                     // a world without its own picture: its pack's icon, large, never a lot's picture
                     else if (packOf is not null) { var big = PackBadge(packOf, installed.FirstOrDefault(x => x.Pack == packOf).Dir, 72); big.HorizontalAlignment = HorizontalAlignment.Center; big.VerticalAlignment = VerticalAlignment.Center; pic.Children.Add(big); }
-                    else pic.Children.Add(new FontIcon { Glyph = "\uE909", FontSize = 30, Foreground = new SolidColorBrush(Rgb(0x4A, 0x4B, 0x55)) });
+                    else pic.Children.Add(new FontIcon { Glyph = "\uE909", FontSize = 30, Foreground = Res("ApexIconMutedBrush") });
                 }, TaskScheduler.FromCurrentSynchronizationContext());
                 col.Children.Add(pic);
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(14, 10, 14, 12) };

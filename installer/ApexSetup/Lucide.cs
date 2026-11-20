@@ -108,7 +108,7 @@ public static class Lucide
 
     // the icon as an element: size in pixels; no brush takes the soft text colour
     public static FrameworkElement Icon(string name, double size = 16, Brush? brush = null, double stroke = 2) =>
-        new LucideIcon { Kind = name, Size = size, Stroke = brush ?? (Brush)Application.Current.Resources["ApexSoftTextBrush"], StrokeWidth = stroke };
+        new LucideIcon { Kind = name, Size = size, Stroke = brush ?? App.Brush("ApexSoftTextBrush"), StrokeWidth = stroke };
 }
 
 // A Lucide icon for XAML and code: Kind is its name ("folder"), Size its width and height, Stroke its colour.
@@ -126,7 +126,7 @@ public sealed partial class LucideIcon : Grid
         Children.Add(new Viewbox { Child = canvas });
         IsHitTestVisible = false;
         Width = Height = 16;
-        _path.Stroke = (Brush)Application.Current.Resources["ApexSoftTextBrush"];
+        _path.Stroke = App.Brush("ApexSoftTextBrush");
     }
 
     public string Kind { get => (string)GetValue(KindProperty); set => SetValue(KindProperty, value); }

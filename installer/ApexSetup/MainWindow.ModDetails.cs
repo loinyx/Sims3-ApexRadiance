@@ -122,7 +122,7 @@ public sealed partial class MainWindow
         foot.Background = new LinearGradientBrush
         {
             StartPoint = new Windows.Foundation.Point(0, 1), EndPoint = new Windows.Foundation.Point(0, 0),
-            GradientStops = { new GradientStop { Color = Windows.UI.Color.FromArgb(255, 15, 16, 19), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0, 15, 16, 19), Offset = 1 } },
+            GradientStops = { new GradientStop { Color = Pick(0xFF0F1013, 0xFFFFFFFF), Offset = 0 }, new GradientStop { Color = Pick(0x000F1013, 0x00FFFFFF), Offset = 1 } },
         };
         foot.ColumnDefinitions.Add(new ColumnDefinition());
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -348,7 +348,7 @@ public sealed partial class MainWindow
     {
         var s = new StackPanel { Spacing = 10 };
         var explain = Note("lightbulb", "ApexAccentBrush", T("The game loads this as one file instead of {0}, so it starts faster. The {0} mods are kept as they were, and any of them can come back out.", info.Originals.Count));
-        s.Children.Add(new Border { Child = explain, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(10), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x17, 0x16, 0x2A)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x2C, 0x2A, 0x4C)), BorderThickness = new Thickness(1) });
+        s.Children.Add(new Border { Child = explain, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(10), Background = Res("ApexAccentSoftBrush"), BorderBrush = Res("ApexAccentLineBrush"), BorderThickness = new Thickness(1) });
         var head = Section(T("Made from {0} mods", info.Originals.Count), Mine(r) ? T("Edit merge") : null, out var edit);
         if (edit is not null) edit.Click += (_, _) => Safe(EditMergeAsync(r, info));
         s.Children.Add(head);
@@ -457,7 +457,7 @@ public sealed partial class MainWindow
         addButton.Click += (_, _) => { addButton.Visibility = Visibility.Collapsed; addPanel.Visibility = Visibility.Visible; search.Focus(FocusState.Programmatic); };
         body.Children.Add(addButton);
         body.Children.Add(addPanel);
-        body.Children.Add(new Border { Child = after, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x17, 0x16, 0x2A)) });
+        body.Children.Add(new Border { Child = after, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(8), Background = Res("ApexAccentSoftBrush") });
         Update();
         var d = new ContentDialog { Title = T("Edit merge"), Content = body, PrimaryButtonText = T("Save and check"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;

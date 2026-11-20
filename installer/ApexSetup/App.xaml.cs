@@ -43,6 +43,18 @@ public partial class App : Application
         TaskScheduler.UnobservedTaskException += (_, e) => { Log(e.Exception); e.SetObserved(); };
     }
 
+    // the theme the window is in (Windows' own unless a test run picks one), and a brush of it by name: code reads the
+    // light or dark one itself, the application's lookup only knows the theme it started with
+    public static bool Light;
+    public static Microsoft.UI.Xaml.Media.Brush Brush(string key)
+    {
+        var res = Current.Resources;
+        var theme = Light ? "Light" : "Default";
+        foreach (var d in new[] { res }.Concat(res.MergedDictionaries))
+            if (d.ThemeDictionaries.TryGetValue(theme, out var t) && t is ResourceDictionary td && td.TryGetValue(key, out var v) && v is Microsoft.UI.Xaml.Media.Brush b) return b;
+        return (Microsoft.UI.Xaml.Media.Brush)res[key];
+    }
+
     static readonly Queue<string> Recent = new();
 
     public static void Log(object? e)

@@ -22,7 +22,7 @@ public sealed partial class MainWindow
             {
                 var on = c.Value == v;
                 c.Card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
-                c.Card.Background = on ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x1F, 0x7F, 0x77, 0xDD)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                c.Card.Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
                 c.Check.Background = on ? Res("ApexAccentBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
                 c.Check.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexMutedBrush");
                 c.Check.Child.Opacity = on ? 1 : 0;

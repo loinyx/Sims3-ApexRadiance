@@ -171,14 +171,14 @@ public sealed partial class MainWindow
             g.Children.Add(t);
             if (count > 0) { var n = new TextBlock { Text = count.ToString(), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(n, 2); g.Children.Add(n); }
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 38, Padding = new Thickness(12, 0, 12, 0), BorderThickness = new Thickness(0),
-                Background = on ? new SolidColorBrush(Rgb(0x22, 0x23, 0x2A)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-            b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Rgb(0x1C, 0x1D, 0x22));
+                Background = on ? new SolidColorBrush(Pick(0xFF22232A, 0xFFE7E7ED)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Pick(0xFF1C1D22, 0xFFF0F0F4));
             b.Click += (_, _) => { _galAlbum = key; _galLimit = 60; BuildGallery(); };
             return b;
         }
         Windows.UI.Color[] dots = [Rgb(0x7D, 0xBE, 0x9A), Rgb(0x57, 0xB6, 0xE8), Rgb(0xE0, 0xA8, 0x4F), Rgb(0xE8, 0x6F, 0xB8), Rgb(0xB4, 0xAE, 0xF2), Rgb(0x8B, 0x8C, 0x96)];
         s.Children.Add(Eyebrow(T("LIBRARY")));
-        s.Children.Add(Album(Gallery.All, T("All pictures"), _galPics.Count, Rgb(0x7F, 0x77, 0xDD)));
+        s.Children.Add(Album(Gallery.All, T("All pictures"), _galPics.Count, AccentInk));
         s.Children.Add(Album(Gallery.Favourites, T("Favourites"), _galPics.Count(p => Gallery.InAlbum(p, Gallery.Favourites, _gal!, _galSaves)), Rgb(0xF2, 0xC9, 0x4C)));
         var head = Eyebrow(T("HOUSEHOLDS"));
         head.Margin = new Thickness(0, 18, 0, 0);
@@ -201,7 +201,7 @@ public sealed partial class MainWindow
         var loose = _gal.Custom.Where(c => !_galSaves.Any(v => string.Equals(homes[c], v.Name, StringComparison.OrdinalIgnoreCase))).ToList();
         Button Mine(CustomAlbum c, bool inside)
         {
-            var b = Album(c.Key, c.Name, _galPics.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), Rgb(0xB4, 0xAE, 0xF2), c.Icon);
+            var b = Album(c.Key, c.Name, _galPics.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), AccentInk, c.Icon);
             if (inside) { b.Margin = new Thickness(18, 0, 0, 0); b.Height = 34; }
             var menu = new MenuFlyout();
             var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = new FontIcon { Glyph = "\uE70F" } };
@@ -261,7 +261,7 @@ public sealed partial class MainWindow
         var look = Gallery.Look(_gal!, _galAlbum);
         var titles = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        if (Gallery.CustomOf(_gal!, _galAlbum) is { } own) name.Children.Add(new FontIcon { Glyph = own.Icon, FontSize = _galBook ? 28 : 22, Foreground = new SolidColorBrush(Rgb(0xB4, 0xAE, 0xF2)), VerticalAlignment = VerticalAlignment.Center });
+        if (Gallery.CustomOf(_gal!, _galAlbum) is { } own) name.Children.Add(new FontIcon { Glyph = own.Icon, FontSize = _galBook ? 28 : 22, Foreground = new SolidColorBrush(AccentInk), VerticalAlignment = VerticalAlignment.Center });
         _boardTitle = _galBook
             ? new TextBlock { Text = AlbumName(_galAlbum), FontFamily = new FontFamily(look.Font), FontSize = 40, FontWeight = FontWeights.SemiBold, Foreground = Ink(look) }
             : new TextBlock { Text = AlbumName(_galAlbum), FontSize = 26, FontWeight = FontWeights.SemiBold };
@@ -340,7 +340,7 @@ public sealed partial class MainWindow
         var track = new Grid { Padding = new Thickness(3), CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center };
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
-        var pill = new Border { CornerRadius = new CornerRadius(7), Background = new SolidColorBrush(Rgb(0x2A, 0x2B, 0x31)), Width = 118, HorizontalAlignment = HorizontalAlignment.Left,
+        var pill = new Border { CornerRadius = new CornerRadius(7), Background = new SolidColorBrush(Pick(0xFF2A2B31, 0xFFE4E4EA)), Width = 118, HorizontalAlignment = HorizontalAlignment.Left,
             TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, Translation = new Vector3(_galBook ? 0 : 118, 0, 0) };
         Grid.SetColumnSpan(pill, 2);
         track.Children.Add(pill);
@@ -351,7 +351,7 @@ public sealed partial class MainWindow
             c.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
             c.Children.Add(new TextBlock { Text = text, FontSize = 13 });
             var b = new Button { Content = c, Height = 34, HorizontalAlignment = HorizontalAlignment.Stretch, BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                Foreground = _galBook == book ? new SolidColorBrush(Microsoft.UI.Colors.White) : Res("ApexSoftTextBrush") };
+                Foreground = _galBook == book ? Res("TextFillColorPrimaryBrush") : Res("ApexSoftTextBrush") };
             b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
@@ -762,7 +762,8 @@ public sealed partial class MainWindow
         var look = Gallery.Look(_gal, _galAlbum);
         var w = stage.ActualWidth;
         var h = stage.ActualHeight;
-        var veil = new Grid { Background = new AcrylicBrush { TintColor = Rgb(0x0A, 0x0A, 0x0D), TintOpacity = 0.55, TintLuminosityOpacity = 0.62, FallbackColor = Windows.UI.Color.FromArgb(0xE6, 0x0A, 0x0A, 0x0D) }, Opacity = 0 };
+        // (the open album is always on a dark veil, whatever the theme)
+        var veil = new Grid { Background = new AcrylicBrush { TintColor = Rgb(0x0A, 0x0A, 0x0D), TintOpacity = 0.55, TintLuminosityOpacity = 0.62, FallbackColor = Windows.UI.Color.FromArgb(0xE6, 0x0A, 0x0A, 0x0D) }, Opacity = 0, RequestedTheme = ElementTheme.Dark };
         var room = new Canvas();
         var roomScroll = new ScrollViewer { Content = room, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         veil.Children.Add(roomScroll);
@@ -1053,7 +1054,7 @@ public sealed partial class MainWindow
         var d = new Border
         {
             Width = 372, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 14, 14), CornerRadius = new CornerRadius(18),
-            Background = new AcrylicBrush { TintColor = Rgb(0x17, 0x18, 0x1C), TintOpacity = 0.82, TintLuminosityOpacity = 0.9, FallbackColor = Rgb(0x1C, 0x1D, 0x22) },
+            Background = new AcrylicBrush { TintColor = Pick(0xFF17181C, 0xFFF7F7F9), TintOpacity = 0.82, TintLuminosityOpacity = 0.9, FallbackColor = Pick(0xFF1C1D22, 0xFFF7F7F9) },
             BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)), BorderThickness = new Thickness(1),
             Shadow = new ThemeShadow(), Translation = new Vector3(420, 0, 40), Opacity = 0, IsHitTestVisible = false,
             TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) },
@@ -1079,7 +1080,7 @@ public sealed partial class MainWindow
         var b = new Button { Content = g, Height = height, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(8, 10, 8, 8), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(on ? 2 : 1),
             BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 255, 255, 255)),
-            Background = new SolidColorBrush(on ? Windows.UI.Color.FromArgb(0x2E, 0x7F, 0x77, 0xDD) : Windows.UI.Color.FromArgb(0x0C, 255, 255, 255)) };
+            Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0CFFFFFF, 0x0A000000)) };
         b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(on ? (byte)0x3A : (byte)0x18, 0x9F, 0x97, 0xF0));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
         b.Click += (_, _) => pick();
@@ -1186,7 +1187,7 @@ public sealed partial class MainWindow
                 var c = Hex(Palette[i].Hex, now);
                 var on = string.Equals(look.Color ?? Hex(now), Palette[i].Hex, StringComparison.OrdinalIgnoreCase);
                 var dot = new Button { Width = 38, Height = 38, HorizontalAlignment = HorizontalAlignment.Center, CornerRadius = new CornerRadius(19), Padding = new Thickness(0),
-                    BorderThickness = new Thickness(on ? 3 : 1), BorderBrush = on ? new SolidColorBrush(Microsoft.UI.Colors.White) : new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)),
+                    BorderThickness = new Thickness(on ? 3 : 1), BorderBrush = on ? Res("TextFillColorPrimaryBrush") : new SolidColorBrush(Pick(0x26FFFFFF, 0x26000000)),
                     Background = new LinearGradientBrush { StartPoint = new(0.2, 0), EndPoint = new(0.8, 1), GradientStops = { new GradientStop { Color = Shade(c, 0.1), Offset = 0 }, new GradientStop { Color = c, Offset = 0.5 }, new GradientStop { Color = Shade(c, -0.3), Offset = 1 } } } };
                 dot.Resources["ButtonBackgroundPointerOver"] = dot.Background;
                 dot.Resources["ButtonBackgroundPressed"] = dot.Background;
@@ -1404,7 +1405,7 @@ public sealed partial class MainWindow
                     if (on) { var tick = new FontIcon { Glyph = "\uE73E", FontSize = 14, Foreground = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(tick, 1); g.Children.Add(tick); }
                     var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(14, 8, 14, 10), CornerRadius = new CornerRadius(12),
                         BorderThickness = new Thickness(on ? 2 : 1), BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 255, 255, 255)),
-                        Background = new SolidColorBrush(on ? Windows.UI.Color.FromArgb(0x2E, 0x7F, 0x77, 0xDD) : Windows.UI.Color.FromArgb(0x0C, 255, 255, 255)) };
+                        Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0CFFFFFF, 0x0A000000)) };
                     Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, f);
                     var font = f;
                     b.Click += (_, _) => { look.Font = font; Changed(); FillCustomize(); };
@@ -2782,6 +2783,8 @@ public sealed partial class MainWindow
         zoomer.ViewChanged += (_, _) => zoomLabel.Content = $"{Math.Round(zoomer.ZoomFactor * 100)}%";
         stage.Children.Add(islandFrame);
         var close = Round("", T("Close"), 40);
+        // (the controls over the dark room keep the dark look in a light theme)
+        foreach (var c in new FrameworkElement[] { prev, next, close, islandFrame }) c.RequestedTheme = ElementTheme.Dark;
         close.HorizontalAlignment = HorizontalAlignment.Right; close.VerticalAlignment = VerticalAlignment.Top; close.Margin = new Thickness(0, -32, -40, 0);
         stage.Children.Add(close);
         shell.Children.Add(stage);
@@ -3027,7 +3030,7 @@ public sealed partial class MainWindow
             g.Children.Add(icon);
             g.Children.Add(new TextBlock { Text = name, FontSize = 12, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, Height = 78, CornerRadius = new CornerRadius(12), Padding = new Thickness(6),
-                Background = new SolidColorBrush(on ? Windows.UI.Color.FromArgb(0x33, 0x7F, 0x77, 0xDD) : Windows.UI.Color.FromArgb(0x0F, 255, 255, 255)),
+                Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0FFFFFFF, 0x0C000000)),
                 BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 255, 255, 255)), BorderThickness = new Thickness(1) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
             return b;
@@ -3129,7 +3132,7 @@ public sealed partial class MainWindow
                 foreach (var c in inAlbums)
                 {
                     var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-                    row.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 14, Foreground = new SolidColorBrush(Rgb(0xB4, 0xAE, 0xF2)) });
+                    row.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 14, Foreground = new SolidColorBrush(AccentInk) });
                     row.Children.Add(new TextBlock { Text = c.Name, FontSize = 13 });
                     var go = new HyperlinkButton { Content = row, Padding = new Thickness(4, 2, 4, 2) };
                     var key = c.Key;

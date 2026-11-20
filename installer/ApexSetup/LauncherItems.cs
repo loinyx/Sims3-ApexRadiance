@@ -95,7 +95,7 @@ public sealed class ModRow : INotifyPropertyChanged
     public void OnCheck() => Check?.Invoke(this);
 
     static Windows.UI.Color Rgb(byte r, byte g, byte b) => Windows.UI.Color.FromArgb(255, r, g, b);
-    static Brush Res(string k) => (Brush)Application.Current.Resources[k];
+    static Brush Res(string k) => App.Brush(k);
 
     public static string IconOf(ModKind k) => k switch
     {

@@ -173,6 +173,9 @@ public sealed partial class MainWindow
             ModGrid.Visibility = _modsGrid ? Visibility.Visible : Visibility.Collapsed;
             ModsViewList.IsChecked = !_modsGrid;
             ModsViewGallery.IsChecked = _modsGrid;
+            // (the chosen one's icon in the colour that reads on the accent)
+            ModsViewListIcon.Stroke = Res(_modsGrid ? "ApexSoftTextBrush" : "TextOnAccentFillColorPrimaryBrush");
+            ModsViewGalleryIcon.Stroke = Res(_modsGrid ? "TextOnAccentFillColorPrimaryBrush" : "ApexSoftTextBrush");
             HuntBanner();
 
             // empty: say what to do here
@@ -457,7 +460,7 @@ public sealed partial class MainWindow
         if (AnimationsOn) g.BackgroundTransition = new BrushTransition { Duration = TimeSpan.FromMilliseconds(120) };
         void Light(bool on)
         {
-            g.Background = on ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x38, 0x7F, 0x77, 0xDD)) : normal;
+            g.Background = on ? Res("ApexAccentSoftBrush") : normal;
             g.BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             if (!AnimationsOn) return;
             g.CenterPoint = new System.Numerics.Vector3((float)g.ActualWidth / 2, (float)g.ActualHeight / 2, 0);
@@ -748,7 +751,7 @@ public sealed partial class MainWindow
     }
 
     void OnModSearchFocus(object sender, RoutedEventArgs e) =>
-        ModSearchBox.BorderBrush = ModSearch.FocusState != FocusState.Unfocused ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x2A, 0x2B, 0x31));
+        ModSearchBox.BorderBrush = ModSearch.FocusState != FocusState.Unfocused ? Res("ApexAccentBrush") : Res("ApexInputBorderBrush");
 
     // the list follows the search once typing pauses (each keystroke refiltered every mod before)
     Microsoft.UI.Dispatching.DispatcherQueueTimer? _searchTimer;
@@ -835,7 +838,7 @@ public sealed partial class MainWindow
             var b = new Button
             {
                 Content = s, Height = 24, Padding = new Thickness(8, 0, 6, 0), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(0),
-                Background = color is not null ? TagDot.BrushOf(color, 0x26) : new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x1C, 0x1B, 0x2E)),
+                Background = color is not null ? TagDot.BrushOf(color, 0x26) : Res("ApexAccentSoftBrush"),
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("Remove filter {0}", text));
             b.Click += (_, _) => { remove(); FillMods(); };
@@ -911,12 +914,12 @@ public sealed partial class MainWindow
             if (used > 0)
             {
                 var badge = new Border { MinWidth = 16, Height = 16, CornerRadius = new CornerRadius(8), Background = Res("ApexAccentBrush"),
-                    Child = new TextBlock { Text = used.ToString(), FontSize = 10, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x0B, 0x0C, 0x0E)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } };
+                    Child = new TextBlock { Text = used.ToString(), FontSize = 10, FontWeight = FontWeights.Bold, Foreground = Res("TextOnAccentFillColorPrimaryBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } };
                 Grid.SetColumn(badge, 2);
                 g.Children.Add(badge);
             }
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 34, Padding = new Thickness(10, 0, 10, 0),
-                BorderThickness = new Thickness(0), Background = i == _filterGroup ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x1C, 0x1B, 0x2E)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+                BorderThickness = new Thickness(0), Background = i == _filterGroup ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, label);
             b.Click += (_, _) => { _filterGroup = at; FillFilterPanel(); };
             nav.Children.Add(b);
@@ -1399,12 +1402,12 @@ public sealed partial class MainWindow
         Grid.SetColumn(t, 1);
         head.Children.Add(t);
         s.Children.Add(head);
-        if (text is not null) s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0xD9, 0xC3, 0x9A)), TextWrapping = TextWrapping.Wrap });
+        if (text is not null) s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexWarningTextBrush"), TextWrapping = TextWrapping.Wrap });
         if (action is not null && run is not null) s.Children.Add(Link(action, run));
         return new Border
         {
             Child = s, Padding = new Thickness(12), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1),
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x1F, 0x1A, 0x12)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x4A, 0x3A, 0x1E)),
+            Background = Res("ApexWarningSoftBrush"), BorderBrush = Res("ApexWarningLineBrush"),
         };
     }
 
