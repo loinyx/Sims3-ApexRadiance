@@ -41,6 +41,9 @@ static class GalleryTests
             Gallery.Toggle(d, trip, c);
             Gallery.Toggle(d, trip, c);
             check(list.Count(p => Gallery.InAlbum(p, trip.Key, d, saves)) == 1 && Gallery.CustomOf(d, trip.Key) == trip, "gallery: the player's own albums hold the pictures put in them, a second toggle takes one out");
+            check(Gallery.HomeOf(trip, d, list, saves) == "Town" && Gallery.HomeOf(new CustomAlbum(), d, list, saves) is null
+                && Gallery.HomeOf(new CustomAlbum { Household = "Arbor", Pictures = [b] }, d, list, saves) == "Arbor",
+                "gallery: an album sits in the household it was made in, else the one its pictures belong to");
             var look = Gallery.Look(d, "Town");
             look.Background = "cork";
             look.Font = "Segoe Print";

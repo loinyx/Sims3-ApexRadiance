@@ -31,6 +31,7 @@ public sealed class AlbumLook
     public string? Color { get; set; }                    // the board's one colour, "#RRGGBB", fading softly darker
     public string Frame { get; set; } = "polaroid";      // polaroid, rounded, stamp, film, circle
     public string Font { get; set; } = "Ink Free";
+    public double Height { get; set; }                     // the board's height its places were laid on
     public int Layout { get; set; }                        // 2: laid along the timeline
     public string Light { get; set; } = "soft";          // soft, spot (a lit middle, darker edges) or flat
     public string Tape { get; set; } = "colour";         // colour, match (the board's own hue) or none
@@ -47,6 +48,7 @@ public sealed class CustomAlbum
     public string Name { get; set; } = "";
     public string Icon { get; set; } = "";        // a Segoe Fluent Icons glyph
     public List<string> Pictures { get; set; } = [];
+    public string? Household { get; set; }     // the household it belongs to; null: the one most of its pictures belong to
     public string Key => Gallery.Mine + Id;
 }
 
@@ -95,6 +97,11 @@ public static class Gallery
         _ when album.StartsWith(Mine, StringComparison.Ordinal) => CustomOf(d, album)?.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase) == true,
         _ => string.Equals(HouseholdOf(p, d, saves), album, StringComparison.OrdinalIgnoreCase),
     };
+
+    // the household an album belongs to: the one it was made in, else the one most of its pictures belong to
+    public static string? HomeOf(CustomAlbum c, GalleryData d, IReadOnlyList<Picture> pictures, IReadOnlyList<Save> saves) =>
+        c.Household ?? pictures.Where(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)).Select(p => HouseholdOf(p, d, saves))
+            .OfType<string>().GroupBy(h => h, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).FirstOrDefault()?.Key;
 
     // what was set on a picture, read only (nothing stored for a picture nothing was set on)
     public static PictureInfo Peek(GalleryData d, string path) => d.Pictures.TryGetValue(path, out var i) ? i : new PictureInfo();

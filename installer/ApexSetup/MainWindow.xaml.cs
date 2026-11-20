@@ -275,6 +275,7 @@ public sealed partial class MainWindow : Window
     {
         _step = step;
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
+        if (step != GalleryScreen) FullBleed(false);
         Scroller.Visibility = step == ModsScreen ? Visibility.Collapsed : Visibility.Visible; // (Mods scrolls in its own panes)
         QueueAudit();
         Animate(_screens[step]);

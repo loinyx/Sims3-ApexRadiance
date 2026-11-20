@@ -17,11 +17,7 @@ public sealed partial class MainWindow
         if (AuditFile is null || _auditQueued) return;
         _auditQueued = true;
         // (after layout and the screen's animation settle)
-        var t = DispatcherQueue.CreateTimer();
-        t.Interval = TimeSpan.FromMilliseconds(900);
-        t.IsRepeating = false;
-        t.Tick += (_, _) => { _auditQueued = false; Audit(); };
-        t.Start();
+        After(900, () => { _auditQueued = false; Audit(); });
     }
 
     void Audit()
