@@ -662,7 +662,7 @@ public sealed partial class MainWindow
     {
         var look = Gallery.Look(_gal!, _galAlbum);
         // (boards laid out before the timeline get the timeline's layout once)
-        if (look.Layout < 3) { look.Places.Clear(); look.Layout = 3; }
+        if (look.Layout < 4) { look.Places.Clear(); look.Layout = 4; }
         var ink = Ink(look);
         // as tall as the window allows, the pictures sized with it
         BoardHeight = BoardFits();
@@ -687,7 +687,7 @@ public sealed partial class MainWindow
             if (i == 0 || pics[i].Taken.Date != pics[i - 1].Taken.Date) { if (i > 0) x += 90 * s; days.Add((x, pics[i].Taken.Date)); }
             xs[i] = x;
             last = ((i % 4 == 0 ? 290 : 230) * s * look.Size + 24);
-            x += last * 0.8;
+            x += last * 0.95;
         }
         var width = Math.Max(1100, pics.Count == 0 ? 0 : xs[^1] + last + 110 * s);
         var canvas = new Canvas { Width = width, Height = BoardHeight, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
