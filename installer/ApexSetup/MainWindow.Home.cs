@@ -44,6 +44,8 @@ public sealed partial class MainWindow
         _homeFit = (_, _) => Fit();
         Scroller.SizeChanged += _homeFit;
         top.Loaded += (_, _) => Fit();
+        // (a banner above measures after the top: it moves the top down, so fit again once it has a size)
+        foreach (var banner in host.Children.OfType<FrameworkElement>().TakeWhile(c => c != top)) banner.SizeChanged += (_, _) => Fit();
         var page = new StackPanel { Spacing = 40, Margin = new Thickness(0, 32, 0, 32) };
         page.Children.Add(HomeSaves(saves));
         if (HomeNews() is { } news) page.Children.Add(news);
@@ -108,7 +110,7 @@ public sealed partial class MainWindow
         health.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 20, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap });
         var healthNote = Muted(_healthState switch
         {
-            HealthState.Blocked => T("Apex Radiance can't start until this is fixed."),
+            HealthState.Blocked => T("The game still starts, but without Apex Radiance until this is fixed."),
             HealthState.Ready => T("Everything is in place."),
             _ => T("Nothing stops the game from starting. Take a look when you have a minute."),
         });

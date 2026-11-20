@@ -59,10 +59,14 @@ public sealed partial class MainWindow
     ConflictCheck? _conflicts;
     int _healthRun;
     bool _healthChecking;
-    void CheckHealth()
+    Task _healthDone = Task.CompletedTask;
+    // (the task ends when this check's result is in _health; Play awaits it, the rest let it run)
+    Task CheckHealth()
     {
-        if (_game is not { } g || _state is not { } s) { _health = []; _healthState = HealthState.Ready; return; }
+        if (_game is not { } g || _state is not { } s) { _health = []; _healthState = HealthState.Ready; return Task.CompletedTask; }
         var run = ++_healthRun;
+        var done = new TaskCompletionSource();
+        _healthDone = done.Task;
         var (docs, apex, mods) = (Docs, _latest.GetValueOrDefault(Releases.Apex), _modsLoaded ? _mods.ToList() : null);
         if (_conflicts is null || _conflicts.Offline != _offline) _conflicts = new ConflictCheck { Offline = _offline };
         var conflicts = _conflicts;
@@ -77,16 +81,32 @@ public sealed partial class MainWindow
                 return Health.Gather(g, s, docs, apex, mods, mods is null ? null : conflicts);
             }
             catch (Exception e) { App.Log(e); return []; }
-        }).ContinueWith(t => DispatcherQueue.TryEnqueue(() =>
+        }).ContinueWith(t =>
         {
-            if (run != _healthRun) return;
-            _healthChecking = false;
-            if (read is not null && !_modsLoaded) _mods = read; // (for Show in Mods; the Mods screen still reads its own)
-            _health = t.Result;
-            _healthState = Health.StateOf(_health);
-            _checked = DateTime.Now;
-            RefreshLauncher();
-        }));
+            if (!DispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    if (run != _healthRun) return;
+                    _healthChecking = false;
+                    if (read is not null && !_modsLoaded) _mods = read; // (for Show in Mods; the Mods screen still reads its own)
+                    _health = t.Result;
+                    _healthState = Health.StateOf(_health);
+                    _checked = DateTime.Now;
+                    // (only the screens that show health are built again: Mods and the Gallery keep what the player is doing)
+                    if (_step is Home or HealthScreen or WorldsScreen or SavesScreen or NewsScreen or SettingsScreen) RefreshLauncher();
+                    else HealthBadge.Visibility = _game is not null && _healthState != HealthState.Ready ? Visibility.Visible : Visibility.Collapsed;
+                }
+                finally { done.TrySetResult(); }
+            })) done.TrySetResult();
+        });
+        return done.Task;
+    }
+
+    // waits for the newest health check, also one started while waiting
+    async Task HealthReady()
+    {
+        while (true) { var t = _healthDone; await t; if (t == _healthDone) return; }
     }
 
     // ---------- Home ----------
@@ -194,14 +214,16 @@ public sealed partial class MainWindow
             await InstallAsync(ups);
             if (WelcomeUpdates().Count > 0) return; // (it failed or was cancelled: its message said why)
         }
-        CheckHealth();
+        _ = CheckHealth();
+        await HealthReady();
         // the fixes that are safe to make without asking (each keeps a copy of the file it changes)
         if (_settings.FixSafeAutomatically && _health.Any(i => i.Finding.CanFix))
         {
             if (!await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); },
                 T("Fixed."), null, "Fix incompatible settings")) return;
             RefreshGame();
-            CheckHealth();
+            _ = CheckHealth();
+            await HealthReady();
         }
         if (_healthState == HealthState.Blocked)
         {
@@ -240,7 +262,7 @@ public sealed partial class MainWindow
         Activate();
         _tray?.Hide();
         RefreshGame();
-        CheckHealth();
+        _ = CheckHealth();
         RefreshAll();
         if (Session.ShouldOffer(info, _state?.RestartHost ?? false))
         {
@@ -290,7 +312,7 @@ public sealed partial class MainWindow
         _defaultsFor = null;
         _modsLoaded = false;
         RefreshGame();
-        CheckHealth();
+        _ = CheckHealth();
         if (_step is Welcome or GameStep && !FirstInstall) Show(Home); // (a first install finished in the administrator window)
         else RefreshAll();
         return false;
@@ -365,9 +387,9 @@ public sealed partial class MainWindow
             var installed = Expansions.Installed(g);
             foreach (var w in list)
             {
-                var card = new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), CornerRadius = new CornerRadius(10) };
+                var card = new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), CornerRadius = new CornerRadius(14) };
                 var col = new StackPanel();
-                var pic = new Grid { Height = 150, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(10, 10, 0, 0) };
+                var pic = new Grid { Height = 150, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(14, 14, 0, 0) };
                 pic.SizeChanged += (_, e) => { var h = Math.Round(e.NewSize.Width * 0.56); if (Math.Abs(pic.Height - h) > 1) pic.Height = h; }; // (the picture keeps its shape as the card widens)
                 var world = w;
                 var packOf = w.Pack is { } wp ? Expansions.All.First(p => p.Short == wp) : null;
@@ -438,7 +460,7 @@ public sealed partial class MainWindow
         var host = ScreenHealth;
         host.Children.Clear();
         if (_game is null) { host.Children.Add(Heading(T("Health"))); host.Children.Add(Muted(T("Choose the game first."))); return; }
-        if (_checked == default) CheckHealth();
+        if (_checked == default) _ = CheckHealth();
         var top = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Spacing = 12 };
         _healthCrystal = new Crystal(170);
         _healthCrystal.SetLevel(HealthLevel, animate: false);
@@ -458,7 +480,7 @@ public sealed partial class MainWindow
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
         var check = new Button { Content = Icon("", T("Check now")), CornerRadius = new CornerRadius(18), Padding = new Thickness(16, 7, 18, 7) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(check, "HealthCheckNow");
-        check.Click += (_, _) => { _modsLoaded = false; RefreshGame(); CheckHealth(); BuildHealth(); };
+        check.Click += (_, _) => { _modsLoaded = false; RefreshGame(); _ = CheckHealth(); BuildHealth(); };
         var copy = new Button { Content = new FontIcon { Glyph = "", FontSize = 14 }, CornerRadius = new CornerRadius(18), Padding = new Thickness(11, 9, 11, 9) };
         ToolTipService.SetToolTip(copy, T("Copy report"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(copy, T("Copy report"));
@@ -656,7 +678,7 @@ public sealed partial class MainWindow
     Button? FindingAction(Health.Item it)
     {
         var f = it.Finding;
-        if (f.CanFix) return Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); CheckHealth(); BuildHealth(); } }, accent: true);
+        if (f.CanFix) return Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); _ = CheckHealth(); BuildHealth(); } }, accent: true);
         if (ModsFor(it.Files) is { Count: > 0 } hits) return Button(T("Show in Mods"), () => ShowInMods(hits));
         if (f.Link is { } link) return Button(T("Read more"), () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }));
         return null;
@@ -726,7 +748,7 @@ public sealed partial class MainWindow
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.Children.Add(Col(new TextBlock { Text = T(p.Label, p.Args), FontSize = 14 }, Muted(p.Created.ToLocalTime().ToString("g"))));
-        var b = Button(action, async () => { await RestoreAsync(p); CheckHealth(); BuildHealth(); });
+        var b = Button(action, async () => { await RestoreAsync(p); _ = CheckHealth(); BuildHealth(); });
         b.IsEnabled = !_running && !_busy;
         Grid.SetColumn(b, 1);
         b.VerticalAlignment = VerticalAlignment.Center;

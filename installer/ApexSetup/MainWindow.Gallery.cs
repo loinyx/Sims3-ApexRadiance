@@ -358,7 +358,7 @@ public sealed partial class MainWindow
             by.Items.Add(T("By day"));
             by.Items.Add(T("By household"));
             by.SelectedIndex = _galByHome ? 1 : 0;
-            by.SelectionChanged += (_, _) => { _galByHome = by.SelectedIndex == 1; BuildGallery(); };
+            by.SelectionChanged += (_, _) => { _galByHome = by.SelectedIndex == 1; DispatcherQueue.TryEnqueue(BuildGallery); }; // (later: the build removes this box)
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(by, T("Group"));
             tools.Children.Add(by);
             tools.Children.Add(Button(T("Screenshots folder"), () => OpenFolder(Gallery.Folder(Docs))));

@@ -139,10 +139,13 @@ public sealed partial class MainWindow
     }
 
     // the player's own picture first, else the one inside the package; one at a time, behind the list
-    static async Task LoadModPicturesAsync(List<ModRow> rows)
+    // (a newer list read stops an older loader: every install, merge or removal reads the list again)
+    async Task LoadModPicturesAsync(List<ModRow> rows)
     {
+        var whole = ReferenceEquals(rows, _modRows);
         foreach (var r in rows)
         {
+            if (whole && !ReferenceEquals(rows, _modRows)) return;
             try
             {
                 var bytes = await Task.Run(() => ModNotes.PicturePath(r.File.Rel) is { } own ? File.ReadAllBytes(own) : Mods.Thumbnail(r.File));

@@ -449,6 +449,14 @@ public sealed partial class MainWindow : Window
     }
 
     void OnFirstStart(object sender, RoutedEventArgs e) => Show(GameStep);
+    // a small window: the aurora panel goes and the words take the width (beside it they were squeezed to a few letters)
+    void OnFirstRunSized(object sender, SizeChangedEventArgs e)
+    {
+        var small = e.NewSize.Width < 900;
+        FirstRun.ColumnDefinitions[0].Width = new GridLength(small ? 0 : 400);
+        GlowPanel.Visibility = small ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     void OnGlowPanelSize(object sender, SizeChangedEventArgs e) =>
         GlowPanel.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
     void OnNotThisGame(object sender, RoutedEventArgs e) => Show(GameStep);
@@ -555,8 +563,10 @@ public sealed partial class MainWindow : Window
         var light = Root.ActualTheme == ElementTheme.Light;
         _light = light;
         ThemeChrome();
+        // (the folder pane and the rows hold brushes of the old theme; RefreshAll builds the screen in use, the Gallery too)
+        _folderSig = "";
+        foreach (var r in _modRows) r.Refresh();
         RefreshAll();
-        if (_step == GalleryScreen) BuildGallery();
     }
 
     // the status bars in a tint of their colour and the window's caption buttons, for the theme in use
@@ -824,7 +834,7 @@ public sealed partial class MainWindow : Window
         _found = _state is null ? new() : Compat.Check(_game!, _state);
         _health = _state is null ? [] : Verify.Files(_game!, _state, _latest.GetValueOrDefault(Releases.Apex)).Concat(_found)
             .Select(f => new Health.Item(f, Health.AreaOf(f), [])).ToList();
-        CheckHealth(); // (the full check, off the window's thread; this quick list shows until it is done)
+        _ = CheckHealth(); // (the full check, off the window's thread; this quick list shows until it is done)
         _healthState = Health.StateOf(_health);
         _checked = DateTime.Now;
         GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;

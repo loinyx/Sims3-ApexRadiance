@@ -43,7 +43,7 @@ public sealed partial class MainWindow
         {
             var bar = new SelectorBar { Margin = new Thickness(12, 0, 12, 0) };
             foreach (var (key, label) in tabs) bar.Items.Add(new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab });
-            bar.SelectionChanged += (s, _) => { if (s.SelectedItem?.Tag is string k && k != _detailsTab) { _detailsTab = k; FillModDetails(); } };
+            bar.SelectionChanged += (s, _) => { if (s.SelectedItem?.Tag is string k && k != _detailsTab) { _detailsTab = k; DispatcherQueue.TryEnqueue(FillModDetails); } }; // (later: the fill removes this bar)
             ModDetailsHead.Children.Add(bar);
             ModDetailsHead.Children.Add(new Border { Height = 1, Background = Res("ApexCardBorderBrush") });
         }

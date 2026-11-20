@@ -113,7 +113,7 @@
             <DataTemplate x:Key="SaveTemplate" x:DataType="local:SaveCard">
                 <Border Style="{StaticResource ApexCard}" Padding="0">
                     <StackPanel>
-                        <Border Height="150" CornerRadius="8,8,0,0" Background="{ThemeResource ApexPillBrush}">
+                        <Border Height="150" CornerRadius="12,12,0,0" Background="{ThemeResource ApexPillBrush}">
                             <Grid>
                                 <FontIcon Glyph="&#xE716;" FontSize="30" Foreground="{ThemeResource ApexIconMutedBrush}" Visibility="{x:Bind Placeholder, Mode=OneWay}" />
                                 <Image Source="{x:Bind Photo, Mode=OneWay}" Stretch="Uniform" />
@@ -846,7 +846,7 @@
         </NavigationView>
 
         <!-- a first install opens here, over the window (no sidebar until Apex Radiance is installed) -->
-        <Grid x:Name="FirstRun" Grid.Row="1" Visibility="Collapsed" Background="{ThemeResource ApexPageBrush}">
+        <Grid x:Name="FirstRun" Grid.Row="1" Visibility="Collapsed" Background="{ThemeResource ApexPageBrush}" SizeChanged="OnFirstRunSized">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="400" />
                 <ColumnDefinition Width="*" />

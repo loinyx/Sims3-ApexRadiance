@@ -141,7 +141,7 @@ public sealed class ModRow : INotifyPropertyChanged
     public void SetFindings(IReadOnlyList<string> findings) { Findings = findings; Refresh(); }
 
     // notes, tags, findings or the New mark changed
-    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(TagsVisible), nameof(NewVisible), nameof(Kind), nameof(KindIcon));
+    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(TagsVisible), nameof(NewVisible), nameof(Kind), nameof(KindIcon), nameof(SizeBrush));
 
     public void OnToggled(object sender, RoutedEventArgs e)
     {
