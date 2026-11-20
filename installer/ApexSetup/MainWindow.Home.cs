@@ -32,7 +32,18 @@ public sealed partial class MainWindow
         if (_offline) host.Children.Add(Banner(InfoBarSeverity.Warning, T("No internet"), T("You can still play. Updates wait until you're back online."), T("Try again"), async () => await LoadReleasesAsync()));
         if (_healthState == HealthState.Blocked)
             host.Children.Add(Banner(InfoBarSeverity.Error, T("Apex Radiance can't start"), T("The game still starts, but without Apex Radiance until this is fixed."), T("Open Health"), () => Show(HealthScreen)));
-        host.Children.Add(HomeTop(g, saves));
+        var top = (FrameworkElement)HomeTop(g, saves);
+        host.Children.Add(top);
+        // the top fills the window, so the households show only once the page scrolls
+        void Fit()
+        {
+            var above = host.Children.OfType<FrameworkElement>().TakeWhile(c => c != top).Sum(c => c.ActualHeight + host.Spacing);
+            top.Height = Math.Max(560, Scroller.ActualHeight - Scroller.Padding.Top - 14 - above);
+        }
+        if (_homeFit is { } old) Scroller.SizeChanged -= old;
+        _homeFit = (_, _) => Fit();
+        Scroller.SizeChanged += _homeFit;
+        top.Loaded += (_, _) => Fit();
         var page = new StackPanel { Spacing = 40, Margin = new Thickness(0, 32, 0, 32) };
         page.Children.Add(HomeSaves(saves));
         if (HomeNews() is { } news) page.Children.Add(news);
@@ -47,7 +58,7 @@ public sealed partial class MainWindow
         var top = new Grid { ColumnSpacing = 12, RowSpacing = 12 };
         top.ColumnDefinitions.Add(new ColumnDefinition());
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
-        top.RowDefinitions.Add(new RowDefinition { Height = new GridLength(520) });
+        top.RowDefinitions.Add(new RowDefinition());
         top.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         // the picture: rounded, fading into the page at its foot so the buttons sit on it
@@ -174,11 +185,13 @@ public sealed partial class MainWindow
     }
 
     // a card that is a button: the whole of it opens its screen, lifting a little under the pointer
+    SizeChangedEventHandler? _homeFit;
+
     Button Tile(FrameworkElement content, string name, Action go)
     {
         var b = new Button { Content = content, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
             HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch,
-            CornerRadius = new CornerRadius(22) };
+            CornerRadius = content switch { Border bd => bd.CornerRadius, Grid gr => gr.CornerRadius, _ => new CornerRadius(22) } }; // the card's own corners, or the button clips its border
         b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         b.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(180) };

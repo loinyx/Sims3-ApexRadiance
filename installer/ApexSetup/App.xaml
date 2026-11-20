@@ -16,7 +16,7 @@
                     <SolidColorBrush x:Key="ApexContentBrush" Color="#0E0E0E" />
                     <SolidColorBrush x:Key="ApexPageBrush" Color="#0C0C0C" />
                     <SolidColorBrush x:Key="ApexCardBrush" Color="#171717" />
-                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#222222" />
+                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#2C2C2C" />
                     <SolidColorBrush x:Key="ApexMutedBrush" Color="#8E8E8E" />
                     <SolidColorBrush x:Key="ApexSoftTextBrush" Color="#BDBDBD" />
                     <SolidColorBrush x:Key="ApexSuccessBrush" Color="#7DBE9A" />
@@ -49,7 +49,7 @@
                     <SolidColorBrush x:Key="ApexContentBrush" Color="#E6FBFBFB" />
                     <SolidColorBrush x:Key="ApexPageBrush" Color="#F6F6F6" />
                     <SolidColorBrush x:Key="ApexCardBrush" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#E2E2E2" />
+                    <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#D4D4D4" />
                     <SolidColorBrush x:Key="ApexMutedBrush" Color="#6E6E6E" />
                     <SolidColorBrush x:Key="ApexSoftTextBrush" Color="#454545" />
                     <SolidColorBrush x:Key="ApexSuccessBrush" Color="#2F8A5B" />
