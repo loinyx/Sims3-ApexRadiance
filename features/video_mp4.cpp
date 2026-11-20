@@ -153,6 +153,7 @@ bool MakeNv12(IDirect3DDevice9* dev, UINT w, UINT h, std::string& why) {
     if (ShaderCache::CreatePixelShader(dev, g_nv12Ps, &g_nv12, &err) != ShaderCache::Result::Ok || !g_nv12) { why = "its shader: " + err.substr(0, 200); return false; }
     if (FAILED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &g_rgbTex, nullptr)) || !g_rgbTex ||
         FAILED(g_rgbTex->GetSurfaceLevel(0, &g_rgbSurf))) { why = "its scaled frame"; return false; }
+    D3D9Hooks::SettleDeferredShaders(dev); // (creating the block reads the device's shaders)
     if (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &g_saved)) || !g_saved) { why = "a state block"; return false; }
     struct V { float x, y, z, rhw; };
     const float x1 = w / 4.0f - 0.5f, y1 = h * 1.5f - 0.5f;
