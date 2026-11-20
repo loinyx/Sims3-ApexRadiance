@@ -576,7 +576,19 @@ public sealed partial class MainWindow
             if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; End(true); }
             else if (e.Key == Windows.System.VirtualKey.Escape) { e.Handled = true; End(false); }
         };
-        box.LostFocus += (_, _) => End(true);
+        box.LostFocus += (_, _) => End(OnScreen(box));
+    }
+
+    // (a rebuild, as a resize into another layout makes, takes a rename box away and its focus with it: that is not the
+    // player done typing, so the half-typed name is not saved)
+    bool OnScreen(UIElement e)
+    {
+        for (DependencyObject? p = e; p is not null; p = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(p))
+        {
+            if (p is UIElement { Visibility: Visibility.Collapsed }) return false;
+            if (p == Content) return true;
+        }
+        return false;
     }
 
     // ---------- folders ----------

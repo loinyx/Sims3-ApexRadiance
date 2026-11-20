@@ -59,6 +59,8 @@ public partial class App : Application
 
     public static void Log(object? e)
     {
+        // (an expected dry-run refusal: one line, so the real errors stand out in the log)
+        if (e is InvalidOperationException { Message: var dry } && dry.StartsWith("Dry run: ", StringComparison.Ordinal)) e = dry;
         string ctx;
         try { ctx = Context(); } catch (Exception) { ctx = ""; }
         try

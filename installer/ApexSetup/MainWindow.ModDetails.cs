@@ -154,7 +154,7 @@ public sealed partial class MainWindow
                     else FillModDetails();
                 }
                 box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; End(true); } else if (e.Key == Windows.System.VirtualKey.Escape) { e.Handled = true; End(false); } };
-                box.LostFocus += (_, _) => End(true);
+                box.LostFocus += (_, _) => End(OnScreen(box));
             };
             Grid.SetColumn(rename, 1);
             nameRow.Children.Add(rename);
