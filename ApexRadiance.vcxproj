@@ -173,6 +173,7 @@
     <ClCompile Include="features\deadline_slicing.cpp" />
     <ClCompile Include="features\map_view.cpp" />
     <ClCompile Include="features\object_index.cpp" />
+    <ClCompile Include="features\string_table_index.cpp" />
     <ClCompile Include="features\object_light_bridge.cpp" />
     <ClCompile Include="features\room_map_dither.cpp" />
     <ClCompile Include="features\picture.cpp" />
@@ -406,6 +407,8 @@
     <ClInclude Include="features\room_solve_share_policy.h" />
     <ClInclude Include="features\map_view.h" />
     <ClInclude Include="features\object_index.h" />
+    <ClInclude Include="features\string_table_index.h" />
+    <ClInclude Include="features\string_table_index_core.h" />
     <ClInclude Include="features\object_light_bridge.h" />
     <ClInclude Include="features\room_map_dither.h" />
     <ClInclude Include="features\picture.h" />

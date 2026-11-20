@@ -381,6 +381,12 @@ enum class Id : uint16_t {
     TestHalf,           // float 0x00F9A5AC (0.5) in FUN_0069d4c0
     TestPenumbra,       // float 0x00FF307C (0.5) in FUN_0069a8c0
     TestWallY,          // float 0x01158A50 (1.0): the wall height test of FUN_0069aa90
+    // ---- String table index (features/string_table_index.h; group "StringTableIndex") ----
+    StblGetString,      // FUN_0059c5b0 thiscall(service; u64 key), ret 8: the text of a string key (walks the table list at +0x48)
+    StblWalk,           // 0x0059C5C2: the walk's start in it (mov esi,[ebx+48h]; add ebx,48h; ...); its loop test at +0x4C
+    StblClear,          // FUN_0059af00 thiscall(service): releases every table and node of the list
+    StblAdd,            // FUN_0059b190 thiscall(service; ResourceKey*), ret 4: loads one table into its node (adds the node first)
+    StblRebuild,        // FUN_0059bde0 thiscall(service): the list from every database's STBL keys (start, locale change)
     Count
 };
 
