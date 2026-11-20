@@ -40,6 +40,7 @@ The feature is described in [features/looks.md](../features/looks.md). It must:
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-20 | 0a0a4e25 (release/4.0.13) | In-game runner, Comic.fx in CAS at On Sims' hair 0% | no outline lines inside the hairstyle (before the 1/16 coverage rule: streaks along faint strands) | RTX Remix bridge (#126 build) |
 | 2026-11-20 | release/4.0.12 | `looks_fx_check --run` on SlowSharp (GShade, NiceGuy, gposingway) and Hybred's MicrocontrastReducer | 4 of 4 compile and run; the three that failed with `cannot unroll` take the level-0 last resort | Direct3D 9 HAL |
 | 2026-11-20 | release/4.0.12 | `looks_fx_check` on 199 pack files, 4.0.11 against this branch | every row the same | None |
 | 2026-11-20 | 4.0.11 (published) | In-game runner, a look of SSDO (GloomAO), MXAO, Flair, MicrocontrastReducer, SlowSharp (NiceGuy) at 3840x2160 | MXAO and Flair left out by the 384 MB cap, the loop shaders `cannot unroll` | RTX Remix bridge |
