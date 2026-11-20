@@ -388,7 +388,7 @@ public sealed partial class MainWindow
             if (!_galByHome && string.Join(" · ", list.Select(p => Gallery.HouseholdOf(p, _gal!, _galSaves)).OfType<string>().Distinct()) is { Length: > 0 } homes)
                 head.Children.Add(new TextBlock { Text = homes, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
             block.Children.Add(head);
-            var wrap = new CardGrid { MinItemWidth = 250, Spacing = 10, ChildrenTransitions = new TransitionCollection { new EntranceThemeTransition { IsStaggeringEnabled = true, FromVerticalOffset = 30 } } };
+            var wrap = new CardGrid { MinItemWidth = 250, Spacing = 10, Aspect = 9.0 / 16, ChildrenTransitions = new TransitionCollection { new EntranceThemeTransition { IsStaggeringEnabled = true, FromVerticalOffset = 30 } } };
             foreach (var p in list)
             {
                 var at = pics.IndexOf(p);
@@ -423,10 +423,33 @@ public sealed partial class MainWindow
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
+    // (the last ones asked for, by picture and width in steps of 160, so the same few are asked for again)
+    static readonly Dictionary<string, LinkedListNode<(string Key, BitmapImage Image)>> ThumbsKept = [];
+    static readonly LinkedList<(string Key, BitmapImage Image)> ThumbsOrder = new();
+    const int ThumbsKeptMax = 90;
+
     static BitmapImage Thumb(string path, double width)
     {
+        var dw = (int)Math.Ceiling(Math.Max(64, width) / 160) * 160;
+        var key = path + "|" + dw;
+        // (large copies, the viewer's, are not kept: a few of them would hold more memory than all the small ones)
+        if (dw > 640) return MakeThumbImage(path, width, dw);
+        if (ThumbsKept.TryGetValue(key, out var node))
+        {
+            ThumbsOrder.Remove(node);
+            ThumbsOrder.AddFirst(node);
+            return node.Value.Image;
+        }
+        var b = MakeThumbImage(path, width, dw);
+        ThumbsKept[key] = ThumbsOrder.AddFirst((key, b));
+        while (ThumbsOrder.Count > ThumbsKeptMax) { ThumbsKept.Remove(ThumbsOrder.Last!.Value.Key); ThumbsOrder.RemoveLast(); }
+        return b;
+    }
+
+    static BitmapImage MakeThumbImage(string path, double width, int dw)
+    {
         var px = width * 1.5 <= 1100 ? 1100 : 2200;
-        var b = new BitmapImage { DecodePixelType = DecodePixelType.Logical, DecodePixelWidth = (int)Math.Ceiling(Math.Max(64, width)) };
+        var b = new BitmapImage { DecodePixelType = DecodePixelType.Logical, DecodePixelWidth = dw };
         if (ThumbFile(path, px) is not { } file) { b.UriSource = new Uri(path); return b; }
         if (File.Exists(file)) { b.UriSource = new Uri(file); return b; }
         var queue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
@@ -492,10 +515,9 @@ public sealed partial class MainWindow
     UIElement Tile(Picture p, Action<FrameworkElement> open)
     {
         var g = new Grid { CornerRadius = new CornerRadius(12), Background = Res("ApexPillBrush") };
-        var image = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(320) } };
         var bmp = Thumb(p.Path, 420);
-        bmp.ImageOpened += (_, _) => image.Opacity = 1;
-        image.Source = bmp;
+        var image = new Image { Stretch = Stretch.UniformToFill, Source = bmp, Opacity = bmp.PixelWidth > 0 ? 1 : 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(320) } };
+        if (bmp.PixelWidth == 0) bmp.ImageOpened += (_, _) => image.Opacity = 1;
         g.Children.Add(image);
         var when = new Border { VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(12, 18, 12, 9), Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) },
             Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(0, 1), GradientStops = { new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0xB3, 0, 0, 0), Offset = 1 } } },
@@ -510,7 +532,9 @@ public sealed partial class MainWindow
         b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, Path.GetFileNameWithoutExtension(p.Path));
         // (16:9, as wide as its column)
-        b.SizeChanged += (_, e) => { if (Math.Abs(g.Height - e.NewSize.Width * 9 / 16) > 1) g.Height = e.NewSize.Width * 9 / 16; b.CenterPoint = new Vector3((float)e.NewSize.Width / 2, (float)e.NewSize.Height / 2, 0); };
+        b.VerticalAlignment = VerticalAlignment.Stretch;
+        b.VerticalContentAlignment = VerticalAlignment.Stretch;
+        b.SizeChanged += (_, e) => b.CenterPoint = new Vector3((float)e.NewSize.Width / 2, (float)e.NewSize.Height / 2, 0);
         b.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(220) };
         b.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(220) };
         b.PointerEntered += (_, _) => { b.Translation = new Vector3(0, -6, 30); b.Scale = new Vector3(1.025f, 1.025f, 1); when.Opacity = 1; };
@@ -886,12 +910,16 @@ public sealed partial class MainWindow
         {
             var cx = Canvas.GetLeft(me) + me.ActualWidth / 2;
             var cy = Canvas.GetTop(me) + me.ActualHeight / 2;
-            foreach (var (_, card, _) in _boardCards)
+            var mine = _boardCards.FirstOrDefault(c => c.Card == me).Pic;
+            var myPile = mine is null ? null : _boardPiled.GetValueOrDefault(mine.Path);
+            var best = double.MaxValue;
+            foreach (var (pic, card, _) in _boardCards)
             {
-                if (card == me) continue;
-                var l = Canvas.GetLeft(card);
-                var t = Canvas.GetTop(card);
-                if (Math.Abs(cx - (l + card.ActualWidth / 2)) < card.ActualWidth * 0.22 && Math.Abs(cy - (t + card.ActualHeight / 2)) < card.ActualHeight * 0.22) { hit = card; break; }
+                if (card == me || card.ActualWidth <= 0 || card.Opacity < 0.5) continue;
+                if (myPile is not null && _boardPiled.GetValueOrDefault(pic.Path) == myPile) continue;
+                var dx = Math.Abs(cx - (Canvas.GetLeft(card) + card.ActualWidth / 2)) / card.ActualWidth;
+                var dy = Math.Abs(cy - (Canvas.GetTop(card) + card.ActualHeight / 2)) / card.ActualHeight;
+                if (dx < 0.4 && dy < 0.4 && dx + dy < best) { best = dx + dy; hit = card; }
             }
         }
         if (hit == _dropTarget) return;
@@ -2795,8 +2823,9 @@ public sealed partial class MainWindow
                 // (full screen: the picture alone, as large as the screen, the cached copy first and the sharp one over it)
                 var alone = new Grid();
                 var quick = new Image { Source = Thumb(path, 900), Stretch = Stretch.Uniform };
-                var crisp = new Image { Source = Thumb(path, root.Size.Width), Stretch = Stretch.Uniform, Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(200) } };
-                crisp.ImageOpened += (_, _) => crisp.Opacity = 1;
+                var crispSource = Thumb(path, root.Size.Width);
+                var crisp = new Image { Source = crispSource, Stretch = Stretch.Uniform, Opacity = crispSource.PixelWidth > 0 ? 1 : 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(200) } };
+                if (crispSource.PixelWidth == 0) crisp.ImageOpened += (_, _) => crisp.Opacity = 1;
                 alone.Children.Add(quick);
                 alone.Children.Add(crisp);
                 var before = shown;
@@ -2821,8 +2850,7 @@ public sealed partial class MainWindow
             // (once in place the cached copy gives way to a sharp one, read off screen first so nothing blinks)
             var sharpCopy = Thumb(path, root.Size.Width);
             var loader = new Image { Source = sharpCopy, Width = 1, Height = 1, Opacity = 0.01, IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
-            stage.Children.Add(loader);
-            loader.ImageOpened += (_, _) =>
+            void Sharpen()
             {
                 stage.Children.Remove(loader);
                 if (shown != card) return;
@@ -2831,7 +2859,9 @@ public sealed partial class MainWindow
                     case Image i: i.Source = sharpCopy; break;
                     case Border { Background: ImageBrush ib }: ib.ImageSource = sharpCopy; break;
                 }
-            };
+            }
+            if (sharpCopy.PixelWidth > 0) Sharpen();
+            else { stage.Children.Add(loader); loader.ImageOpened += (_, _) => Sharpen(); }
             if (!grow)
             {
                 // (the next picture waits until it is read, then slides in over the last one, which slides out the other way)

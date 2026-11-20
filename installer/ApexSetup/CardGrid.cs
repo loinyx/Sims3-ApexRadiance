@@ -10,6 +10,7 @@ public sealed class CardGrid : Panel
 {
     public double MinItemWidth { get; set; } = 240;
     public double Spacing { get; set; } = 16;
+    public double Aspect { get; set; }   // height over width of every cell; 0: as tall as its content
 
     public static int Columns(double width, double min, double gap) =>
         double.IsInfinity(width) || width <= 0 ? 1 : Math.Max(1, (int)((width + gap) / (min + gap)));
@@ -23,8 +24,8 @@ public sealed class CardGrid : Panel
         double height = 0, row = 0;
         for (int i = 0; i < Children.Count; i++)
         {
-            Children[i].Measure(new Size(w, double.PositiveInfinity));
-            row = Math.Max(row, Children[i].DesiredSize.Height);
+            Children[i].Measure(new Size(w, Aspect > 0 ? w * Aspect : double.PositiveInfinity));
+            row = Aspect > 0 ? w * Aspect : Math.Max(row, Children[i].DesiredSize.Height);
             if (i % cols == cols - 1 || i == Children.Count - 1) { height += row + (height > 0 ? Spacing : 0); row = 0; }
         }
         return new Size(double.IsInfinity(available.Width) ? cols * w : available.Width, height);
@@ -39,7 +40,7 @@ public sealed class CardGrid : Panel
         {
             var end = Math.Min(start + cols, Children.Count);
             double row = 0;
-            for (int i = start; i < end; i++) row = Math.Max(row, Children[i].DesiredSize.Height);
+            for (int i = start; i < end; i++) row = Aspect > 0 ? w * Aspect : Math.Max(row, Children[i].DesiredSize.Height);
             for (int i = start; i < end; i++) Children[i].Arrange(new Rect((i - start) * (w + Spacing), y, w, row));
             y += row + Spacing;
         }
