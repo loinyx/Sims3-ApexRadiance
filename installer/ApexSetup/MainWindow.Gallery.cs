@@ -547,6 +547,22 @@ public sealed partial class MainWindow
         Child = new FontIcon { Glyph = "\uF5B0", FontSize = size * 0.38, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), Margin = new Thickness(size * 0.06, 0, 0, 0) },
     };
 
+    static async Task<bool> Blank(string file)
+    {
+        const int W = 320, H = 180;
+        var px = new byte[W * H * 4];
+        for (int i = 0; i < px.Length; i += 4) { px[i] = 0x2E; px[i + 1] = 0x2A; px[i + 2] = 0x28; px[i + 3] = 0xFF; }
+        var temp = file + ".part";
+        using (var target = File.Create(temp))
+        {
+            var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(Windows.Graphics.Imaging.BitmapEncoder.JpegEncoderId, target.AsRandomAccessStream());
+            encoder.SetPixelData(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Ignore, W, H, 96, 96, px);
+            await encoder.FlushAsync();
+        }
+        File.Move(temp, file, true);
+        return true;
+    }
+
     static async Task<bool> MakeThumb(string path, string file, int px)
     {
         await ThumbMakers.WaitAsync();
@@ -557,7 +573,8 @@ public sealed partial class MainWindow
             var video = Gallery.VideoKinds.Contains(Path.GetExtension(path).ToLowerInvariant());
             using var source = video ? null : File.OpenRead(path);
             using var frame = video ? await VideoFrame(path, px) : null;
-            if (video && frame is null) return false;
+            // (a video Windows cannot take a frame from still gets a picture: a dark 16:9 one the play mark sits on)
+            if (video && frame is null) return await Blank(file);
             var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(frame ?? source!.AsRandomAccessStream());
             var scale = Math.Min(1.0, px / (double)decoder.PixelWidth);
             var transform = new Windows.Graphics.Imaging.BitmapTransform
@@ -1253,28 +1270,9 @@ public sealed partial class MainWindow
         if (_custTab == 0)
         {
             // the colour: ready ones, or any colour from the wheel at any brightness
-            body.Children.Add(Caption(T("COLOUR")));
-            var swatches = Columns(6, 10);
             var now = BoardColor(look);
-            for (int i = 0; i < Palette.Length; i++)
-            {
-                var c = Hex(Palette[i].Hex, now);
-                var on = string.Equals(look.Color ?? Hex(now), Palette[i].Hex, StringComparison.OrdinalIgnoreCase);
-                var dot = new Button { Width = 38, Height = 38, HorizontalAlignment = HorizontalAlignment.Center, CornerRadius = new CornerRadius(19), Padding = new Thickness(0),
-                    BorderThickness = new Thickness(on ? 3 : 1), BorderBrush = on ? Res("TextFillColorPrimaryBrush") : new SolidColorBrush(Pick(0x26FFFFFF, 0x26000000)),
-                    Background = new LinearGradientBrush { StartPoint = new(0.2, 0), EndPoint = new(0.8, 1), GradientStops = { new GradientStop { Color = Shade(c, 0.1), Offset = 0 }, new GradientStop { Color = c, Offset = 0.5 }, new GradientStop { Color = Shade(c, -0.3), Offset = 1 } } } };
-                dot.Resources["ButtonBackgroundPointerOver"] = dot.Background;
-                dot.Resources["ButtonBackgroundPressed"] = dot.Background;
-                dot.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB0, 255, 255, 255));
-                ToolTipService.SetToolTip(dot, T(Palette[i].Name));
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(dot, T(Palette[i].Name));
-                var hex = Palette[i].Hex;
-                dot.Click += (_, _) => { look.Color = hex; if (_boardFrame is not null) _boardFrame.Background = BoardBrush(look); foreach (var t in _boardTools) InkTool(t, look); Changed(); FillCustomize(); };
-                PutAt(swatches, dot, i, 6);
-            }
-            body.Children.Add(swatches);
 
-            body.Children.Add(Caption(T("YOUR OWN")));
+            body.Children.Add(Caption(T("COLOUR")));
             var (hue, bright, sat) = HueOf(now);
             var wheel = new Microsoft.UI.Xaml.Controls.Primitives.ColorSpectrum
             {
@@ -1338,7 +1336,7 @@ public sealed partial class MainWindow
             // the paper under the pictures
             body.Children.Add(Caption(T("PAPER")));
             var papers = Columns(4);
-            (string Key, string Name)[] sheets = [("none", T("Plain")), ("lines", T("Lined")), ("grid", T("Squared")), ("dots", T("Dotted"))];
+            var sheets = Papers;
             for (int i = 0; i < sheets.Length; i++)
             {
                 var key = sheets[i].Key;
@@ -1347,9 +1345,34 @@ public sealed partial class MainWindow
                 var c = new Canvas { Width = 56, Height = 44 };
                 DrawPaper(c, new AlbumLook { Pattern = key, Color = look.Color, Background = look.Background }, 56, 44, 9);
                 art.Children.Add(c);
-                PutAt(papers, Choice(art, sheets[i].Name, look.Pattern == key, () => { look.Pattern = key; Changed(); FillCustomize(); }, 84), i, 4);
+                art.Clip = new RectangleGeometry { Rect = new(0, 0, 56, 44) };
+                PutAt(papers, Choice(art, T(sheets[i].Name), look.Pattern == key, () => { look.Pattern = key; Changed(); FillCustomize(); }, 84), i, 4);
             }
             body.Children.Add(papers);
+            if (look.Pattern is not ("none" or null))
+            {
+                // how strong the paper shows, drawn again as it is dragged
+                var row = new Grid { ColumnSpacing = 10, Margin = new Thickness(0, 6, 0, 0) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition());
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.Children.Add(new TextBlock { Text = T("Faint"), FontSize = 12, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
+                var strength = new Slider { Minimum = 0.3, Maximum = 2.5, StepFrequency = 0.05, Value = look.PaperStrength, VerticalAlignment = VerticalAlignment.Center };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(strength, T("Paper strength"));
+                Grid.SetColumn(strength, 1);
+                row.Children.Add(strength);
+                var strongText = new TextBlock { Text = T("Strong"), FontSize = 12, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(strongText, 2);
+                row.Children.Add(strongText);
+                strength.ValueChanged += (_, e) =>
+                {
+                    look.PaperStrength = e.NewValue;
+                    if (_boardPaper is not null && _boardFrame is not null) DrawPaper(_boardPaper, look, _boardFrame.ActualWidth, _boardFrame.ActualHeight, 28);
+                    _custChanged = true;
+                    Keep();
+                };
+                body.Children.Add(row);
+            }
         }
         else if (_custTab == 3)
         {
@@ -1577,33 +1600,240 @@ public sealed partial class MainWindow
     ];
 
     // lined, squared or dotted paper drawn over a size, a line every step
+    // The paper patterns, by key, with their names in Customize
+    static readonly (string Key, string Name)[] Papers =
+    [
+        ("none", "Plain"), ("lines", "Lined"), ("grid", "Squared"), ("dots", "Dotted"),
+        ("graph", "Graph"), ("diagonal", "Diagonal"), ("crosshatch", "Hatched"), ("gingham", "Gingham"), ("polka", "Polka dots"),
+        ("music", "Music"), ("isometric", "Isometric"), ("hexagons", "Hexagon"), ("waves", "Waves"), ("confetti", "Confetti"),
+        ("hearts", "Hearts"), ("stars", "Stars"), ("flowers", "Flowers"), ("clouds", "Clouds"), ("scales", "Scallops"), ("sparkles", "Sparkles"),
+    ];
+
+    // The paper drawn as one shape (a few paths, never an element per line or dot), in the board's ink
     static void DrawPaper(Canvas c, AlbumLook look, double w, double h, double step)
     {
         c.Children.Clear();
-        if (look.Pattern is not ("lines" or "grid" or "dots")) return;
-        var ink = new SolidColorBrush(IsLight(BoardColor(look)) ? Windows.UI.Color.FromArgb(0x30, 0x3A, 0x34, 0x2A) : Windows.UI.Color.FromArgb(0x1C, 0xFF, 0xFF, 0xFF));
-        if (look.Pattern == "dots")
+        if (look.Pattern is "none" or null) return;
+        var light = IsLight(BoardColor(look));
+        // (the strength scales the ink: faint to strong)
+        byte A(double a) => (byte)Math.Clamp(a * look.PaperStrength, 4, 255);
+        var ink = new SolidColorBrush(light ? Windows.UI.Color.FromArgb(A(0x30), 0x3A, 0x34, 0x2A) : Windows.UI.Color.FromArgb(A(0x1C), 0xFF, 0xFF, 0xFF));
+        var strong = new SolidColorBrush(light ? Windows.UI.Color.FromArgb(A(0x4A), 0x3A, 0x34, 0x2A) : Windows.UI.Color.FromArgb(A(0x30), 0xFF, 0xFF, 0xFF));
+        var lines = new GeometryGroup();
+        var fills = new GeometryGroup();
+        void Line(double x1, double y1, double x2, double y2) => lines.Children.Add(new LineGeometry { StartPoint = new(x1, y1), EndPoint = new(x2, y2) });
+        void Dot(double x, double y, double r) => fills.Children.Add(new EllipseGeometry { Center = new(x, y), RadiusX = r, RadiusY = r });
+        void Stroke(Geometry g, Brush b, double t) => c.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = g, Stroke = b, StrokeThickness = t });
+        static PathGeometry Poly(params (double X, double Y)[] p)
         {
-            // shortcut: one dot per cell is a few thousand elements on a large window; fine for a board, not for a wall
-            for (double y = step; y < h; y += step)
-                for (double x = step; x < w; x += step)
+            var fig = new PathFigure { StartPoint = new(p[0].X, p[0].Y), IsClosed = true, IsFilled = true };
+            for (int i = 1; i < p.Length; i++) fig.Segments.Add(new LineSegment { Point = new(p[i].X, p[i].Y) });
+            return new PathGeometry { Figures = { fig } };
+        }
+        switch (look.Pattern)
+        {
+            case "lines":
+                for (double y = step; y < h; y += step) Line(0, y, w, y);
+                // (the notebook's margin line)
+                Stroke(new LineGeometry { StartPoint = new(step * 3, 0), EndPoint = new(step * 3, h) }, new SolidColorBrush(Windows.UI.Color.FromArgb(0x55, 0xE0, 0x6A, 0x6A)), 1.5);
+                break;
+            case "grid":
+                for (double y = step; y < h; y += step) Line(0, y, w, y);
+                for (double x = step; x < w; x += step) Line(x, 0, x, h);
+                break;
+            case "dots":
+                for (double y = step; y < h; y += step) for (double x = step; x < w; x += step) Dot(x, y, 1.2);
+                break;
+            case "graph":
+            {
+                // (fine squares, every fifth line stronger, as engineering paper)
+                var major = new GeometryGroup();
+                var fine = step / 2;
+                int i = 1;
+                for (double y = fine; y < h; y += fine, i++) (i % 5 == 0 ? major : lines).Children.Add(new LineGeometry { StartPoint = new(0, y), EndPoint = new(w, y) });
+                i = 1;
+                for (double x = fine; x < w; x += fine, i++) (i % 5 == 0 ? major : lines).Children.Add(new LineGeometry { StartPoint = new(x, 0), EndPoint = new(x, h) });
+                Stroke(major, strong, 1);
+                break;
+            }
+            case "diagonal":
+                for (double d = -h; d < w; d += step) Line(d, h, d + h, 0);
+                break;
+            case "crosshatch":
+                for (double d = -h; d < w; d += step * 1.4) { Line(d, h, d + h, 0); Line(d, 0, d + h, h); }
+                break;
+            case "gingham":
+            {
+                // (see-through bands both ways: where they cross, the colour doubles)
+                var band = step * 1.2;
+                var across = new GeometryGroup();
+                for (double y = 0; y < h; y += band * 2) across.Children.Add(new RectangleGeometry { Rect = new(0, y, w, band) });
+                for (double x = 0; x < w; x += band * 2) fills.Children.Add(new RectangleGeometry { Rect = new(x, 0, band, h) });
+                c.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = across, Fill = ink });
+                c.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = fills, Fill = ink });
+                return;
+            }
+            case "polka":
+            {
+                var gap = step * 2.4;
+                int row = 0;
+                for (double y = gap / 2; y < h + gap; y += gap * 0.5, row++)
+                    for (double x = row % 2 == 0 ? gap / 2 : gap; x < w + gap; x += gap) Dot(x, y, step * 0.32);
+                break;
+            }
+            case "music":
+            {
+                // (staves of five lines, a gap between them)
+                var line = step * 0.55;
+                for (double top = step * 1.5; top + line * 4 < h; top += line * 4 + step * 2.2)
+                    for (int k = 0; k < 5; k++) Line(0, top + k * line, w, top + k * line);
+                break;
+            }
+            case "isometric":
+            {
+                var dx = step * 1.2;
+                var dy = dx * 0.866;
+                int row = 0;
+                for (double y = dy / 2; y < h; y += dy, row++)
+                    for (double x = row % 2 == 0 ? dx / 2 : dx; x < w; x += dx) Dot(x, y, 1.2);
+                break;
+            }
+            case "hexagons":
+            {
+                // (pointy-top hexagons sharing their sides)
+                var r = step * 0.9;
+                var hw = r * Math.Sqrt(3);
+                int row = 0;
+                for (double cy = 0; cy < h + r * 2; cy += r * 1.5, row++)
+                    for (double cx = row % 2 == 0 ? 0 : hw / 2; cx < w + hw; cx += hw)
+                    {
+                        var fig = new PathFigure { StartPoint = new(cx, cy - r), IsClosed = true };
+                        for (int k = 1; k < 6; k++)
+                        {
+                            var a = Math.PI / 3 * k - Math.PI / 2;
+                            fig.Segments.Add(new LineSegment { Point = new(cx + r * Math.Cos(a), cy + r * Math.Sin(a)) });
+                        }
+                        lines.Children.Add(new PathGeometry { Figures = { fig } });
+                    }
+                break;
+            }
+            case "waves":
+            {
+                var amp = step * 0.28;
+                var len = step * 2.4;
+                for (double y = step; y < h + amp; y += step * 1.3)
                 {
-                    var d = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 2.4, Height = 2.4, Fill = ink };
-                    Canvas.SetLeft(d, x); Canvas.SetTop(d, y);
-                    c.Children.Add(d);
+                    var fig = new PathFigure { StartPoint = new(0, y) };
+                    for (double x = 0; x < w; x += len)
+                        fig.Segments.Add(new BezierSegment { Point1 = new(x + len / 3, y - amp * 2), Point2 = new(x + len * 2 / 3, y + amp * 2), Point3 = new(x + len, y) });
+                    lines.Children.Add(new PathGeometry { Figures = { fig } });
                 }
-            return;
+                break;
+            }
+            case "confetti":
+            {
+                // (little dashes and dots thrown about, the same each time)
+                var rnd = new Random(7);
+                var n = (int)(w * h / (step * step * 1.6));
+                for (int i = 0; i < n; i++)
+                {
+                    double x = rnd.NextDouble() * w, y = rnd.NextDouble() * h;
+                    if (rnd.Next(3) == 0) Dot(x, y, step * 0.12);
+                    else
+                    {
+                        var a = rnd.NextDouble() * Math.PI;
+                        var l = step * 0.3;
+                        Line(x - Math.Cos(a) * l, y - Math.Sin(a) * l, x + Math.Cos(a) * l, y + Math.Sin(a) * l);
+                    }
+                }
+                Stroke(lines, strong, 1.6);
+                if (fills.Children.Count > 0) c.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = fills, Fill = strong });
+                return;
+            }
+            case "hearts":
+            case "stars":
+            case "flowers":
+            case "sparkles":
+            {
+                // (little shapes on a staggered grid, small and faint so they stay behind the pictures)
+                var gap = step * 2.6;
+                var k = step * 0.32;
+                int row = 0;
+                fills.FillRule = FillRule.Nonzero;
+                for (double y = gap / 2; y < h + gap; y += gap * 0.75, row++)
+                    for (double x = row % 2 == 0 ? gap / 2 : gap; x < w + gap; x += gap)
+                        switch (look.Pattern)
+                        {
+                            case "hearts":
+                                // (two round tops and a point)
+                                Dot(x - k * 0.5, y - k * 0.2, k * 0.55);
+                                Dot(x + k * 0.5, y - k * 0.2, k * 0.55);
+                                fills.Children.Add(Poly((x - k * 1.02, y), (x + k * 1.02, y), (x, y + k * 1.15)));
+                                break;
+                            case "stars":
+                            {
+                                var pts = new (double, double)[10];
+                                for (int i = 0; i < 10; i++)
+                                {
+                                    var a = Math.PI / 5 * i - Math.PI / 2;
+                                    var rr = i % 2 == 0 ? k * 1.1 : k * 0.45;
+                                    pts[i] = (x + rr * Math.Cos(a), y + rr * Math.Sin(a));
+                                }
+                                fills.Children.Add(Poly(pts));
+                                break;
+                            }
+                            case "flowers":
+                                for (int i = 0; i < 5; i++)
+                                {
+                                    var a = Math.PI * 2 / 5 * i;
+                                    Dot(x + k * 0.62 * Math.Cos(a), y + k * 0.62 * Math.Sin(a), k * 0.42);
+                                }
+                                break;
+                            case "sparkles":
+                                // (a four-pointed twinkle, every other one smaller)
+                                var big = (row + (int)(x / gap)) % 2 == 0 ? k * 1.1 : k * 0.65;
+                                fills.Children.Add(Poly((x, y - big), (x + big * 0.22, y - big * 0.22), (x + big, y), (x + big * 0.22, y + big * 0.22),
+                                    (x, y + big), (x - big * 0.22, y + big * 0.22), (x - big, y), (x - big * 0.22, y - big * 0.22)));
+                                break;
+                        }
+                break;
+            }
+            case "clouds":
+            {
+                // (soft puffs scattered about, the same each time)
+                var rnd = new Random(11);
+                fills.FillRule = FillRule.Nonzero;
+                var n = Math.Max(1, (int)(w * h / (step * step * 26)));
+                for (int i = 0; i < n; i++)
+                {
+                    double x = rnd.NextDouble() * w, y = rnd.NextDouble() * h, k = step * (0.5 + rnd.NextDouble() * 0.4);
+                    Dot(x, y, k);
+                    Dot(x - k * 0.95, y + k * 0.3, k * 0.7);
+                    Dot(x + k * 0.95, y + k * 0.3, k * 0.75);
+                    fills.Children.Add(new RectangleGeometry { Rect = new(x - k * 0.95, y + k * 0.2, k * 1.9, k * 0.8) });
+                }
+                break;
+            }
+            case "scales":
+            {
+                // (rows of half circles, each row half a step over: a scalloped edge)
+                var rr = step * 0.7;
+                int row = 0;
+                for (double y = rr; y < h + rr; y += rr, row++)
+                    for (double x = row % 2 == 0 ? 0 : rr; x < w + rr * 2; x += rr * 2)
+                    {
+                        var fig = new PathFigure { StartPoint = new(x - rr, y) };
+                        fig.Segments.Add(new ArcSegment { Point = new(x + rr, y), Size = new(rr, rr), SweepDirection = SweepDirection.Clockwise });
+                        lines.Children.Add(new PathGeometry { Figures = { fig } });
+                    }
+                break;
+            }
+            default:
+                return;
         }
-        for (double y = step; y < h; y += step) { var l = new Border { Width = w, Height = 1, Background = ink }; Canvas.SetTop(l, y); c.Children.Add(l); }
-        if (look.Pattern == "grid")
-            for (double x = step; x < w; x += step) { var l = new Border { Width = 1, Height = h, Background = ink }; Canvas.SetLeft(l, x); c.Children.Add(l); }
-        else
-        {
-            // (the notebook's margin line)
-            var m = new Border { Width = 1.5, Height = h, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x55, 0xE0, 0x6A, 0x6A)) };
-            Canvas.SetLeft(m, step * 3);
-            c.Children.Add(m);
-        }
+        if (lines.Children.Count > 0) Stroke(lines, ink, 1);
+        // (the clouds' big puffs a shade lighter, so they stay soft)
+        if (fills.Children.Count > 0) c.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = fills, Fill = ink, Opacity = look.Pattern == "clouds" ? 0.55 : 1 });
     }
 
     // a sticker where the board is being looked at
@@ -3016,9 +3246,9 @@ public sealed partial class MainWindow
             StopVideo();
             // (the zoom island is for pictures: a video has its own controls there)
             islandFrame.Visibility = pic.Video ? Visibility.Collapsed : Visibility.Visible;
-            if (pic.Video)
+            if (pic.Video && wide)
             {
-                // (a video plays in the room, with the player's own controls; the picture's zoom stays at rest)
+                // (full screen: the video plays at once in the room, with the player's own controls; the zoom stays at rest)
                 zt.ScaleX = zt.ScaleY = 1; zt.TranslateX = zt.TranslateY = 0; zt.Rotation = 0;
                 var player = new MediaPlayerElement { AreTransportControlsEnabled = true, AutoPlay = true, Stretch = Stretch.Uniform,
                     Source = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(path)), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
@@ -3054,6 +3284,19 @@ public sealed partial class MainWindow
                 return;
             }
             var card = CardFor(pic);
+            // a video opens as its card does, then the player takes the card's place where it landed
+            void PlayIn()
+            {
+                if (shown != card || closing) return;
+                var player = new MediaPlayerElement { AreTransportControlsEnabled = true, AutoPlay = true, Stretch = Stretch.Uniform, Opacity = 0,
+                    OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(260) },
+                    Source = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(path)), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
+                player.TransportControls.IsZoomButtonVisible = false;
+                photo.Children.Add(player);
+                shown = player;
+                DispatcherQueue.TryEnqueue(() => player.Opacity = 1);
+                After(320, () => photo.Children.Remove(card));
+            }
             card.HorizontalAlignment = HorizontalAlignment.Center;
             card.VerticalAlignment = VerticalAlignment.Center;
             var old = shown;
@@ -3094,6 +3337,7 @@ public sealed partial class MainWindow
                         Tween(sb, old, "Opacity", 0, 220);
                         sb.Completed += (_, _) => photo.Children.Remove(old);
                     }
+                    if (pic.Video) sb.Completed += (_, _) => PlayIn();
                     Play(sb);
                 }
                 DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
@@ -3120,7 +3364,7 @@ public sealed partial class MainWindow
                 var dst = Bounds(card);
                 from!.Opacity = 0;
                 photo.Opacity = 0;
-                Fly(pic, dst, src, turn, true, 600, () => photo.Opacity = 1);
+                Fly(pic, dst, src, turn, true, 600, () => { photo.Opacity = 1; if (pic.Video) PlayIn(); });
             }
             if (card.ActualWidth > 0) Rise(); else { void Once(object o, SizeChangedEventArgs e) { card.SizeChanged -= Once; Rise(); } card.SizeChanged += Once; }
         }

@@ -46,7 +46,8 @@ public sealed class AlbumLook
     public List<StickyNote> Notes { get; set; } = [];
     public string Entrance { get; set; } = "soft";       // how the pictures come onto the board: soft, float, zoom, slide, playful or none
     public int Seed { get; set; }                          // varies the timeline's wave; Rearrange picks another
-    public string Pattern { get; set; } = "none";        // none, lines, grid or dots: the paper under the pictures
+    public string Pattern { get; set; } = "none";        // none, lines, grid or dots: the paper under the pictures
+    public double PaperStrength { get; set; } = 1;           // how strong the paper shows, 0.3 to 2.5
     public List<Sticker> Stickers { get; set; } = [];
     public DateTime Seen { get; set; }                     // the newest picture when the board was last laid
     public double SeenX { get; set; }                      // and where it lay
