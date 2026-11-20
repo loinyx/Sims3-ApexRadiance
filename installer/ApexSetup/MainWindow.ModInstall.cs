@@ -136,6 +136,8 @@ public sealed partial class MainWindow
                 var src = sources[n];
                 var res = await Task.Run(() => ModLibrary.AddAny(docs, dir, [src], installed, withDuplicates));
                 added.AddRange(res.Added);
+                // (a later file of this drop with the same bytes is a duplicate of this one)
+                installed.AddRange(res.Added.Select(p => new ModFile(p, Path.Combine("Mods", Path.GetRelativePath(Path.Combine(docs, "Mods"), p)), new FileInfo(p).Length, ModKind.Package, true, false)));
                 skipped.AddRange(res.Skipped);
             }
             catch (Exception e) { App.Log(e); skipped.Add($"{Path.GetFileName(sources[n])}: {ErrorText(e)}"); }

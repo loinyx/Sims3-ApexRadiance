@@ -50,6 +50,28 @@ static class ModToolsTests
             check(Refused(() => ModHunt.Start(list(), docs)), "hunt: a second hunt is refused while one is going");
             ModHunt.Stop(list(), docs);
 
+            // a mod held open by another program during a switch: the mods already switched go back and the round is not
+            // kept, at the start and at an answer (the next answer is never read against an Off half that did not happen)
+            var oldDelay = Fs.RetryDelay;
+            Fs.RetryDelay = TimeSpan.FromMilliseconds(1);
+            static bool Held(string path, Action a)
+            {
+                using var h = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
+                try { a(); return false; } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; }
+            }
+            var heldStart = Held(list().Single(m => m.Name == "mod1.package").Path, () => ModHunt.Start(list(), docs));
+            var afterStart = ModHunt.Current() is null && list().All(m => before[m.Name] == m.Enabled);
+            ModHunt.Start(list(), docs);
+            var round1 = list().ToDictionary(m => m.Name, m => m.Enabled);
+            var off1 = ModHunt.Current()!.Off;
+            var heldAnswer = Held(list().Single(m => m.Name == "mod5.package").Path, () => ModHunt.Answer(stillThere: true, list(), docs));
+            var kept = ModHunt.Current();
+            check(heldStart && afterStart && heldAnswer && kept is { Round: 1 } && kept.Off.SequenceEqual(off1) && list().All(m => round1[m.Name] == m.Enabled),
+                "hunt: a mod held open by another program undoes that round's switches, at the start and at an answer");
+            ModHunt.Stop(list(), docs);
+            Fs.RetryDelay = oldDelay;
+            check(list().All(m => before[m.Name] == m.Enabled) && ModHunt.Current() is null, "hunt: Stop after a held mod puts every mod back");
+
             // "the answers did not add up": still there with every suspect off this round leaves none
             ModHunt.Start(list(), docs);
             var end = ModHunt.Answer(stillThere: false, list(), docs);
@@ -156,6 +178,14 @@ static class ModToolsTests
             var forced = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "new.package")], list(), duplicates: true);
             check(again.Added.Count == 0 && again.Skipped.Single().Contains("already installed as new.package") && forced.Added.Single().EndsWith("new (2).package"),
                 "install: a file already installed is not added twice unless asked, then it gets \" (2)\"");
+            // the same bytes twice in one drop (a zip and its own extracted copy, a file given twice): only the first goes in
+            var twice = Path.Combine(drop, "twice.zip");
+            using (var z = ZipFile.Open(twice, ZipArchiveMode.Create))
+            using (var w = z.CreateEntry("inner-copy.package").Open()) w.Write(Dbpf20(8));
+            File.WriteAllBytes(Path.Combine(drop, "loose-copy.package"), Dbpf20(8));
+            var batch = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "loose-copy.package"), twice, Path.Combine(drop, "loose-copy.package")], list());
+            check(batch.Added.Count == 1 && batch.Skipped.Count == 2 && batch.Skipped.All(s => s.EndsWith("already installed as loose-copy.package")),
+                "install: the same file twice in one drop goes in once | " + string.Join(" | ", batch.Skipped));
 
             // a folder so deep that the file would pass the game's 260-character path: not installed, said why
             var deep = Path.Combine("Packages", new string('d', 120), new string('e', 120));
@@ -168,6 +198,16 @@ static class ModToolsTests
             var dups = ModLibrary.Duplicates(list());
             check(dups.Count == 4 && dups.Keys.Any(k => k.EndsWith(@"Packages\mod3.package")) && dups.Keys.Any(k => k.EndsWith("new (2).package")) && dups.Keys.Any(k => k.EndsWith("copy-of-mod3.package"))
                 && !dups.Keys.Any(k => k.EndsWith("mod4.package")), "duplicates: the same bytes under two names are found (a copy of mod3, the two new.package), nothing else");
+
+            // a hidden or system package, and a hidden folder, are listed: the game loads them
+            var hidDir = Path.Combine(mods, "Packages", "Hid");
+            var hidden = Path.Combine(hidDir, "hidden.package");
+            Write(hidden, "hidden");
+            File.SetAttributes(hidden, FileAttributes.Hidden | FileAttributes.System);
+            new DirectoryInfo(hidDir).Attributes |= FileAttributes.Hidden;
+            check(list().Any(m => m.Path == hidden) && ModLibrary.Folders(docs).Contains(Path.Combine("Packages", "Hid")), "mods: hidden and system packages and folders are listed");
+            File.SetAttributes(hidden, FileAttributes.Normal);
+            Directory.Delete(hidDir, true);
 
             // creators: a prefix two files share, a known maker's prefix alone, never a lone word; the player's name wins
             ModFile F(string name) => new(Path.Combine(root, name), Path.Combine("Mods", name), 1, ModKind.Package, true, false);

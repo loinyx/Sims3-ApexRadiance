@@ -54,7 +54,8 @@ public static class Mods
 
     static IEnumerable<string> Files(string dir, string pattern)
     {
-        try { return Directory.EnumerateFiles(dir, pattern, new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true }).ToList(); }
+        // (hidden and system files too: the game loads them)
+        try { return Directory.EnumerateFiles(dir, pattern, new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 }).ToList(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
     }
 

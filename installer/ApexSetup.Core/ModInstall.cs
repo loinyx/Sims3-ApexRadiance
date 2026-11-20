@@ -18,17 +18,18 @@ public static class ModInstall
     public static List<Item> Inspect(IEnumerable<string> paths, IReadOnlyList<ModFile> installed)
     {
         var hashes = installed.Where(m => m.FileType == "package").GroupBy(m => m.Size).ToDictionary(g => g.Key, g => g.ToList());
+        var seen = new Dictionary<string, string>(); // (by hash, the first file of this batch: a zip and its own extracted copy, or a file given twice)
         var items = new List<Item>();
         foreach (var p in paths)
         {
-            if (Directory.Exists(p)) { foreach (var f in Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories)) items.Add(CheckFile(f, null, hashes)); continue; }
-            if (p.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) { items.AddRange(CheckZip(p, hashes)); continue; }
-            items.Add(CheckFile(p, null, hashes));
+            if (Directory.Exists(p)) { foreach (var f in Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories)) items.Add(CheckFile(f, null, hashes, seen)); continue; }
+            if (p.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) { items.AddRange(CheckZip(p, hashes, seen)); continue; }
+            items.Add(CheckFile(p, null, hashes, seen));
         }
         return items;
     }
 
-    static Item CheckFile(string path, string? entry, Dictionary<long, List<ModFile>> installed)
+    static Item CheckFile(string path, string? entry, Dictionary<long, List<ModFile>> installed, Dictionary<string, string> seen)
     {
         var name = Path.GetFileName(entry ?? path);
         var ext = Path.GetExtension(name).ToLowerInvariant();
@@ -43,10 +44,12 @@ public static class ModInstall
             if (kind == "") problems.Add("Not a mod file: only .package files and zips of them are added.");
             else if (size == 0) problems.Add("The file is empty.");
             else problems.AddRange(PackageProblems(path, warnings));
-            if (problems.Count == 0 && installed.TryGetValue(size, out var sameSize))
+            if (problems.Count == 0)
             {
                 var hash = Hash(path);
-                same = sameSize.FirstOrDefault(m => { try { return Hash(m.Path) == hash; } catch (IOException) { return false; } })?.Name;
+                if (installed.TryGetValue(size, out var sameSize))
+                    same = sameSize.FirstOrDefault(m => { try { return Hash(m.Path) == hash; } catch (IOException) { return false; } })?.Name;
+                if (!seen.TryAdd(hash, name)) same ??= seen[hash];
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { problems.Add("The file could not be read."); }
@@ -54,7 +57,7 @@ public static class ModInstall
     }
 
     // a zip's mod files, each taken out to a temporary file and checked like a loose one
-    static IEnumerable<Item> CheckZip(string zip, Dictionary<long, List<ModFile>> installed)
+    static IEnumerable<Item> CheckZip(string zip, Dictionary<long, List<ModFile>> installed, Dictionary<string, string> seen)
     {
         var items = new List<Item>();
         var tmp = Path.Combine(Path.GetTempPath(), "apex-zip-" + Guid.NewGuid().ToString("N"));
@@ -69,7 +72,7 @@ public static class ModInstall
                 Directory.CreateDirectory(tmp);
                 var t = Path.Combine(tmp, Guid.NewGuid().ToString("N") + Path.GetExtension(n));
                 e.ExtractToFile(t);
-                items.Add(CheckFile(t, e.FullName, installed) with { Source = zip });
+                items.Add(CheckFile(t, e.FullName, installed, seen) with { Source = zip });
             }
             if (items.Count == 0) items.Add(new(Path.GetFileName(zip), zip, null, "", new FileInfo(zip).Length, ["The zip holds no .package."], [], null));
         }

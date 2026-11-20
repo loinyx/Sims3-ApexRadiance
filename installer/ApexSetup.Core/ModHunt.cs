@@ -63,7 +63,7 @@ public static class ModHunt
         var st = Current() ?? throw new SetupException("No hunt is going.");
         var suspects = stillThere ? st.Suspects.Except(st.Off, StringComparer.OrdinalIgnoreCase).ToList() : st.Off.ToList();
         var next = st with { Round = st.Round + 1, Suspects = suspects, Off = [] };
-        return suspects.Count <= 1 ? Finish(next, mods, docs) : Apply(next, mods, docs);
+        return suspects.Count <= 1 ? Finish(next, mods, docs) : Apply(next, mods, docs, st);
     }
 
     // the one mod left (or none, when the answers did not add up)
@@ -90,17 +90,32 @@ public static class ModHunt
 
     public static void Forget() { try { File.Delete(FilePath); } catch (IOException) { } }
 
-    // this round: the first half of the suspects off, everything else as it was before the hunt
-    static State Apply(State st, IReadOnlyList<ModFile> mods, string docs)
+    // this round: the first half of the suspects off, everything else as it was before the hunt. A mod that can't be switched
+    // (held open by another program) puts the ones already switched back and the record back to the last round (none before
+    // the first), so the next answer is never read against an Off half that did not happen.
+    static State Apply(State st, IReadOnlyList<ModFile> mods, string docs, State? last = null)
     {
         var off = st.Suspects.Take(st.Suspects.Count / 2).ToList();
         var next = st with { Off = off };
         Save(next);
         var offSet = off.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var m in mods.Where(m => next.Before.ContainsKey(m.Rel)))
+        var switched = new List<(ModFile Mod, string Path)>();
+        try
         {
-            var want = !offSet.Contains(m.Rel) && next.Before[m.Rel];
-            if (m.Enabled != want) Mods.SetEnabled(m, want, docs);
+            foreach (var m in mods.Where(m => next.Before.ContainsKey(m.Rel)))
+            {
+                var want = !offSet.Contains(m.Rel) && next.Before[m.Rel];
+                if (m.Enabled != want) switched.Add((m, Mods.SetEnabled(m, want, docs)));
+            }
+        }
+        catch
+        {
+            foreach (var (m, path) in switched)
+                try { Mods.SetEnabled(m with { Path = path, Enabled = !m.Enabled }, m.Enabled, docs); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+            try { if (last is null) File.Delete(FilePath); else Save(last); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+            throw;
         }
         return next;
     }
