@@ -943,7 +943,7 @@ public sealed partial class MainWindow
             if (into is null && await AlbumDialog(null, Gallery.HouseholdOf(hit.Pic, _gal!, _galSaves)) is { } made)
             {
                 into = made;
-                look.Places[made.Key] = new Placed { X = Canvas.GetLeft(target) - _boardAnchor.GetValueOrDefault(hit.Pic.Path), Y = Canvas.GetTop(target), Moved = true };
+                look.Places[made.Key] = new Placed { X = Canvas.GetLeft(target) - _boardAnchor.GetValueOrDefault(hit.Pic.Path), Y = Canvas.GetTop(target), Moved = true, On = hit.Pic.Path };
             }
             if (into is not null)
             {
@@ -1674,25 +1674,33 @@ public sealed partial class MainWindow
             days.Clear();
             x = 40 * s;
             slot = 0;
+            DateTime? lastDay = null;
             for (int i = 0; i < pics.Count; i++)
             {
                 // (room the player's arrangement needed when newer pictures arrived)
                 foreach (var g in look.Gaps)
                     if (pics[i].Taken <= g.At && (i == 0 || pics[i - 1].Taken > g.At)) x += g.Width;
                 var heap = _boardPiled.GetValueOrDefault(pics[i].Path);
-                if (heap is not null && firstOf.TryGetValue(heap, out var head)) { xs[i] = xs[head]; rawX[i] = rawX[head]; slotOf[i] = slotOf[head]; continue; }
+                if (heap is not null && HeadOf(heap) != i) continue;
                 if (heap is not null) firstOf[heap] = i;
+                if (lastDay != pics[i].Taken.Date) { if (lastDay is not null) x += 40 * s * look.Spacing; days.Add((x, pics[i].Taken.Date)); x += 150 * s; lastDay = pics[i].Taken.Date; }
                 if (heap is not null) _boardAnchor[heap.Key] = x;
-                rawX[i] = x;
-                if (heap is not null && look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved) { xs[i] = x + parked.X; slotOf[i] = slot; continue; }
-                if (i == 0 || pics[i].Taken.Date != pics[i - 1].Taken.Date) { if (i > 0) x += 40 * s * look.Spacing; days.Add((x, pics[i].Taken.Date)); x += 150 * s; }
                 xs[i] = rawX[i] = x;
                 if (i < fresh) freshSlots = slot + 1;
                 slotOf[i] = slot++;
                 x += Wide(i) * (heap is null ? 0.95 : 1.2) * look.Spacing;
             }
+            // (the other pictures of a pile lie on its place)
+            for (int i = 0; i < pics.Count; i++)
+                if (_boardPiled.GetValueOrDefault(pics[i].Path) is { } heap && firstOf.TryGetValue(heap, out var head) && head != i) { xs[i] = xs[head]; rawX[i] = rawX[head]; slotOf[i] = slotOf[head]; }
         }
         int Kind(int i) => ((i - lead) % 4 + 4) % 4;
+        // a pile's own picture: the one it was made on when it is here, else its newest
+        var headOf = new Dictionary<CustomAlbum, int>();
+        for (int i = pics.Count - 1; i >= 0; i--)
+            if (_boardPiled.GetValueOrDefault(pics[i].Path) is { } heap)
+                if (!headOf.ContainsKey(heap) || !(look.Places.TryGetValue(heap.Key, out var pp) && string.Equals(pp.On, pics[headOf[heap]].Path, StringComparison.OrdinalIgnoreCase))) headOf[heap] = i;
+        int HeadOf(CustomAlbum heap) => headOf[heap];
         LayTimeline();
         if (fresh > 0 && fresh < pics.Count)
         {
@@ -1708,7 +1716,7 @@ public sealed partial class MainWindow
             {
                 var heap = _boardPiled.GetValueOrDefault(pics[i].Path);
                 if (heap is not null ? look.Places.TryGetValue(heap.Key, out var pl) && pl.Moved : look.Places.TryGetValue(pics[i].Path, out pl) && pl.Moved)
-                    oldLeft = Math.Min(oldLeft, heap is not null ? xs[i] : rawX[i] + pl.X);
+                    oldLeft = Math.Min(oldLeft, rawX[i] + pl.X);
             }
             foreach (var nt in look.Notes) oldLeft = Math.Min(oldLeft, nt.X);
             var need = newRight - oldLeft;
@@ -1760,39 +1768,48 @@ public sealed partial class MainWindow
         _restZ.Clear();
         var inPile = new Dictionary<CustomAlbum, int>();
         var pileBase = new Dictionary<CustomAlbum, Placed>();
+        // where a picture lies by itself: along the wave of the timeline, a little jitter of its own
+        Placed Auto(int i, bool piled)
+        {
+            var jitter = new Random(Stable(pics[i].Path) + look.Seed);
+            var phase = (i - lead) * 1.1 + look.Seed % 7;
+            var hh = ((Kind(i) == 0 ? 194 : 154) * s * look.Size) + 70;
+            return new Placed
+            {
+                X = xs[i] + jitter.Next(-12, 12),
+                Y = Math.Clamp(mid - hh / 2 + Math.Sin(phase) * mid * 0.5, roof, Math.Max(roof, BoardHeight - hh - (piled ? 70 : 14))),
+                Angle = Math.Round(-Math.Cos(phase) * 5 + jitter.NextDouble() * 3 - 1.5, 1),
+            };
+        }
         for (int i = 0; i < pics.Count; i++)
         {
             var path = pics[i].Path;
-            var jitter = new Random(Stable(path) + look.Seed);
-            var phase = (i - lead) * 1.1 + look.Seed % 7;
-            var h = ((Kind(i) == 0 ? 194 : 154) * s * look.Size) + 70;
             var heap = _boardPiled.GetValueOrDefault(path);
-            var auto = new Placed
-            {
-                X = xs[i] + jitter.Next(-12, 12),
-                Y = Math.Clamp(mid - h / 2 + Math.Sin(phase) * mid * 0.5, roof, Math.Max(roof, BoardHeight - h - (heap is null ? 14 : 70))),
-                Angle = Math.Round(-Math.Cos(phase) * 5 + jitter.NextDouble() * 3 - 1.5, 1),
-            };
+            var own = heap is null ? i : firstOf[heap];
+            var h = ((Kind(own) == 0 ? 194 : 154) * s * look.Size) + 70;
+            var auto = heap is null ? Auto(i, false) : null;
             Placed place;
             if (heap is not null)
             {
                 var k = inPile.GetValueOrDefault(heap);
                 inPile[heap] = k + 1;
-                if (k == 0) pileBase[heap] = look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved ? new Placed { X = xs[i], Y = parked.Y - 24 * s } : auto;
+                if (k == 0) pileBase[heap] = look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved
+                    ? new Placed { X = rawX[own] + parked.X, Y = Math.Clamp(parked.Y, roof, Math.Max(roof, BoardHeight - h - 70)) - 24 * s }
+                    : Auto(own, true);
                 var under = pileBase[heap];
                 var shift = PileShift[k % PileShift.Length];
                 place = new Placed { X = under.X + shift.X * s, Y = under.Y + shift.Y * s + 24 * s, Angle = PileTurns[k % PileTurns.Length] };
             }
             // (a picture put somewhere always lies whole on the board, whatever its height since)
-            else place = look.Places.TryGetValue(path, out var own) && own.Moved ? new Placed { X = Math.Max(8, xs[i] + own.X), Y = Math.Clamp(own.Y, roof, Math.Max(roof, BoardHeight - h - 14)), Angle = own.Angle, Moved = true } : auto;
+            else place = look.Places.TryGetValue(path, out var put) && put.Moved ? new Placed { X = Math.Max(8, xs[i] + put.X), Y = Math.Clamp(put.Y, roof, Math.Max(roof, BoardHeight - h - 14)), Angle = put.Angle, Moved = true } : auto!;
             _boardAnchor[path] = xs[i];
             _boardPlaces[path] = place;
             // (the newest fall in first, the ones further back already lie there when scrolled to)
             var delay = 120 + Math.Min(slotOf[i], 10) * 130;
-            var card = Framed(pics[i], place, look, ink, i, delay, pics, heap, bare: heap is not null && inPile[heap] > 1, kind: Kind(i));
+            var card = Framed(pics[i], place, look, ink, i, delay, pics, heap, bare: heap is not null && inPile[heap] > 1, kind: Kind(own));
             if (heap is not null) Canvas.SetZIndex(card, firstOf[heap] * 10 + 9 - inPile[heap]);
             // (a picture the player put down lies over the ones it was put on, the last one put down on top)
-            else if (place.Moved && look.Places.TryGetValue(path, out var put) && put.Z > 0) _restZ[card] = 600 + look.Places.Values.Count(o => o.Moved && o.Z > 0 && o.Z < put.Z);
+            else if (place.Moved && look.Places.TryGetValue(path, out var top) && top.Z > 0) _restZ[card] = 600 + look.Places.Values.Count(o => o.Moved && o.Z > 0 && o.Z < top.Z);
             if (_restZ.TryGetValue(card, out var z)) Canvas.SetZIndex(card, z);
             canvas.Children.Add(card);
             _boardCards.Add((pics[i], card, i));

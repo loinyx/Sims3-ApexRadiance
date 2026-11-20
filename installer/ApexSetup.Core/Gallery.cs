@@ -13,7 +13,7 @@ public sealed class PictureInfo
 }
 
 // a picture's place on an album's scrapbook board, and a sticky note there
-public sealed class Placed { public double X { get; set; } public double Y { get; set; } public double Angle { get; set; } public bool Moved { get; set; } public int Z { get; set; } }   // Moved: put there by the player; Z: the order it was put down in
+public sealed class Placed { public double X { get; set; } public double Y { get; set; } public double Angle { get; set; } public bool Moved { get; set; } public int Z { get; set; } public string? On { get; set; } }   // Moved: put there by the player; Z: the order it was put down in; On: (a pile) the picture whose place it takes
 public sealed class StickyNote
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
