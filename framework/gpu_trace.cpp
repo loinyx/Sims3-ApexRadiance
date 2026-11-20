@@ -44,6 +44,7 @@ TraceFile* g_f = nullptr;
 ULONGLONG g_startMs = 0;
 std::atomic<const char*> g_lastKey{nullptr}; // the last step (its pointer: a repeat adds to its count)
 std::atomic<uint32_t> g_lastSlot{0};
+std::atomic<DWORD> g_renderThread{0}; // set by the first Present: from then on only its steps are kept (a background loop fills the ring)
 
 std::string LocalTime(uint64_t fileTime)
 {
@@ -220,6 +221,7 @@ void Mark(const char* step) noexcept
 {
     TraceFile* t = g_f;
     if (!t || !step) return;
+    if (const DWORD r = g_renderThread.load(std::memory_order_relaxed); r && r != GetCurrentThreadId()) return;
     const uint32_t ms = (uint32_t)(GetTickCount64() - g_startMs);
     if (g_lastKey.load(std::memory_order_relaxed) == step)
     {
@@ -241,6 +243,7 @@ void Mark(const char* step) noexcept
 
 void Frame() noexcept
 {
+    if (!g_renderThread.load(std::memory_order_relaxed)) g_renderThread.store(GetCurrentThreadId(), std::memory_order_relaxed);
     if (TraceFile* t = g_f) ++t->frame;
     Mark("Present");
 }

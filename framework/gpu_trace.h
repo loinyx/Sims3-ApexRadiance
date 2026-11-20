@@ -2,7 +2,7 @@
 // What Apex was doing when a session ended without closing. Credits: @loinyx
 // A GPU hang (a driver fault: under the RTX Remix bridge the server loses its device, VK_ERROR_DEVICE_LOST) freezes the game
 // with no exception: no crash report, the log just stops, and the player ends TS3W.exe from the Task Manager. Apex keeps
-// its last 256 steps (each HookGuard step, each post-scene effect, each Looks shader, each Present; a step repeated at once
+// its last 256 steps on the render thread (each HookGuard step, each post-scene effect, each Looks shader, each Present; a step repeated at once
 // is one entry with a count) in Apex Radiance\ApexRadiance_Trace.bin, a mapped file Windows writes out even when the
 // process is ended. At the next start, a session that did not close is reported in the log: its last steps, the graphics
 // driver's errors since it started (Windows' System log: nvlddmkm, amdkmdag, igfx, Display, TDRs) and the RTX Remix
