@@ -25,6 +25,11 @@ public static partial class Strings
         // the screen reader's name (also of a Tag="dyn" element: its name is static, its text is not)
         if (e is FrameworkElement fe && AutomationProperties.GetName(fe) is { Length: > 0 } name)
             AutomationProperties.SetName(fe, T(Remember(fe, name)));
+        // (a plain-text tooltip and a search box's placeholder, written in XAML)
+        if (e is FrameworkElement ft && ToolTipService.GetToolTip(ft) is string { Length: > 0 } tip)
+            ToolTipService.SetToolTip(ft, T(Remember(ft, tip)));
+        if (e is TextBox { PlaceholderText.Length: > 0 } box)
+            box.PlaceholderText = T(Remember(box, box.PlaceholderText));
         switch (e)
         {
             case FrameworkElement { Tag: "dyn" }:

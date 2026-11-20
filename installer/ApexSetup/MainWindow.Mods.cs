@@ -1685,7 +1685,8 @@ public sealed partial class MainWindow
         else
         {
             panel.Children.Add(Muted(T("Reading what it holds…")));
-            _ = Task.Run(() => { try { return ModContent.Read(path); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) { return new ModContents([], [], []); } })
+            // (a damaged package of any kind reads as empty, never an error box)
+            _ = Task.Run(() => { try { return ModContent.Read(path); } catch (Exception e) { App.Log(e); return new ModContents([], [], []); } })
                 .ContinueWith(t => DispatcherQueue.TryEnqueue(() => { _modContents[path] = t.Result; Fill(t.Result); }));
         }
         return panel;

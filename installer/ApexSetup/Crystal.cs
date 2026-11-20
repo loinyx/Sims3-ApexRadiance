@@ -61,8 +61,8 @@ public sealed class Crystal : Grid
         }
         for (int i = 0; i < 12; i++) _canvas.Children.Add(_front[i] = new Polygon());
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(this, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
-        Loaded += (_, _) => Hook(true);
-        Unloaded += (_, _) => Hook(false);
+        Loaded += (_, _) => { Watch(true); Hook(Shown()); };
+        Unloaded += (_, _) => { Watch(false); Hook(false); };
         SetState(HealthState.Ready, animate: false);
         Draw();
     }
@@ -111,6 +111,24 @@ public sealed class Crystal : Grid
         _hooked = on;
         if (on) CompositionTarget.Rendering += OnFrame; else CompositionTarget.Rendering -= OnFrame;
         Draw();
+    }
+
+    // (screens are hidden, not unloaded: the crystal turns with its screen shown and stops on a hidden one, so no frame is
+    // drawn for a screen nobody sees)
+    readonly List<(UIElement El, long Token)> _watched = [];
+    void Watch(bool on)
+    {
+        foreach (var (el, token) in _watched) el.UnregisterPropertyChangedCallback(VisibilityProperty, token);
+        _watched.Clear();
+        if (!on) return;
+        for (DependencyObject? p = this; p is not null; p = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(p))
+            if (p is UIElement u) _watched.Add((u, u.RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => Hook(Shown()))));
+    }
+    bool Shown()
+    {
+        for (DependencyObject? p = this; p is not null; p = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(p))
+            if (p is UIElement { Visibility: Visibility.Collapsed }) return false;
+        return XamlRoot is not null;
     }
 
     void OnFrame(object? sender, object e)

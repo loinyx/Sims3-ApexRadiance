@@ -1170,7 +1170,7 @@ public sealed partial class MainWindow
         g.Children.Add(label);
         var b = new Button { Content = g, Height = height, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(8, 10, 8, 8), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(on ? 2 : 1),
-            BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 255, 255, 255)),
+            BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Pick(0x1AFFFFFF, 0x1F000000)),
             Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0CFFFFFF, 0x0A000000)) };
         b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(on ? (byte)0x3A : (byte)0x18, 0x9F, 0x97, 0xF0));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
@@ -1236,7 +1236,7 @@ public sealed partial class MainWindow
         titles.Children.Add(new TextBlock { Text = AlbumName(_galAlbum), FontSize = 12, Opacity = 0.6, TextTrimming = TextTrimming.CharacterEllipsis });
         head.Children.Add(titles);
         var x = new Button { Content = new FontIcon { Glyph = "", FontSize = 12 }, Width = 34, Height = 34, Padding = new Thickness(0), CornerRadius = new CornerRadius(17), BorderThickness = new Thickness(0),
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 255, 255, 255)), VerticalAlignment = VerticalAlignment.Top };
+            Background = new SolidColorBrush(Pick(0x14FFFFFF, 0x10000000)), VerticalAlignment = VerticalAlignment.Top };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(x, T("Close"));
         x.Click += (_, _) => ToggleCustomize(false);
         Grid.SetColumn(x, 1);
@@ -1388,7 +1388,7 @@ public sealed partial class MainWindow
                     var glyph = set[i];
                     var b = new Button { Content = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe UI Emoji"), FontSize = 24, HorizontalAlignment = HorizontalAlignment.Center },
                         Height = 46, HorizontalAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(0), CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(0),
-                        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x0C, 255, 255, 255)) };
+                        Background = new SolidColorBrush(Pick(0x0CFFFFFF, 0x0A000000)) };
                     Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("Sticker"));
                     b.Click += (_, _) => AddSticker(glyph);
                     PutAt(grid, b, i, 6);
@@ -1501,7 +1501,7 @@ public sealed partial class MainWindow
                     g.Children.Add(lines);
                     if (on) { var tick = new FontIcon { Glyph = "\uE73E", FontSize = 14, Foreground = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(tick, 1); g.Children.Add(tick); }
                     var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(14, 8, 14, 10), CornerRadius = new CornerRadius(12),
-                        BorderThickness = new Thickness(on ? 2 : 1), BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 255, 255, 255)),
+                        BorderThickness = new Thickness(on ? 2 : 1), BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Pick(0x1AFFFFFF, 0x1F000000)),
                         Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0CFFFFFF, 0x0A000000)) };
                     Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, f);
                     var font = f;
@@ -2883,7 +2883,7 @@ public sealed partial class MainWindow
         {
             Child = row, Padding = new Thickness(18, 8, 10, 8), CornerRadius = new CornerRadius(20), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 0, 74), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xEE, 0x1E, 0x1F, 0x25)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x30, 255, 255, 255)),
-            BorderThickness = new Thickness(1), Shadow = new ThemeShadow(), Translation = new Vector3(0, 30, 24), Opacity = 0,
+            BorderThickness = new Thickness(1), Shadow = new ThemeShadow(), Translation = new Vector3(0, 30, 24), Opacity = 0, RequestedTheme = ElementTheme.Dark, // (a dark pill in both themes: its link reads on it)
             TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(260) }, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(200) },
         };
         foreach (var old in stage.Children.OfType<Border>().Where(x => x.Tag as string == "undo").ToList()) stage.Children.Remove(old);
@@ -3379,7 +3379,7 @@ public sealed partial class MainWindow
             g.Children.Add(new TextBlock { Text = name, FontSize = 12, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, Height = 78, CornerRadius = new CornerRadius(12), Padding = new Thickness(6),
                 Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0FFFFFFF, 0x0C000000)),
-                BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 255, 255, 255)), BorderThickness = new Thickness(1) };
+                BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Pick(0x14FFFFFF, 0x1A000000)), BorderThickness = new Thickness(1) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
             return b;
         }
@@ -3402,7 +3402,7 @@ public sealed partial class MainWindow
 
             // where it belongs: its place in the album, and its household (a menu to change it)
             var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, -6, 0, 0) };
-            chips.Children.Add(new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 3, 10, 4), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 255, 255, 255)),
+            chips.Children.Add(new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 3, 10, 4), Background = new SolidColorBrush(Pick(0x14FFFFFF, 0x10000000)),
                 Child = new TextBlock { Text = T("{0} of {1}", at + 1, pics.Count), FontSize = 12, Foreground = Res("ApexSoftTextBrush") } });
             var names = _galSaves.Select(s => s.Name).ToList();
             var guess = Gallery.GuessHousehold(p, _galSaves);

@@ -376,7 +376,7 @@ public sealed partial class MainWindow
                     if (t.IsCompletedSuccessfully && t.Result.Replaced > 0)
                     {
                         what.Text = ReplacesSummary(t.Result) + " · " + ModRow.SizeText(o.Size);
-                        what.Foreground = TagDot.BrushOf("#9CC7EE");
+                        what.Foreground = new SolidColorBrush(Pick(0xFF9CC7EE, 0xFF2F6FA8));
                     }
                 }, TaskScheduler.FromCurrentSynchronizationContext());
             if (Mine(r))
