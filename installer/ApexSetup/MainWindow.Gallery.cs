@@ -277,8 +277,8 @@ public sealed partial class MainWindow
         mineHead.VerticalAlignment = VerticalAlignment.Center;
         mine.Children.Add(mineHead);
         var make = new Button { Content = new FontIcon { Glyph = "\uE710", FontSize = 12 }, Width = 28, Height = 28, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(make, T("New album"));
-        ToolTipService.SetToolTip(make, T("New album"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(make, T("New album…"));
+        ToolTipService.SetToolTip(make, T("New album…"));
         make.Click += async (_, _) => { if (await AlbumDialog(null) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
         Grid.SetColumn(make, 1);
         mine.Children.Add(make);
@@ -312,7 +312,7 @@ public sealed partial class MainWindow
         if (Gallery.CustomOf(_gal!, _galAlbum) is { } own) name.Children.Add(new FontIcon { Glyph = own.Icon, FontSize = _galBook ? 28 : 22, Foreground = new SolidColorBrush(AccentInk), VerticalAlignment = VerticalAlignment.Center });
         _boardTitle = _galBook
             ? new TextBlock { Text = AlbumName(_galAlbum), FontFamily = new FontFamily(look.Font), FontSize = 40, FontWeight = FontWeights.SemiBold, Foreground = Ink(look) }
-            : new TextBlock { Text = AlbumName(_galAlbum), FontSize = 26, FontWeight = FontWeights.SemiBold };
+            : new TextBlock { Text = AlbumName(_galAlbum), FontSize = 28, FontWeight = FontWeights.SemiBold };
         name.Children.Add(_boardTitle);
         titles.Children.Add(name);
         var hint = Muted(_galBook ? T("Drag to travel the timeline · click a picture to open it")
@@ -335,7 +335,7 @@ public sealed partial class MainWindow
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
                 return b;
             }
-            var custom = Round(new Button(), "\uE790", T("Customize"));
+            var custom = Round(new Button(), "\uE790", T("Customise"));
             custom.Click += (_, _) => ToggleCustomize();
             var add = Round(new Button(), "\uE70B", T("Add a note"));
             var menu = new MenuFlyout();
@@ -1150,13 +1150,13 @@ public sealed partial class MainWindow
             Shadow = new ThemeShadow(), Translation = new Vector3(420, 0, 40), Opacity = 0, IsHitTestVisible = false,
             TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) },
         };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(d, T("Customize"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(d, T("Customise"));
         _custDrawer = d;
         return d;
     }
 
     // a small header over a group of controls
-    static TextBlock Caption(string t) => new() { Text = t, FontSize = 12, FontWeight = FontWeights.SemiBold, CharacterSpacing = 60, Opacity = 0.62, Margin = new Thickness(0, 6, 0, 0) };
+    static TextBlock Caption(string t) => new() { Text = t, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(0, 6, 0, 0) };
 
     // a choice drawn as a card: its picture over its name, lit when chosen
     Button Choice(UIElement art, string name, bool on, Action pick, double height = 92)
@@ -1232,7 +1232,7 @@ public sealed partial class MainWindow
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var titles = new StackPanel { Spacing = 0 };
-        titles.Children.Add(new TextBlock { Text = T("Customize"), FontSize = 20, FontWeight = FontWeights.SemiBold });
+        titles.Children.Add(new TextBlock { Text = T("Customise"), FontSize = 20, FontWeight = FontWeights.SemiBold });
         titles.Children.Add(new TextBlock { Text = AlbumName(_galAlbum), FontSize = 12, Opacity = 0.6, TextTrimming = TextTrimming.CharacterEllipsis });
         head.Children.Add(titles);
         var x = new Button { Content = new FontIcon { Glyph = "", FontSize = 12 }, Width = 34, Height = 34, Padding = new Thickness(0), CornerRadius = new CornerRadius(17), BorderThickness = new Thickness(0),

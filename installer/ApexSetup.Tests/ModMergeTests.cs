@@ -126,7 +126,7 @@ static class ModMergeTests
                 && plan.Duplicates.Count == 1 && plan.Duplicates[0].Kept == Path.Combine("Mods", B) && plan.Duplicates[0].Dropped.SequenceEqual([Path.Combine("Mods", A)])
                 && plan.OutputBytes == 96 + 5 + 2 + 2 + packed.Length + 4 + 4 * 32,
                 "merge: plan in the game's load order, the Overrides copy (priority 1000) of a shared key kept, exact size");
-            check(Why(Path.Combine("Mods", S)).Contains("script") && Why(@"Mods\Packages\~tmp.package").Contains("temporary") && Why(@"Mods\Packages\Sub\off.package") == "Switched off."
+            check(Why(Path.Combine("Mods", S)).Contains("script") && Why(@"Mods\Packages\~tmp.package").Contains("temporary") && Why(@"Mods\Packages\Sub\off.package") == "Turned off."
                 && Why("x.asi").Contains("Not a package") && plan.Skipped.Any(s => s.Mod.Locked && s.Reason.Key.Contains("launcher installs")),
                 "merge: script mods (by default), temporary files, switched-off mods, non-packages and locked mods are skipped with a reason");
             check(hostile.All(h => Why(h.Rel).StartsWith("Not a readable package") || Why(h.Rel).Contains("protected")) && Same(before, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)),
@@ -269,6 +269,14 @@ static class ModMergeTests
             File.Delete(removed.Path);
             ModMerge.Recover(docs);
             check(File.Exists(Path.Combine(ModMerge.Folder(docs), "Removed", A)) && !File.Exists(Path.Combine(mods, A)), "merge: a merged file the player removed keeps its originals kept");
+            // a write cut short before its record: an old .package.tmp-* no record names goes, one written now stays
+            var orphan = Path.Combine(mods, "Lost.package.tmp-" + Guid.NewGuid().ToString("N"));
+            var fresh = Path.Combine(mods, "Busy.package.tmp-" + Guid.NewGuid().ToString("N"));
+            File.WriteAllText(orphan, "half a merge"); File.SetLastWriteTime(orphan, DateTime.Now.AddDays(-1));
+            File.WriteAllText(fresh, "a merge being written");
+            ModMerge.Recover(docs);
+            check(!File.Exists(orphan) && File.Exists(fresh), "merge: an orphan temporary file from an earlier run goes, one being written stays");
+            File.Delete(fresh);
         }
         catch (Exception e) { check(false, "merge: exception " + e); }
         finally

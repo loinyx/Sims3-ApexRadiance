@@ -133,7 +133,7 @@ public static partial class ModMerge
             var key = ModConflicts.LoadKey(dirs, relMods);
             if (m.FileType != "package" || !m.Rel.StartsWith("Mods" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) why = R("Not a package in Mods.");
             else if (m.Locked) why = R("Part of what the launcher installs.");
-            else if (!m.Enabled) why = R("Switched off.");
+            else if (!m.Enabled) why = R("Turned off.");
             else if (Path.GetFullPath(m.Path).StartsWith(store, StringComparison.OrdinalIgnoreCase)) why = R("Kept by an earlier merge.");
             else if (m.Name.StartsWith('~') || m.Name.Contains(".tmp", StringComparison.OrdinalIgnoreCase)) why = R("A temporary file.");
             else if (key is null) why = R("The game does not load it (Resource.cfg).");
@@ -445,6 +445,19 @@ public static partial class ModMerge
                 foreach (var t in tmps) Fs.Retry(() => File.Delete(t));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        // a write cut short before its record was made leaves a .package.tmp-* with nothing naming it: the game never loads
+        // it, so it only takes space (one of a record still waiting stays; so does one younger than this launcher)
+        try
+        {
+            var mods = Path.Combine(docs, "Mods");
+            var started = System.Diagnostics.Process.GetCurrentProcess().StartTime;
+            var waiting = Records(docs).Select(r => Path.Combine(Path.GetDirectoryName(Path.Combine(docs, r.Merged))!, r.Name + ".package.tmp-")).ToList();
+            if (Directory.Exists(mods))
+                foreach (var t in Directory.EnumerateFiles(mods, "*.package.tmp-*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }).ToList())
+                    if (File.GetLastWriteTime(t) < started && !waiting.Any(w => t.StartsWith(w, StringComparison.OrdinalIgnoreCase)))
+                        Fs.Retry(() => File.Delete(t));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         Forget(docs);
     }
 

@@ -16,7 +16,7 @@ public static partial class ModMerge
     {
         var info = Info(docs, merged) ?? throw new SetupException("This file is not a merge made by the launcher.");
         // (a merge that is off splits into originals that are off, which a merge skips: every one would be left loose)
-        if (!merged.Enabled) throw new SetupException("Nothing was changed: {0}", "Switched off.");
+        if (!merged.Enabled) throw new SetupException("Nothing was changed: {0}", "Turned off.");
         var name = Path.GetFileNameWithoutExtension(merged.Name);
         var folder = Path.GetRelativePath("Mods", Path.GetDirectoryName(merged.Rel) ?? "Mods") is var f && f == "." ? "" : f;
         if (add.Count > 0)

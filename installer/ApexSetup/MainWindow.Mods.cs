@@ -373,7 +373,7 @@ public sealed partial class MainWindow
         };
         var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         s.Children.Add(Lucide.Icon(_collapsed.Contains(key) ? "chevron-right" : "chevron-down", 12, Res("ApexMutedBrush")));
-        s.Children.Add(new TextBlock { Text = label, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 70, Foreground = Res("ApexMutedBrush") });
+        s.Children.Add(new TextBlock { Text = label, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush") });
         head.Content = s;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(head, label);
         head.Click += (_, _) => { if (!_collapsed.Remove(key)) _collapsed.Add(key); SaveViewPrefs(); _folderSig = ""; FillSide(); };
@@ -968,7 +968,7 @@ public sealed partial class MainWindow
         panel.Children.Add(nav);
 
         var list = new StackPanel { Spacing = 1, Padding = new Thickness(8, 8, 10, 8) };
-        void Head(string text) => list.Children.Add(new TextBlock { Text = text, FontSize = 10, FontWeight = FontWeights.SemiBold, CharacterSpacing = 80, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(8, 10, 0, 2) });
+        void Head(string text) => list.Children.Add(new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(8, 10, 0, 2) });
         void Opt(string label, string? icon, string? color, int count, bool on, Action<bool> set)
         {
             var g = new Grid { ColumnSpacing = 10 };
@@ -1168,7 +1168,7 @@ public sealed partial class MainWindow
         var tg = Act("tag", T("Tag"), null);
         tg.Click += (_, _) => TagMenu(picked).ShowAt(tg);
         Act("merge", T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null)), mine.Count > 1);
-        Act("trash-2", T("Remove to the Recycle Bin"), () => RemoveMods(mine), mine.Count > 0, "ApexErrorBrush");
+        Act("trash-2", T("Move to the Recycle Bin"), () => RemoveMods(mine), mine.Count > 0, "ApexErrorBrush");
         a.Children.Add(new Border { Width = 1, Height = 20, Background = Res("ApexCardBorderBrush"), Margin = new Thickness(4, 0, 4, 0) });
         Act("x", T("Clear the selection"), CloseModDetails);
     }
@@ -1321,7 +1321,7 @@ public sealed partial class MainWindow
         foreach (var group in Enum.GetNames<Kind>().Where(k => k != nameof(Kind.Other)).Concat(["Asi"])
                      .GroupBy(KindGroup).OrderBy(g => KindGroupOrder(g.Key)))
         {
-            list.Children.Add(new TextBlock { Text = KindGroupName(group.Key), FontSize = 11, CharacterSpacing = 60, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(4, list.Children.Count == 0 ? 0 : 12, 0, 4) });
+            list.Children.Add(new TextBlock { Text = KindGroupName(group.Key), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(4, list.Children.Count == 0 ? 0 : 12, 0, 4) });
             foreach (var k in group.OrderBy(KindLabel, StringComparer.CurrentCultureIgnoreCase))
             {
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -1662,7 +1662,7 @@ public sealed partial class MainWindow
     UIElement InsidePanel(ModRow r)
     {
         var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(new TextBlock { Text = T("INSIDE"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 60, Foreground = Res("ApexMutedBrush") });
+        panel.Children.Add(new TextBlock { Text = T("INSIDE"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush") });
         var path = r.File.Path;
         void Fill(ModContents c)
         {

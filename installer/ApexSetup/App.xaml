@@ -88,7 +88,7 @@
                 <Setter Property="Padding" Value="18,14" />
             </Style>
             <Style x:Key="ApexTitle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}">
-                <Setter Property="FontSize" Value="24" />
+                <Setter Property="FontSize" Value="28" />
             </Style>
             <Style x:Key="ApexMuted" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
                 <Setter Property="Foreground" Value="{ThemeResource ApexMutedBrush}" />

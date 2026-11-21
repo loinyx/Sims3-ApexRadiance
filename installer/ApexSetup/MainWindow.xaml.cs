@@ -1943,7 +1943,7 @@ public sealed partial class MainWindow : Window
     {
         var plain = ex switch
         {
-            SetupException se => T(se.Key, se.Args),
+            SetupException se => T(se.Key, TArgs(se.Args)), // (a word the Core passes in, like "Turned off.", is translated too)
             _ when Engine.IsNetwork(ex) => T("Check your internet connection, then try again."),
             UnauthorizedAccessException => T("Windows did not let the launcher change a file. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; a read-only or locked file can also cause this."),
             IOException when Engine.IsVirusBlock(ex) => T("Your antivirus blocked a file the launcher needs; add an exception for {0} and open the launcher again.", GitHubSource.TempRoot + ", " + (_game?.Bin ?? "Game\\Bin")),

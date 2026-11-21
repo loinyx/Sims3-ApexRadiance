@@ -87,7 +87,7 @@ public sealed partial class MainWindow
         tags.Children.Add(TagsRow(mine));
         host.Children.Add(tags);
         var all = Section(mine.Count == picked.Count ? T("For all {0}", mine.Count) : T("For the {0} that can be changed", mine.Count), null, out _);
-        if (mine.Count > 1) all.Children.Add(ActionRow("merge", T("Merge into one package"), T("faster loading"), () => Safe(MergeAsync(mine, null, null))));
+        if (mine.Count > 1) all.Children.Add(ActionRow("merge", T("Merge into one package…"), T("faster loading"), () => Safe(MergeAsync(mine, null, null))));
         Button? moveRow = null;
         moveRow = ActionRow("folder-input", T("Move to a folder"), null, () => MoveMenu(mine).ShowAt(moveRow!));
         all.Children.Add(moveRow);
@@ -99,7 +99,7 @@ public sealed partial class MainWindow
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var allOn = on == mine.Count;
         foot.Children.Add(MainButton(allOn ? T("Turn all {0} off", mine.Count) : T("Turn all {0} on", mine.Count), () => SetMods(mine, !allOn)));
-        var remove = IconButton("trash-2", T("Remove all {0} to the Recycle Bin", mine.Count), "ApexErrorBrush");
+        var remove = IconButton("trash-2", T("Move all {0} to the Recycle Bin", mine.Count), "ApexErrorBrush");
         remove.Width = remove.Height = 36;
         remove.BorderThickness = new Thickness(1);
         remove.BorderBrush = Res("ApexCardBorderBrush");

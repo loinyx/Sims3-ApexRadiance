@@ -560,7 +560,7 @@ public sealed partial class MainWindow
         Icon(show);
         if (mine)
         {
-            var remove = IconButton("trash-2", T("Remove to the Recycle Bin"), "ApexErrorBrush");
+            var remove = IconButton("trash-2", T("Move to the Recycle Bin"), "ApexErrorBrush");
             remove.Click += (_, _) => RemoveMods([r]);
             Icon(remove);
         }

@@ -941,7 +941,7 @@ public sealed partial class MainWindow
     static TextBlock Strong(string t) => new() { Text = t, FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
     static TextBlock Body(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexBody"], Foreground = Res("ApexSoftTextBrush") };
     static TextBlock Muted(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexMuted"] };
-    static TextBlock Eyebrow(string t) => new() { Text = t, FontSize = 11, CharacterSpacing = 80, Foreground = Res("ApexMutedBrush") };
+    static TextBlock Eyebrow(string t) => new() { Text = t, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush") };
     static TextBlock Section(string t) => new() { Text = t, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 16, 0, 0) };
 
     // rows of one section in one card, divided by hairlines, instead of a card each (Settings): calmer, and the eye reads

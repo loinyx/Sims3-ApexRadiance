@@ -130,7 +130,7 @@ public sealed partial class MainWindow
 
         var last = SessionHistory.List().FirstOrDefault();
         var lastBody = new StackPanel { Spacing = 4 };
-        lastBody.Children.Add(new TextBlock { Text = T("LAST TIME"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 140, Foreground = Res("ApexMutedBrush") });
+        lastBody.Children.Add(new TextBlock { Text = T("LAST TIME"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush") });
         lastBody.Children.Add(new TextBlock { Text = last is null ? T("No game played yet") : Played(last.Played), FontSize = 18, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         lastBody.Children.Add(new TextBlock
         {
@@ -403,7 +403,7 @@ public sealed partial class MainWindow
         var right = new StackPanel { Spacing = 14, VerticalAlignment = VerticalAlignment.Center };
         if (ups.Count > 0)
         {
-            left.Children.Add(new TextBlock { Text = T("UPDATES"), FontSize = 12, FontWeight = FontWeights.Bold, CharacterSpacing = 160, Foreground = lilac });
+            left.Children.Add(new TextBlock { Text = T("UPDATES"), FontSize = 12, FontWeight = FontWeights.SemiBold, CharacterSpacing = 120, Foreground = lilac });
             left.Children.Add(new TextBlock { Text = ups.Count == 1 ? T("1 update ready") : T("{0} updates ready", ups.Count), FontSize = 28, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             left.Children.Add(new TextBlock { Text = T("Nothing changes until you choose; your settings stay."), FontSize = 14, Foreground = soft, TextWrapping = TextWrapping.Wrap });
             foreach (var c in ups)
@@ -423,7 +423,7 @@ public sealed partial class MainWindow
         else
         {
             var paras = Paragraphs(apex!.Body);
-            left.Children.Add(new TextBlock { Text = T("WHAT'S NEW"), FontSize = 12, FontWeight = FontWeights.Bold, CharacterSpacing = 160, Foreground = lilac });
+            left.Children.Add(new TextBlock { Text = T("WHAT'S NEW"), FontSize = 12, FontWeight = FontWeights.SemiBold, CharacterSpacing = 120, Foreground = lilac });
             left.Children.Add(new TextBlock { Text = "Apex Radiance " + apex.Version, FontSize = 28, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             left.Children.Add(new TextBlock { Text = T("installed"), FontSize = 14, Foreground = soft });
             if (paras.Count > 0) right.Children.Add(new TextBlock { Text = paras[0], FontSize = 20, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });

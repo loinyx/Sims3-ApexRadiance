@@ -211,7 +211,7 @@ public sealed partial class MainWindow
         var suspects = _mods.Count(m => m.FileType == "package" && !m.Locked && m.Enabled);
         var rounds = (int)Math.Ceiling(Math.Log2(Math.Max(2, suspects)));
         if (!await Confirm(T("Find a problem mod"),
-                T("Each round the launcher switches off half of your {0} mods that are on. You play, then say whether the problem is still there. About {1} rounds find the one behind it. Stop puts every mod back exactly as it was, at any time.", suspects, rounds)
+                T("Each round the launcher turns off half of your {0} mods that are on. You play, then say whether the problem is still there. About {1} rounds find the one behind it. Stop puts every mod back exactly as it was, at any time.", suspects, rounds)
                 + "\n\n" + T("While you hunt, do not save over your game: objects and outfits of the mods that are off would be taken out of it. Use Save As, or quit without saving."),
                 T("Start"))) return;
         try { ModHunt.Start(Mods.List(_game!, Docs, kinds: false), Docs, _modLooks.Select(p => _mods.FirstOrDefault(m => m.Path == p)?.Rel).OfType<string>()); }
