@@ -319,7 +319,7 @@
                                 <TextBlock Text="Apex" Style="{StaticResource ApexSection}" />
                                 <TextBlock Text="Made and kept up to date by Apex. Switch its parts on or off here." Style="{StaticResource ApexMuted}" />
                             </StackPanel>
-                            <Border x:Name="WizardComponents" Visibility="Collapsed" CornerRadius="14" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}">
+                            <Border x:Name="WizardComponents" Visibility="Collapsed" CornerRadius="14" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}">
                                 <StackPanel x:Name="WizardRows" />
                             </Border>
                             <!-- Apex: Apex Radiance large on the left, its four parts around it (Sims 3 Modernization, the renderer,
@@ -463,29 +463,31 @@
                                 </StackPanel>
                                 <Border CornerRadius="14" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}">
                                     <StackPanel>
-                                        <Grid ColumnSpacing="16" Padding="20,16">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <Border Width="40" Height="40" CornerRadius="11" Background="#22B598F6" VerticalAlignment="Top">
-                                                <local:LucideIcon Kind="sliders-horizontal" Size="18" Stroke="#B598F6" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <Grid ColumnSpacing="16" Padding="20,14">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" MinWidth="88" /></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Center">
+                                                <local:LucideIcon Kind="sliders-horizontal" Size="18" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
-                                            <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center" MinHeight="40">
+                                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                                 <TextBlock Text="Sims3SettingsSetter" Style="{StaticResource ApexStrong}" />
                                                 <TextBlock Text="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" FontSize="12" />
-                                                <TextBlock x:Name="S3ssPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                             </StackPanel>
-                                            <ToggleSwitch x:Name="S3ssToggle" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Top" Margin="0,4,0,0" Toggled="OnToggle"
+                                            <TextBlock x:Name="S3ssPill" Tag="dyn" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap" />
+                                            <ToggleSwitch x:Name="S3ssToggle" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
                                                           AutomationProperties.Name="Sims3SettingsSetter" />
                                         </Grid>
-                                        <Grid ColumnSpacing="16" Padding="20,16" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <Border Width="40" Height="40" CornerRadius="11" Background="#22F2B25C" VerticalAlignment="Top">
-                                                <local:LucideIcon Kind="flame" Size="18" Stroke="#F2B25C" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <Grid ColumnSpacing="16" Padding="20,14" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" MinWidth="88" /></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Center">
+                                                <local:LucideIcon Kind="flame" Size="18" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
-                                            <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center" MinHeight="40">
+                                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                                 <TextBlock Text="Sims 3 Performance Patch" Style="{StaticResource ApexStrong}" />
                                                 <TextBlock Text="Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes." Style="{StaticResource ApexMuted}" FontSize="12" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Spacing="8" Margin="0,10,0,0">
                                                 <TextBlock x:Name="S3ppPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
-                                                <StackPanel x:Name="S3ppGet" Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                                                <StackPanel x:Name="S3ppGet" Orientation="Horizontal" Spacing="8">
                                                     <Button Click="OnS3ppDownload">
                                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                                             <FontIcon Glyph="&#xE896;" FontSize="14" />
@@ -494,25 +496,25 @@
                                                     </Button>
                                                     <Button Content="Choose the downloaded file" Click="OnS3ppPick" />
                                                 </StackPanel>
-                                                <StackPanel x:Name="S3ppWait" Orientation="Horizontal" Spacing="10" Margin="0,6,0,0" Visibility="Collapsed">
+                                                <StackPanel x:Name="S3ppWait" Orientation="Horizontal" Spacing="10" Visibility="Collapsed">
                                                     <ProgressRing Width="16" Height="16" IsActive="True" />
                                                     <TextBlock x:Name="S3ppWaitText" Tag="dyn" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
                                                 </StackPanel>
                                             </StackPanel>
-                                            <ToggleSwitch x:Name="S3ppToggle" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Top" Margin="0,4,0,0" Toggled="OnToggle"
+                                            <ToggleSwitch x:Name="S3ppToggle" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
                                                           AutomationProperties.Name="Sims 3 Performance Patch" />
                                         </Grid>
-                                        <Grid x:Name="MonoCard" ColumnSpacing="16" Padding="20,16" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <Border Width="40" Height="40" CornerRadius="11" Background="#22A2A5B2" VerticalAlignment="Top">
-                                                <local:LucideIcon Kind="puzzle" Size="18" Stroke="#A2A5B2" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <Grid x:Name="MonoCard" ColumnSpacing="16" Padding="20,14" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" MinWidth="88" /></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Center">
+                                                <local:LucideIcon Kind="puzzle" Size="18" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
-                                            <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center" MinHeight="40">
+                                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                                 <TextBlock Text="MonoPatcher" Style="{StaticResource ApexStrong}" />
                                                 <TextBlock Text="Needed only by some script mods; turn it on if a mod asks for it." Style="{StaticResource ApexMuted}" FontSize="12" />
-                                                <TextBlock x:Name="MonoPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                             </StackPanel>
-                                            <ToggleSwitch x:Name="MonoToggle" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Width="40" VerticalAlignment="Top" Margin="0,4,0,0" Toggled="OnToggle"
+                                            <TextBlock x:Name="MonoPill" Tag="dyn" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap" />
+                                            <ToggleSwitch x:Name="MonoToggle" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
                                                           AutomationProperties.Name="MonoPatcher" />
                                         </Grid>
                                     </StackPanel>
