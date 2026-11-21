@@ -1325,7 +1325,6 @@ public static partial class Strings
         ["Apex"] = "Apex",
         ["Parts of Apex"] = "Partes do Apex",
         ["Channel"] = "Canal",
-        ["{0} → {1}"] = "{0} → {1}",
         ["On in the NVIDIA driver"] = "Ligado no driver da NVIDIA",
         ["On in the NVIDIA driver · frame limit now 60 fps"] = "Ligado no driver da NVIDIA · limite agora em 60 fps",
         ["On in the AMD driver, for every game"] = "Ligado no driver da AMD, em todos os jogos",
