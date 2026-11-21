@@ -673,9 +673,9 @@ public sealed partial class MainWindow : Window
         if (!wizard) Label(T("Parts of Apex"));
         else WizardRows.Children.Add(new Border { Height = 8 });
         if (CoreModernization.Visibility == Visibility.Visible)
-            Row(IconBox("hammer"), "Sims 3 Modernization", ModDesc.Text, wizard ? T("Recommended") : null, State(ModPill), Changes(Components.Modernization),
+            Row(IconBox("wrench"), "Sims 3 Modernization", ModDesc.Text, wizard ? T("Recommended") : null, State(ModPill), Changes(Components.Modernization),
                 wizard || ModChannel.Visibility != Visibility.Visible ? null : Channel(), Mirror(ModToggle, "Sims 3 Modernization"));
-        if (wizard) Row(IconBox("layers"), RendererName.Text, RendererState.Text, null, null, false, Button(T("Change"), () => OnChangeRenderer(this, new RoutedEventArgs())));
+        if (wizard) Row(IconBox("monitor"), RendererName.Text, RendererState.Text, null, null, false, Button(T("Change"), () => OnChangeRenderer(this, new RoutedEventArgs())));
         else
         {
             var choices = _rendererCards.Keys.ToList();
@@ -690,7 +690,7 @@ public sealed partial class MainWindow : Window
                 var pick = choices[menu.SelectedIndex];
                 Later(() => { _renderer = pick; RefreshComponents(); });
             };
-            Row(IconBox("layers"), T("Graphics"), T("How Apex draws the game."), null, StateText(RendererState.Text, RendererState.Foreground),
+            Row(IconBox("monitor"), T("Graphics"), T("How Apex draws the game."), null, StateText(RendererState.Text, RendererState.Foreground),
                 Changes(Components.Bridge, Components.Dxvk), menu);
         }
         if (SmoothSection.Visibility == Visibility.Visible && SmoothCard.Visibility == Visibility.Visible)
@@ -703,15 +703,15 @@ public sealed partial class MainWindow : Window
                 Put(both, Adopt(SmoothHelp, SmoothCard));
                 smoothState = both;
             }
-            Row(IconBox("waves"), "NVIDIA Smooth Motion", T("An extra picture between every two the game makes, on RTX 40 and 50 cards."), null, smoothState, _smoothWant is not null, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
+            Row(IconBox("film"), "NVIDIA Smooth Motion", T("An extra picture between every two the game makes, on RTX 40 and 50 cards."), null, smoothState, _smoothWant is not null, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
         }
         if (SmoothSection.Visibility == Visibility.Visible && AfmfCard.Visibility == Visibility.Visible)
-            Row(IconBox("waves"), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, State(AfmfPill), _afmfWant is not null, Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
+            Row(IconBox("film"), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, State(AfmfPill), _afmfWant is not null, Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
         _fpsBox ??= ((Panel)FpsCard.Child).Children.OfType<StackPanel>().First(sp => sp.Children.Contains(FpsCombo));
         if (!wizard && SmoothSection.Visibility == Visibility.Visible && FpsCard.Visibility == Visibility.Visible)
         {
             FpsCombo.MinWidth = 0; FpsCombo.Width = 200;
-            Row(IconBox("sliders-horizontal"), T("Apex frame limit"), FpsDesc.Text, null, State(FpsPill), _fpsWant is not null, Adopt(_fpsBox, FpsCard));
+            Row(IconBox("gauge"), T("Apex frame limit"), FpsDesc.Text, null, State(FpsPill), _fpsWant is not null, Adopt(_fpsBox, FpsCard));
         }
         Row(IconBox("rotate-ccw"), T("TS3Wrap"), T("Reopens your last save with fresh memory when the game runs low."), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
     }
