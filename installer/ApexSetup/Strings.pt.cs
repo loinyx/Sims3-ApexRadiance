@@ -1286,5 +1286,16 @@ public static partial class Strings
         ["Sparkles"] = "Brilhos",
         ["Updated"] = "Atualizado",
         ["Your settings stay. Press Play when you are ready."] = "Suas configurações continuam. Clique em Jogar quando quiser.",
+        ["What goes in with Apex Radiance"] = "O que vai junto com o Apex Radiance",
+        ["The recommended set is on. Change it any time in Components."] = "O conjunto recomendado já está ligado. Mude quando quiser em Componentes.",
+        ["Always installed"] = "Sempre instalado",
+        ["An extra picture between every two the game makes, on RTX 40 and 50 cards."] = "Uma imagem extra entre cada duas que o jogo faz, nas placas RTX 40 e 50.",
+        ["The AMD driver adds frames for smoother motion."] = "O driver da AMD adiciona quadros para um movimento mais suave.",
+        ["Start again into a save made low on memory."] = "Recomeça direto num save feito com pouca memória.",
+        ["Keep Apex Launcher on this PC"] = "Manter o Apex Launcher neste PC",
+        ["In the Start menu, on the desktop and in Installed apps. Start the game from it."] = "No menu Iniciar, na área de trabalho e em Aplicativos instalados. Comece o jogo por ele.",
+        ["Keep it as a single file"] = "Manter como um arquivo só",
+        ["Runs from {0}, nothing added to Windows."] = "Roda de {0}, nada é adicionado ao Windows.",
+        ["Lighting, picture and performance for The Sims 3. The launcher sets it up and then starts the game for you."] = "Iluminação, imagem e desempenho para The Sims 3. O launcher instala tudo e depois abre o jogo para você.",
     };
 }

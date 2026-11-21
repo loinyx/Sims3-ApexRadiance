@@ -281,6 +281,8 @@ public sealed partial class MainWindow : Window
         _step = step;
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
         if (step != GalleryScreen) FullBleed(false);
+        if (step == GameStep && FirstInstall) _wizardFlow = true;
+        WizardChrome();
         Scroller.Visibility = step == ModsScreen ? Visibility.Collapsed : Visibility.Visible; // (Mods scrolls in its own panes)
         QueueAudit();
         Animate(_screens[step]);
@@ -374,12 +376,19 @@ public sealed partial class MainWindow : Window
                 else if (SettingChanges().Count > 0) await InstallAsync(add, del, settingsOnly: true);
                 break;
             }
+            // (a copy not installed yet goes where the player chose: installed, it starts the installed copy and closes)
+            case DoneStep when DoneChoice.Visibility == Visibility.Visible && Environment.ProcessPath is { } self:
+                _ = ApplyInstallMode(_doneInstall, self, null);
+                if (!_doneInstall) Show(Home);
+                break;
             case DoneStep: if (Maintenance) Close(); else Show(FirstInstall ? Welcome : Home); break;
         }
     }
 
     void UpdateFooter()
     {
+        WizardChrome(); // (also on a theme change: the card's brushes follow it)
+        FillWizardRows();
         // a first install opens on its own welcome over the window; its steps show their bar beside the sidebar
         FirstRun.Visibility = FirstInstall && _step == Welcome && !_busy ? Visibility.Visible : Visibility.Collapsed;
         // the glow moves only while it shows, and not when Windows' animation effects are off (started once, not on every refresh)
@@ -401,7 +410,7 @@ public sealed partial class MainWindow : Window
             ComponentsStep when _offline && wa.Count > 0 => T("Try again"),
             ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Nothing to apply")) : _state?.ApexVersion is null ? T("Install")
                 : work.Count == 1 ? T("Apply 1 change") : T("Apply {0} changes", work.Count),
-            DoneStep => T("Finish"),
+            DoneStep => DoneChoice.Visibility == Visibility.Visible ? T("Open Apex Launcher") : T("Finish"),
             _ => T("Next"),
         };
         NextButton.IsEnabled = !_busy && _step switch
@@ -450,14 +459,90 @@ public sealed partial class MainWindow : Window
     }
 
     void OnFirstStart(object sender, RoutedEventArgs e) => Show(GameStep);
-    // a small window: the aurora panel goes and the words take the width (beside it they were squeezed to a few letters)
-    void OnFirstRunSized(object sender, SizeChangedEventArgs e)
+
+    // ---------- the install as one card ----------
+
+    // A first install (and the updates Play puts in) runs its steps in one card in the middle of the window, without the
+    // sidebar: none of it works before Apex Radiance is in. Any other screen leaves the card.
+    bool _wizardFlow;
+    bool Wizard => _wizardFlow && _step is GameStep or ComponentsStep or RendererStep or InstallStep or DoneStep;
+
+    void WizardChrome()
     {
-        var small = e.NewSize.Width < 900;
-        FirstRun.ColumnDefinitions[0].Width = new GridLength(small ? 0 : 400);
-        GlowPanel.Visibility = small ? Visibility.Collapsed : Visibility.Visible;
+        var on = Wizard;
+        if (!on && _step is not (GameStep or ComponentsStep or RendererStep or InstallStep or DoneStep)) _wizardFlow = false;
+        Nav.IsPaneVisible = !on;
+        ContentFrame.MaxWidth = on ? 760 : double.PositiveInfinity;
+        ContentFrame.HorizontalAlignment = HorizontalAlignment.Stretch; // (with MaxWidth: the card keeps its width, centred, whatever the step holds)
+        ContentFrame.VerticalAlignment = on ? VerticalAlignment.Center : VerticalAlignment.Stretch;
+        ContentFrame.Margin = new Thickness(on ? 24 : 0);
+        ContentFrame.CornerRadius = new CornerRadius(on ? 24 : 0);
+        ContentFrame.BorderThickness = new Thickness(on ? 1 : 0);
+        ContentFrame.BorderBrush = on ? Res("ApexCardBorderBrush") : null;
+        ContentFrame.Background = on ? Res("ApexCardBrush") : null;
+        ContentFrame.MaxHeight = on && Nav.ActualHeight > 0 ? Math.Max(320, Nav.ActualHeight - 48) : double.PositiveInfinity;
+        Footer.Padding = new Thickness(on ? 28 : 24, 0, on ? 28 : 24, 0);
+        if (on) Scroller.Padding = new Thickness(28, 24, 28, 0);
     }
 
+    // the first install's short list: one row each, with the switches of the Components cards mirrored both ways
+    void FillWizardRows()
+    {
+        var on = Wizard && _step == ComponentsStep;
+        WizardComponents.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        CoreGrid.Visibility = OtherModsSection.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        WizardRows.Children.Clear();
+        if (!on) return;
+        FrameworkElement IconBox(string icon, uint argb)
+        {
+            var c = Windows.UI.Color.FromArgb(255, (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb);
+            return new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(10), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x22, c.R, c.G, c.B)),
+                VerticalAlignment = VerticalAlignment.Center, Child = Lucide.Icon(icon, 17, new SolidColorBrush(c)) };
+        }
+        void Row(FrameworkElement icon, string name, string text, string? pill, string pillKind, FrameworkElement? end)
+        {
+            var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(18, 13, 18, 13), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, WizardRows.Children.Count == 0 ? 0 : 1, 0, 0) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.Children.Add(icon);
+            var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            title.Children.Add(new TextBlock { Text = name, FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            if (pill is not null)
+                title.Children.Add(new Border
+                {
+                    Style = (Style)Application.Current.Resources["ApexPill"], VerticalAlignment = VerticalAlignment.Center,
+                    Background = pillKind == "accent" ? Res("ApexAccentSoftBrush") : Res("ApexPillBrush"),
+                    Child = new TextBlock { Text = pill, FontSize = 11, Foreground = Res(pillKind == "accent" ? "ApexAccentTextBrush" : pillKind == "warn" ? "ApexWarningBrush" : "ApexMutedBrush") },
+                });
+            words.Children.Add(title);
+            words.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+            Grid.SetColumn(words, 1);
+            g.Children.Add(words);
+            if (end is not null) { end.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(end, 2); g.Children.Add(end); }
+            WizardRows.Children.Add(g);
+        }
+        ToggleSwitch Mirror(ToggleSwitch card, string name)
+        {
+            var t = new ToggleSwitch { OnContent = "", OffContent = "", MinWidth = 0, Width = 40, IsOn = card.IsOn, IsEnabled = card.IsEnabled };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(t, name);
+            t.Toggled += (_, _) => { if (card.IsOn != t.IsOn) card.IsOn = t.IsOn; };
+            return t;
+        }
+        var logo = new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 36, Height = 36, VerticalAlignment = VerticalAlignment.Center };
+        Row(logo, "Apex Radiance " + (Latest(Components.Apex) ?? ""), T("Lighting, picture and performance for The Sims 3."), T("Always installed"), "", null);
+        if (CoreModernization.Visibility == Visibility.Visible)
+            Row(IconBox("hammer", 0x6ED3A8), "Sims 3 Modernization", ModDesc.Text, T("Recommended"), "accent", Mirror(ModToggle, "Sims 3 Modernization"));
+        Row(IconBox("layers", 0x8E9CFF), RendererName.Text, RendererState.Text, null, "", Button(T("Change"), () => OnChangeRenderer(this, new RoutedEventArgs())));
+        if (SmoothSection.Visibility == Visibility.Visible && SmoothCard.Visibility == Visibility.Visible)
+            Row(IconBox("waves", 0x62CBDD), "NVIDIA Smooth Motion", T("An extra picture between every two the game makes, on RTX 40 and 50 cards."), null, "", Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
+        if (SmoothSection.Visibility == Visibility.Visible && AfmfCard.Visibility == Visibility.Visible)
+            Row(IconBox("waves", 0xEF9872), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, "", Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
+        Row(IconBox("rotate-ccw", 0xE0A84F), T("Restart host"), T("Start again into a save made low on memory."), T("Experimental"), "warn", Mirror(RestartToggle, "Restart host"));
+    }
+
+    void OnContentFrameSized(object sender, SizeChangedEventArgs e) { if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
     void OnGlowPanelSize(object sender, SizeChangedEventArgs e) =>
         GlowPanel.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
     void OnNotThisGame(object sender, RoutedEventArgs e) => Show(GameStep);
@@ -936,7 +1021,7 @@ public sealed partial class MainWindow : Window
         // game that already has Apex keeps its renderer and its choices (the card check, once known, moves a blocked bridge to DXVK)
         _renderer = RendererOf(s with { Layer = Engine.DefaultLayer(s, VulkanBlocked) });
         S3ssToggle.IsOn = s.S3ss; // (optional mods start off unless installed)
-        ModToggle.IsOn = s.Modernization;
+        ModToggle.IsOn = s.Modernization || s.ApexVersion is null && _game is { ModernizationSupported: true }; // (recommended: on in a first install where its build runs)
         _modExp = s.Manifest.ModernizationChannel == "experimental";
         (_modExp ? ModExperimental : ModStable).IsChecked = true;
         MonoToggle.IsOn = s.MonoPatcher;
@@ -1286,6 +1371,9 @@ public sealed partial class MainWindow : Window
 
     void RefreshComponents()
     {
+        var wizard = Wizard && _step == ComponentsStep;
+        CompTitle.Text = wizard ? T("What goes in with Apex Radiance") : T("Components");
+        CompSub.Text = wizard ? T("The recommended set is on. Change it any time in Components.") : T("What runs with your game. Nothing changes until you apply.");
         if (_state is not { } s || _game is not { } g) return;
         SetDefaults();
         var latest = Latest(Components.Apex) ?? "";
@@ -1613,13 +1701,7 @@ public sealed partial class MainWindow : Window
                 _skipUpdate.Clear();
                 RefreshAll();
             }
-            else
-            {
-                Show(DoneStep);
-                // (a first install skipped the question at start: asked now, so the launcher lands in the Start menu and
-                // Installed apps instead of staying in the downloads folder)
-                DispatcherQueue.TryEnqueue(async () => await AskInstallModeAsync());
-            }
+            else Show(DoneStep);
         }
         catch (Exception ex)
         {
@@ -1710,6 +1792,7 @@ public sealed partial class MainWindow : Window
             });
         if (_lastChanges.Any(p => p.Error is not null && p.Error != "Dry run: Setup changes nothing.")) { DoneTitle.Text = T("Some changes did not apply"); DoneText.Text = ""; }
         DoneSummaryCard.Visibility = DoneSummary.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FillDoneChoice();
     }
 
     // ---------- repair or remove ----------

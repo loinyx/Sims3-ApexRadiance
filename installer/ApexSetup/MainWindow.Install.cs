@@ -101,6 +101,48 @@ public sealed partial class MainWindow
 
     void BuildSettingsIfShown() { if (_step == SettingsScreen) BuildSettings(); }
 
+    // the end of an install on a copy that is neither installed nor portable: the same two choices as cards, Install first
+    bool _doneInstall = true;
+    void FillDoneChoice()
+    {
+        DoneChoice.Children.Clear();
+        var ask = !Maintenance && !DryRun && LauncherInstall.Mode == LauncherMode.NotChosen && Environment.ProcessPath is not null && _lastInstall.Count > 0;
+        DoneChoice.Visibility = ask ? Visibility.Visible : Visibility.Collapsed;
+        if (!ask) return;
+        var self = Environment.ProcessPath!;
+        foreach (var (value, icon, title, text) in new[]
+        {
+            (true, "hard-drive", T("Keep Apex Launcher on this PC"), T("In the Start menu, on the desktop and in Installed apps. Start the game from it.")),
+            (false, "folder", T("Keep it as a single file"), T("Runs from {0}, nothing added to Windows.", ShortPath(Path.GetDirectoryName(self) ?? self))),
+        })
+        {
+            var on = value == _doneInstall;
+            var g = new Grid { ColumnSpacing = 14 };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.Children.Add(new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
+                Child = Lucide.Icon(icon, 17, Res(value ? "ApexAccentBrush" : "ApexMutedBrush")) });
+            var s = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            s.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
+            s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+            Grid.SetColumn(s, 1);
+            g.Children.Add(s);
+            var check = new Border { Width = 20, Height = 20, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1.5), VerticalAlignment = VerticalAlignment.Center,
+                Background = on ? Res("ApexAccentBrush") : null, BorderBrush = Res(on ? "ApexAccentBrush" : "ApexMutedBrush"),
+                Child = on ? Lucide.Icon("check", 12, Res("TextOnAccentFillColorPrimaryBrush"), 3) : null };
+            Grid.SetColumn(check, 2);
+            g.Children.Add(check);
+            var card = new Border { Child = g, Padding = new Thickness(16, 14, 16, 14), CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(on ? 1.5 : 1),
+                BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush"), Background = on ? Res("ApexAccentSoftBrush") : null };
+            var b = new Button { Content = card, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(14), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            b.Click += (_, _) => { _doneInstall = value; FillDoneChoice(); UpdateFooter(); };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title);
+            DoneChoice.Children.Add(b);
+        }
+    }
+
     // Settings: this copy, installed or not, and the way to switch
     Border InstallModeRow()
     {

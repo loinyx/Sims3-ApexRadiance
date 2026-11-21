@@ -198,7 +198,7 @@
                 <TextBlock x:Name="SetupVersion" Tag="dyn" Margin="16,4,0,12" Style="{StaticResource ApexMuted}" />
             </NavigationView.PaneFooter>
 
-            <Grid>
+            <Grid x:Name="ContentFrame" SizeChanged="OnContentFrameSized">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
@@ -309,9 +309,13 @@
                         <StackPanel x:Name="ScreenComponents" Spacing="24" Visibility="Collapsed" MaxWidth="1180">
                             <StackPanel x:Name="StepsComponents" Tag="dyn" Orientation="Horizontal" Spacing="12" />
                             <StackPanel Spacing="4">
-                                <TextBlock Text="Components" Style="{StaticResource ApexTitle}" />
-                                <TextBlock Text="What runs with your game. Nothing changes until you apply." Style="{StaticResource ApexMuted}" FontSize="13" />
+                                <TextBlock x:Name="CompTitle" Tag="dyn" Style="{StaticResource ApexTitle}" />
+                                <TextBlock x:Name="CompSub" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" TextWrapping="Wrap" />
                             </StackPanel>
+                            <!-- a first install: Apex Radiance and its parts as one short list (the switches are the cards' own, mirrored) -->
+                            <Border x:Name="WizardComponents" Visibility="Collapsed" CornerRadius="14" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}">
+                                <StackPanel x:Name="WizardRows" />
+                            </Border>
                             <!-- Apex: Apex Radiance large on the left, its four parts around it (Sims 3 Modernization, the renderer,
                                  frame generation, the restart host); the layout is set in OnCoreSized -->
                             <Grid x:Name="CoreGrid" SizeChanged="OnCoreSized" ColumnSpacing="14" RowSpacing="14">
@@ -331,7 +335,7 @@
                                         </Border.Background>
                                     </Border>
                                     <StackPanel Spacing="8" Padding="28" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <Border x:Name="ApexCrystalHost" HorizontalAlignment="Center" Margin="0,0,0,8" />
+                                        <Image Source="ms-appx:///Assets/apex_logo.png" Width="104" Height="104" HorizontalAlignment="Center" Margin="0,0,0,8" />
                                         <TextBlock Text="Apex Radiance" FontSize="26" FontWeight="Bold" HorizontalAlignment="Center" />
                                         <TextBlock Text="Lighting, picture and performance for The Sims 3." Style="{StaticResource ApexMuted}" HorizontalAlignment="Center" TextAlignment="Center" />
                                         <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" Margin="0,6,0,0">
@@ -451,7 +455,7 @@
                                 <StackPanel x:Name="SuggestList" Tag="dyn" Spacing="8" />
                             </StackPanel>
                             <!-- the mods by other modders: a plain list -->
-                            <StackPanel Spacing="10">
+                            <StackPanel x:Name="OtherModsSection" Spacing="10">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="Other mods" Style="{StaticResource ApexSection}" />
                                     <TextBlock Text="Made by other modders. The launcher installs and updates them for you." Style="{StaticResource ApexMuted}" />
@@ -537,6 +541,8 @@
                             <Border x:Name="DoneSummaryCard" Style="{StaticResource ApexCard}" MinWidth="520" Margin="0,8,0,0">
                                 <StackPanel x:Name="DoneSummary" Tag="dyn" Spacing="6" />
                             </Border>
+                            <!-- a copy neither installed nor portable yet: the choice is part of the end, not a dialog after it -->
+                            <StackPanel x:Name="DoneChoice" Tag="dyn" Spacing="10" MinWidth="520" Visibility="Collapsed" />
                         </StackPanel>
 
                         <!-- 5 Repair or remove -->
@@ -844,14 +850,10 @@
         </NavigationView>
 
         <!-- a first install opens here, over the window (no sidebar until Apex Radiance is installed) -->
-        <Grid x:Name="FirstRun" Grid.Row="1" Visibility="Collapsed" Background="{ThemeResource ApexPageBrush}" SizeChanged="OnFirstRunSized">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="400" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <!-- an aurora over the whole panel: three soft bands of light drifting and fading at their own pace (FirstRunGlow,
-                 started in code); the panel clips them -->
-            <Grid x:Name="GlowPanel" Background="#080808" BorderBrush="#1B1B1B" BorderThickness="0,0,1,0" SizeChanged="OnGlowPanelSize">
+        <!-- a first install opens here, over the window (no sidebar until Apex Radiance is installed): the aurora fills the
+             window and the welcome is one card in the middle, as every step of the install after it -->
+        <Grid x:Name="FirstRun" Grid.Row="1" Visibility="Collapsed" Background="{ThemeResource ApexPageBrush}">
+            <Grid x:Name="GlowPanel" Background="#080808" SizeChanged="OnGlowPanelSize">
                 <Grid.Resources>
                     <Storyboard x:Name="FirstRunGlow">
                         <DoubleAnimation Storyboard.TargetName="AuroraGreenMove" Storyboard.TargetProperty="TranslateX" From="-60" To="60" Duration="0:0:11" AutoReverse="True" RepeatBehavior="Forever">
@@ -883,7 +885,7 @@
                         </DoubleAnimation>
                     </Storyboard>
                 </Grid.Resources>
-                <Canvas>
+                <Canvas Width="420" Height="560" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <Ellipse x:Name="AuroraViolet" Width="760" Height="330" Canvas.Left="-180" Canvas.Top="135" RenderTransformOrigin="0.5,0.5">
                         <Ellipse.RenderTransform>
                             <CompositeTransform x:Name="AuroraVioletMove" Rotation="24" />
@@ -921,37 +923,37 @@
                         </Ellipse.Fill>
                     </Ellipse>
                 </Canvas>
-                <Image Source="ms-appx:///Assets/apex_logo.png" Width="120" Height="120" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-60,0,0" />
             </Grid>
-            <Grid Grid.Column="1" Padding="64,0,64,28">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <StackPanel VerticalAlignment="Center" Spacing="28">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="WELCOME" FontSize="12" FontWeight="SemiBold" CharacterSpacing="120" Foreground="#A9A3EE" />
-                        <TextBlock x:Name="FirstTitle" Tag="dyn" FontSize="40" FontWeight="Bold" />
-                        <TextBlock Text="Lighting, picture and performance for The Sims 3." FontSize="16" Foreground="{ThemeResource ApexSoftTextBrush}" TextWrapping="Wrap" />
+            <Border MaxWidth="720" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" CornerRadius="24" BorderThickness="1"
+                    BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}">
+                <Border.Shadow><ThemeShadow /></Border.Shadow>
+                <StackPanel>
+                    <StackPanel Padding="28,40,28,8" Spacing="12" HorizontalAlignment="Center">
+                        <Image Source="ms-appx:///Assets/apex_logo.png" Width="76" Height="76" HorizontalAlignment="Center" />
+                        <TextBlock x:Name="FirstTitle" Tag="dyn" FontSize="26" FontWeight="Bold" HorizontalAlignment="Center" />
+                        <TextBlock Text="Lighting, picture and performance for The Sims 3. The launcher sets it up and then starts the game for you." Style="{StaticResource ApexMuted}"
+                                   FontSize="14" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="520" HorizontalAlignment="Center" />
                     </StackPanel>
-                    <StackPanel Spacing="2">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <FontIcon x:Name="FirstGameIcon" Glyph="&#xE73E;" FontSize="16" Foreground="{ThemeResource ApexSuccessBrush}" VerticalAlignment="Center" />
-                            <TextBlock x:Name="FirstGame" Tag="dyn" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="330" />
-                            <HyperlinkButton x:Name="FirstNotThis" Content="Not this one?" Padding="4,2" VerticalAlignment="Center" Click="OnNotThisGame" />
-                        </StackPanel>
-                        <TextBlock x:Name="FirstGamePath" Tag="dyn" Style="{StaticResource ApexMuted}" Margin="26,0,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                    </StackPanel>
-                    <StackPanel Spacing="12">
-                        <Button Style="{StaticResource AccentButtonStyle}" MinWidth="200" Height="44" FontSize="15" Click="OnFirstStart">
+                    <Border Margin="20,14,20,10" Padding="16,14" CornerRadius="14" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}">
+                        <Grid ColumnSpacing="14">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <FontIcon x:Name="FirstGameIcon" Glyph="&#xE7FC;" FontSize="18" Foreground="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock x:Name="FirstGame" Tag="dyn" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock x:Name="FirstGamePath" Tag="dyn" Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                <HyperlinkButton x:Name="FirstNotThis" Content="Not this one?" Padding="0" FontSize="12" Click="OnNotThisGame" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <TextBlock Margin="28,0,28,8" Text="Close the game before you start. Everything comes from each author's official GitHub, and the launcher keeps a copy of every file it changes."
+                               Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                    <Border Padding="28,16,28,22" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource ApexCardBorderBrush}">
+                        <Button Style="{StaticResource AccentButtonStyle}" MinWidth="160" Height="44" FontSize="15" HorizontalAlignment="Right" Click="OnFirstStart">
                             <TextBlock Text="Get started" />
                         </Button>
-                        <TextBlock Text="Game, components and installation" Style="{StaticResource ApexMuted}" />
-                    </StackPanel>
+                    </Border>
                 </StackPanel>
-                <TextBlock Grid.Row="1" Text="Close the game before you start. Everything comes from each author's official GitHub, and the launcher keeps a copy of every file it changes."
-                           Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-            </Grid>
+            </Border>
         </Grid>
     </Grid>
 </Window>

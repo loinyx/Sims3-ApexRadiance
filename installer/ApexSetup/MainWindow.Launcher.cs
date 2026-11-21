@@ -119,9 +119,6 @@ public sealed partial class MainWindow
         if (!_coreHooked)
         {
             _coreHooked = true;
-            var crystal = new Crystal(92);
-            crystal.SetColor(new System.Numerics.Vector3(0.62f, 0.42f, 0.95f));
-            ApexCrystalHost.Child = crystal;
             SmoothSection.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => LayCore());
             GraphicsInfo.RegisterPropertyChangedCallback(InfoBar.IsOpenProperty, (_, _) => ShowCoreNotes());
         }
