@@ -164,9 +164,9 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 ## The launcher (2.0.0)
 
 Apex Launcher keeps everything above as its *Components* screen and adds the screens a player uses every day. On
-*Components*, Apex Radiance sits large on the left with its parts beside it (Sims 3 Modernization with its channel, the
-renderer, frame generation and the frame limit, the restart host); the mods by other modders (Sims3SettingsSetter, the
-Sims 3 Performance Patch, MonoPatcher) are a list under them. It runs
+*Components*, Apex Radiance and its parts are one list, as in the install (Sims 3 Modernization with its channel, the
+renderer, frame generation and the frame limit, the restart host), each row with its state; the mods by other modders
+(Sims3SettingsSetter, the Sims 3 Performance Patch, MonoPatcher) are a second list under it. It runs
 as the signed-in user, not as administrator: a change to the game folder or to a driver setting is written as a plan
 (`%LOCALAPPDATA%\Apex Launcher\ops`) and applied by the same exe started once with administrator rights
 (`Elevation.cs`), one prompt per change. A game folder the user can write to needs no prompt.

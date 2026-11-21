@@ -401,7 +401,7 @@ public sealed partial class MainWindow : Window
     void UpdateFooter()
     {
         WizardChrome(); // (also on a theme change: the card's brushes follow it)
-        FillWizardRows();
+        try { FillWizardRows(); } catch (Exception e) { App.Log(e); } // (a row that cannot be built must not stop the screen)
         // a first install opens on its own welcome over the window; its steps show their bar beside the sidebar
         FirstRun.Visibility = FirstInstall && _step == Welcome && !_busy ? Visibility.Visible : Visibility.Collapsed;
         // the glow moves only while it shows, and not when Windows' animation effects are off (started once, not on every refresh)
@@ -478,6 +478,8 @@ public sealed partial class MainWindow : Window
     // A first install (and the updates Play puts in) runs its steps in one card in the middle of the window, without the
     // sidebar: none of it works before Apex Radiance is in. Any other screen leaves the card.
     bool _wizardFlow, _updatingForPlay, _playAnyway;
+    readonly Dictionary<FrameworkElement, Panel> _moved = new();
+    StackPanel? _fpsBox;
     (string? Bin, bool Writable) _writableFor = (null, true);
     bool Wizard => _wizardFlow && _step is GameStep or ComponentsStep or RendererStep or InstallStep or DoneStep;
 
@@ -502,10 +504,15 @@ public sealed partial class MainWindow : Window
     // the first install's short list: one row each, with the switches of the Components cards mirrored both ways
     void FillWizardRows()
     {
-        var on = Wizard && _step == ComponentsStep;
-        WizardComponents.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-        CoreGrid.Visibility = OtherModsSection.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        // the install's list is also Components' own: Apex Radiance and its parts as rows; outside the install each row
+        // also says its state, and Modernization's channel and the frame limit sit in their rows
+        var wizard = Wizard && _step == ComponentsStep;
+        var list = _step == ComponentsStep;
+        WizardComponents.Visibility = list ? Visibility.Visible : Visibility.Collapsed;
+        CoreGrid.Visibility = Visibility.Collapsed;
+        OtherModsSection.Visibility = wizard ? Visibility.Collapsed : Visibility.Visible;
         WizardRows.Children.Clear();
+        var on = wizard;
         // what is in the way, said in the card: the game open, no internet, or a game folder that needs Windows' permission
         // (asked once per game: the probe writes a file in Game\Bin)
         if (on && _game is { } wg && _writableFor.Bin != wg.Bin) _writableFor = (wg.Bin, Elevation.IsElevated || Elevation.CanWrite(wg.Bin));
@@ -520,14 +527,23 @@ public sealed partial class MainWindow : Window
         else GameRunningNotice.IsOpen = false;
         GameRunningNotice.Visibility = GameRunningNotice.IsOpen ? Visibility.Visible : Visibility.Collapsed;
         WizardComponents.Opacity = on && (_running || _offline) ? 0.55 : 1;
-        if (!on) return;
+        if (!list) return;
         FrameworkElement IconBox(string icon, uint argb)
         {
             var c = Windows.UI.Color.FromArgb(255, (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb);
             return new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(10), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x22, c.R, c.G, c.B)),
                 VerticalAlignment = VerticalAlignment.Center, Child = Lucide.Icon(icon, 17, new SolidColorBrush(c)) };
         }
-        void Row(FrameworkElement icon, string name, string text, string? pill, string pillKind, FrameworkElement? end)
+        // (a control of the hidden cards moved into a row: it keeps its handlers and state; where it sits is kept here, since
+        // a control of a card never shown tells no parent)
+        FrameworkElement Adopt(FrameworkElement e, Border card)
+        {
+            var from = _moved.TryGetValue(e, out var row) ? row : (Panel)card.Child;
+            from.Children.Remove(e);
+            return e;
+        }
+        TextBlock? State(TextBlock pill) => wizard || pill.Text.Length == 0 ? null : new TextBlock { Text = pill.Text, FontSize = 12, Foreground = pill.Foreground, TextWrapping = TextWrapping.Wrap };
+        void Row(FrameworkElement icon, string name, string text, string? pill, string pillKind, FrameworkElement? end, params FrameworkElement?[] under)
         {
             var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(18, 13, 18, 13), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, WizardRows.Children.Count == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -546,6 +562,7 @@ public sealed partial class MainWindow : Window
                 });
             words.Children.Add(title);
             words.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+            foreach (var u in under) if (u is not null) { u.Margin = new Thickness(0, 4, 0, 0); words.Children.Add(u); _moved[u] = words; }
             Grid.SetColumn(words, 1);
             g.Children.Add(words);
             if (end is not null) { end.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(end, 2); g.Children.Add(end); }
@@ -559,15 +576,21 @@ public sealed partial class MainWindow : Window
             return t;
         }
         var logo = new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 36, Height = 36, VerticalAlignment = VerticalAlignment.Center };
-        Row(logo, "Apex Radiance " + (Latest(Components.Apex) ?? ""), T("Lighting, picture and performance for The Sims 3."), T("Always installed"), "", null);
+        Row(logo, "Apex Radiance" + (wizard ? " " + (Latest(Components.Apex) ?? "") : ""), wizard ? T("Lighting, picture and performance for The Sims 3.") : ApexDesc.Text,
+            wizard ? T("Always installed") : T("Required"), "", null);
         if (CoreModernization.Visibility == Visibility.Visible)
-            Row(IconBox("hammer", 0x6ED3A8), "Sims 3 Modernization", ModDesc.Text, T("Recommended"), "accent", Mirror(ModToggle, "Sims 3 Modernization"));
+            Row(IconBox("hammer", 0x6ED3A8), "Sims 3 Modernization", ModDesc.Text, T("Recommended"), "accent", Mirror(ModToggle, "Sims 3 Modernization"),
+                State(ModPill), wizard || ModChannel.Visibility != Visibility.Visible ? null : Adopt(ModChannel, CoreModernization));
         Row(IconBox("layers", 0x8E9CFF), RendererName.Text, RendererState.Text, null, "", Button(T("Change"), () => OnChangeRenderer(this, new RoutedEventArgs())));
         if (SmoothSection.Visibility == Visibility.Visible && SmoothCard.Visibility == Visibility.Visible)
-            Row(IconBox("waves", 0x62CBDD), "NVIDIA Smooth Motion", T("An extra picture between every two the game makes, on RTX 40 and 50 cards."), null, "", Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
+            Row(IconBox("waves", 0x62CBDD), "NVIDIA Smooth Motion", T("An extra picture between every two the game makes, on RTX 40 and 50 cards."), null, "", Mirror(SmoothToggle, "NVIDIA Smooth Motion"),
+                State(SmoothPill), wizard || SmoothHelp.Visibility != Visibility.Visible ? null : Adopt(SmoothHelp, SmoothCard));
         if (SmoothSection.Visibility == Visibility.Visible && AfmfCard.Visibility == Visibility.Visible)
-            Row(IconBox("waves", 0xEF9872), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, "", Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
-        Row(IconBox("rotate-ccw", 0xE0A84F), T("Restart host"), T("Start again into a save made low on memory."), null, "", Mirror(RestartToggle, "Restart host"));
+            Row(IconBox("waves", 0xEF9872), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, "", Mirror(AfmfToggle, "AMD Fluid Motion Frames"), State(AfmfPill));
+        _fpsBox ??= ((Panel)FpsCard.Child).Children.OfType<StackPanel>().First(sp => sp.Children.Contains(FpsCombo));
+        if (!wizard && SmoothSection.Visibility == Visibility.Visible && FpsCard.Visibility == Visibility.Visible)
+            Row(IconBox("sliders-horizontal", 0xB598F6), T("Apex frame limit"), FpsDesc.Text, null, "", null, State(FpsPill), Adopt(_fpsBox, FpsCard));
+        Row(IconBox("rotate-ccw", 0xE0A84F), T("Restart host"), T("Start again into a save made low on memory."), null, "", Mirror(RestartToggle, "Restart host"), State(RestartPill));
     }
 
     void OnContentFrameSized(object sender, SizeChangedEventArgs e) { if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
