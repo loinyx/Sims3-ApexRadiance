@@ -1318,5 +1318,10 @@ public static partial class Strings
         ["The game is as it was before the update."] = "O jogo está como antes da atualização.",
         ["Everything put in before it was taken back out."] = "Tudo o que foi colocado antes foi retirado de novo.",
         ["The update did not go in"] = "A atualização não entrou",
+        ["Made and kept up to date by Apex. Switch its parts on or off here."] = "Feito e mantido em dia pelo Apex. Ligue ou desligue as partes dele aqui.",
+        ["Update ready"] = "Atualização pronta",
+        ["Up to date"] = "Em dia",
+        ["How Apex draws the game."] = "Como o Apex desenha o jogo.",
+        ["Apex"] = "Apex",
     };
 }
