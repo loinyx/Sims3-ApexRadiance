@@ -567,7 +567,7 @@ public sealed partial class MainWindow : Window
             Row(IconBox("waves", 0x62CBDD), "NVIDIA Smooth Motion", T("An extra picture between every two the game makes, on RTX 40 and 50 cards."), null, "", Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
         if (SmoothSection.Visibility == Visibility.Visible && AfmfCard.Visibility == Visibility.Visible)
             Row(IconBox("waves", 0xEF9872), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, "", Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
-        Row(IconBox("rotate-ccw", 0xE0A84F), T("Restart host"), T("Start again into a save made low on memory."), T("Experimental"), "warn", Mirror(RestartToggle, "Restart host"));
+        Row(IconBox("rotate-ccw", 0xE0A84F), T("Restart host"), T("Start again into a save made low on memory."), null, "", Mirror(RestartToggle, "Restart host"));
     }
 
     void OnContentFrameSized(object sender, SizeChangedEventArgs e) { if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
@@ -1053,7 +1053,7 @@ public sealed partial class MainWindow : Window
         _modExp = s.Manifest.ModernizationChannel == "experimental";
         (_modExp ? ModExperimental : ModStable).IsChecked = true;
         MonoToggle.IsOn = s.MonoPatcher;
-        RestartToggle.IsOn = s.RestartHost; // (experimental: off unless on already)
+        RestartToggle.IsOn = s.RestartHost || s.ApexVersion is null; // (on in a new install; the player can turn it off)
         // no longer offered (no mod Setup installs needs it, and it crashed the launcher on some PCs): shown only to keep or remove it
         MonoCard.Visibility = s.MonoPatcher ? Visibility.Visible : Visibility.Collapsed;
         S3ppToggle.IsOn = true;

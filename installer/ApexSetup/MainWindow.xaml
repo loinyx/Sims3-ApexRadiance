@@ -441,12 +441,7 @@
                                             <ToggleSwitch x:Name="RestartToggle" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
                                                           AutomationProperties.Name="Restart host" />
                                         </Grid>
-                                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
-                                            <TextBlock Text="Restart host" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                            <Border Style="{StaticResource ApexPill}" VerticalAlignment="Center">
-                                                <TextBlock Text="Experimental" FontSize="11" Foreground="{ThemeResource ApexWarningBrush}" />
-                                            </Border>
-                                        </StackPanel>
+                                        <TextBlock Text="Restart host" FontSize="15" FontWeight="SemiBold" Margin="0,4,0,0" />
                                         <TextBlock Text="After a save made low on memory, offers to start the game again into that save when you quit." Style="{StaticResource ApexMuted}" FontSize="12" />
                                         <TextBlock x:Name="RestartPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>

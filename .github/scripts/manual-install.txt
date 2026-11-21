@@ -60,7 +60,7 @@
 
 
 ------------------------------------------------------------------------------
-  STEP 5  -  RESTART HOST  (optional, experimental)
+  STEP 5  -  RESTART HOST  (recommended)
 ------------------------------------------------------------------------------
 
     After a save that leaves the game little free memory, quitting the
