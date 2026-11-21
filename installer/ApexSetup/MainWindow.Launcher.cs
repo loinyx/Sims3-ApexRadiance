@@ -208,8 +208,12 @@ public sealed partial class MainWindow
         if (_running || Games.IsRunning()) { await Message(T("The Sims 3 is already running"), T("Switch to the game, or close it and press Play again.")); return; }
         if (update && WelcomeUpdates() is { Count: > 0 } ups)
         {
-            await InstallAsync(ups);
-            if (WelcomeUpdates().Count > 0) return; // (it failed or was cancelled: its message said why)
+            // (in the card, as an install: then straight to the game, from Home, with no done screen in between)
+            _wizardFlow = _updatingForPlay = true;
+            try { await InstallAsync(ups); }
+            finally { _wizardFlow = _updatingForPlay = false; }
+            if (WelcomeUpdates().Count > 0) { if (_step is InstallStep or DoneStep) Show(Home); return; } // (it failed or was cancelled: its message said why)
+            Show(Home);
         }
         _ = CheckHealth();
         await HealthReady();

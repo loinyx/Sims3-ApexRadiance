@@ -143,25 +143,36 @@ public sealed partial class MainWindow : Window
         {
             if (await SelfUpdate.DownloadIfNewerAsync(apex, self) is not { } file) return;
             var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(file).FileVersion is { } fv && Version.TryParse(fv, out var pv) ? pv.ToString(3) : "";
-            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new Apex Launcher is available"),
-                T("Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again.", v), T("Update the launcher"), () =>
+            void UpdateNow()
+            {
+                if (_busy) return; // (an install in progress finishes first)
+                try
                 {
-                    if (_busy) return; // (an install in progress finishes first)
-                    try
-                    {
-                        SelfUpdate.ReplaceAndStart(file, self, LauncherInstall.HandoverArgs(Environment.GetCommandLineArgs().Skip(1)));
-                        Application.Current.Exit();
-                    }
-                    catch (Exception e)
-                    {
-                        App.Log(e);
-                        SetupUpdateInfo.IsOpen = false;
-                        // (the new exe quarantined or blocked by an antivirus: said as such)
-                        var shown = e is FileNotFoundException || e is System.ComponentModel.Win32Exception { NativeErrorCode: 2 or 225 or 226 } || Engine.IsVirusBlock(e)
-                            ? Engine.Antivirus(SelfUpdate.AssetName, Path.GetDirectoryName(file) ?? "") : e;
-                        _ = ShowDialog(new ContentDialog { Title = T("The launcher could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
-                    }
-                });
+                    SelfUpdate.ReplaceAndStart(file, self, LauncherInstall.HandoverArgs(Environment.GetCommandLineArgs().Skip(1)));
+                    Application.Current.Exit();
+                }
+                catch (Exception e)
+                {
+                    App.Log(e);
+                    SetupUpdateInfo.IsOpen = false;
+                    // (the new exe quarantined or blocked by an antivirus: said as such)
+                    var shown = e is FileNotFoundException || e is System.ComponentModel.Win32Exception { NativeErrorCode: 2 or 225 or 226 } || Engine.IsVirusBlock(e)
+                        ? Engine.Antivirus(SelfUpdate.AssetName, Path.GetDirectoryName(file) ?? "") : e;
+                    _ = ShowDialog(new ContentDialog { Title = T("The launcher could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
+                }
+            }
+            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new Apex Launcher is available"),
+                T("Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again.", v), T("Update the launcher"), UpdateNow);
+            // (the notice above sits on the old start page: anywhere else, and when no game runs, the offer is a card of its own)
+            if (_step == Welcome || _running || _busy) return;
+            var body = new StackPanel { Spacing = 14, Width = 420 };
+            body.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 64, Height = 64, HorizontalAlignment = HorizontalAlignment.Center });
+            body.Children.Add(new TextBlock { Text = T("Downloaded and checked. It restarts in a moment and opens where you are; nothing in the game changes."),
+                TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = App.Brush("ApexSoftTextBrush") });
+            body.Children.Add(new TextBlock { Text = App.Version + " \u2192 " + v, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Foreground = App.Brush("ApexMutedBrush") });
+            if (await ShowDialog(new ContentDialog { Title = T("Apex Launcher {0} is ready", v), Content = body, PrimaryButtonText = T("Restart now"), CloseButtonText = T("Later"),
+                    DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Primary)
+                UpdateNow();
         }
         catch (Exception e) { App.Log(e); }
     }
@@ -464,7 +475,8 @@ public sealed partial class MainWindow : Window
 
     // A first install (and the updates Play puts in) runs its steps in one card in the middle of the window, without the
     // sidebar: none of it works before Apex Radiance is in. Any other screen leaves the card.
-    bool _wizardFlow;
+    bool _wizardFlow, _updatingForPlay;
+    (string? Bin, bool Writable) _writableFor = (null, true);
     bool Wizard => _wizardFlow && _step is GameStep or ComponentsStep or RendererStep or InstallStep or DoneStep;
 
     void WizardChrome()
@@ -492,6 +504,15 @@ public sealed partial class MainWindow : Window
         WizardComponents.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
         CoreGrid.Visibility = OtherModsSection.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
         WizardRows.Children.Clear();
+        // what is in the way, said in the card: the game open, no internet, or a game folder that needs Windows' permission
+        // (asked once per game: the probe writes a file in Game\Bin)
+        if (on && _game is { } wg && _writableFor.Bin != wg.Bin) _writableFor = (wg.Bin, Elevation.IsElevated || Elevation.CanWrite(wg.Bin));
+        var needsAdmin = on && !_writableFor.Writable;
+        if (on && _running) SetInfo(WizardNotice, InfoBarSeverity.Warning, T("Close The Sims 3 to continue"), T("The game, its launcher and the RTX Remix bridge have to be closed while files change."));
+        else if (on && _offline) SetInfo(WizardNotice, InfoBarSeverity.Error, T("No internet"), T("The components download from each author's GitHub. Connect and try again."), T("Try again"), async () => await LoadReleasesAsync());
+        else if (needsAdmin) SetInfo(WizardNotice, InfoBarSeverity.Informational, T("Windows will ask for permission"), T("The game is in a protected folder. One prompt, then the change runs in its own window."));
+        else WizardNotice.IsOpen = false;
+        WizardComponents.Opacity = on && (_running || _offline) ? 0.55 : 1;
         if (!on) return;
         FrameworkElement IconBox(string icon, uint argb)
         {
@@ -1617,7 +1638,8 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            InstallTitle.Text = T("Applying changes");
+            // (a first install installs, Play's updates update, Components applies)
+            InstallTitle.Text = _wizardFlow ? (_state?.ApexVersion is null ? T("Installing") : T("Updating")) : T("Applying changes");
             Show(InstallStep);
             TaskList.Children.Clear();
         }
@@ -1701,7 +1723,7 @@ public sealed partial class MainWindow : Window
                 _skipUpdate.Clear();
                 RefreshAll();
             }
-            else Show(DoneStep);
+            else if (!_updatingForPlay) Show(DoneStep);
         }
         catch (Exception ex)
         {

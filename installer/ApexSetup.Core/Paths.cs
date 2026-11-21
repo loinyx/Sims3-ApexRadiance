@@ -17,12 +17,14 @@ public static class Paths
 
     // Apex Radiance Setup kept the same files in "Apex Radiance Setup": moved once, so the remembered games and the
     // language choice carry over. A folder already there wins (moved before, or written since).
+    // (true for this run when the move happened: the launcher then says Setup became it)
+    public static bool MovedFromSetup { get; private set; }
     public static void MigrateOldData()
     {
         try
         {
             var old = Path.Combine(LocalAppData, "Apex Radiance Setup");
-            if (Directory.Exists(old) && !Directory.Exists(Data)) Directory.Move(old, Data);
+            if (Directory.Exists(old) && !Directory.Exists(Data)) { Directory.Move(old, Data); MovedFromSetup = true; }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // (in use: the old files stay where they are)
     }

@@ -178,8 +178,14 @@ as the signed-in user, not as administrator: a change to the game folder or to a
   settings unless kept) runs as the player. Files of the player's that a fix set aside in the backup folder go to the
   Recycle Bin. A launcher still open (in the tray too) closes first, so its exe and folder go as well. Settings from
   Apex Radiance Setup's data folder move to the launcher's on first start.
+- **First install and updates as one card.** With no Apex Radiance in the game, the welcome and every step after it
+  (game, components, installing, done) are one card in the middle of the window, without the sidebar; the components
+  step is a short list of Apex Radiance and its parts. Updates Play puts in run in the same card (*Updating*) and the
+  game starts from Home. A game that is running, no internet or a protected game folder are said in the card. A new
+  Apex Launcher is offered as its own card (*Restart now* or *Later*).
 - **Installed or portable.** A copy that is neither (a download, or an Apex Radiance Setup that updated itself into
-  the launcher) asks once: at start when the game already has Apex Radiance, right after the first install otherwise.
+  the launcher) asks once: at start when the game already has Apex Radiance (after Setup, as *Apex Radiance Setup is
+  now Apex Launcher*), on the done screen of a first install otherwise.
   A downloaded copy newer than the installed one replaces it and takes over: an older copy running closes (unless it
   is in the middle of a change) and the new one opens in its place; an older or equal download only opens the
   installed copy.

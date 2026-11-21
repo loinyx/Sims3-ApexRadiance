@@ -313,6 +313,7 @@
                                 <TextBlock x:Name="CompSub" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" TextWrapping="Wrap" />
                             </StackPanel>
                             <!-- a first install: Apex Radiance and its parts as one short list (the switches are the cards' own, mirrored) -->
+                            <InfoBar x:Name="WizardNotice" IsClosable="False" IsOpen="False" />
                             <Border x:Name="WizardComponents" Visibility="Collapsed" CornerRadius="14" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}">
                                 <StackPanel x:Name="WizardRows" />
                             </Border>

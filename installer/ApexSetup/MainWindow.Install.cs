@@ -55,13 +55,30 @@ public sealed partial class MainWindow
             return b;
         }
         var body = new StackPanel { Spacing = 8, Width = 460 };
-        body.Children.Add(new TextBlock { Text = T("Install it for this Windows account, or keep it as a single file you can run from any folder. Your settings and games are kept either way."), TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush"), Margin = new Thickness(0, 0, 0, 8) });
+        // (an Apex Radiance Setup that updated itself into the launcher: what it became and what came with it, first)
+        var fromSetup = Paths.MovedFromSetup;
+        if (fromSetup)
+        {
+            body.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 64, Height = 64, HorizontalAlignment = HorizontalAlignment.Center });
+            body.Children.Add(new TextBlock { Text = T("It still installs and updates Apex Radiance, and now starts the game too: Play, Health, Mods, Saves and your pictures."),
+                TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = Res("ApexSoftTextBrush") });
+            var came = new StackPanel { Spacing = 6, Padding = new Thickness(14, 10, 14, 10), Margin = new Thickness(0, 6, 0, 6) };
+            foreach (var line in new[] { T("Your games and language came with it"), T("Apex Radiance and its components stay as they are"), T("Restore points and backups are kept") })
+            {
+                var r = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+                r.Children.Add(Lucide.Icon("check", 14, Res("ApexAccentBrush"), 2.6));
+                r.Children.Add(new TextBlock { Text = line, FontSize = 13 });
+                came.Children.Add(r);
+            }
+            body.Children.Add(new Border { Child = came, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush") });
+        }
+        else body.Children.Add(new TextBlock { Text = T("Install it for this Windows account, or keep it as a single file you can run from any folder. Your settings and games are kept either way."), TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush"), Margin = new Thickness(0, 0, 0, 8) });
         body.Children.Add(Option(true, "hard-drive", T("Install (recommended)"), T("Adds Apex Launcher to the Start menu and Installed apps, easy to remove. Updates itself in place.")));
         body.Children.Add(Option(false, "package", T("Keep portable"), T("Runs from {0}, nothing added to Windows. Updates itself in place.", ShortPath(Path.GetDirectoryName(self) ?? self))));
         Pick(true);
         var d = new ContentDialog
         {
-            Title = T("How do you want to use Apex Launcher?"), Content = body, PrimaryButtonText = T("Continue"), CloseButtonText = T("Ask me later"),
+            Title = fromSetup ? T("Apex Radiance Setup is now Apex Launcher") : T("How do you want to use Apex Launcher?"), Content = body, PrimaryButtonText = T("Continue"), CloseButtonText = T("Ask me later"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;
