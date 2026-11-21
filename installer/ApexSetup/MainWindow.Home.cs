@@ -410,7 +410,7 @@ public sealed partial class MainWindow
             {
                 var item = new StackPanel { Spacing = 3 };
                 var head = new TextBlock { FontSize = 16, TextWrapping = TextWrapping.Wrap };
-                head.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = c, FontWeight = FontWeights.SemiBold });
+                head.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Name(c), FontWeight = FontWeights.SemiBold });
                 var from = InstalledOf(c);
                 var to = ReleaseOf(c)?.Version;
                 if (to is not null) head.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "   " + (from is { Length: > 0 } && from != "?" ? from + " → " + to : to), Foreground = soft, FontSize = 14 });

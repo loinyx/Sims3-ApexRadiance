@@ -1284,5 +1284,7 @@ public static partial class Strings
         ["Clouds"] = "Nuvens",
         ["Scallops"] = "Escamas",
         ["Sparkles"] = "Brilhos",
+        ["Updated"] = "Atualizado",
+        ["Your settings stay. Press Play when you are ready."] = "Suas configurações continuam. Clique em Jogar quando quiser.",
     };
 }

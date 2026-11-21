@@ -348,15 +348,13 @@
                                             <Border Width="38" Height="38" CornerRadius="11" Background="#226ED3A8" HorizontalAlignment="Left">
                                                 <local:LucideIcon Kind="hammer" Size="18" Stroke="#6ED3A8" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
+                                            <Border Style="{StaticResource ApexPill}" Background="{ThemeResource ApexAccentSoftBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,52,0">
+                                                <TextBlock Text="Recommended" FontSize="11" Foreground="{ThemeResource ApexAccentTextBrush}" />
+                                            </Border>
                                             <ToggleSwitch x:Name="ModToggle" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
                                                           AutomationProperties.Name="Sims 3 Modernization" />
                                         </Grid>
-                                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
-                                            <TextBlock Text="Sims 3 Modernization" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                            <Border Style="{StaticResource ApexPill}" Background="{ThemeResource ApexAccentSoftBrush}" VerticalAlignment="Center">
-                                                <TextBlock Text="Recommended" FontSize="11" Foreground="{ThemeResource ApexAccentTextBrush}" />
-                                            </Border>
-                                        </StackPanel>
+                                        <TextBlock Text="Sims 3 Modernization" FontSize="15" FontWeight="SemiBold" Margin="0,4,0,0" TextWrapping="Wrap" />
                                         <TextBlock x:Name="ModDesc" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="12" />
                                         <TextBlock x:Name="ModPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                         <StackPanel x:Name="ModChannel" Spacing="2">

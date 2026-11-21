@@ -34,6 +34,7 @@ public sealed partial class MainWindow : Window
     State? _state;
     bool _offline, _busy, _syncNav, _running;
     List<string> _lastInstall = new();
+    bool _lastWasUpdate; // (every component installed was there before: the done screen says updated, not set up)
 
     static readonly Dictionary<string, string> Repo = new()
     {
@@ -1598,6 +1599,7 @@ public sealed partial class MainWindow : Window
             if (nvOff is not null) { smoothOffRow?.Invoke(3); _lastChanges.Add((T("Turn off {0}", "NVIDIA Smooth Motion"), "nv", false, nvOff)); }
             if (amdOff is not null) { afmfOffRow?.Invoke(3); _lastChanges.Add((T("Turn off {0}", "AMD Fluid Motion Frames"), "amd", false, amdOff)); }
             _lastInstall = order;
+            _lastWasUpdate = order.Count > 0 && order.All(c => before[c].Length > 0);
             _lastRemove = dels;
             if (order.Contains(Components.S3pp)) _s3ppArchive = null;
             _defaultsFor = null; // (the switches follow the game as it is now)
@@ -1690,8 +1692,9 @@ public sealed partial class MainWindow : Window
     void RefreshDone()
     {
         var apex = _state?.ApexVersion is not null;
-        DoneTitle.Text = apex ? T("You're all set") : T("Changes applied");
-        DoneText.Text = apex ? T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu.") : "";
+        DoneTitle.Text = _lastWasUpdate ? T("Updated") : apex ? T("You're all set") : T("Changes applied");
+        DoneText.Text = _lastWasUpdate ? T("Your settings stay. Press Play when you are ready.")
+            : apex ? T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu.") : "";
         DoneSummary.Children.Clear();
         foreach (var c in _lastInstall)
             DoneSummary.Children.Add(new TextBlock { Text = T("Installed: {0} {1}", Name(c), _state?.Installed(c) ?? ""), FontSize = 12, Foreground = App.Brush("ApexSoftTextBrush") });
