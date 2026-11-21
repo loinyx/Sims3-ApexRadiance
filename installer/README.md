@@ -1,6 +1,6 @@
 # Apex Launcher (Apex Radiance Setup)
 
-Apex Launcher 2.0.0 (`ApexLauncher.exe`; Apex Radiance Setup up to 1.2.x) is a Windows program (WinUI 3, one
+Apex Launcher 2.0.1 (`ApexLauncher.exe`; Apex Radiance Setup up to 1.2.x) is a Windows program (WinUI 3, one
 self-contained exe) that installs Apex Radiance and the mods it works with and starts the game: Home and Play, Health,
 Mods, Worlds, Saves, a Gallery of pictures and videos, and What's new. The screens are described in
 [docs/features/installer.md](../docs/features/installer.md#the-launcher-200); this page covers the installing part

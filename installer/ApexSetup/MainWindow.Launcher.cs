@@ -910,6 +910,16 @@ public sealed partial class MainWindow
     // Start with Windows: only the notification area icon until the player opens the window
     public void StartInTray() => TrayShow(T("Apex Launcher"));
 
+    // a newer copy was installed while this one runs: this one closes so the new one opens in its place (never in the
+    // middle of a change: the new one then shows this window and closes)
+    public bool QuitForNewerCopy()
+    {
+        if (_busy) return false;
+        _tray?.Dispose();
+        Application.Current.Exit();
+        return true;
+    }
+
     // Installed apps' Uninstall: the window opens on the uninstall question
     public void UninstallWhenShown() => ((FrameworkElement)Content).Loaded += async (_, _) => await UninstallAsync(fromWindows: true);
 

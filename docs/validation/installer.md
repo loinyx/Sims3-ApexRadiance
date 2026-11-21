@@ -24,6 +24,7 @@ described in [features/installer.md](../features/installer.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-20 | 2.0.1 build of this change | Real install on this PC, separate `%LOCALAPPDATA%` and a copied `TS3W.exe` as the game | First install from a download: Apex installed, the question after it, the installed copy started with Installed apps, Start menu, desktop and Open with; a downloaded 2.0.2 replaced a running 2.0.1; an older download only opened the installed copy; an Apex Radiance Setup user (old data folder, `ApexRadianceSetup.exe`) kept language and games and installed | Windows 11 |
 | 2026-11-20 | `4fd4114b` | `installer/ApexSetup.Tests` | All passed three runs in a row; file-timing tests (merge, split, caches, uninstall) fail now and then and pass on a rerun | none |
 | 2026-11-20 | `4fd4114b` | `installer/ui-smoke/Run-UiSmoke.ps1` (dry run, Steam test game) | 432 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-20 | `4fd4114b` | Published exe in a sandbox: every screen in light and dark, at 1600x1000 and 900x760, Portuguese and English | Rendered as expected; captures reviewed | Windows 11, RTX 4070 Ti SUPER |
@@ -51,6 +52,9 @@ described in [features/installer.md](../features/installer.md).
 
 ## Open checks
 
-- Steps 1 to 6 of the in-game test plan on a real install, including the EA app edition.
+- Steps 1 to 6 of the in-game test plan on a real install, including the EA app edition. Not yet run for real: the
+  update an elevated Setup 1.2.x starts (the restart as the player needs a Windows prompt) and the full uninstall
+  (it acts on every game the PC has).
+- The merge, split and cache tests fail now and then on this PC and pass on a rerun.
 - Dragging a picture onto another to make or join an album, with a real mouse.
 - The texts new in 4.1.0 in the 19 languages other than English and Portuguese.

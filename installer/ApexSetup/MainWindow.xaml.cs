@@ -1611,7 +1611,13 @@ public sealed partial class MainWindow : Window
                 _skipUpdate.Clear();
                 RefreshAll();
             }
-            else Show(DoneStep);
+            else
+            {
+                Show(DoneStep);
+                // (a first install skipped the question at start: asked now, so the launcher lands in the Start menu and
+                // Installed apps instead of staying in the downloads folder)
+                DispatcherQueue.TryEnqueue(async () => await AskInstallModeAsync());
+            }
         }
         catch (Exception ex)
         {

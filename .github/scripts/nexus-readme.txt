@@ -18,10 +18,14 @@
     1.  Close The Sims 3 and its launcher.
     2.  Run ApexLauncher.exe.
     3.  Pick your game, then click Install.
+    4.  When it asks how to use it, keep "Install (recommended)".
 
   That's it. The launcher finds the game (Steam or EA app), installs
   Apex Radiance and everything it needs, and checks your other mods.
-  It adds itself to the Start menu and the desktop.
+  It adds itself to the Start menu, the desktop and Installed apps.
+
+  Already using Apex Radiance Setup? Open it: it updates itself into
+  Apex Launcher and keeps your games, language and settings.
 
   From then on, start the game from Apex Launcher to:
 

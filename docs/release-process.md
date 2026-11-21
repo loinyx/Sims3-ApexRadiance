@@ -110,7 +110,7 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
    ## Fixes
    - <the problem that is gone, in the player's words>
    ## Install
-   <Apex Radiance Setup first, then the manual steps>
+   <Apex Launcher first, then the manual steps>
    ```
 
    One short line per item, about 5 to 15 words, no ending period, no area prefix inside the lines (the section names

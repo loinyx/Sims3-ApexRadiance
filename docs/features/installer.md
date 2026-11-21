@@ -12,7 +12,7 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Unreleased, planned for 4.0.3 (Setup 1.2.0). Sims 3 Modernization's experimental channel: Unreleased. Apex Launcher 2.0.0 (the launcher below): Unreleased, planned for 4.1.0 |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Unreleased, planned for 4.0.3 (Setup 1.2.0). Sims 3 Modernization's experimental channel: Unreleased. Apex Launcher 2.0.1 (the launcher below): Unreleased, planned for 4.1.0 |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
 | Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup; also Sims 3 Modernization's channel, `ModernizationChannel`); restore points in `Game\Bin\Apex Radiance backup\restore`; the launcher's own files in `%LOCALAPPDATA%\Apex Launcher` (`settings.json`, `gallery.json`, `language.txt`, mod notes, picture thumbnails, `ApexLauncher.log`); the program in `%LOCALAPPDATA%\Programs\Apex Launcher` |
@@ -177,6 +177,11 @@ as the signed-in user, not as administrator: a change to the game folder or to a
   stay. Only the game-folder part runs as administrator; the Documents part (switched-off mods back on, Apex Radiance's
   settings unless kept) runs as the player. Files of the player's that a fix set aside in the backup folder go to the
   Recycle Bin. Settings from Apex Radiance Setup's data folder move to the launcher's on first start.
+- **Installed or portable.** A copy that is neither (a download, or an Apex Radiance Setup that updated itself into
+  the launcher) asks once: at start when the game already has Apex Radiance, right after the first install otherwise.
+  A downloaded copy newer than the installed one replaces it and takes over: an older copy running closes (unless it
+  is in the middle of a change) and the new one opens in its place; an older or equal download only opens the
+  installed copy.
 - **Home and Play.** A picture of the newest save with its name and *Play* on it, the game's health with its crystal,
   the last session, and counts of mods, packs, saves and pictures; this top fills the window, and the households,
   updates and newest pictures follow as the page scrolls. *Play* installs the ready updates first (*Play without
@@ -243,7 +248,7 @@ folder*; the log is in the player's `%LOCALAPPDATA%\Apex Radiance Setup\`. The f
 ## Limitations
 
 - Windows 10 version 1809 or later, 64-bit.
-- Apex Launcher 2.0.0, not yet verified on a real install: the upgrade from Apex Radiance Setup 1.2.x, a full uninstall,
+- Apex Launcher 2.0.1, not yet verified on a real install: the upgrade from Apex Radiance Setup 1.2.x, a full uninstall,
   the administrator window on a game under Program Files, Play and the session with the EA app edition, the tray.
 - The newest texts of the Gallery (search, album menu, videos) show in English in every language until they are
   translated.

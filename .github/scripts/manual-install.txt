@@ -2,9 +2,10 @@
   APEX RADIANCE {VERSION}  -  INSTALL BY HAND
 ==============================================================================
 
-  Easier way: Apex Radiance Setup (ApexRadianceSetup.exe) does all of
-  this for you. It is one folder up in the Nexus download, and a file of
-  its own on the GitHub release page.
+  Easier way: Apex Launcher (ApexLauncher.exe) does all of this for you,
+  and starts the game, checks it and keeps it up to date. It is one
+  folder up in the Nexus download, and a file of its own on the GitHub
+  release page.
 
   Where files go: the game's Bin folder, called "Game\Bin" below.
 

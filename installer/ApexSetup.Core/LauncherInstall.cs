@@ -35,7 +35,7 @@ public static partial class LauncherInstall
 
     // Portable is a marker file next to the exe, so a portable folder moved as a whole stays portable. An exe moved without
     // its marker is NotChosen again and the player is asked once more; its data stays in %LOCALAPPDATA% either way.
-    public const string PortableMarker = "ApexLauncher.portable", HandoverArg = "--handover";
+    public const string PortableMarker = "ApexLauncher.portable", HandoverArg = "--handover", ReplaceArg = "--replace";
     public static string MarkerOf(string exe) => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(exe))!, PortableMarker);
 
     public static LauncherMode ModeOf(string exe) =>
@@ -122,7 +122,7 @@ public static partial class LauncherInstall
         return true;
     }
 
-    static bool Newer(string a, string b) =>
+    public static bool Newer(string a, string b) =>
         Version.TryParse(FileVersionInfo.GetVersionInfo(a).FileVersion, out var va) && Version.TryParse(FileVersionInfo.GetVersionInfo(b).FileVersion, out var vb) && va > vb;
 
     // The shortcuts and the Installed apps entry, written at every start of the installed copy (the version shown follows

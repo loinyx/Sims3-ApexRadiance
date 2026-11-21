@@ -83,7 +83,7 @@ public partial class App : Application
     }
 
     Mutex? _single;
-    EventWaitHandle? _show;
+    EventWaitHandle? _show, _replace;
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
@@ -112,8 +112,10 @@ public partial class App : Application
                     case StartStep.RestartAsPlayer: if (Elevation.RestartAsPlayer(self)) { Exit(); return; } break;
                     case StartStep.Register: LauncherInstall.Register(self, Version, LauncherSettings.Load().DesktopShortcut); break;
                     // installed before: this copy updates the installed one when newer and hands over to it
-                    case StartStep.HandToInstalled when LauncherInstall.CopyIn(self):
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Paths.InstalledExe, string.Join(" ", argv.Select(SelfUpdate.Quote))) { UseShellExecute = true });
+                    // (when this copy updated the installed one, a running older copy is asked to close so the new one takes its place)
+                    case StartStep.HandToInstalled when (File.Exists(Paths.InstalledExe) && LauncherInstall.Newer(self, Paths.InstalledExe)) is var updating && LauncherInstall.CopyIn(self):
+                        var handed = updating ? LauncherInstall.HandoverArgs(argv).Append(LauncherInstall.ReplaceArg) : argv;
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Paths.InstalledExe, string.Join(" ", handed.Select(SelfUpdate.Quote))) { UseShellExecute = true });
                         Exit();
                         return;
                 }
@@ -125,6 +127,8 @@ public partial class App : Application
         {
             _single = new Mutex(true, @"Local\ApexLauncher", out var first);
             _show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ApexLauncher.Show");
+            _replace = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ApexLauncher.Replace");
+            if (!first && argv.Contains(LauncherInstall.ReplaceArg)) _replace.Set();
             // (started by Install, MakePortable or an update while the copy before it still closes: waits for it)
             if (!first && argv.Contains(LauncherInstall.HandoverArg))
                 try { first = _single.WaitOne(TimeSpan.FromSeconds(20)); } catch (AbandonedMutexException) { first = true; }
@@ -137,6 +141,8 @@ public partial class App : Application
                 _show.Set(); Exit(); return;
             }
             var show = _show;
+            var replace = _replace;
+            new Thread(() => { while (replace.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => (_window as MainWindow)?.QuitForNewerCopy()); }) { IsBackground = true }.Start();
             new Thread(() => { while (show.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => { _window.AppWindow.Show(); _window.Activate(); (_window as MainWindow)?.TakeHandedFiles(); }); }) { IsBackground = true }.Start();
         }
         var w = new MainWindow();
