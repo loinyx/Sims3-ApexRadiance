@@ -269,7 +269,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Apex Launcher {0} byl stažen a ověřen. Aktualizujte spouštěč a znovu se otevře.",
         ["Update the launcher"] = "Aktualizovat spouštěč",
         // restart host (experimental)
-        ["Restart host"] = "Restart hry",
         ["Experimental"] = "Experimentální",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Když uložíte hru s nedostatkem paměti, nabídne při ukončení spustit hru znovu s touto pozicí.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Spusťte hru jednou s Apex Radiance a potom zde zapněte restart hry.",

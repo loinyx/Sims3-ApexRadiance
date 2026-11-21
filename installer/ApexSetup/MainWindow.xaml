@@ -439,9 +439,9 @@
                                                 <local:LucideIcon Kind="rotate-ccw" Size="18" Stroke="#E0A84F" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
                                             <ToggleSwitch x:Name="RestartToggle" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
-                                                          AutomationProperties.Name="Restart host" />
+                                                          AutomationProperties.Name="TS3Wrap" />
                                         </Grid>
-                                        <TextBlock Text="Restart host" FontSize="15" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                        <TextBlock Text="TS3Wrap" FontSize="15" FontWeight="SemiBold" Margin="0,4,0,0" />
                                         <TextBlock Text="After a save made low on memory, offers to start the game again into that save when you quit." Style="{StaticResource ApexMuted}" FontSize="12" />
                                         <TextBlock x:Name="RestartPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>

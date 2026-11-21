@@ -267,7 +267,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "O Apex Launcher {0} foi baixado e verificado. Atualize o launcher e ele abre de novo.",
         ["Update the launcher"] = "Atualizar o launcher",
         // restart host (experimental)
-        ["Restart host"] = "Reinício do jogo",
         ["Experimental"] = "Experimental",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Depois de salvar com pouca memória, oferece abrir o jogo de novo nesse save quando você sair.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Abra o jogo uma vez com o Apex Radiance e depois ative o reinício do jogo aqui.",
@@ -1291,7 +1290,6 @@ public static partial class Strings
         ["Always installed"] = "Sempre instalado",
         ["An extra picture between every two the game makes, on RTX 40 and 50 cards."] = "Uma imagem extra entre cada duas que o jogo faz, nas placas RTX 40 e 50.",
         ["The AMD driver adds frames for smoother motion."] = "O driver da AMD adiciona quadros para um movimento mais suave.",
-        ["Start again into a save made low on memory."] = "Recomeça direto num save feito com pouca memória.",
         ["Keep Apex Launcher on this PC"] = "Manter o Apex Launcher neste PC",
         ["In the Start menu, on the desktop and in Installed apps. Start the game from it."] = "No menu Iniciar, na área de trabalho e em Aplicativos instalados. Comece o jogo por ele.",
         ["Keep it as a single file"] = "Manter como um arquivo só",
@@ -1336,5 +1334,7 @@ public static partial class Strings
         ["No limit · about double on screen"] = "Sem limite · cerca do dobro na tela",
         ["{0} when you apply"] = "{0} ao aplicar",
         ["remove {0}"] = "remover {0}",
+        ["TS3Wrap"] = "TS3Wrap",
+        ["Reopens your last save with fresh memory when the game runs low."] = "Reabre seu último save com a memória limpa quando ela acaba.",
     };
 }

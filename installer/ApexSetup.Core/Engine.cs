@@ -13,7 +13,7 @@ public static class Components
     public static string Name(string c) => c switch
     {
         Apex => "Apex Radiance", Bridge => "RTX Remix bridge", Loader => "Ultimate ASI Loader", Dxvk => "DXVK", S3ss => "Sims3SettingsSetter",
-        MonoPatcher => "MonoPatcher", S3pp => "Sims 3 Performance Patch", RestartHost => "Restart host", _ => "Sims 3 Modernization",
+        MonoPatcher => "MonoPatcher", S3pp => "Sims 3 Performance Patch", RestartHost => "TS3Wrap", _ => "Sims 3 Modernization",
     };
 }
 

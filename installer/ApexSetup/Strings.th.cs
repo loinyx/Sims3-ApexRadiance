@@ -232,7 +232,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "ดาวน์โหลดและตรวจสอบ Apex Launcher {0} แล้ว อัปเดตลอนเชอร์ แล้วมันจะเปิดขึ้นใหม่",
         ["Update the launcher"] = "อัปเดตลอนเชอร์",
         // restart host (experimental)
-        ["Restart host"] = "เริ่มเกมใหม่",
         ["Experimental"] = "ทดลอง",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "หลังจากเซฟขณะหน่วยความจำเหลือน้อย เมื่อคุณออกจากเกมจะเสนอให้เปิดเกมใหม่ที่เซฟนั้น",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "เปิดเกมหนึ่งครั้งพร้อม Apex Radiance แล้วจึงเปิดการเริ่มเกมใหม่ที่นี่",

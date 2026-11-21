@@ -262,7 +262,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Apex Launcher {0} загружен и проверен. Обновите лаунчер, и он откроется снова.",
         ["Update the launcher"] = "Обновить лаунчер",
         // restart host (experimental)
-        ["Restart host"] = "Перезапуск игры",
         ["Experimental"] = "Экспериментально",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "После сохранения при нехватке памяти при выходе предлагает снова запустить игру с этим сохранением.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Запустите игру один раз с Apex Radiance, затем включите здесь перезапуск игры.",

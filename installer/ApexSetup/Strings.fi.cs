@@ -264,7 +264,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Apex Launcher {0} on ladattu ja tarkistettu. Päivitä käynnistin, niin se avautuu uudelleen.",
         ["Update the launcher"] = "Päivitä käynnistin",
         // restart host (experimental)
-        ["Restart host"] = "Pelin uudelleenkäynnistys",
         ["Experimental"] = "Kokeellinen",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Kun tallennat muistin ollessa vähissä, se tarjoaa lopettaessasi pelin käynnistämistä uudelleen siihen tallennukseen.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Käynnistä peli kerran Apex Radiancen kanssa ja ota sitten pelin uudelleenkäynnistys käyttöön tästä.",

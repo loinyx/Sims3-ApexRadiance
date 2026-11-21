@@ -276,7 +276,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Apex Launcher {0} a été téléchargé et vérifié. Mettez le lanceur à jour, il se rouvrira.",
         ["Update the launcher"] = "Mettre le lanceur à jour",
         // restart host (experimental)
-        ["Restart host"] = "Relance du jeu",
         ["Experimental"] = "Expérimental",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Après une sauvegarde faite avec peu de mémoire, propose de relancer le jeu sur cette sauvegarde quand vous quittez.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Lancez le jeu une fois avec Apex Radiance, puis activez ici la relance du jeu.",

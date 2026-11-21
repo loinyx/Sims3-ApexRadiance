@@ -264,7 +264,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Apex Launcher {0} er hentet og kontrolleret. Opdater launcheren, så åbner den igen.",
         ["Update the launcher"] = "Opdater launcheren",
         // restart host (experimental)
-        ["Restart host"] = "Genstart af spillet",
         ["Experimental"] = "Eksperimentel",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Efter en gemning med lidt hukommelse tilbyder den at starte spillet igen i den gemning, når du afslutter.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Start spillet én gang med Apex Radiance, og slå derefter genstart af spillet til her.",

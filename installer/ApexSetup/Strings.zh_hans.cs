@@ -260,7 +260,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Apex Launcher {0} 已下载并校验。更新启动器后它会重新打开。",
         ["Update the launcher"] = "更新启动器",
         // restart host (experimental)
-        ["Restart host"] = "重新启动游戏",
         ["Experimental"] = "实验性",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "在内存不足时存档后，退出游戏时会询问是否用该存档重新启动游戏。",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "请先用 Apex Radiance 启动一次游戏，然后在这里打开重新启动游戏。",

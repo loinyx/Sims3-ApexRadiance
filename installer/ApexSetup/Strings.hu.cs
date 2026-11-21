@@ -279,7 +279,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Az Apex Launcher {0} letöltve és ellenőrizve. Frissítsd a launchert, utána újra megnyílik.",
         ["Update the launcher"] = "A launcher frissítése",
         // restart host (experimental)
-        ["Restart host"] = "Játék újraindítása",
         ["Experimental"] = "Kísérleti",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Kevés memóriával történt mentés után kilépéskor felajánlja, hogy a játék újrainduljon ezzel a mentéssel.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Indítsd el egyszer a játékot az Apex Radiance-szel, majd itt kapcsold be a játék újraindítását.",

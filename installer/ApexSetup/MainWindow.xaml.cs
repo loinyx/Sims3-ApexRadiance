@@ -713,7 +713,7 @@ public sealed partial class MainWindow : Window
             FpsCombo.MinWidth = 0; FpsCombo.Width = 200;
             Row(IconBox("sliders-horizontal"), T("Apex frame limit"), FpsDesc.Text, null, State(FpsPill), _fpsWant is not null, Adopt(_fpsBox, FpsCard));
         }
-        Row(IconBox("rotate-ccw"), T("Restart host"), T("Start again into a save made low on memory."), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "Restart host"));
+        Row(IconBox("rotate-ccw"), T("TS3Wrap"), T("Reopens your last save with fresh memory when the game runs low."), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
     }
 
     void OnContentFrameSized(object sender, SizeChangedEventArgs e) { if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
@@ -972,7 +972,7 @@ public sealed partial class MainWindow : Window
         Row("Apex Radiance", test ? T("{0} \u00b7 test build", s.ApexVersion!) : State(Components.Apex), !test && !Updates().Contains(Components.Apex));
         Row(T("Graphics"), LayerName(s.Layer), true);
         foreach (var (c, name, present) in new[] { (Components.S3ss, "Sims3SettingsSetter", s.S3ss), (Components.Modernization, "Sims 3 Modernization", s.Modernization), (Components.MonoPatcher, "MonoPatcher", s.MonoPatcher),
-                     (Components.RestartHost, T("Restart host"), s.RestartHost) })
+                     (Components.RestartHost, T("TS3Wrap"), s.RestartHost) })
             if (present) Row(name, c == Components.Modernization && Releases.IsExperimental(Known(c) ?? "") ? State(c) + " (" + T("Experimental") + ")" : State(c), !Updates().Contains(c));
 
         // the problems and suggestions, between the rows and the buttons
@@ -2044,7 +2044,7 @@ public sealed partial class MainWindow : Window
         if (S3ppPresent) ManageRow("Sims 3 Performance Patch", T("Removes Sims3Performance.asi and its .ini."), T("Remove"), () => RemoveAsync(Components.S3pp));
         if (s.MonoPatcher) ManageRow("MonoPatcher", T("Removes MonoPatcher.asi and its package."), T("Remove"), () => RemoveAsync(Components.MonoPatcher));
         if (s.S3ss) ManageRow("Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
-        if (s.RestartHost) ManageRow(T("Restart host"), T("Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."), T("Remove"), () => RemoveAsync(Components.RestartHost));
+        if (s.RestartHost) ManageRow(T("TS3Wrap"), T("Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."), T("Remove"), () => RemoveAsync(Components.RestartHost));
         if (s.Modernization) ManageRow("Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
         ManageRow(T("Uninstall everything"), T("Removes what the launcher installed, and Apex Radiance, and puts back every file the launcher replaced."), T("Uninstall"), UninstallAll, danger: true);
 

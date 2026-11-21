@@ -277,7 +277,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Το Apex Launcher {0} κατέβηκε και ελέγχθηκε. Ενημέρωσε τον launcher και θα ανοίξει ξανά.",
         ["Update the launcher"] = "Ενημέρωση του launcher",
         // restart host (experimental)
-        ["Restart host"] = "Επανεκκίνηση παιχνιδιού",
         ["Experimental"] = "Πειραματικό",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Μετά από αποθήκευση με λίγη μνήμη, προτείνει να ξεκινήσει ξανά το παιχνίδι σε αυτή την αποθήκευση όταν βγείτε.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Ξεκινήστε το παιχνίδι μία φορά με το Apex Radiance και μετά ενεργοποιήστε εδώ την επανεκκίνηση παιχνιδιού.",

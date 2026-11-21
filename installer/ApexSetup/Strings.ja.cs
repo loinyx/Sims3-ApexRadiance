@@ -266,7 +266,6 @@ public static partial class Strings
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "Apex Launcher {0} をダウンロードして確認しました。ランチャーを更新すると、もう一度開きます。",
         ["Update the launcher"] = "ランチャーを更新",
         // restart host (experimental)
-        ["Restart host"] = "ゲームの再起動",
         ["Experimental"] = "試験的",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "メモリが少ない状態でセーブした後、終了時にそのセーブでゲームを再び起動するか尋ねます。",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Apex Radiance でゲームを一度起動してから、ここでゲームの再起動をオンにしてください。",
