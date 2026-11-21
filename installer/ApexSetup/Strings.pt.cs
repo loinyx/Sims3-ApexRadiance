@@ -1323,5 +1323,7 @@ public static partial class Strings
         ["Up to date"] = "Em dia",
         ["How Apex draws the game."] = "Como o Apex desenha o jogo.",
         ["Apex"] = "Apex",
+        ["Parts of Apex"] = "Partes do Apex",
+        ["Channel"] = "Canal",
     };
 }
