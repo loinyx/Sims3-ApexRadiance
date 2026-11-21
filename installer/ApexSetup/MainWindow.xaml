@@ -453,7 +453,7 @@
                             </StackPanel>
                             <!-- the mods by other modders: the same rows as Apex's parts -->
                             <StackPanel x:Name="OtherModsSection" Spacing="4">
-                                <TextBlock Text="Other mods" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                <TextBlock Text="Other mods" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,2" />
                                 <Border CornerRadius="8" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}" Padding="20,8" MinHeight="68">
                                     <Grid ColumnSpacing="16" VerticalAlignment="Center">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="180" /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions>
@@ -465,7 +465,7 @@
                                             <TextBlock Text="Sims3SettingsSetter" Style="{StaticResource ApexStrong}" />
                                             <TextBlock Text="Fixes for game and graphics settings." ToolTipService.ToolTip="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" FontSize="12" TextTrimming="CharacterEllipsis" MaxLines="1" />
                                         </StackPanel>
-                                        <TextBlock x:Name="S3ssPill" Tag="dyn" Grid.Column="2" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+                                        <Grid Grid.Column="2" ColumnSpacing="8" VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="6" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Ellipse x:Name="S3ssDot" Width="6" Height="6" Fill="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" Visibility="Collapsed" /><TextBlock x:Name="S3ssPill" Tag="dyn" Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" /></Grid>
                                         <ToggleSwitch x:Name="S3ssToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
                                                       AutomationProperties.Name="Sims3SettingsSetter" />
                                     </Grid>
@@ -481,7 +481,7 @@
                                             <TextBlock Text="Sims 3 Performance Patch" Style="{StaticResource ApexStrong}" />
                                             <TextBlock Text="Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes." ToolTipService.ToolTip="Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes." Style="{StaticResource ApexMuted}" FontSize="12" TextTrimming="CharacterEllipsis" MaxLines="1" />
                                         </StackPanel>
-                                        <TextBlock x:Name="S3ppPill" Tag="dyn" Grid.Column="2" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+                                        <Grid Grid.Column="2" ColumnSpacing="8" VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="6" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Ellipse x:Name="S3ppDot" Width="6" Height="6" Fill="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" Visibility="Collapsed" /><TextBlock x:Name="S3ppPill" Tag="dyn" Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" /></Grid>
                                         <ToggleSwitch x:Name="S3ppToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
                                                       AutomationProperties.Name="Sims 3 Performance Patch" />
                                         <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,4,0,4">
@@ -512,7 +512,7 @@
                                             <TextBlock Text="MonoPatcher" Style="{StaticResource ApexStrong}" />
                                             <TextBlock Text="Needed only by some script mods; turn it on if a mod asks for it." ToolTipService.ToolTip="Needed only by some script mods; turn it on if a mod asks for it." Style="{StaticResource ApexMuted}" FontSize="12" TextTrimming="CharacterEllipsis" MaxLines="1" />
                                         </StackPanel>
-                                        <TextBlock x:Name="MonoPill" Tag="dyn" Grid.Column="2" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+                                        <Grid Grid.Column="2" ColumnSpacing="8" VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="6" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Ellipse x:Name="MonoDot" Width="6" Height="6" Fill="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" Visibility="Collapsed" /><TextBlock x:Name="MonoPill" Tag="dyn" Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" /></Grid>
                                         <ToggleSwitch x:Name="MonoToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
                                                       AutomationProperties.Name="MonoPatcher" />
                                     </Grid>

@@ -442,7 +442,7 @@ public sealed partial class MainWindow : Window
             ComponentsStep when work.Count == 0 && !fixes => T("Everything is installed and up to date."),
             ComponentsStep when _state?.ApexVersion is null => T("Nothing changes until you click Install."),
             // what Apply will change in the drivers and Apex's settings (the components show theirs on their rows)
-            ComponentsStep when settings.Count > 0 => T("To apply: {0}", string.Join(", ", settings)),
+            ComponentsStep when work.Count > 0 => T("To apply: {0}", string.Join(", ", wa.Select(Name).Concat(wd.Select(c => T("remove {0}", Name(c)))).Concat(settings))),
             _ => "",
         };
         NavComponents.IsEnabled = CanLeaveGame() && !_busy;
@@ -528,7 +528,7 @@ public sealed partial class MainWindow : Window
         GameRunningNotice.Visibility = GameRunningNotice.IsOpen ? Visibility.Visible : Visibility.Collapsed;
         WizardComponents.Opacity = on && (_running || _offline) ? 0.55 : 1;
         if (!list) return;
-        FrameworkElement IconBox(string icon) => new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(8), Background = Res("ApexPillBrush"),
+        FrameworkElement IconBox(string icon) => new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Pick(0xFF232323, 0xFFF0F0F0)),
             VerticalAlignment = VerticalAlignment.Center, Child = Lucide.Icon(icon, 18, Res("ApexSoftTextBrush")) };
         // (a control of the hidden cards moved into a row: it keeps its handlers and state; where it sits is kept here, since
         // a control of a card never shown tells no parent)
@@ -539,6 +539,8 @@ public sealed partial class MainWindow : Window
             return e;
         }
         void Put(Panel p, FrameworkElement e) { p.Children.Add(e); if (e == SmoothHelp || e == _fpsBox) _moved[e] = p; }
+        var (planAdd, planDel) = Plan();
+        bool Changes(params string[] cs) => cs.Any(c => planAdd.Contains(c) || planDel.Contains(c));
         // (one rule for every state: quiet grey, a warning in its colour)
         TextBlock? StateText(string text, Brush? brush) => wizard || text.Length == 0 ? null : new TextBlock
         {
@@ -565,21 +567,20 @@ public sealed partial class MainWindow : Window
             var c = new ComboBox { Width = 136, IsEnabled = ModStable.IsEnabled, SelectedIndex = ModExperimental.IsChecked == true ? 1 : 0 };
             c.Items.Add(T("Stable")); c.Items.Add(T("Experimental"));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(c, T("Channel"));
-            c.SelectionChanged += (_, _) => (c.SelectedIndex == 1 ? ModExperimental : ModStable).IsChecked = true;
+            // (later: the rows are built again while the menu is still closing)
+            c.SelectionChanged += (_, _) => { var pick = c.SelectedIndex == 1 ? ModExperimental : ModStable; Later(() => pick.IsChecked = true); };
             return c;
         }
-        void Label(string text) => WizardRows.Children.Add(new TextBlock { Text = text, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 20, 0, 4) });
+        void Label(string text) => WizardRows.Children.Add(new TextBlock { Text = text, FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 24, 0, 6) });
+        foreach (var other in OtherModsSection.Children.OfType<Border>()) Soft(other);
         Border Card(UIElement child, double pad)
         {
-            var b = new Border { Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(20, pad, 20, pad), MinHeight = 68, Child = child };
-            var rest = b.Background;
-            b.PointerEntered += (_, _) => b.Background = Res("ApexRaisedBrush");
-            b.PointerExited += (_, _) => b.Background = rest;
+            var b = new Border { Child = child, CornerRadius = new CornerRadius(8), Padding = new Thickness(20, pad, 20, pad), MinHeight = 68 };
+            Soft(b);
             return b;
         }
         // one row: icon, name and one line, its state in a column of its own, the controls on the right; every row the same height
-        void Row(FrameworkElement icon, string name, string text, string? pill, FrameworkElement? state, params FrameworkElement?[] ends)
+        void Row(FrameworkElement icon, string name, string text, string? pill, FrameworkElement? state, bool changes, params FrameworkElement?[] ends)
         {
             var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -603,7 +604,20 @@ public sealed partial class MainWindow : Window
             words.Children.Add(line);
             Grid.SetColumn(words, 1);
             g.Children.Add(words);
-            if (state is not null) { state.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(state, 2); g.Children.Add(state); }
+            if (!wizard)
+            {
+                var cell = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
+                cell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+                cell.ColumnDefinitions.Add(new ColumnDefinition());
+                if (changes) cell.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 6, Height = 6, Fill = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center });
+                if (state is not null)
+                {
+                    state.VerticalAlignment = VerticalAlignment.Center;
+                    if (changes && state is TextBlock tb) tb.Foreground = Res("ApexSoftTextBrush");
+                    Grid.SetColumn(state, 1); Put(cell, state);
+                }
+                Grid.SetColumn(cell, 2); g.Children.Add(cell);
+            }
             var end = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
             foreach (var e in ends) if (e is not null) { e.Margin = new Thickness(0); e.VerticalAlignment = VerticalAlignment.Center; Put(end, e); }
             Grid.SetColumn(end, 3);
@@ -626,9 +640,9 @@ public sealed partial class MainWindow : Window
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 44, Height = 44, VerticalAlignment = VerticalAlignment.Center });
-            var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            words.Children.Add(new TextBlock { Text = "Apex Radiance", FontSize = 16, FontWeight = FontWeights.SemiBold });
+            g.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 52, Height = 52, VerticalAlignment = VerticalAlignment.Center });
+            var words = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+            words.Children.Add(new TextBlock { Text = "Apex Radiance", FontSize = 18, FontWeight = FontWeights.SemiBold });
             words.Children.Add(new TextBlock { Text = T("Lighting, picture and performance for The Sims 3."), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
             Grid.SetColumn(words, 1); g.Children.Add(words);
             var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
@@ -639,18 +653,46 @@ public sealed partial class MainWindow : Window
             chip.Children.Add(new TextBlock { Text = wizard ? T("Always installed") : apexUpdate ? T("Update ready") : T("Up to date"), FontSize = 12, Foreground = Res("ApexSoftTextBrush") });
             right.Children.Add(new Border { Child = chip, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 4, 10, 5), VerticalAlignment = VerticalAlignment.Center });
             Grid.SetColumn(right, 2); g.Children.Add(right);
-            var hero = Card(g, 14);
-            hero.MinHeight = 76;
+            var hero = Card(g, 18);
+            hero.MinHeight = 88;
+            hero.CornerRadius = new CornerRadius(10);
+            // (the glow sits behind the card's own fill: a gradient from the logo's purple at the left into the card colour)
+            var fill = ((SolidColorBrush)Res("ApexCardBrush")).Color;
+            var glow = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 0.6) };
+            glow.GradientStops.Add(new GradientStop { Color = Blend(fill, Windows.UI.Color.FromArgb(255, 0x9B, 0x7B, 0xF0), _light ? 0.10 : 0.16), Offset = 0 });
+            glow.GradientStops.Add(new GradientStop { Color = Blend(fill, Windows.UI.Color.FromArgb(255, 0x3F, 0xD1, 0x8C), _light ? 0.04 : 0.05), Offset = 0.45 });
+            glow.GradientStops.Add(new GradientStop { Color = fill, Offset = 1 });
+            hero.Background = glow;
+            hero.PointerEntered += (_, _) => hero.Background = glow;
+            hero.PointerExited += (_, _) => hero.Background = glow;
             WizardRows.Children.Add(hero);
         }
+        S3ssDot.Visibility = Changes(Components.S3ss) ? Visibility.Visible : Visibility.Collapsed;
+        S3ppDot.Visibility = Changes(Components.S3pp) ? Visibility.Visible : Visibility.Collapsed;
+        MonoDot.Visibility = Changes(Components.MonoPatcher) ? Visibility.Visible : Visibility.Collapsed;
         if (!wizard) Label(T("Parts of Apex"));
         else WizardRows.Children.Add(new Border { Height = 8 });
         if (CoreModernization.Visibility == Visibility.Visible)
-            Row(IconBox("hammer"), "Sims 3 Modernization", ModDesc.Text, wizard ? T("Recommended") : null, State(ModPill),
+            Row(IconBox("hammer"), "Sims 3 Modernization", ModDesc.Text, wizard ? T("Recommended") : null, State(ModPill), Changes(Components.Modernization),
                 wizard || ModChannel.Visibility != Visibility.Visible ? null : Channel(), Mirror(ModToggle, "Sims 3 Modernization"));
-        if (wizard) Row(IconBox("layers"), RendererName.Text, RendererState.Text, null, null, Button(T("Change"), () => OnChangeRenderer(this, new RoutedEventArgs())));
-        else Row(IconBox("layers"), T("Graphics"), T("How Apex draws the game."), null, StateText(RendererState.Text, RendererState.Foreground),
-            Picker(RendererShort(_renderer), 200, () => OnChangeRenderer(this, new RoutedEventArgs())));
+        if (wizard) Row(IconBox("layers"), RendererName.Text, RendererState.Text, null, null, false, Button(T("Change"), () => OnChangeRenderer(this, new RoutedEventArgs())));
+        else
+        {
+            var choices = _rendererCards.Keys.ToList();
+            if (!choices.Contains(_renderer)) choices.Add(_renderer);
+            var menu = new ComboBox { Width = 200, SelectedIndex = choices.IndexOf(_renderer) };
+            foreach (var c in choices) menu.Items.Add(RendererShort(c));
+            menu.SelectedIndex = choices.IndexOf(_renderer);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(menu, T("Graphics"));
+            menu.SelectionChanged += (_, _) =>
+            {
+                if (menu.SelectedIndex < 0 || choices[menu.SelectedIndex] == _renderer) return;
+                var pick = choices[menu.SelectedIndex];
+                Later(() => { _renderer = pick; RefreshComponents(); });
+            };
+            Row(IconBox("layers"), T("Graphics"), T("How Apex draws the game."), null, StateText(RendererState.Text, RendererState.Foreground),
+                Changes(Components.Bridge, Components.Dxvk), menu);
+        }
         if (SmoothSection.Visibility == Visibility.Visible && SmoothCard.Visibility == Visibility.Visible)
         {
             FrameworkElement? smoothState = State(SmoothPill);
@@ -661,17 +703,17 @@ public sealed partial class MainWindow : Window
                 Put(both, Adopt(SmoothHelp, SmoothCard));
                 smoothState = both;
             }
-            Row(IconBox("waves"), "NVIDIA Smooth Motion", T("An extra picture between every two the game makes, on RTX 40 and 50 cards."), null, smoothState, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
+            Row(IconBox("waves"), "NVIDIA Smooth Motion", T("An extra picture between every two the game makes, on RTX 40 and 50 cards."), null, smoothState, _smoothWant is not null, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
         }
         if (SmoothSection.Visibility == Visibility.Visible && AfmfCard.Visibility == Visibility.Visible)
-            Row(IconBox("waves"), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, State(AfmfPill), Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
+            Row(IconBox("waves"), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, State(AfmfPill), _afmfWant is not null, Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
         _fpsBox ??= ((Panel)FpsCard.Child).Children.OfType<StackPanel>().First(sp => sp.Children.Contains(FpsCombo));
         if (!wizard && SmoothSection.Visibility == Visibility.Visible && FpsCard.Visibility == Visibility.Visible)
         {
             FpsCombo.MinWidth = 0; FpsCombo.Width = 200;
-            Row(IconBox("sliders-horizontal"), T("Apex frame limit"), FpsDesc.Text, null, State(FpsPill), Adopt(_fpsBox, FpsCard));
+            Row(IconBox("sliders-horizontal"), T("Apex frame limit"), FpsDesc.Text, null, State(FpsPill), _fpsWant is not null, Adopt(_fpsBox, FpsCard));
         }
-        Row(IconBox("rotate-ccw"), T("Restart host"), T("Start again into a save made low on memory."), null, State(RestartPill), Mirror(RestartToggle, "Restart host"));
+        Row(IconBox("rotate-ccw"), T("Restart host"), T("Start again into a save made low on memory."), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "Restart host"));
     }
 
     void OnContentFrameSized(object sender, SizeChangedEventArgs e) { if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
@@ -770,6 +812,19 @@ public sealed partial class MainWindow : Window
     static readonly Windows.UI.ViewManagement.UISettings Ui = new();
     static Windows.UI.Color Accent(Windows.UI.ViewManagement.UIColorType kind = Windows.UI.ViewManagement.UIColorType.Accent) => Ui.GetColorValue(kind);
     // a colour for the theme in use: its dark form, else its light one
+    static Windows.UI.Color Blend(Windows.UI.Color a, Windows.UI.Color b, double t) =>
+        Windows.UI.Color.FromArgb(255, (byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
+    // a Components card: read by its fill, a border just off it, a lighter fill under the pointer (handlers added once)
+    static readonly HashSet<Border> _softened = new();
+    static void Soft(Border b)
+    {
+        b.Background = Res("ApexCardBrush");
+        b.BorderBrush = new SolidColorBrush(Pick(0xFF212121, 0xFFE4E4E4));
+        b.BorderThickness = new Thickness(1);
+        if (!_softened.Add(b)) return;
+        b.PointerEntered += (_, _) => b.Background = new SolidColorBrush(Pick(0xFF1C1C1C, 0xFFFAFAFA));
+        b.PointerExited += (_, _) => b.Background = Res("ApexCardBrush");
+    }
     static Windows.UI.Color Pick(uint dark, uint light) { var c = _light ? light : dark; return Windows.UI.Color.FromArgb((byte)(c >> 24), (byte)(c >> 16), (byte)(c >> 8), (byte)c); }
     // the accent as text and icons: light on dark, deep on light
     static Windows.UI.Color AccentInk => Accent(_light ? Windows.UI.ViewManagement.UIColorType.AccentDark2 : Windows.UI.ViewManagement.UIColorType.AccentLight2);
@@ -1191,7 +1246,7 @@ public sealed partial class MainWindow : Window
 
     // the pending state of a switch, shown on its row
     (string, string)? PendingLine(bool? want) => want is { } w
-        ? (T(w ? "Turns on when you apply the changes." : "Turns off when you apply the changes."), "ApexAccentBrush") : null;
+        ? (T(w ? "Turns on when you apply" : "Turns off when you apply"), "ApexAccentBrush") : null;
 
     // "Apex's frame limit is now 60 fps" only while it still is
     bool LimitNow60 => _game is { } lg && ReadFpsLimit(lg) == Engine.FrameGenFps; // (read now: _fpsNow is refreshed after the rows)
@@ -1225,8 +1280,7 @@ public sealed partial class MainWindow : Window
             ?? (_smoothError == "Dry run: Setup changes nothing." ? (T(_smoothError), "ApexMutedBrush")
             : _smoothError is not null ? (T(Engine.FriendlyFrameGenError(_smoothError, false, _smoothErrorOn)), "ApexWarningBrush")
             : blocked is { } b ? (T(b.Key, b.Arg), "ApexMutedBrush")
-            : sm.On ? (T(_smoothFps && LimitNow60 ? "On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."
-                                  : "On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."), "ApexSuccessBrush")
+            : sm.On ? (T(_smoothFps && LimitNow60 ? "On in the NVIDIA driver \u00b7 frame limit now 60 fps" : "On in the NVIDIA driver"), "ApexSuccessBrush")
             : (T("Off for The Sims 3."), "ApexMutedBrush")));
     }
 
@@ -1253,8 +1307,7 @@ public sealed partial class MainWindow : Window
             ?? (_afmfError == "Dry run: Setup changes nothing." ? (T(_afmfError), "ApexMutedBrush")
             : _afmfError is not null ? (T(Engine.FriendlyFrameGenError(_afmfError, true, _afmfErrorOn)), "ApexWarningBrush")
             : blocked is { } b ? (T(b.Key, b.Arg), "ApexMutedBrush")
-            : a.On ? (T(_afmfFps && LimitNow60 ? "On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."
-                                 : "On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."), "ApexSuccessBrush")
+            : a.On ? (T(_afmfFps && LimitNow60 ? "On in the AMD driver \u00b7 frame limit now 60 fps" : "On in the AMD driver, for every game"), "ApexSuccessBrush")
             : (T("Off in the AMD driver."), "ApexMutedBrush")));
     }
 
@@ -1324,12 +1377,11 @@ public sealed partial class MainWindow : Window
         // the frame generation the row stands beside, by name: the one that is on (or turns on), else the row shown
         var active = ActiveFrameGen();
         var fg = active ?? (SmoothCard.Visibility == Visibility.Visible && SmoothToggle.IsEnabled ? "NVIDIA Smooth Motion" : "AMD Fluid Motion Frames");
-        FpsDesc.Text = T("{0} doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps.", fg);
+        FpsDesc.Text = T("Works best at 60 to 90 fps with {0}.", fg);
         // the doubled figure only while frame generation is on; otherwise the limit as it is
         string Seen(int v) => active is null ? (v > 0 ? T("{0} fps", v) : T("no limit"))
-            : v > 0 ? T("{0} fps → about {1} fps on screen with {2}", v, v * 2, active) : T("No limit: about double your frame rate on screen with {0}", active);
-        SetState(FpsPill, _fpsWant is { } p ? (T("Changes to {0} when you apply the changes.", p == 0 ? T("no limit") : T("{0} fps", p))
-                + (active is null ? "" : " " + Seen(p)), "ApexAccentBrush")
+            : v > 0 ? T("{0} fps \u00b7 about {1} on screen", v, v * 2) : T("No limit \u00b7 about double on screen");
+        SetState(FpsPill, _fpsWant is { } p ? (T("{0} when you apply", p == 0 ? T("no limit") : T("{0} fps", p)), "ApexAccentBrush")
             : _fpsError == "Dry run: Setup changes nothing." ? (T(_fpsError), "ApexMutedBrush")
             : _fpsError is not null ? (T("Could not change Apex's frame limit: {0}", _fpsError), "ApexWarningBrush")
             : (Seen(shown), active is null ? "ApexMutedBrush" : "ApexAccentBrush"));
@@ -1589,7 +1641,7 @@ public sealed partial class MainWindow : Window
         if (!on) return (v is { Length: > 0 } ? T("{0} \u00b7 will be removed", v) : T("Will be removed"), "ApexWarningBrush");
         if (wrong) return (T("Wrong build"), "ApexWarningBrush");
         if (v is not { Length: > 0 }) return (T("Installed"), "ApexMutedBrush");
-        return Newer(latest, v) || c == Components.Modernization && ModChannelChange() ? (T("{0} \u2192 updates to {1}", v, latest!), "ApexAccentBrush") : (T("{0} \u00b7 up to date", v), "ApexMutedBrush");
+        return Newer(latest, v) || c == Components.Modernization && ModChannelChange() ? (T("{0} \u2192 {1}", v, latest!), "ApexAccentBrush") : (T("{0} \u00b7 up to date", v), "ApexMutedBrush");
     }
 
     static void SetState(TextBlock line, (string Text, string Brush) state)

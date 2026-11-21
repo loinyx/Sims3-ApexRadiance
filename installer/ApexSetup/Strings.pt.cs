@@ -1325,5 +1325,17 @@ public static partial class Strings
         ["Apex"] = "Apex",
         ["Parts of Apex"] = "Partes do Apex",
         ["Channel"] = "Canal",
+        ["{0} → {1}"] = "{0} → {1}",
+        ["On in the NVIDIA driver"] = "Ligado no driver da NVIDIA",
+        ["On in the NVIDIA driver · frame limit now 60 fps"] = "Ligado no driver da NVIDIA · limite agora em 60 fps",
+        ["On in the AMD driver, for every game"] = "Ligado no driver da AMD, em todos os jogos",
+        ["On in the AMD driver · frame limit now 60 fps"] = "Ligado no driver da AMD · limite agora em 60 fps",
+        ["Turns on when you apply"] = "Liga ao aplicar",
+        ["Turns off when you apply"] = "Desliga ao aplicar",
+        ["Works best at 60 to 90 fps with {0}."] = "Funciona melhor entre 60 e 90 fps com {0}.",
+        ["{0} fps · about {1} on screen"] = "{0} fps · cerca de {1} na tela",
+        ["No limit · about double on screen"] = "Sem limite · cerca do dobro na tela",
+        ["{0} when you apply"] = "{0} ao aplicar",
+        ["remove {0}"] = "remover {0}",
     };
 }
