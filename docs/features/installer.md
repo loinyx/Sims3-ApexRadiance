@@ -180,8 +180,9 @@ as the signed-in user, not as administrator: a change to the game folder or to a
   Apex Radiance Setup's data folder move to the launcher's on first start.
 - **First install and updates as one card.** With no Apex Radiance in the game, the welcome and every step after it
   (game, components, installing, done) are one card in the middle of the window, without the sidebar; the components
-  step is a short list of Apex Radiance and its parts. Updates Play puts in run in the same card (*Updating*) and the
-  game starts from Home. A game that is running, no internet or a protected game folder are said in the card. A new
+  step is a short list of Apex Radiance and its parts. Play with updates first lists them (*Update and play*, *Play
+  without updating*); they run in the same card (*Updating*) and the game starts from Home. A failed first install or
+  update is taken back out at once and one card says why (*Try again*, *Play anyway* for an update, *Copy details*). A game that is running, no internet or a protected game folder are said in the card. A new
   Apex Launcher is offered as its own card (*Restart now* or *Later*).
 - **Installed or portable.** A copy that is neither (a download, or an Apex Radiance Setup that updated itself into
   the launcher) asks once: at start when the game already has Apex Radiance (after Setup, as *Apex Radiance Setup is

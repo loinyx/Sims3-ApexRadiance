@@ -206,13 +206,20 @@ public sealed partial class MainWindow
     {
         if (_game is not { } g || _busy) return;
         if (_running || Games.IsRunning()) { await Message(T("The Sims 3 is already running"), T("Switch to the game, or close it and press Play again.")); return; }
-        if (update && WelcomeUpdates() is { Count: > 0 } ups)
+        if (update && WelcomeUpdates() is { Count: > 0 } pending && await UpdatesFirst(pending) is var go && go != true)
         {
+            if (go is null) return; // (Cancel)
+            update = false; // (Play without updating)
+        }
+        _playAnyway = false;
+        if (update && WelcomeUpdates() is { Count: > 0 } ups2)
+        {
+            var ups = ups2;
             // (in the card, as an install: then straight to the game, from Home, with no done screen in between)
             _wizardFlow = _updatingForPlay = true;
             try { await InstallAsync(ups); }
             finally { _wizardFlow = _updatingForPlay = false; }
-            if (WelcomeUpdates().Count > 0) { if (_step is InstallStep or DoneStep) Show(Home); return; } // (it failed or was cancelled: its message said why)
+            if (WelcomeUpdates().Count > 0 && !_playAnyway) { if (_step is InstallStep or DoneStep) Show(Home); return; } // (it failed or was cancelled: its card said why)
             Show(Home);
         }
         _ = CheckHealth();
@@ -916,6 +923,46 @@ public sealed partial class MainWindow
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
         foreach (var p in System.Diagnostics.Process.GetProcessesByName("ApexLauncher").Where(p => p.Id != Environment.ProcessId))
             try { using (p) p.WaitForExit(10000); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+    }
+
+    // What Play puts in first, each with its versions and the first line of its notes: update and play, play as it is, or
+    // nothing (true, false, null)
+    async Task<bool?> UpdatesFirst(List<string> ups)
+    {
+        var body = new StackPanel { Spacing = 12, Width = 480 };
+        body.Children.Add(new TextBlock { Text = T("Then the game starts. Your settings stay."), Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        var list = new StackPanel();
+        foreach (var c in ups)
+        {
+            var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(16, 12, 16, 12), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            FrameworkElement icon = c == Components.Apex
+                ? new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 32, Height = 32 }
+                : new Border { Width = 32, Height = 32, CornerRadius = new CornerRadius(9), Background = Res("ApexPillBrush"), Child = Lucide.Icon(c == Components.Modernization ? "hammer" : c is Components.Bridge or Components.Dxvk ? "layers" : "package", 15, Res("ApexAccentBrush")) };
+            icon.VerticalAlignment = VerticalAlignment.Top;
+            g.Children.Add(icon);
+            var words = new StackPanel { Spacing = 2 };
+            var head = new TextBlock { FontSize = 14, TextWrapping = TextWrapping.Wrap };
+            head.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Name(c), FontWeight = FontWeights.SemiBold });
+            var from = InstalledOf(c);
+            if (ReleaseOf(c)?.Version is { } to)
+                head.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "  " + (from is { Length: > 0 } && from != "?" ? from + " \u2192 " + to : to), Foreground = Res("ApexMutedBrush") });
+            words.Children.Add(head);
+            if (Paragraphs(ReleaseOf(c)?.Body).FirstOrDefault() is { } headline)
+                words.Children.Add(new TextBlock { Text = headline, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis });
+            Grid.SetColumn(words, 1);
+            g.Children.Add(words);
+            list.Children.Add(g);
+        }
+        body.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush") });
+        var r = await ShowDialog(new ContentDialog
+        {
+            Title = ups.Count == 1 ? T("1 update goes in first") : T("{0} updates go in first", ups.Count), Content = body,
+            PrimaryButtonText = T("Update and play"), SecondaryButtonText = T("Play without updating"), CloseButtonText = T("Cancel"),
+            DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
+        });
+        return r == ContentDialogResult.Primary ? true : r == ContentDialogResult.Secondary ? false : null;
     }
 
     // Start with Windows: only the notification area icon until the player opens the window

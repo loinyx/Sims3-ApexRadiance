@@ -1312,5 +1312,11 @@ public static partial class Strings
         ["The components download from each author's GitHub. Connect and try again."] = "Os componentes são baixados do GitHub de cada autor. Conecte-se e tente de novo.",
         ["Windows will ask for permission"] = "O Windows vai pedir permissão",
         ["The game is in a protected folder. One prompt, then the change runs in its own window."] = "O jogo está numa pasta protegida. Um pedido de permissão, e a mudança roda numa janela própria.",
+        ["Then the game starts. Your settings stay."] = "Depois o jogo abre. Suas configurações continuam.",
+        ["Some files could not be put back: {0}. Repair or remove sets the game right."] = "Alguns arquivos não puderam ser devolvidos: {0}. Reparar ou remover deixa o jogo certo.",
+        ["The launcher can't reach GitHub. Connect and try again."] = "O launcher não consegue acessar o GitHub. Conecte-se e tente de novo.",
+        ["The game is as it was before the update."] = "O jogo está como antes da atualização.",
+        ["Everything put in before it was taken back out."] = "Tudo o que foi colocado antes foi retirado de novo.",
+        ["The update did not go in"] = "A atualização não entrou",
     };
 }

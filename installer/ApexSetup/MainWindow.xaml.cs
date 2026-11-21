@@ -141,7 +141,9 @@ public sealed partial class MainWindow : Window
             || _latest.GetValueOrDefault(Releases.Apex) is not { } apex) return;
         try
         {
-            if (await SelfUpdate.DownloadIfNewerAsync(apex, self) is not { } file) return;
+            // (APEX_LAUNCHER_FAKE_UPDATE: a newer exe on disk taken as the download, to see and run the offer without a release)
+            var fake = Environment.GetEnvironmentVariable("APEX_LAUNCHER_FAKE_UPDATE") is { Length: > 0 } fu && File.Exists(fu) && SelfUpdate.IsNewer(fu, self) ? fu : null;
+            if ((fake ?? await SelfUpdate.DownloadIfNewerAsync(apex, self)) is not { } file) return;
             var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(file).FileVersion is { } fv && Version.TryParse(fv, out var pv) ? pv.ToString(3) : "";
             void UpdateNow()
             {
@@ -475,7 +477,7 @@ public sealed partial class MainWindow : Window
 
     // A first install (and the updates Play puts in) runs its steps in one card in the middle of the window, without the
     // sidebar: none of it works before Apex Radiance is in. Any other screen leaves the card.
-    bool _wizardFlow, _updatingForPlay;
+    bool _wizardFlow, _updatingForPlay, _playAnyway;
     (string? Bin, bool Writable) _writableFor = (null, true);
     bool Wizard => _wizardFlow && _step is GameStep or ComponentsStep or RendererStep or InstallStep or DoneStep;
 
@@ -512,6 +514,11 @@ public sealed partial class MainWindow : Window
         else if (on && _offline) SetInfo(WizardNotice, InfoBarSeverity.Error, T("No internet"), T("The components download from each author's GitHub. Connect and try again."), T("Try again"), async () => await LoadReleasesAsync());
         else if (needsAdmin) SetInfo(WizardNotice, InfoBarSeverity.Informational, T("Windows will ask for permission"), T("The game is in a protected folder. One prompt, then the change runs in its own window."));
         else WizardNotice.IsOpen = false;
+        WizardNotice.Visibility = WizardNotice.IsOpen ? Visibility.Visible : Visibility.Collapsed; // (a closed bar still took the panel's gap)
+        // (the game step holds the install back while the game runs: said in the card, not only in the footer)
+        if (Wizard && _step == GameStep && _running) SetInfo(GameRunningNotice, InfoBarSeverity.Warning, T("Close The Sims 3 to continue"), T("The game, its launcher and the RTX Remix bridge have to be closed while files change."));
+        else GameRunningNotice.IsOpen = false;
+        GameRunningNotice.Visibility = GameRunningNotice.IsOpen ? Visibility.Visible : Visibility.Collapsed;
         WizardComponents.Opacity = on && (_running || _offline) ? 0.55 : 1;
         if (!on) return;
         FrameworkElement IconBox(string icon, uint argb)
@@ -1735,6 +1742,22 @@ public sealed partial class MainWindow : Window
             var net = Engine.IsNetwork(ex);
             var title = net ? T("The launcher can't reach GitHub") : T("The launcher could not finish");
             var text = ErrorText(ex);
+            // a first install or Play's updates: no question, what went in is taken back out, and one card says so
+            if (_wizardFlow && !engineDone)
+            {
+                string? left = null;
+                if (point?.Committed is { } wp)
+                    try { if (RestorePoints.Restore(g.Bin, wp) is { Count: > 0 } kept) left = string.Join(", ", kept); }
+                    catch (Exception re) { App.Log(re); left = ErrorText(re); }
+                _state = Scan.Run(g);
+                _defaultsFor = null;
+                _busy = false;
+                var again = await WizardFailed(net, text, left);
+                if (again == "try") { await InstallAsync(comps, remove, inline, settingsOnly); return; }
+                if (again == "play") { _playAnyway = true; return; }
+                Show(_updatingForPlay ? Home : ComponentsStep);
+                return;
+            }
             // the files it changed before the error are put back: half an install is the worse state. Keeping them is the
             // second choice (Repair or remove sets them right later)
             if (!engineDone && point?.Committed is { } p)
@@ -1767,6 +1790,31 @@ public sealed partial class MainWindow : Window
             _busy = false;
             Show(engineDone && !inline ? DoneStep : from);
         }
+    }
+
+    // the card after a failed first install or update: what went wrong in the player's words; Try again, Play anyway (an
+    // update) or Back; the details copy to the clipboard for a bug report
+    async Task<string?> WizardFailed(bool net, string text, string? left)
+    {
+        var update = _updatingForPlay;
+        var body = new StackPanel { Spacing = 12, Width = 460 };
+        body.Children.Add(new Border { Width = 64, Height = 64, CornerRadius = new CornerRadius(32), HorizontalAlignment = HorizontalAlignment.Center,
+            Background = Res("ApexWarningSoftBrush"), Child = Lucide.Icon(left is null ? "undo-2" : "triangle-alert", 28, Res("ApexWarningBrush"), 2.2) });
+        var what = left is not null ? T("Some files could not be put back: {0}. Repair or remove sets the game right.", left)
+            : net ? T("The launcher can't reach GitHub. Connect and try again.")
+            : update ? T("The game is as it was before the update.") : T("Everything put in before it was taken back out.");
+        body.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center });
+        body.Children.Add(new TextBlock { Text = what, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = Res("ApexMutedBrush") });
+        var copy = new HyperlinkButton { Content = T("Copy details"), HorizontalAlignment = HorizontalAlignment.Center };
+        copy.Click += (_, _) => { var dp = new Windows.ApplicationModel.DataTransfer.DataPackage(); dp.SetText(text + "\n\n" + App.Details()); Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp); };
+        body.Children.Add(copy);
+        var r = await ShowDialog(new ContentDialog
+        {
+            Title = left is not null ? T("The launcher could not finish") : update ? T("The update did not go in") : T("Nothing was changed"),
+            Content = body, PrimaryButtonText = T("Try again"), SecondaryButtonText = update ? T("Play anyway") : "", CloseButtonText = update ? T("Cancel") : T("Back"),
+            DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
+        });
+        return r == ContentDialogResult.Primary ? "try" : r == ContentDialogResult.Secondary ? "play" : null;
     }
 
     // a row of the task list; the returned action sets it to 0 pending, 1 working, 2 done, 3 failed
