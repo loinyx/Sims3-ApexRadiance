@@ -866,6 +866,8 @@ public sealed partial class MainWindow
         if (!ok) { if (fromWindows) Application.Current.Exit(); return; }
         _busy = true;
         var keepSettings = keep.IsChecked == true;
+        // (from Installed apps a launcher can still be open, in the tray too: it closes first, or its exe and folder stay)
+        if (fromWindows) await Task.Run(CloseOtherCopies);
         var left = new List<string>();
         try
         {
@@ -905,6 +907,14 @@ public sealed partial class MainWindow
         Uninstall.Launcher(keepData: keepSettings);
         await Message(T("Apex Launcher was uninstalled"), T("Everything it installed is gone, and the files it replaced are back."));
         Application.Current.Exit();
+    }
+
+    static void CloseOtherCopies()
+    {
+        try { if (EventWaitHandle.TryOpenExisting(@"Local\ApexLauncher.Replace", out var close)) using (close) close.Set(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
+        foreach (var p in System.Diagnostics.Process.GetProcessesByName("ApexLauncher").Where(p => p.Id != Environment.ProcessId))
+            try { using (p) p.WaitForExit(10000); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
     }
 
     // Start with Windows: only the notification area icon until the player opens the window

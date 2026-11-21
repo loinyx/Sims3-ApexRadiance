@@ -61,6 +61,8 @@ public static class Games
 
     public static List<Game> Detect()
     {
+        // (a test run on a real PC: only the games it was given, so an uninstall there never reaches the player's own)
+        if (Environment.GetEnvironmentVariable("APEX_LAUNCHER_NO_DETECT") == "1") return [];
         var roots = new List<string>();
         foreach (var lib in SteamLibraries())
             roots.Add(Path.Combine(lib, "steamapps", "common", "The Sims 3"));

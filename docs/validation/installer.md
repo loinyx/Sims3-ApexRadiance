@@ -24,6 +24,7 @@ described in [features/installer.md](../features/installer.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-20 | 2.0.1 build of this change | Full cycle on this PC, `APEX_LAUNCHER_NO_DETECT=1`, faked drivers, a copied `TS3W.exe` as the only game: install from a download, then *Uninstall* through the Installed apps command with the launcher still open and settings not kept | The open launcher closed; the game folder back to `TS3W.exe` alone; install folder, data, Installed apps entry, shortcuts, Run value and Open with gone. Left: `%ProgramData%\Apex Radiance Setup` (the Smooth Motion record) when the uninstall needs no administrator | Windows 11 |
 | 2026-11-20 | 2.0.1 build of this change | Real install on this PC, separate `%LOCALAPPDATA%` and a copied `TS3W.exe` as the game | First install from a download: Apex installed, the question after it, the installed copy started with Installed apps, Start menu, desktop and Open with; a downloaded 2.0.2 replaced a running 2.0.1; an older download only opened the installed copy; an Apex Radiance Setup user (old data folder, `ApexRadianceSetup.exe`) kept language and games and installed | Windows 11 |
 | 2026-11-20 | `4fd4114b` | `installer/ApexSetup.Tests` | All passed three runs in a row; file-timing tests (merge, split, caches, uninstall) fail now and then and pass on a rerun | none |
 | 2026-11-20 | `4fd4114b` | `installer/ui-smoke/Run-UiSmoke.ps1` (dry run, Steam test game) | 432 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |

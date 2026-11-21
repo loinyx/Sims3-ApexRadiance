@@ -140,6 +140,10 @@ public static partial class LauncherInstall
         k.SetValue("UninstallString", $"{SelfUpdate.Quote(exe)} {UninstallArg}");
         k.SetValue("NoModify", 1, RegistryValueKind.DWord);
         k.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+        // (the date Installed apps shows: the first registration's, kept by every later start)
+        if (k.GetValue("InstallDate") is null) k.SetValue("InstallDate", DateTime.Now.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture));
+        k.SetValue("URLInfoAbout", "https://github.com/loinyx/Sims3-ApexRadiance");
+        k.SetValue("HelpLink", "https://github.com/loinyx/Sims3-ApexRadiance/issues");
         try { k.SetValue("EstimatedSize", (int)(new FileInfo(exe).Length / 1024), RegistryValueKind.DWord); } catch (IOException) { }
         RegisterOpenWith(exe);
     }
@@ -220,7 +224,10 @@ public static partial class LauncherInstall
     {
         var rd = string.Join(" & ", paths.Select(p => Directory.Exists(p) ? $"rd /s /q {SelfUpdate.Quote(p)}" : File.Exists(p) ? $"del /f /q {SelfUpdate.Quote(p)}" : null).OfType<string>());
         if (rd.Length == 0) return;
-        Process.Start(new ProcessStartInfo("cmd.exe", $"/c timeout /t 3 /nobreak >nul & {rd}") { CreateNoWindow = true, UseShellExecute = false });
+        // (ping waits without a console; timeout refuses to run without one, and another timeout.exe can come first on the
+        // PATH, so the delete ran at once while the exe was still open)
+        var ping = Path.Combine(Environment.SystemDirectory, "ping.exe"); // (unquoted: cmd /c strips the first and last quote of a line that starts with one)
+        Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/c {ping} -n 5 127.0.0.1 >nul & {rd}") { CreateNoWindow = true, UseShellExecute = false });
     }
 
     // ---------- shortcuts (IShellLinkW through source-generated COM: the exe is trimmed) ----------

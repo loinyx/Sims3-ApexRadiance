@@ -176,7 +176,8 @@ as the signed-in user, not as administrator: a change to the game folder or to a
   installed in every game it knows and its own files; saves, mods put in by hand and `Resource.cfg`
   stay. Only the game-folder part runs as administrator; the Documents part (switched-off mods back on, Apex Radiance's
   settings unless kept) runs as the player. Files of the player's that a fix set aside in the backup folder go to the
-  Recycle Bin. Settings from Apex Radiance Setup's data folder move to the launcher's on first start.
+  Recycle Bin. A launcher still open (in the tray too) closes first, so its exe and folder go as well. Settings from
+  Apex Radiance Setup's data folder move to the launcher's on first start.
 - **Installed or portable.** A copy that is neither (a download, or an Apex Radiance Setup that updated itself into
   the launcher) asks once: at start when the game already has Apex Radiance, right after the first install otherwise.
   A downloaded copy newer than the installed one replaces it and takes over: an older copy running closes (unless it
