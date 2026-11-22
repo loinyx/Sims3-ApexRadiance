@@ -185,6 +185,44 @@ try
     Compat.FixDxvk(Compat.FixDxvk(dxc), dxw2);
     Check(dxw2.Count == 0, "bridge dxvk.conf fix settles");
 
+    // 7b. Faster text lookups on while another mod changes the same code: reported, nothing written
+    {
+        var apexToml = Engine.ApexToml(docs);
+        var tomlOld = File.Exists(apexToml) ? File.ReadAllText(apexToml) : null;
+        var s3ppIni = B("Sims3Performance.ini");
+        var merge = Path.Combine(Scan.Packages(docs), "CCStringMerge_Strings.package");
+        var log = Path.Combine(docs, "Apex Radiance", "ApexRadiance_LOG.txt");
+        List<Finding> Text() => Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.Text.StartsWith("Faster text lookups")).ToList();
+        Directory.CreateDirectory(Path.GetDirectoryName(apexToml)!);
+        File.WriteAllText(B("Sims3Performance.asi"), "s3pp");
+        File.WriteAllText(s3ppIni, "[Patches]\r\nLocalizedStringCache=1\r\nStblBucketLayoutTuning=0\r\n");
+        File.WriteAllText(apexToml, "[patches.StringTableIndex]\nenabled = false\n");
+        Check(Text().Count == 0, "text lookups off: no finding");
+        File.WriteAllText(apexToml, "[patches.StringTableIndex]\nenabled = true\n");
+        var lsc = Text();
+        Check(lsc.Count == 1 && lsc[0].Fix is null && lsc[0].Args.SequenceEqual(new[] { "Sims 3 Performance Patch", "Sims3Performance.asi", "LocalizedStringCache=0", "Sims3Performance.ini" }),
+            "S3PP's LocalizedStringCache on: named with its key, no fix");
+        File.WriteAllText(s3ppIni, "[Patches]\r\nMonoIsinstCache=1\r\n");
+        Check(Text().SingleOrDefault()?.Args[2] == "LocalizedStringCache=0 and StblBucketLayoutTuning=0", "S3PP keys missing count as on");
+        var iniText = "[Patches]\r\nLocalizedStringCache = 0 ; off\r\nStblBucketLayoutTuning=0\r\n";
+        File.WriteAllText(s3ppIni, iniText);
+        Check(Text().Count == 0 && File.ReadAllText(s3ppIni) == iniText, "S3PP string options off: no finding, its ini untouched");
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        File.WriteAllText(B("TextHook.asi"), "other");
+        File.WriteAllText(log, "[Main] x\n[StringTableIndex] Off: the text lookup's entry (0x0059c5b0) was changed by TextHook.asi. To use Faster text lookups, turn off ...\n");
+        Check(Text().SingleOrDefault()?.Args.SequenceEqual(new[] { "TextHook.asi" }) == true, "the last game's stand-down names an unknown module still in Game\\Bin");
+        File.Delete(B("TextHook.asi"));
+        Check(Text().Count == 0, "a module no longer in Game\\Bin: no finding");
+        Check(Compat.StandDownModule("[StringTableIndex] Off: the string tables' hash layout (0x0059af50) was changed likely by Sims 3 Performance Patch (Sims3Performance.asi). To use")
+              == "Sims3Performance.asi" && Compat.StandDownModule("[StringTableIndex] Off: the table walk (0x0059c5c2) was changed by a patch in memory (no file), likely a loader or trainer") is null
+              && Compat.StandDownModule("[StringTableIndex] Off: CCStringMerge_Strings.package is in Mods\\Packages (string tables already merged)") is null,
+            "stand-down line: known name (file), likely, in memory, merged package");
+        File.WriteAllText(merge, "pkg");
+        Check(Text().SingleOrDefault()?.Args.SequenceEqual(new[] { "CCStringMerge_Strings.package" }) == true, "CCStringMerge_Strings.package: its own finding");
+        foreach (var x in new[] { merge, log, B("Sims3Performance.asi"), s3ppIni }) File.Delete(x);
+        if (tomlOld is null) File.Delete(apexToml); else File.WriteAllText(apexToml, tomlOld);
+    }
+
     // 8. MonoPatcher in, then out; Smooth Patch's ASI next to S3SS is moved away
     await Engine.InstallAsync(g, new[] { Components.MonoPatcher }, src, null, docs);
     Check(Scan.Run(g, docs).MonoPatcher && File.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher", "ld_MonoPatcher.package")), "MonoPatcher installed");

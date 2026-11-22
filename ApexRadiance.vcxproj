@@ -411,6 +411,7 @@
     <ClInclude Include="features\object_index.h" />
     <ClInclude Include="features\string_table_index.h" />
     <ClInclude Include="features\string_table_index_core.h" />
+    <ClInclude Include="features\string_table_index_culprit.h" />
     <ClInclude Include="features\object_light_bridge.h" />
     <ClInclude Include="features\room_map_dither.h" />
     <ClInclude Include="features\picture.h" />

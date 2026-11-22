@@ -21,7 +21,8 @@
 // game's: any difference turns the index off for the session.
 //
 // Stands down (stays off, logged): another module changed GetString's entry or the walk, or
-// Mods\Packages\CCStringMerge_Strings.package exists (string tables merged offline already).
+// Mods\Packages\CCStringMerge_Strings.package exists (string tables merged offline already). A changed-code stand-down
+// names the module the patch jumps into and, for a known mod, the setting to turn off (string_table_index_culprit.h).
 // Thread-safe: the index is read under a shared SRW lock and built under the exclusive one, both taken with Try (a
 // lookup never waits: it takes the walk); no lock is held while game code runs.
 #include <string>
