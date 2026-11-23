@@ -575,48 +575,53 @@ public static class Engine
         if (c == Components.RestartHost)
             foreach (var f in m.Files.Where(f => Path.GetFileName(f.Path).Equals("ts3wrap.exe", StringComparison.OrdinalIgnoreCase))) f.Component = c;
         var layerBefore = Scan.Run(g, docs).Layer;
-        // hand-installed files first, so a backup restored below is never taken for one
-        foreach (var rel in Known[c])
+        // setup.json is saved even when a file fails: an entry whose original is already back must not be read again on a retry
+        try
         {
-            var p = Path.Combine(g.Bin, rel);
-            // only the d3d9.dll of the layer being removed
-            if (rel == "d3d9.dll" && layerBefore != (c == Components.Dxvk ? Layer.Dxvk : Layer.Bridge)) continue;
-            if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) Fs.Delete(p);
-        }
-        var docsRoot = docs ?? Scan.DocumentsFor(g);
-        foreach (var f in m.Files.Where(f => f.Component == c).ToList())
-        {
-            // (a file already gone with nothing to put back needs no work wherever it was, as after Documents moved)
-            if (f.Backup is null && !File.Exists(f.Path)) { m.Files.Remove(f); continue; }
-            if (!Within(f.Path, g.Bin, docsRoot) || f.Backup is not null && !Within(f.Backup, Manifest.DirOf(g.Bin)))
+            // hand-installed files first, so a backup restored below is never taken for one
+            foreach (var rel in Known[c])
             {
-                Engine.Log(new InvalidOperationException("Manifest entry outside the game left alone: " + f.Path + " <- " + f.Backup));
-                continue;
+                var p = Path.Combine(g.Bin, rel);
+                // only the d3d9.dll of the layer being removed
+                if (rel == "d3d9.dll" && layerBefore != (c == Components.Dxvk ? Layer.Dxvk : Layer.Bridge)) continue;
+                if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) Fs.Delete(p);
             }
-            Fs.Delete(f.Path);
-            if (f.Backup is not null && File.Exists(f.Backup)) Fs.Move(f.Backup, f.Path);
-            m.Files.Remove(f);
+            var docsRoot = docs ?? Scan.DocumentsFor(g);
+            foreach (var f in m.Files.Where(f => f.Component == c).ToList())
+            {
+                // (a file already gone with nothing to put back needs no work wherever it was, as after Documents moved)
+                if (f.Backup is null && !File.Exists(f.Path)) { m.Files.Remove(f); continue; }
+                if (!Within(f.Path, g.Bin, docsRoot) || f.Backup is not null && !Within(f.Backup, Manifest.DirOf(g.Bin)))
+                {
+                    Engine.Log(new InvalidOperationException("Manifest entry outside the game left alone: " + f.Path + " <- " + f.Backup));
+                    continue;
+                }
+                // (a backup already gone: the file there is the original an earlier, failed removal put back)
+                if (f.Backup is null || File.Exists(f.Backup)) Fs.Delete(f.Path);
+                if (f.Backup is not null && File.Exists(f.Backup)) Fs.Move(f.Backup, f.Path);
+                m.Files.Remove(f);
+            }
+            if (c == Components.MonoPatcher && Directory.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher")))
+                foreach (var f in Directory.EnumerateFiles(Path.Combine(Scan.Packages(docs), "MonoPatcher"), "ld_MonoPatcher*.package")) Fs.Delete(f);
+            if (c == Components.Modernization)
+            {
+                var pkg = Path.Combine(Scan.Packages(docs), "ts3fixes.package");
+                Fs.Delete(pkg);
+            }
+            if (c is Components.Bridge or Components.Dxvk)
+            {
+                foreach (var d in new[] { Path.Combine(g.Bin, ".trex"), Path.Combine(g.Bin, "licenses") })
+                    if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Fs.DeleteDir(d);
+                // the game is back on its own D3D9 (a restored loader or wrapper included): the copy taken then matches the card it sees again
+                if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup) && Scan.Run(g, docs).Layer is Layer.Native or Layer.Other)
+                    Fs.Copy(m.OptionsBackup, OptionsIni(docs));
+                if (m.OptionsBackup is not null) Fs.Delete(m.OptionsBackup);
+                m.OptionsBackup = null;
+            }
+            if (c == Components.RestartHost) SetRestartHost(docs, false);
+            m.Versions.Remove(c);
         }
-        if (c == Components.MonoPatcher && Directory.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher")))
-            foreach (var f in Directory.EnumerateFiles(Path.Combine(Scan.Packages(docs), "MonoPatcher"), "ld_MonoPatcher*.package")) Fs.Delete(f);
-        if (c == Components.Modernization)
-        {
-            var pkg = Path.Combine(Scan.Packages(docs), "ts3fixes.package");
-            Fs.Delete(pkg);
-        }
-        if (c is Components.Bridge or Components.Dxvk)
-        {
-            foreach (var d in new[] { Path.Combine(g.Bin, ".trex"), Path.Combine(g.Bin, "licenses") })
-                if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Fs.DeleteDir(d);
-            // the game is back on its own D3D9 (a restored loader or wrapper included): the copy taken then matches the card it sees again
-            if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup) && Scan.Run(g, docs).Layer is Layer.Native or Layer.Other)
-                Fs.Copy(m.OptionsBackup, OptionsIni(docs));
-            if (m.OptionsBackup is not null) Fs.Delete(m.OptionsBackup);
-            m.OptionsBackup = null;
-        }
-        if (c == Components.RestartHost) SetRestartHost(docs, false);
-        m.Versions.Remove(c);
-        m.Save();
+        finally { m.Save(); }
         // after the files are gone (a failed removal leaves frame generation as it was); never fails the removal: the UI logs it and shows it on the row
         if (TurnsFrameGenOff(c)) { var (nv, amd) = FrameGenOff(g); FrameGenOffError = (nv ?? FrameGenOffError.Nv, amd ?? FrameGenOffError.Amd); }
         // the restored d3d9.dll is a loader again: the one Setup added for the bridge would load every mod twice

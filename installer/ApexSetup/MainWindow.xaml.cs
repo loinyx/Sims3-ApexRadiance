@@ -148,7 +148,12 @@ public sealed partial class MainWindow : Window
             var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(file).FileVersion is { } fv && Version.TryParse(fv, out var pv) ? pv.ToString(3) : "";
             void UpdateNow()
             {
-                if (_busy) return; // (an install in progress finishes first)
+                if (_busy) // (an install in progress finishes first: said, with the button kept)
+                {
+                    SetInfo(SetupUpdateInfo, InfoBarSeverity.Informational, T("A new Apex Launcher is available"),
+                        T("Wait for the current change to finish, then update the launcher."), T("Update the launcher"), UpdateNow);
+                    return;
+                }
                 try
                 {
                     SelfUpdate.ReplaceAndStart(file, self, LauncherInstall.HandoverArgs(Environment.GetCommandLineArgs().Skip(1)));
@@ -502,6 +507,7 @@ public sealed partial class MainWindow : Window
         if (on) Scroller.Padding = new Thickness(28, 24, 28, 0);
     }
 
+    (string Name, FocusState How)? _refocus; // the mirrored switch just toggled, for the rows built next
     // the first install's short list: one row each, with the switches of the Components cards mirrored both ways
     void FillWizardRows()
     {
@@ -625,18 +631,27 @@ public sealed partial class MainWindow : Window
             g.Children.Add(end);
             WizardRows.Children.Add(Card(g, 8));
         }
+        // (the install's rows have no state column: a switch that cannot be used says why in the row's own line)
+        string Why(ToggleSwitch card, TextBlock pill, string text) => wizard && !card.IsEnabled && pill.Text.Length > 0 ? pill.Text : text;
         ToggleSwitch Mirror(ToggleSwitch card, string name)
         {
             var t = new ToggleSwitch { OnContent = "", OffContent = "", MinWidth = 0, Width = 40, IsOn = card.IsOn, IsEnabled = card.IsEnabled };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(t, name);
-            t.Toggled += (_, _) => { if (card.IsOn != t.IsOn) card.IsOn = t.IsOn; };
+            // (later: the card's own handler builds the rows again, this switch included, and a control rebuilt inside its
+            // own event loses the keyboard; the new switch of the same name takes the focus back, as it was given)
+            t.Toggled += (_, _) => { if (card.IsOn == t.IsOn) return; _refocus = (name, t.FocusState); Later(() => card.IsOn = t.IsOn); };
+            if (_refocus is { } f && f.Name == name)
+            {
+                _refocus = null;
+                if (f.How != FocusState.Unfocused) t.Loaded += (_, _) => t.Focus(f.How);
+            }
             return t;
         }
         // Apex Radiance on top, set apart: its version and whether it is up to date
         {
             var have = _state?.ApexVersion;
             var latest = Latest(Components.Apex);
-            var apexUpdate = !wizard && (ApexDesc.Text.Contains('\u2192') || have is { } av && latest is { } lv && av != lv);
+            var apexUpdate = !wizard && planAdd.Contains(Components.Apex); // (what Apply does: a test build is kept, so it is no update)
             var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -691,7 +706,10 @@ public sealed partial class MainWindow : Window
                 var pick = choices[menu.SelectedIndex];
                 Later(() => { _renderer = pick; RefreshComponents(); });
             };
-            Row(IconBox("monitor"), T("Graphics"), T("How Apex draws the game."), null, StateText(RendererState.Text, RendererState.Foreground),
+            // (a choice missing from the menu says why: the card or driver cannot run it; a change chosen keeps its own line)
+            var blocked = BridgeDetail.Text.Length > 0 && _state is { } rs && _renderer == RendererOf(rs);
+            Row(IconBox("monitor"), T("Graphics"), T("How Apex draws the game."), null,
+                blocked ? Tip(StateText(BridgeDetail.Text, Res("ApexWarningBrush"))!) : StateText(RendererState.Text, RendererState.Foreground),
                 Changes(Components.Bridge, Components.Dxvk), menu);
         }
         if (SmoothSection.Visibility == Visibility.Visible && SmoothCard.Visibility == Visibility.Visible)
@@ -704,17 +722,17 @@ public sealed partial class MainWindow : Window
                 Put(both, Adopt(SmoothHelp, SmoothCard));
                 smoothState = both;
             }
-            Row(IconBox("film"), "NVIDIA Smooth Motion", T("An extra picture between every two the game makes, on RTX 40 and 50 cards."), null, smoothState, _smoothWant is not null, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
+            Row(IconBox("film"), "NVIDIA Smooth Motion", Why(SmoothToggle, SmoothPill, T("An extra picture between every two the game makes, on RTX 40 and 50 cards.")), null, smoothState, _smoothWant is not null, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
         }
         if (SmoothSection.Visibility == Visibility.Visible && AfmfCard.Visibility == Visibility.Visible)
-            Row(IconBox("film"), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, State(AfmfPill), _afmfWant is not null, Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
+            Row(IconBox("film"), "AMD Fluid Motion Frames", Why(AfmfToggle, AfmfPill, T("The AMD driver adds frames for smoother motion.")), null, State(AfmfPill), _afmfWant is not null, Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
         _fpsBox ??= ((Panel)FpsCard.Child).Children.OfType<StackPanel>().First(sp => sp.Children.Contains(FpsCombo));
         if (!wizard && SmoothSection.Visibility == Visibility.Visible && FpsCard.Visibility == Visibility.Visible)
         {
             FpsCombo.MinWidth = 0; FpsCombo.Width = 200;
             Row(IconBox("gauge"), T("Apex frame limit"), FpsDesc.Text, null, State(FpsPill), _fpsWant is not null, Adopt(_fpsBox, FpsCard));
         }
-        Row(IconBox("rotate-ccw"), T("TS3Wrap"), T("Reopens your last save with fresh memory when the game runs low."), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
+        Row(IconBox("rotate-ccw"), T("TS3Wrap"), Why(RestartToggle, RestartPill, T("Reopens your last save with fresh memory when the game runs low.")), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
     }
 
     void OnContentFrameSized(object sender, SizeChangedEventArgs e) { if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
@@ -816,13 +834,14 @@ public sealed partial class MainWindow : Window
     static Windows.UI.Color Blend(Windows.UI.Color a, Windows.UI.Color b, double t) =>
         Windows.UI.Color.FromArgb(255, (byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
     // a Components card: read by its fill, a border just off it, a lighter fill under the pointer (handlers added once)
-    static readonly HashSet<Border> _softened = new();
+    // (weak keys: the rows are built again on every refresh, and a set would keep every old one alive)
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Border, object> _softened = new();
     static void Soft(Border b)
     {
         b.Background = Res("ApexCardBrush");
         b.BorderBrush = new SolidColorBrush(Pick(0xFF212121, 0xFFE4E4E4));
         b.BorderThickness = new Thickness(1);
-        if (!_softened.Add(b)) return;
+        if (!_softened.TryAdd(b, _softened)) return;
         b.PointerEntered += (_, _) => b.Background = new SolidColorBrush(Pick(0xFF1C1C1C, 0xFFFAFAFA));
         b.PointerExited += (_, _) => b.Background = Res("ApexCardBrush");
     }
@@ -1504,7 +1523,8 @@ public sealed partial class MainWindow : Window
         var tags = new List<string> { RDxvk, RBridge, RNative };
         if (VulkanBlocked && s.Layer != Layer.Bridge) tags.Remove(RBridge);
         if (VulkanBlocked && s.Layer != Layer.Dxvk) tags.Remove(RDxvk);
-        if (s.Layer == Layer.Other) tags.Add(RKeep);
+        // (another d3d9.dll is only ever kept or replaced by DXVK or the bridge: nothing removes it, so Windows default is no choice)
+        if (s.Layer == Layer.Other) { tags.Remove(RNative); tags.Add(RKeep); }
         // each choice: its name, what it does, and Installed on the one the game has now (rebuilt when the list, the language
         // or the installed one changes)
         var cur = RendererOf(s);
@@ -1570,6 +1590,7 @@ public sealed partial class MainWindow : Window
 
         if (VulkanBlocked && _renderer == RBridge && s.Layer != Layer.Bridge) _renderer = RDxvk;
         if (VulkanBlocked && _renderer == RDxvk && s.Layer != Layer.Dxvk) _renderer = RNative;
+        if (_renderer == RNative && s.Layer == Layer.Other) _renderer = RKeep; // (not offered over another d3d9.dll: FillRenderer)
         FillRenderer(s);
         var cur = RendererOf(s);
         var changed = _renderer != cur;
@@ -2169,6 +2190,7 @@ public sealed partial class MainWindow : Window
             () => _ = RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir, bar));
         else SetInfo(bar, InfoBarSeverity.Error, T("The launcher could not finish"), error!);
         if (!ok) bar.Content = ErrorLinks(inBar: true); // (Copy details, Open log folder, as the dialogs have)
+        ShowCoreNotes(); // (Components' bar opened after the refresh: its panel is hidden once the last suggestion went)
         return ok;
     }
 

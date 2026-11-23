@@ -1904,6 +1904,8 @@ public sealed partial class MainWindow
         After(page ? 0 : settle, () =>
         {
             if (mine != _boardRedraw || !_galBook) return;
+            // (an album open over the board flies its pictures back to these cards: the board is laid again once it closes)
+            if (_spotlightOpen && !page) { _boardStale = true; return; }
             _boardKeep = _boardScroll is { ScrollableWidth: > 0 } sv ? sv.HorizontalOffset / sv.ScrollableWidth : null;
             _boardCalm = true;
             try
@@ -2811,6 +2813,7 @@ public sealed partial class MainWindow
     void Keep(bool step = false)
     {
         if (_gal is null) return;
+        Gallery.Save(_gal); // (first: it drops the empty records, which would otherwise read as a change next time)
         var now = System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         if (_lastKept is not null && now != _lastKept)
         {
@@ -2820,7 +2823,6 @@ public sealed partial class MainWindow
         }
         if (now != _lastKept) _lastKeptAt = Environment.TickCount64;
         _lastKept = now;
-        Gallery.Save(_gal);
     }
 
     // Ctrl+Z back, Ctrl+Y and Ctrl+Shift+Z forward, wherever the focus is while the Gallery shows; a text being typed
@@ -2851,8 +2853,8 @@ public sealed partial class MainWindow
     void KeepQuiet()
     {
         if (_gal is null) return;
-        _lastKept = System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         Gallery.Save(_gal);
+        _lastKept = System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
     }
 
     void StepBack(bool undo)
@@ -2873,7 +2875,7 @@ public sealed partial class MainWindow
         foreach (var t in _boardTools) InkTool(t, look);
         if (_galSide is not null) _galSide.Content = GalleryAlbums();
         if (_custDrawer is { Opacity: > 0.5 }) FillCustomize();
-        FlipBoard();
+        if (_galBook) FlipBoard(); else BuildGallery(); // (the Albums view has no board to flip)
         ShowUndo(undo ? T("Undone") : T("Redone"), () => StepBack(!undo), undo ? T("Redo") : T("Undo"));
     }
 
@@ -2982,8 +2984,9 @@ public sealed partial class MainWindow
     void OpenViewer(List<Picture> pics, int at, FrameworkElement? from = null)
     {
         // (one viewer at a time: a click can arrive both as a tap and as a press that barely moved)
-        if (_viewing || pics.Count == 0 || Content.XamlRoot is not { } root) return;
+        if (_viewing || at < 0 || at >= pics.Count || Content.XamlRoot is not { } root) return;
         _viewing = true;
+        var removed = false; // a picture went to the Recycle Bin from here
         // (the board is laid again on closing only when something was changed here, so an open album stays open)
         var opened = _gal is null ? null : System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         var culture = LangCulture();
@@ -3174,9 +3177,11 @@ public sealed partial class MainWindow
                 if (home is not null) home.Opacity = 1;
                 popup.IsOpen = false;
                 _viewing = false;
-                if (_gal is not null && opened == System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData)) return;
-                // (an album open over the board stays open: the board is laid again when it closes)
-                if (stay && _spotlightOpen) _boardStale = true;
+                // (leaving for an album, or a picture gone, always lays the gallery again)
+                if (stay && !removed && _gal is not null && opened == System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData)) return;
+                // (an album open over the board stays open: the board is laid again when it closes; with a picture gone it
+                // closes, for its card would still be there)
+                if (stay && !removed && _spotlightOpen) _boardStale = true;
                 else if (stay && _galBook) RefreshBoard(page: true); else BuildGallery();
             };
             Play(away);
@@ -3399,7 +3404,8 @@ public sealed partial class MainWindow
         void Fill()
         {
             var p = pics[at];
-            var info = Gallery.Info(_gal!, p.Path);
+            // (read only: a record is made when something is set, and fetched then, for a save drops the empty ones)
+            var info = Gallery.Peek(_gal!, p.Path);
             Show(p.Path);
             side.Children.Clear();
 
@@ -3427,7 +3433,7 @@ public sealed partial class MainWindow
             {
                 var item = new ToggleMenuFlyoutItem { Text = n, IsChecked = string.Equals(n, house, StringComparison.OrdinalIgnoreCase) };
                 var chosen = n;
-                item.Click += (_, _) => { info.Household = chosen == guess ? null : chosen; Keep(); Fill(); };
+                item.Click += (_, _) => { Gallery.Info(_gal!, p.Path).Household = chosen == guess ? null : chosen; Keep(); Fill(); };
                 homeMenu.Items.Add(item);
             }
             var whoButton = new DropDownButton { Content = who, Flyout = homeMenu, CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 2, 8, 3), MinHeight = 0, FontSize = 12 };
@@ -3441,7 +3447,7 @@ public sealed partial class MainWindow
             var cap = new TextBox { Text = info.Caption ?? "", PlaceholderText = T("Write something about this moment…"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
                 FontFamily = new FontFamily(look.Font), FontSize = 20, MinHeight = 96, Padding = new Thickness(14, 10, 14, 10), CornerRadius = new CornerRadius(12) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cap, T("Caption"));
-            cap.LostFocus += (_, _) => { info.Caption = cap.Text.Trim(); Keep(); };
+            cap.LostFocus += (_, _) => { Gallery.Info(_gal!, p.Path).Caption = cap.Text.Trim(); Keep(); };
             side.Children.Add(cap);
 
             // what to do with it, as tiles
@@ -3451,7 +3457,7 @@ public sealed partial class MainWindow
             grid.RowDefinitions.Add(new RowDefinition());
             grid.RowDefinitions.Add(new RowDefinition());
             var fav = Action(info.Favourite ? "" : "", info.Favourite ? T("In Favourites") : T("Favourite"), info.Favourite);
-            fav.Click += (_, _) => { info.Favourite = !info.Favourite; Keep(); Fill(); };
+            fav.Click += (_, _) => { var i = Gallery.Info(_gal!, p.Path); i.Favourite = !i.Favourite; Keep(); Fill(); };
             var inAlbums = _gal!.Custom.Where(c => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)).ToList();
             var album = Action("", T("Add to an album"), inAlbums.Count > 0);
             var albums = new MenuFlyout();
@@ -3517,7 +3523,7 @@ public sealed partial class MainWindow
             bin.Click += async (_, _) =>
             {
                 if (!await Confirm(T("Move this picture to the Recycle Bin?"), T("You can put it back from the Recycle Bin."), T("Move it"))) return;
-                try { Gallery.Remove(_gal!, p.Path); pics.RemoveAt(at); if (pics.Count == 0) { Close(); return; } at = Math.Min(at, pics.Count - 1); Fill(); }
+                try { Gallery.Remove(_gal!, p.Path); removed = true; pics.RemoveAt(at); if (pics.Count == 0) { Close(); return; } at = Math.Min(at, pics.Count - 1); Fill(); }
                 catch (Exception e) { App.Log(e); await Message(T("The picture was not moved"), ErrorText(e)); }
             };
             Grid.SetColumn(bin, 1);

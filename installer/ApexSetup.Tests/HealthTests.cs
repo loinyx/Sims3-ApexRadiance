@@ -113,6 +113,21 @@ static class HealthTests
         string Crashes(int n) => ScriptErrors.Findings(r with { ByMod = [r.ByMod.First(m => m.Mod == "Crashy.asi") with { Count = n, Crashes = n }] }).Single().Finding.Severity.ToString();
         check(Crashes(1) == "Info" && Crashes(2) == "Info" && Crashes(ScriptErrors.CrashPattern) == "Warning",
             $"script errors: one or two crashes in a place are a note, {ScriptErrors.CrashPattern} a warning ({Crashes(1)}, {Crashes(2)}, {Crashes(3)})");
+        // two older crashes, before the window asked for (the last game start) but within the week
+        foreach (var n in new[] { 1, 2 })
+        {
+            var old = Path.Combine(docs, $"xcpt PC 30-01-0{n} 09.00.00.txt");
+            File.Copy(Path.Combine(docs, "xcpt PC 30-01-01 10.00.00.txt"), old);
+            File.SetLastWriteTime(old, DateTime.Now.AddDays(-2 - n));
+        }
+        var week = ScriptErrors.Read(docs, DateTime.Now.AddDays(-1), mods);
+        check(week.ByMod.Any(m => m.Mod == "Crashy.asi" && m.Crashes == 3) && week.Total == 7 && ScriptErrors.Findings(week).Any(f => f.Finding.Severity == Severity.Warning && f.Finding.Args.Contains("Crashy.asi")),
+            $"script errors: the week's crashes count toward the pattern, whatever the script window ({week.Total})");
+        Health.Item Err(string text, Action? fix = null) { var f = new Finding(Severity.Error, text, [], fix); return new(f, Health.AreaOf(f), []); }
+        check(Health.StateOf([Err("Apex Radiance is not installed in this game.")]) == HealthState.Blocked && Health.StateOf([Err("No ASI loader in Game\\Bin: x")]) == HealthState.Blocked
+            && Health.StateOf([Err("Sims 3 Modernization's ts3native is the build for the other edition and does nothing."), Err("{0} is missing: the RTX Remix bridge does not start.")]) == HealthState.NeedsYou
+            && Health.StateOf([Err("{0} in Game\\Bin loads a second copy of Apex Radiance.", () => { })]) == HealthState.NeedsYou,
+            "state: blocked only by an unfixable error in Apex Radiance or the ASI loader");
     }
 
     static void SavesCheck(Action<bool, string> check, string docs)
@@ -210,6 +225,11 @@ static class HealthTests
         var items = Health.Gather(g, s, docs, null, Mods(), broken);
         check(items.Count > 0 && items.Any(i => i.Area == HealthArea.Saves || i.Area == HealthArea.Disk || i.Finding.Text.Contains("not installed")) && !items.Any(i => i.Finding.Text.Contains("likely wins")),
             "conflicts: a scan that throws leaves the other Health checks in place");
+        var (log, failed) = (Engine.Log, 0);
+        Engine.Log = _ => failed++;
+        List<Health.Item> rest;
+        try { rest = Health.Gather(null!, s, docs, null); } finally { Engine.Log = log; }
+        check(failed > 0 && rest.Count > 0, $"health: a file or compatibility check that throws is logged and the others still run ({failed} failed, {rest.Count} items)");
         var slow = new ConflictCheck { Offline = true, Timeout = TimeSpan.FromMilliseconds(100), Scan = o => { Thread.Sleep(1500); return ModConflicts.Scan(o); } };
         var t0 = DateTime.Now;
         check(!slow.Check(Mods(), g, docs).Any() && DateTime.Now - t0 < TimeSpan.FromSeconds(1.4), "conflicts: a scan over its time limit returns nothing at once");

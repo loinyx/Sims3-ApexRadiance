@@ -24,7 +24,7 @@ public sealed partial class MainWindow
     bool _modsLoaded, _modsLoading;
     int _healthTab, _newsTab;
     Session? _session;
-    SessionInfo? _lastSession;
+    bool _starting;
     Process? _maintenance;
     Tray? _tray;
     Crystal? _homeCrystal, _healthCrystal;
@@ -73,14 +73,14 @@ public sealed partial class MainWindow
         _healthChecking = true;
         // (the mods are read here when the Mods screen has not read them yet: Health checks them either way)
         List<ModFile>? read = null;
-        _ = Task.Run(() =>
+        _ = Task.Run(List<Health.Item>? () =>
         {
             try
             {
                 if (mods is null) try { mods = read = Mods.List(g, docs, kinds: false); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
                 return Health.Gather(g, s, docs, apex, mods, mods is null ? null : conflicts);
             }
-            catch (Exception e) { App.Log(e); return []; }
+            catch (Exception e) { App.Log(e); return null; }
         }).ContinueWith(t =>
         {
             if (!DispatcherQueue.TryEnqueue(() =>
@@ -90,7 +90,7 @@ public sealed partial class MainWindow
                     if (run != _healthRun) return;
                     _healthChecking = false;
                     if (read is not null && !_modsLoaded) _mods = read; // (for Show in Mods; the Mods screen still reads its own)
-                    _health = t.Result;
+                    _health = t.Result ?? _health; // (a check that failed keeps the last findings: an empty list would read "Every check passed")
                     _healthState = Health.StateOf(_health);
                     _checked = DateTime.Now;
                     // (only the screens that show health are built again: Mods and the Gallery keep what the player is doing)
@@ -110,37 +110,6 @@ public sealed partial class MainWindow
     }
 
     // ---------- Home ----------
-
-    // Components: Apex Radiance large on the left with its four parts in two rows beside it; one column on a narrow
-    // window; with no frame generation on this PC the restart host takes the whole second row
-    bool _coreHooked;
-    void OnCoreSized(object sender, SizeChangedEventArgs e)
-    {
-        if (!_coreHooked)
-        {
-            _coreHooked = true;
-            SmoothSection.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => LayCore());
-            GraphicsInfo.RegisterPropertyChangedCallback(InfoBar.IsOpenProperty, (_, _) => ShowCoreNotes());
-        }
-        LayCore();
-    }
-
-    void LayCore()
-    {
-        var narrow = CoreGrid.ActualWidth is > 0 and < 760;
-        var cols = CoreGrid.ColumnDefinitions;
-        cols[1].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-        cols[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-        CoreGrid.ColumnSpacing = narrow ? 0 : 14;
-        static void At(FrameworkElement el, int row, int col, int rows = 1, int span = 1) { Grid.SetRow(el, row); Grid.SetColumn(el, col); Grid.SetRowSpan(el, rows); Grid.SetColumnSpan(el, span); }
-        if (narrow)
-        {
-            At(CoreApex, 0, 0); At(CoreModernization, 1, 0); At(CoreRenderer, 2, 0); At(SmoothSection, 3, 0); At(CoreRestart, 4, 0);
-            return;
-        }
-        At(CoreApex, 0, 0, 2); At(CoreModernization, 0, 1); At(CoreRenderer, 0, 2); At(SmoothSection, 1, 1);
-        if (SmoothSection.Visibility == Visibility.Visible) At(CoreRestart, 1, 2); else At(CoreRestart, 1, 1, 1, 2);
-    }
 
     // how much needs attention, for the crystal's colour: nothing is 0, a blocked game 1; warnings fill the way between
     // (1 or 2 small ones a yellow-green, about 4 yellow, 8 or more orange)
@@ -205,7 +174,16 @@ public sealed partial class MainWindow
     async Task PlayAsync(string? save, bool update = false)
     {
         if (_game is not { } g || _busy) return;
-        if (_running || Games.IsRunning()) { await Message(T("The Sims 3 is already running"), T("Switch to the game, or close it and press Play again.")); return; }
+        // (a session still open: the game closed and its watch is waiting to see whether it restarts on its own)
+        if (_running || _session is not null || Games.IsRunning()) { await Message(T("The Sims 3 is already running"), T("Switch to the game, or close it and press Play again.")); return; }
+        if (_starting) return; // (a second press while the first is still checking Health)
+        _starting = true;
+        try { await StartChecked(g, save, update); }
+        finally { _starting = false; }
+    }
+
+    async Task StartChecked(Game g, string? save, bool update)
+    {
         if (update && WelcomeUpdates() is { Count: > 0 } pending && await UpdatesFirst(pending) is var go && go != true)
         {
             if (go is null) return; // (Cancel)
@@ -235,7 +213,7 @@ public sealed partial class MainWindow
         }
         if (_healthState == HealthState.Blocked)
         {
-            var first = _health.First(i => i.Finding.Severity == Severity.Error && !i.Finding.CanFix).Finding;
+            var first = _health.First(Health.StopsApex).Finding;
             var r = await ShowDialog(new ContentDialog
             {
                 Title = T("One thing before you play"), Content = T(first.Text, first.Args) + "\n\n" + T("The game starts without Apex Radiance until this is fixed."),
@@ -261,7 +239,6 @@ public sealed partial class MainWindow
             _tray?.Show(T("The Sims 3 · {0} · {1} MB", Duration(s.Played), s.MemoryBytes >> 20));
             if (_step == Home && Environment.TickCount64 % 30000 < 5000) BuildHome(); // (the playing time on Home, now and then)
         }));
-        _lastSession = info;
         // (kept for Health's last sessions, and for Mods' "new since last play")
         try { SessionHistory.Add(info); ModViewPrefs.LastPlay = info.Started + info.Played; } catch (Exception e) { App.Log(e); }
         _session = null;
@@ -286,7 +263,8 @@ public sealed partial class MainWindow
     {
         _tray ??= new Tray(Path.Combine(AppContext.BaseDirectory, "Assets", "apex.ico"), () => DispatcherQueue.TryEnqueue(() => { AppWindow.Show(); Activate(); }),
             () => [(T("Open Apex Launcher"), () => DispatcherQueue.TryEnqueue(() => { AppWindow.Show(); Activate(); })),
-                   (T("Quit"), () => DispatcherQueue.TryEnqueue(() => { _tray?.Dispose(); Application.Current.Exit(); }))]);
+                   // (never in the middle of an install: the same refusal as closing the window)
+                   (T("Quit"), () => DispatcherQueue.TryEnqueue(() => { if (!QuitForNewerCopy()) _ = Message(T("The launcher is applying changes"), T("Wait until it finishes before closing.")); }))]);
         _tray.Show(tip);
     }
 
@@ -549,7 +527,7 @@ public sealed partial class MainWindow
                 Grid.SetColumn(what, 1);
                 strip.Children.Add(what);
                 var lines = new StackPanel { Spacing = 6, Padding = new Thickness(46, 0, 18, 4), Visibility = _showNotes ? Visibility.Visible : Visibility.Collapsed };
-                foreach (var n in notes) lines.Children.Add(new TextBlock { Text = T(n.Finding.Text, n.Finding.Args), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap });
+                foreach (var n in notes) lines.Children.Add(NoteRow(n));
                 var see = new HyperlinkButton { Content = _showNotes ? T("Hide notes") : T("See notes"), FontSize = 13, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
                 see.Click += (_, _) => { _showNotes = !_showNotes; lines.Visibility = _showNotes ? Visibility.Visible : Visibility.Collapsed; see.Content = _showNotes ? T("Hide notes") : T("See notes"); };
                 Grid.SetColumn(see, 2);
@@ -603,7 +581,7 @@ public sealed partial class MainWindow
             head.Children.Add(chevron);
             var content = new StackPanel { Spacing = 8, Padding = new Thickness(50, 0, 18, 14), Visibility = open ? Visibility.Visible : Visibility.Collapsed };
             if (items.Count == 0) content.Children.Add(Muted(T("Nothing to report.")));
-            foreach (var it in items) content.Children.Add(new TextBlock { Text = T(it.Finding.Text, it.Finding.Args), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap });
+            foreach (var it in items) content.Children.Add(NoteRow(it));
             var toggle = new Button { Content = head, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, name);
@@ -686,10 +664,27 @@ public sealed partial class MainWindow
     Button? FindingAction(Health.Item it)
     {
         var f = it.Finding;
+        // a suggestion (clear the caches, back up a save): offered under its own name, never run by Fix or Repair
+        if (f.CanApply) return Button(T(f.Suggest!), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Applied."), null, "Apply suggestion: {0}", args: f.Suggest!)) { RefreshGame(); _ = CheckHealth(); BuildHealth(); } });
         if (f.CanFix) return Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); _ = CheckHealth(); BuildHealth(); } }, accent: true);
         if (ModsFor(it.Files) is { Count: > 0 } hits) return Button(T("Show in Mods"), () => ShowInMods(hits));
         if (f.Link is { } link) return Button(T("Read more"), () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }));
         return null;
+    }
+
+    // a finding as a quiet line (the notes, an area's findings), its action beside it when it has one
+    UIElement NoteRow(Health.Item it)
+    {
+        var text = new TextBlock { Text = T(it.Finding.Text, it.Finding.Args), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+        if (FindingAction(it) is not { } act) return text;
+        var g = new Grid { ColumnSpacing = 12 };
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.Children.Add(text);
+        Grid.SetColumn(act, 1);
+        act.VerticalAlignment = VerticalAlignment.Center;
+        g.Children.Add(act);
+        return g;
     }
 
     UIElement FindingRow(Health.Item it, bool line)
@@ -766,7 +761,8 @@ public sealed partial class MainWindow
 
     void HealthSession(StackPanel body)
     {
-        if (_lastSession is not { } s) { body.Children.Add(Card(Muted(T("Play once through the launcher and the session shows here.")))); return; }
+        // (the newest kept session: the same one Home's status line shows)
+        if (SessionHistory.List().FirstOrDefault() is not { } s) { body.Children.Add(Card(Muted(T("Play once through the launcher and the session shows here.")))); return; }
         var grid = new Grid { ColumnSpacing = 12 };
         (string, string, string)[] stats =
         [
@@ -933,7 +929,13 @@ public sealed partial class MainWindow
                     try { stayed.AddRange(Uninstall.FromDocuments(g, Scan.DocumentsFor(g), keepSettings)); }
                     catch (Exception e) { App.Log(e); stayed.Add(Scan.DocumentsFor(g) + ": " + ErrorText(e)); }
                 }
-                if (!needAdmin) Uninstall.MachineData();
+                if (!needAdmin)
+                {
+                    // (frame generation the drivers did not turn off: the uninstall is not done, and its record stays)
+                    var (nv, amd) = Uninstall.MachineData();
+                    if (nv is not null) { App.Log(new InvalidOperationException("Smooth Motion off: " + nv)); stayed.Add(T("Turn off {0}", "NVIDIA Smooth Motion") + ": " + T(Engine.FriendlyFrameGenError(nv, false, false))); }
+                    if (amd is not null) { App.Log(new InvalidOperationException("AFMF off: " + amd)); stayed.Add(T("Turn off {0}", "AMD Fluid Motion Frames") + ": " + T(Engine.FriendlyFrameGenError(amd, true, false))); }
+                }
                 return stayed;
             }));
         }
@@ -946,8 +948,13 @@ public sealed partial class MainWindow
             if (fromWindows) Application.Current.Exit();
             return;
         }
-        Uninstall.Launcher(keepData: keepSettings);
+        // the launcher's own removal comes after the message: its delayed delete of the exe and folders waits a few seconds,
+        // less than a player takes to read it (and it still runs when the window is closed instead of OK)
+        var gone = false;
+        void RemoveLauncher() { if (gone) return; gone = true; Uninstall.Launcher(keepData: keepSettings); }
+        AppWindow.Closing += (_, _) => RemoveLauncher();
         await Message(T("Apex Launcher was uninstalled"), T("Everything it installed is gone, and the files it replaced are back."));
+        RemoveLauncher();
         Application.Current.Exit();
     }
 
@@ -1025,7 +1032,9 @@ public sealed partial class MainWindow
             try { if (Uninstall.FromGame(g, Scan.DocumentsFor(g)).Count > 0) failed = true; }
             catch (Exception e) { App.Log(e); failed = true; }
         }
-        Uninstall.MachineData();
+        var (nv, amd) = Uninstall.MachineData();
+        if (nv is not null) { App.Log(new InvalidOperationException("Smooth Motion off: " + nv)); failed = true; }
+        if (amd is not null) { App.Log(new InvalidOperationException("AFMF off: " + amd)); failed = true; }
         return failed ? 1 : 0;
     }
 

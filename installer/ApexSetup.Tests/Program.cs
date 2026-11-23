@@ -286,6 +286,25 @@ try
     Engine.Remove(g, Components.Bridge, docs);
     Check(Read(B("d3d9.dll")) == "reshade" && Read(Path.Combine(docs, "Options.ini")) == "gpu=real", "wrapper and Options.ini restored after the bridge");
 
+    // 13b. a removal that fails after the wrapper is back: setup.json no longer lists it, so the retry does not delete it
+    await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs);
+    {
+        var fm = Manifest.Load(bin); // (the wrapper's entry first, so it is restored before the file that fails)
+        var wrapper = fm.Files.Single(f => Path.GetFileName(f.Path) == "d3d9.dll");
+        fm.Files.Remove(wrapper); fm.Files.Insert(0, wrapper); fm.Save();
+        var threw = false;
+        using (new FileStream(B(@".trex\NvRemixBridge.exe"), FileMode.Open, FileAccess.Read, FileShare.None))
+            try { Engine.Remove(g, Components.Bridge, docs); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { threw = true; }
+        Check(threw && Read(B("d3d9.dll")) == "reshade" && Manifest.Load(bin).Files.All(f => f.Backup is null || File.Exists(f.Backup)),
+              "a failed removal saves setup.json: no entry points at a backup already put back");
+        // (and a setup.json an older launcher left that way: the file there is the player's, not deleted)
+        fm = Manifest.Load(bin);
+        fm.Files.Add(new ManifestFile { Component = Components.Bridge, Path = B("d3d9.dll"), Backup = Path.Combine(Manifest.DirOf(bin), "d3d9.dll.bak") }); fm.Save();
+        Engine.Remove(g, Components.Bridge, docs);
+        Check(Read(B("d3d9.dll")) == "reshade" && !File.Exists(B(@".trex\NvRemixBridge.exe")) && Manifest.Load(bin).Files.All(f => f.Component != Components.Bridge),
+              "the retry keeps the restored wrapper and removes the rest");
+    }
+
     // 14. a bridge installed by hand: Repair takes its files as its own, so Remove takes the bridge out
     File.Delete(B("d3d9.dll"));
     File.WriteAllText(B("d3d9.dll"), "hand bridge remixapi_InitializeLibrary");
@@ -1482,7 +1501,18 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         // (a file of the player's a fix set aside in the backup folder goes to the Recycle Bin, not deleted for good)
         var aside = Path.Combine(Manifest.DirOf(ubin), "TS3Patch.asi.bak");
         File.WriteAllText(aside, "the player's old patch");
+        // (frame generation the driver did not turn off: the machine-wide record stays for the retry, then goes)
+        var umarker = SmoothMotion.Marker;
+        SmoothMotion.Marker = Path.Combine(lr, "Machine", "smooth-motion-on.txt");
+        Directory.CreateDirectory(Path.Combine(lr, "Machine")); File.WriteAllText(SmoothMotion.Marker, "on");
+        var uoff = Engine.FrameGenOff;
+        Engine.FrameGenOff = _ => ("denied", null);
         left = Uninstall.FromGame(ug, udocs);
+        Check(Uninstall.MachineData() == ("denied", null) && File.Exists(SmoothMotion.Marker), "uninstall keeps the frame generation record when the driver was not turned off, and says so");
+        Engine.FrameGenOff = _ => (null, null);
+        left = Uninstall.FromGame(ug, udocs);
+        Check(Uninstall.MachineData() == (null, null) && !Directory.Exists(Path.Combine(lr, "Machine")), "uninstall removes the frame generation record once the driver is back");
+        Engine.FrameGenOff = uoff; SmoothMotion.Marker = umarker;
         left.AddRange(Uninstall.FromDocuments(ug, udocs, keepSettings: false));
         Check(left.Count == 0 && !File.Exists(Path.Combine(ubin, "ApexRadiance.asi")) && !File.Exists(Path.Combine(ubin, "wininet.dll"))
             && !Directory.Exists(Manifest.DirOf(ubin)), "uninstall removes Apex, the loader and the backup folder, a set-aside file to the Recycle Bin");

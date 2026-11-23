@@ -170,7 +170,8 @@ public sealed partial class MainWindow
         {
             Mark(current, "fail");
             d.Title = error is OperationCanceledException ? T("Merge stopped") : T("The merge did not finish");
-            time.Text = error is OperationCanceledException ? T("Nothing was changed.") : ErrorText(error!) + " " + T("Your mods are as they were.");
+            // (a SetupException from Run says what is out of place itself, such as originals left in the merge folder)
+            time.Text = error is OperationCanceledException ? T("Nothing was changed.") : ErrorText(error!) + (error is SetupException ? "" : " " + T("Your mods are as they were."));
             d.CloseButtonText = T("Close");
             if (plan.LogPath is { } lp) { d.PrimaryButtonText = T("Open log"); d.PrimaryButtonClick += (_, e) => { e.Cancel = true; OpenLog(lp); }; }
         }

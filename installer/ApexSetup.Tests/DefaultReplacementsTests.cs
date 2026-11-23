@@ -123,6 +123,15 @@ static class DefaultReplacementsTests
         check(DefaultReplacements.OriginalThumbnail(gi, r.CasParts[0]) is { } c && c.SequenceEqual(CasPng), "defaults: a CAS part's from CasThumbnails, group 0 first");
         check(DefaultReplacements.OriginalThumbnail(gi, r.Objects.First(o => o.Instance == 0x101)) is null, "defaults: no thumbnail when the game has none");
 
+        // the mod's own thumbnail: its index is kept by path until the mods are read again, and an empty one is not kept
+        var thumbs = Path.Combine(dir, "Mods", "thumbs.package");
+        check(DefaultReplacements.ModThumbnail(thumbs, sofa!) is null, "defaults: no mod thumbnail from a package that does not read");
+        Write(thumbs, (Thum, 0, 0x100, [7, 7]));
+        check(DefaultReplacements.ModThumbnail(thumbs, sofa!) is [7, 7], "defaults: an empty index is not kept, the package is read once it is there");
+        Write(thumbs, (Xml, 0, 0x400, [1, 2, 3, 4, 5]), (Thum, 0, 0x100, [8, 8, 8]));
+        DefaultReplacements.ForgetModIndexes();
+        check(DefaultReplacements.ModThumbnail(thumbs, sofa!) is [8, 8, 8], "defaults: a package written anew is indexed again after the mods are read again");
+
         // names read back from the cache by a new index
         var again = DefaultReplacements.Cached(g)!;
         check(DefaultReplacements.Analyze(again, mod).Objects.Any(o => o.Name == "Game Sofa"), "defaults: names come back from their cache");

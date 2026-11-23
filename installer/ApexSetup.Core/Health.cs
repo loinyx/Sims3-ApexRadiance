@@ -14,21 +14,23 @@ public static class Health
     // conflicts: ModConflicts' scan (seconds on a cold cache: call Gather off the UI thread when passing it)
     public static List<Item> Gather(Game g, State s, string docs, Release? apex, IReadOnlyList<ModFile>? mods = null, ConflictCheck? conflicts = null)
     {
-        var items = Verify.Files(g, s, apex).Concat(Compat.Check(g, s, docs)).Select(f => new Item(f, AreaOf(f), [])).ToList();
-        if (mods is not null) items.AddRange(ModChecks.Run(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
+        var items = new List<Item>();
         // each analyzer on its own: one that throws is logged and the others still run
         void Add(string name, Func<IEnumerable<Item>> run)
         {
             try { items.AddRange(run().ToList()); }
             catch (Exception e) { Engine.Log(new InvalidOperationException($"Health check {name} failed", e)); }
         }
+        Add("files", () => Verify.Files(g, s, apex).Select(f => new Item(f, AreaOf(f), [])));
+        Add("compatibility", () => Compat.Check(g, s, docs).Select(f => new Item(f, AreaOf(f), [])));
+        if (mods is not null) Add("mods", () => ModChecks.Run(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
         if (mods is not null && conflicts is not null) Add("conflicts", () => conflicts.Check(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
         Add("saves", () => SaveHealth.Findings(SaveHealth.Check(docs), docs).Select(f => new Item(f, HealthArea.Saves, [])));
         Add("places", () => PlaceChecks.Check(g, docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("caches", () => CacheFindings(docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("sessions", () => SessionHistory.Check().Select(f => new Item(f, HealthArea.Stability, [])));
-        // the errors since the last game start, at most a week back (a game started without the launcher records no start,
-        // so the last recorded one can be long ago)
+        // the script errors since the last game start, at most a week back (a game started without the launcher records no
+        // start, so the last recorded one can be long ago); Read takes the crash logs of the whole week either way
         var week = DateTime.Now.AddDays(-7);
         Add("script errors", () => ScriptErrors.Findings(ScriptErrors.Read(docs, SessionHistory.List().FirstOrDefault()?.Started is { } s && s > week ? s : week, mods))
             .Select(m => new Item(m.Finding, HealthArea.Stability, m.Files)));
@@ -52,9 +54,15 @@ public static class Health
     public static HealthState StateOf(IEnumerable<Item> items)
     {
         var list = items.ToList();
-        if (list.Any(i => i.Finding.Severity == Severity.Error && !i.Finding.CanFix)) return HealthState.Blocked;
+        if (list.Any(StopsApex)) return HealthState.Blocked;
         return list.Any(i => i.Finding.Severity != Severity.Info) ? HealthState.NeedsYou : HealthState.Ready;
     }
+
+    // An error nothing fixes that keeps Apex Radiance from loading: Apex itself or the ASI loader. The other unfixable
+    // errors (a bridge file missing, Modernization's ts3native of the wrong build) leave Apex running: they need the player.
+    // shortcut: Modernization's findings told from the loader's by their text, as AreaOf does; an Area on Finding ends both
+    public static bool StopsApex(Item i) => i.Finding.Severity == Severity.Error && !i.Finding.CanFix
+        && (i.Area == HealthArea.ApexRadiance || i.Area == HealthArea.Loaders && !i.Finding.Text.Contains("Modernization", StringComparison.OrdinalIgnoreCase));
 
     // shortcut: the area read from the finding's English key; a finding that should land elsewhere needs an Area on Finding
     public static HealthArea AreaOf(Finding f)

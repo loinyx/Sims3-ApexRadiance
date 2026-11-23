@@ -107,7 +107,8 @@ public sealed partial class MainWindow
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not read your mods"), ErrorText(e)); }
         finally { _modsLoading = false; }
         _folderSig = "";
-        FillMods();
+        // (after a failed read FillMods would start the read again, without end: the next visit or change tries again)
+        if (_modsLoaded) FillMods(); else ModsSummary.Text = T("The launcher could not read your mods");
         if (_modsAgain) await LoadModsAsync();
     }
 
@@ -116,6 +117,7 @@ public sealed partial class MainWindow
     {
         try
         {
+            DefaultReplacements.ForgetModIndexes();
             var found = await Task.Run(() =>
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));

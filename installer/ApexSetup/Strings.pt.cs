@@ -278,6 +278,7 @@ public static partial class Strings
         ["A new Apex Launcher is available"] = "Há um novo Apex Launcher",
         ["Apex Launcher {0} was downloaded and checked. Update the launcher, then it opens again."] = "O Apex Launcher {0} foi baixado e verificado. Atualize o launcher e ele abre de novo.",
         ["Update the launcher"] = "Atualizar o launcher",
+        ["Wait for the current change to finish, then update the launcher."] = "Espere a alteração em andamento terminar e então atualize o launcher.",
         // restart host (experimental)
         ["Experimental"] = "Experimental",
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Depois de salvar com pouca memória, oferece abrir o jogo de novo nesse save quando você sair.",

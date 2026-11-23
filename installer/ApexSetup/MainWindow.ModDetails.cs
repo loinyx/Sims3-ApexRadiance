@@ -471,13 +471,15 @@ public sealed partial class MainWindow
             ModsInfo.Severity = InfoBarSeverity.Informational;
             ModsInfo.Title = addFiles.Count > 0 ? T("Merging again with the new mods…") : T("Merging the rest again…");
             ModsInfo.Message = "";
-            ModMerge.TakeOutResult res;
+            ModMerge.TakeOutResult? res = null;
             try { res = await Task.Run(() => ModMerge.Edit(Docs, r.File, outRels, addFiles)); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merge was not changed as asked"), ErrorText(e)); return; }
-            ModsResult(res.Remerged is { } m ? T("{0} now holds {1} mods", m.Merged.Name, m.Mods) : T("Every mod is back on its own"), null);
+            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merge was not changed as asked"), ErrorText(e)); }
+            if (res is not null) ModsResult(res.Remerged is { } m ? T("{0} now holds {1} mods", m.Merged.Name, m.Mods) : T("Every mod is back on its own"), null);
+            // (read again after a failure too: the split may be done, with the merged file already in the Recycle Bin)
             _modsLoaded = false;
             _folderSig = "";
             await LoadModsAsync();
+            if (res is null) return;
         }
         if (newName.Length > 0 && newName != r.Name && _modRows.FirstOrDefault(x => x.File.Rel.Equals(r.File.Rel, StringComparison.OrdinalIgnoreCase)) is { } now)
             RenameMod(now, newName);

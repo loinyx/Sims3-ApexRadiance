@@ -74,12 +74,17 @@ public static class Uninstall
         return left;
     }
 
-    // Smooth Motion's and AFMF's markers (machine-wide, written as administrator): gone once the drivers are back
-    public static void MachineData()
+    // Smooth Motion's and AFMF's markers (machine-wide, written as administrator): gone once the drivers are back.
+    // Returns the turn-off errors of the removals before it (taken, so a retry starts clean); with one, the markers stay:
+    // they are what lets a later try, or the player's next install, still turn frame generation off.
+    public static (string? Nv, string? Amd) MachineData()
     {
+        var failed = Engine.TakeFrameGenOffError();
+        if (failed != (null, null)) return failed;
         var d = Path.GetDirectoryName(SmoothMotion.Marker)!;
         try { if (Directory.Exists(d)) Directory.Delete(d, true); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return failed;
     }
 
     // the games that have anything of the launcher's: Apex Radiance, a manifest or switched-off mods

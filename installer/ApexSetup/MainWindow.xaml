@@ -319,8 +319,8 @@
                                 <StackPanel x:Name="WizardRows" Spacing="4" />
                             </Border>
                             <!-- Apex: Apex Radiance large on the left, its four parts around it (Sims 3 Modernization, the renderer,
-                                 frame generation, the restart host); the layout is set in OnCoreSized -->
-                            <Grid x:Name="CoreGrid" SizeChanged="OnCoreSized" ColumnSpacing="14" RowSpacing="14">
+                                 frame generation, the restart host). Never shown: Components' rows read these cards' texts and adopt their controls -->
+                            <Grid x:Name="CoreGrid" ColumnSpacing="14" RowSpacing="14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="1.1*" />
                                     <ColumnDefinition Width="*" />

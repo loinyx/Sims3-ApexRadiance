@@ -33,10 +33,14 @@ public static partial class ScriptErrors
     static readonly Regex ExceptionLine = new(@"^\s*([A-Za-z_][\w.]*(Exception|Error)):\s?(.*)$", RegexOptions.Multiline);
     static readonly Regex Frame = new(@"^#\d+:\s+0x[0-9a-fA-F]+\s+\S+\s+in\s+([^\s:(]+):", RegexOptions.Multiline);
 
-    // the logs written since `since` (default: the last week), mapped to the player's mods (null: the Mods folder's packages)
+    // the logs written since `since` (default: the last week), mapped to the player's mods (null: the Mods folder's packages).
+    // The crash logs go back a week at least: a game session ends at its crash, so "since the last start" never holds two,
+    // and three in one place are the pattern Findings looks for.
     public static Report Read(string docs, DateTime? since = null, IReadOnlyList<ModFile>? mods = null)
     {
-        var from = since ?? DateTime.Now.AddDays(-7);
+        var week = DateTime.Now.AddDays(-7);
+        var from = since ?? week;
+        var crashFrom = from < week ? from : week;
         var errors = new List<Error>();
         Func<string, (string Mod, string File)?> map = Mapper(docs, mods);
         // (every crash log: a mod that writes one log per script error must not push the few crashes out of the cap)
@@ -44,7 +48,7 @@ public static partial class ScriptErrors
         var unread = 0;
         try
         {
-            var all = new DirectoryInfo(docs).EnumerateFiles().Where(f => IsLog(f.Name) && f.LastWriteTime >= from).OrderByDescending(f => f.LastWriteTime).ToList();
+            var all = new DirectoryInfo(docs).EnumerateFiles().Where(f => IsLog(f.Name) && f.LastWriteTime >= (IsCrash(f.Name) ? crashFrom : from)).OrderByDescending(f => f.LastWriteTime).ToList();
             var crashes = all.Where(f => IsCrash(f.Name)).ToList();
             var scripts = all.Where(f => !IsCrash(f.Name)).ToList();
             unread = Math.Max(0, scripts.Count - MaxFiles);
