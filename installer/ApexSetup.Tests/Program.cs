@@ -152,9 +152,16 @@ try
     Check(s4.S3ss && s4.Ts3Native && s4.Ts3Fixes && s4.Installed(Components.Modernization) == "0.2.10", "S3SS and sims3-modernization detected with versions");
     Check(File.Exists(Path.Combine(docs, "Mods", "Resource.cfg")), "Resource.cfg created");
 
-    // 5. wrong ts3native build is reported
-    File.WriteAllText(B("ts3native.log"), "SKIP all: host is not TS3W.exe at 0x400000");
-    Check(Scan.Run(g, docs).Ts3NativeWrongBuild, "wrong ts3native build detected");
+    // 5. wrong ts3native build is reported, from the edition the ASI was built for (not from a log)
+    var asiBytes = File.ReadAllBytes(B("ts3native.asi"));
+    File.WriteAllText(B("ts3native.asi"), "xx SKIP all: host is not TS3W.exe at 0x400000 xx");
+    Check(Scan.Run(g, docs).Ts3NativeWrongBuild, "the Steam ts3native in the EA app game detected");
+    File.WriteAllText(B("ts3native.asi"), "xx SKIP all: host is not EA app 1.69.47 (pe %08lX size 0x%lX) xx");
+    File.WriteAllText(B("ts3native.launcher.log"), "SKIP all: host is not EA app 1.69.47 (pe 52DEC247 size 0xE5A000)");
+    Check(!Scan.Run(g, docs).Ts3NativeWrongBuild, "the EA ts3native in the EA app game is right, whatever a launcher log says");
+    Check(Scan.Run(g with { Edition = Edition.Steam, Version = "1.67.2" }, docs).Ts3NativeWrongBuild, "the EA ts3native in the Steam game detected");
+    File.Delete(B("ts3native.launcher.log"));
+    File.WriteAllBytes(B("ts3native.asi"), asiBytes);
 
     // 6. switch the renderer: bridge -> DXVK (as the UI's Apply does: remove, then install), then DXVK -> the game's own D3D9
     Engine.Remove(g, Components.Bridge, docs); // nothing installed by Setup: a no-op
@@ -320,9 +327,9 @@ try
     File.Delete(B("bridge.conf"));
 
     // 15. the player's ts3native.ini survives a repair; installing the right build clears the wrong one's log
-    File.WriteAllText(B("ts3native.log"), "SKIP all: host is not TS3W.exe at 0x400000");
+    File.WriteAllText(B("ts3native.asi"), "xx SKIP all: host is not TS3W.exe at 0x400000 xx");
     await Engine.InstallAsync(g, new[] { Components.Modernization }, src, null, docs);
-    Check(!Scan.Run(g, docs).Ts3NativeWrongBuild, "installing ts3native clears the old wrong-build log");
+    Check(!Scan.Run(g, docs).Ts3NativeWrongBuild, "installing ts3native replaces the wrong build");
     File.WriteAllText(B("ts3native.ini"), "player switches");
     await Engine.InstallAsync(g, new[] { Components.Modernization }, src, null, docs);
     Check(Read(B("ts3native.ini")) == "player switches", "ts3native.ini edits kept on repair");
@@ -911,7 +918,7 @@ finally
     var lb = Path.Combine(Path.GetTempPath(), "ApexSetupLog-" + Guid.NewGuid().ToString("N")[..8], "The Sims 3", "Game", "Bin");
     Directory.CreateDirectory(lb);
     File.WriteAllText(Path.Combine(lb, "TS3W.exe"), "exe");
-    File.WriteAllText(Path.Combine(lb, "ts3native.asi"), "asi");
+    File.WriteAllText(Path.Combine(lb, "ts3native.asi"), "xx SKIP all: host is not EA app 1.69.47 xx");
     using (var open = new FileStream(Path.Combine(lb, "ts3native.log"), FileMode.Create, FileAccess.Write, FileShare.Read))
     {
         open.Write(System.Text.Encoding.ASCII.GetBytes("SKIP all: host is not TS3W.exe"));
@@ -919,7 +926,7 @@ finally
         var gl = new Game(Path.GetDirectoryName(Path.GetDirectoryName(lb))!, lb, "TS3W.exe", Edition.Steam, "1.67.2");
         bool wrongBuild = false;
         try { wrongBuild = Scan.Run(gl, Path.Combine(lb, "docs")).Ts3NativeWrongBuild; } catch (IOException) { }
-        Check(wrongBuild, "ts3native.log open in the running game is still read");
+        Check(wrongBuild, "a ts3native.log held open by the running game does not stop the scan");
     }
     Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(lb)))!, true);
 }
