@@ -346,5 +346,8 @@ public static partial class Strings
         ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows ei antanut Setupin muuttaa ajurin asetuksia. Sulje AMD Software ja yritä uudelleen.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "Tiedoston {0} lataus oli vioittunut. Yritä uudelleen; jos se toistuu, virustorjunnan verkkosuoja tai välityspalvelin saattaa muuttaa latauksia.",
         ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "Virustorjunta esti tiedoston, jota Setup tarvitsee; lisää poikkeus kohteelle {0} ja käynnistä Setup uudelleen.",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "Nopeampi tekstihaku on pois päältä, kun {0} on kansiossa Mods\\Packages: se paketti yhdistää jo tekstitaulukot. Poista {0}, jos haluat käyttää sitä.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "Nopeampi tekstihaku on pois päältä, koska {0} ({1}) muuttaa samaa koodia. Jos haluat käyttää sitä, aseta {2} tiedoston {3} osioon [Patches] tai poista {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "Nopeampi tekstihaku oli pois päältä edellisessä pelissä, koska {0} muuttaa samaa koodia. Jos haluat käyttää sitä, kytke pois se modin osa, joka muuttaa tekstihakua, tai poista {0}.",
     };
 }

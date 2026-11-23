@@ -344,5 +344,8 @@ public static partial class Strings
         ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows не дал Setup изменить настройки драйвера. Закройте AMD Software, затем попробуйте снова.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "Загрузка {0} повреждена. Попробуйте снова; если это повторяется, загрузки может менять веб-защита антивируса или прокси.",
         ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "Ваш антивирус заблокировал нужный Setup файл; добавьте исключение для {0} и снова запустите Setup.",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "Быстрый поиск текстов выключен, пока {0} лежит в Mods\\Packages: этот пакет уже объединяет таблицы текстов. Чтобы им пользоваться, удалите {0}.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "Быстрый поиск текстов выключен, потому что {0} ({1}) меняет тот же код. Чтобы им пользоваться, задайте {2} в разделе [Patches] файла {3} или удалите {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "Быстрый поиск текстов был выключен в прошлой игре, потому что {0} меняет тот же код. Чтобы им пользоваться, выключите часть этого мода, которая меняет поиск текстов, или удалите {0}.",
     };
 }

@@ -346,5 +346,8 @@ public static partial class Strings
         ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows가 Setup의 드라이버 설정 변경을 허용하지 않았습니다. AMD Software를 닫고 다시 시도하세요.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "{0} 다운로드가 손상되었습니다. 다시 시도하세요. 반복되면 백신의 웹 보호나 프록시가 다운로드를 바꾸고 있을 수 있습니다.",
         ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "백신이 Setup에 필요한 파일을 차단했습니다. {0}을(를) 예외에 추가하고 Setup을 다시 실행하세요.",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "{0}이(가) Mods\\Packages에 있는 동안 텍스트 검색 가속은 꺼집니다. 이 패키지가 이미 문자열 테이블을 합칩니다. 사용하려면 {0}을(를) 제거하세요.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "{0}({1})이(가) 같은 코드를 바꾸므로 텍스트 검색 가속이 꺼져 있습니다. 사용하려면 {3}의 [Patches] 섹션에서 {2}(으)로 설정하거나 {1}을(를) 제거하세요.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "{0}이(가) 같은 코드를 바꾸므로 지난 게임에서 텍스트 검색 가속이 꺼져 있었습니다. 사용하려면 그 모드에서 텍스트 검색을 바꾸는 기능을 끄거나 {0}을(를) 제거하세요.",
     };
 }

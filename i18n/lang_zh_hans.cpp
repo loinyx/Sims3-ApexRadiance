@@ -171,6 +171,8 @@ const I18n::Pair kPairs[] = {
     {"Pie menus and names show faster with a lot of custom content", "自定义内容很多时，饼状菜单和名称显示得更快"},
     {"Every name and text the game shows (pie menus, tooltips, catalog names) is looked up in each of its string tables in turn, one table per package with text, so thousands of custom content packages make every lookup slower. This keeps one index of the tables already loaded and goes straight to the table that answers, with the same text. Part of Apex Radiance. Credits: @loinyx", "游戏显示的每个名称和文本（饼状菜单、提示、目录名称）都会依次在它的每个字符串表中查找，每个带文本的包一张表，因此成千上万个自定义内容包会让每次查找都变慢。此功能为已加载的表保留一个索引，直接找到给出答案的那张表，文本完全相同。Apex Radiance 的一部分。Credits: @loinyx"},
     {"4K videos, and ReShade looks that leave Sims' hair alone", "4K 视频，以及不影响模拟市民头发的 ReShade 风格"},
+    {"Performance: Faster text lookups names the mod that keeps it off, and Setup warns about it", "性能：“更快的文本查找”会说出让它保持关闭的模组，安装程序也会提示"},
+    {"Night Lights: the game no longer freezes at the loading screen in rare starts", "夜间灯光：在少数启动中游戏不再卡在加载画面"},
     {"Shaders: ReShade Effect Shader Toggler .ini files choose where each shader runs", "着色器：ReShade Effect Shader Toggler 的 .ini 文件可选择每个着色器的作用位置"},
     {"Shaders: On Sims' hair sets how much of each shader reaches Sims' hair", "着色器：“模拟市民的头发”设置每个着色器作用到模拟市民头发上的程度"},
     {"Capture: videos in 4K", "捕获：4K 视频"},

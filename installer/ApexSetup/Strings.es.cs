@@ -356,5 +356,8 @@ public static partial class Strings
         ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows no dejó que el instalador cambiara los ajustes del controlador. Cierra AMD Software y vuelve a intentarlo.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "La descarga de {0} llegó dañada. Vuelve a intentarlo; si se repite, un escudo web del antivirus o un proxy puede estar cambiando las descargas.",
         ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "Tu antivirus bloqueó un archivo que el instalador necesita; añade una excepción para {0} y vuelve a abrir el instalador.",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "La Búsqueda de textos más rápida está desactivada mientras {0} esté en Mods\\Packages: ese paquete ya une las tablas de texto. Para usarla, quita {0}.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "La Búsqueda de textos más rápida está desactivada porque {0} ({1}) cambia el mismo código. Para usarla, pon {2} en la sección [Patches] de {3}, o quita {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "La Búsqueda de textos más rápida estuvo desactivada en la última partida porque {0} cambia el mismo código. Para usarla, desactiva la parte de ese mod que cambia la búsqueda de textos, o quita {0}.",
     };
 }

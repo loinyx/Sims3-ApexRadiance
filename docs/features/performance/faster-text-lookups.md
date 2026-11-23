@@ -63,9 +63,21 @@ The row is not part of the Overview's Performance group switch and not in the Pe
 - **Stands down** (stays off, logged): another mod changed GetString's entry (`83 EC 78 53 55 56 8B D9 57`) or the
   walk's bytes (for example a string cache that hooks GetString), or `Mods\Packages\CCStringMerge_Strings.package`
   exists (string tables already merged into one per language offline).
+- **Naming the mod:** when the checked code differs, the stand-down decodes the patch there (jmp rel32, jmp rel8,
+  jmp [abs32], push/ret, mov reg/jmp reg; up to 4 jumps through memory outside any module) and names the module file it
+  lands in (file name only): "... was changed by <name> (<file>). To use Faster text lookups, <setting>, then restart the
+  game". Known mods get their setting (`features/string_table_index_culprit.h`); an unknown module its file name; a jump
+  outside every module "a patch in memory (no file), likely a loader or trainer". An in-place change without a jump (as
+  *StblBucketLayoutTuning*) names a known mod that is loaded, marked "likely".
+- **Setup** (`installer/ApexSetup.Core/Compat.cs`) reports the same before the game starts, when the switch is on in
+  `ApexRadiance.toml`: CCStringMerge's package, `Sims3Performance.ini` with either string option on (a missing ini or key
+  counts as on), else the module the last game's stand-down named while it is still in `Game\Bin`. Read only: it never
+  changes the other mod's files.
 - **Sims3Performance:** its *LocalizedStringCache* detours GetString's entry and its *StblBucketLayoutTuning* changes
   the string tables' hash layout; with either on, this switch stands down (the layout is also checked before every
-  index build, so a later change turns the index off for the session). Turn both off to use this one.
+  index build, so a later change turns the index off for the session). Turn both off to use this one:
+  `LocalizedStringCache=0` and `StblBucketLayoutTuning=0` in the `[Patches]` section of `Sims3Performance.ini`
+  (`Game\Bin`; names from the mod's beta 2.1 ini and readme).
 - **Game build:** signatures (address group `StringTableIndex`), each unique in Steam 1.67.2 and retail 1.67.2
   `TS3W.exe`; EA app 1.69: unverified. All instructions the hook relies on are checked before anything is written.
 - A second walk with the same rule (0x0059CB00, another lookup entry) is not indexed.

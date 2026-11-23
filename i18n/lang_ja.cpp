@@ -170,6 +170,8 @@ const I18n::Pair kPairs[] = {
     {"Pie menus and names show faster with a lot of custom content", "カスタムコンテンツが多くても、パイメニューや名前が速く表示されます"},
     {"Every name and text the game shows (pie menus, tooltips, catalog names) is looked up in each of its string tables in turn, one table per package with text, so thousands of custom content packages make every lookup slower. This keeps one index of the tables already loaded and goes straight to the table that answers, with the same text. Part of Apex Radiance. Credits: @loinyx", "ゲームが表示するすべての名前とテキスト（パイメニュー、ツールチップ、カタログ名）は、テキストを持つパッケージごとに 1 つある文字列テーブルを順番に調べて探されるため、カスタムコンテンツのパッケージが数千あると検索のたびに遅くなります。この機能は読み込み済みのテーブルの索引を 1 つ保持し、答えを持つテーブルへ直接向かいます。表示されるテキストは同じです。Apex Radiance の一部です。Credits: @loinyx"},
     {"4K videos, and ReShade looks that leave Sims' hair alone", "4K の動画と、シムの髪をそのままにする ReShade のルック"},
+    {"Performance: Faster text lookups names the mod that keeps it off, and Setup warns about it", "パフォーマンス：テキスト検索の高速化をオフにしている MOD の名前が表示され、インストーラーも警告します"},
+    {"Night Lights: the game no longer freezes at the loading screen in rare starts", "ナイトライト：まれな起動でロード画面のまま止まることがなくなりました"},
     {"Shaders: ReShade Effect Shader Toggler .ini files choose where each shader runs", "シェーダー: ReShade Effect Shader Toggler の .ini ファイルで各シェーダーの適用場所を選べます"},
     {"Shaders: On Sims' hair sets how much of each shader reaches Sims' hair", "シェーダー: シムの髪で各シェーダーがシムの髪にどれだけかかるかを設定できます"},
     {"Capture: videos in 4K", "キャプチャ: 4K の動画"},

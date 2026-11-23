@@ -351,5 +351,8 @@ public static partial class Strings
         ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows nedovolil Setupu změnit nastavení ovladače. Zavřete AMD Software a zkuste to znovu.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "Stažený soubor {0} byl poškozený. Zkuste to znovu; pokud se to opakuje, stahování možná mění webový štít antiviru nebo proxy.",
         ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "Váš antivirus zablokoval soubor, který Setup potřebuje; přidejte výjimku pro {0} a spusťte Setup znovu.",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "Rychlejší vyhledávání textů je vypnuté, dokud je {0} v Mods\\Packages: ten balíček už tabulky textů slučuje. Chcete-li je použít, odstraňte {0}.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "Rychlejší vyhledávání textů je vypnuté, protože {0} ({1}) mění stejný kód. Chcete-li je použít, nastavte {2} v sekci [Patches] souboru {3}, nebo odstraňte {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "Rychlejší vyhledávání textů bylo v minulé hře vypnuté, protože {0} mění stejný kód. Chcete-li je použít, vypněte část toho modu, která mění vyhledávání textů, nebo odstraňte {0}.",
     };
 }

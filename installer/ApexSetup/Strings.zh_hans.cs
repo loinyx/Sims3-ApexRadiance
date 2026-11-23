@@ -342,5 +342,8 @@ public static partial class Strings
         ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows 不允许 Setup 更改驱动设置。请关闭 AMD Software，然后重试。",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "{0} 的下载已损坏。请重试；如果反复出现，可能是杀毒软件的网页防护或代理在更改下载内容。",
         ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "你的杀毒软件拦截了 Setup 需要的文件；请为 {0} 添加例外，然后重新运行 Setup。",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "{0} 位于 Mods\\Packages 时，“更快的文本查找”会关闭：该包已经合并了字符串表。要使用它，请移除 {0}。",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "“更快的文本查找”已关闭，因为 {0}（{1}）修改了同一段代码。要使用它，请在 {3} 的 [Patches] 部分设置 {2}，或移除 {1}。",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "上次游戏中“更快的文本查找”已关闭，因为 {0} 修改了同一段代码。要使用它，请关闭该模组中修改文本查找的部分，或移除 {0}。",
     };
 }

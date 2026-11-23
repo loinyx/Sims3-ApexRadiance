@@ -6,9 +6,12 @@
 //   3. a list changed without the hooks (other ends) is not trusted; a text changed behind its back is caught by the
 //      verification and turns the index off; over the byte cap it answers nothing;
 //   4. 3000 tables: every key equal to the walk, and the time per lookup of both;
-//   5. --exe <TS3W.exe> [--sigs <framework/game_addresses.cpp>]: each "Stbl" signature matches exactly once.
+//   5. the stand-down's culprit: each jump form decodes to its target (fixture bytes), other bytes do not; known mods
+//      are matched without case and get their setting per site, an unknown file its name, no file the in-memory text;
+//   6. --exe <TS3W.exe> [--sigs <framework/game_addresses.cpp>]: each "Stbl" signature matches exactly once.
 //   check.exe [--exe <TS3W.exe>] [--sigs <game_addresses.cpp>]
 #include "../../features/string_table_index_core.h"
+#include "../../features/string_table_index_culprit.h"
 #include <chrono>
 #include <cstdio>
 #include <deque>
@@ -229,7 +232,50 @@ int main(int argc, char** argv) {
         std::printf("     per lookup: index %.3f us, walk %.3f us\n", std::chrono::duration<double, std::micro>(t1 - t0).count() / n,
                     std::chrono::duration<double, std::micro>(t2 - t1).count() / n);
     }
-    // ---- 5: signatures ----
+    // ---- 5: culprit ----
+    {
+        namespace C = StringTableIndex::Culprit;
+        constexpr uintptr_t at = 0x0059C5B0;
+        const uint8_t e9[] = {0xE9, 0x4B, 0x3A, 0xA6, 0x0F};             // jmp 0x10000000
+        const uint8_t e9back[] = {0xE9, 0xFB, 0xFF, 0xFF, 0xFF};         // jmp at
+        const uint8_t eb[] = {0xEB, 0xFE};                               // jmp at
+        const uint8_t ff25[] = {0xFF, 0x25, 0x00, 0x10, 0x00, 0x20};     // jmp [0x20001000]
+        const uint8_t pushRet[] = {0x68, 0x78, 0x56, 0x34, 0x12, 0xC3};  // push 0x12345678; ret
+        const uint8_t movJmp[] = {0xB8, 0x00, 0x20, 0x00, 0x30, 0xFF, 0xE0}; // mov eax,0x30002000; jmp eax
+        const uint8_t movEdx[] = {0xBA, 0x00, 0x20, 0x00, 0x30, 0xFF, 0xE2}; // mov edx,..; jmp edx
+        const uint8_t movBad[] = {0xBA, 0x00, 0x20, 0x00, 0x30, 0xFF, 0xE0}; // mov edx,..; jmp eax: not one jump
+        const uint8_t entry[] = {0x83, 0xEC, 0x78, 0x53, 0x55, 0x56, 0x8B, 0xD9, 0x57}; // the game's own entry
+        const uint8_t s3ppLayout[] = {0xBF, 0xFD, 0x01, 0x00, 0x00, 0xF7, 0xF7}; // mov edi,509; div edi (in place)
+        auto read = [](uintptr_t a, uintptr_t* v) { return a == 0x20001000 ? (*v = 0x40001234, true) : false; };
+        Expect(C::JumpTarget(e9, sizeof e9, at, read) == 0x10000000 && C::JumpTarget(e9back, sizeof e9back, at, read) == at, "jmp rel32, forward and back");
+        Expect(C::JumpTarget(eb, sizeof eb, at, read) == at, "jmp rel8");
+        Expect(C::JumpTarget(ff25, sizeof ff25, at, read) == 0x40001234 && C::JumpTarget(ff25, sizeof ff25, at, nullptr) == 0, "jmp [abs32], through the read");
+        Expect(C::JumpTarget(pushRet, sizeof pushRet, at, read) == 0x12345678, "push/ret");
+        Expect(C::JumpTarget(movJmp, sizeof movJmp, at, read) == 0x30002000 && C::JumpTarget(movEdx, sizeof movEdx, at, read) == 0x30002000, "mov reg/jmp reg");
+        Expect(!C::JumpTarget(movBad, sizeof movBad, at, read) && !C::JumpTarget(entry, sizeof entry, at, read) &&
+                   !C::JumpTarget(s3ppLayout, sizeof s3ppLayout, at, read) && !C::JumpTarget(e9, 4, at, read),
+               "no target: other registers, the game's own bytes, an immediate patch, too few bytes");
+        Expect(C::FindKnown("sims3performance.ASI") && !C::FindKnown("Sims3Performance.asi.bak") && !C::FindKnown(""), "known mods without case, whole name");
+        const std::string lsc = C::Describe(C::Site::Entry, at, "Sims3Performance.asi", false);
+        Expect(lsc == "the text lookup's entry (0x0059c5b0) was changed by Sims 3 Performance Patch (Sims3Performance.asi). To use Faster text lookups, "
+                      "set LocalizedStringCache=0 in the [Patches] section of Sims3Performance.ini (Game\\Bin), then restart the game",
+               "S3PP on the entry: LocalizedStringCache");
+        Expect(C::Describe(C::Site::Layout, at, "Sims3Performance.asi", false, true).find("changed likely by Sims 3 Performance Patch (Sims3Performance.asi). To use "
+                                                                                     "Faster text lookups, set StblBucketLayoutTuning=0") != std::string::npos,
+               "S3PP on the layout (loaded, no jump): StblBucketLayoutTuning");
+        Expect(C::Describe(C::Site::Walk, at, "Other.asi", false) == "the table walk (0x0059c5b0) was changed by Other.asi. To use Faster text lookups, turn off the "
+                                                                    "part of that mod that changes text lookups or remove Other.asi, then restart the game",
+               "unknown module: its file name");
+        Expect(C::Describe(C::Site::ListFunctions, at, "TS3NATIVE.asi", false).find("by Sims 3 Modernization (TS3NATIVE.asi). To use Faster text lookups, set "
+                                                                                  "Threads=0 in the [Verify] section of ts3native.ini") != std::string::npos,
+               "ts3native on the list functions: its [Verify] Threads probes");
+        Expect(C::Describe(C::Site::Entry, at, "ts3native.asi", false).find("To use Faster text lookups, turn off the part of that mod") != std::string::npos,
+               "known mod without a setting for the site: generic advice");
+        Expect(C::Describe(C::Site::Entry, at, "", true).ends_with("changed by a patch in memory (no file), likely a loader or trainer") &&
+                   C::Describe(C::Site::Entry, at, "", false).ends_with("(its file was not found)"),
+               "no module: in memory, or not found");
+    }
+    // ---- 6: signatures ----
     const char* exePath = nullptr;
     const char* sigPath = nullptr;
     for (int i = 1; i + 1 < argc; i++) {

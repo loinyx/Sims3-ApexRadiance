@@ -87,6 +87,7 @@ run at the end of every install, or with *Fix all now* on the game page.
 | `S3SSApex.asi`, an old build with Apex inside S3SS, or a second `ApexRadiance.asi` in `scripts\` or `plugins\` | Moved to the backup folder |
 | Two ASI loaders | All but the first moved to the backup folder |
 | Sims3Performance next to `ts3native` with `ShortWaitSpin` or `ThreadStackDiet` above 0 | Both set to 0, copy as `Sims3Performance.ini.apex-backup` |
+| Faster text lookups on in `ApexRadiance.toml` while `CCStringMerge_Strings.package`, Sims3Performance's `LocalizedStringCache` or `StblBucketLayoutTuning` (missing = on), or the module the last game's stand-down named changes the same code | Reported with the file and setting; nothing changed |
 | S3SS uncompressed lot or Sim textures under the bridge | `enabled = false`, copy as `S3SS.toml.apex-backup` |
 | `client.targetProcess` in a `bridge.conf` not the game's exe | Set to the exe |
 | The bridge's `dxvk.conf` without the TS3 profile, `d3d9.countLosableResources = False` before its first `[exe]` section | Wrong values set, missing lines added at the top |
