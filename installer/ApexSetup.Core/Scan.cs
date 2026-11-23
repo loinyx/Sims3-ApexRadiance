@@ -107,7 +107,7 @@ public static class Scan
     public static string Packages(string docs) => Path.Combine(docs, "Mods", "Packages");
 
     // a log the running game keeps open for writing: read beside it
-    static string ReadShared(string file)
+    internal static string ReadShared(string file)
     {
         using var r = new StreamReader(new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
         return r.ReadToEnd();

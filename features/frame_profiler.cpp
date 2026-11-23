@@ -3380,6 +3380,13 @@ void TimelineFrame(const HitchRecord& r, bool hitch, uint64_t now) {
     int64_t pickTicks;
     PickReadback::TakeCounters(row.pickRuns, row.pickStill, row.pickMoving, row.pickReadbacks, pickTicks, row.pickHolds);
     row.pickRbMs = static_cast<float>(static_cast<double>(pickTicks) * 1000.0 / g_qpcFreq);
+    { // the shared room solve time: level solves that waited in this frame interval, and the longest wait now (frames); taken before the early return, as the pick counters
+        static uint32_t s_waitedBefore = 0;
+        const uint32_t waited = RoomSolveShare::WaitedTotal();
+        row.roomSolveWaited = waited - s_waitedBefore;
+        s_waitedBefore = waited;
+        row.roomSolveLongestWait = RoomSolveShare::LongestWaitNow();
+    }
     if (!g_writeFile.load(std::memory_order_relaxed) || !g_writerRunning.load(std::memory_order_relaxed)) return;
     if (r.foreground) row.flags |= kTlFocus;
     if (RoomLightQueue::EditBurstOn()) row.flags |= kTlLampEdit;
@@ -3405,13 +3412,6 @@ void TimelineFrame(const HitchRecord& r, bool hitch, uint64_t now) {
     row.lotsLighting = r.calls[kLotLightingUpdate];
     row.roomSolveCalls = r.calls[kLotRoomSolve];
     row.roomSolveMaxMs = r.counters.maxMs[0][kLotRoomSolve - kFirstCounterCat];
-    { // the shared room solve time: level solves that waited in this frame interval, and the longest wait now (frames)
-        static uint32_t s_waitedBefore = 0;
-        const uint32_t waited = RoomSolveShare::WaitedTotal();
-        row.roomSolveWaited = waited - s_waitedBefore;
-        s_waitedBefore = waited;
-        row.roomSolveLongestWait = RoomSolveShare::LongestWaitNow();
-    }
     row.sceneNodes = static_cast<uint32_t>(r.counters.extra[0][kXNodes]);
     row.sceneDeferred = static_cast<uint32_t>(r.counters.extra[0][kXDeferred]);
     row.modDispatches = r.calls[kModD3DHooks]; // x16 per sampled dispatch (kTlModSampled)

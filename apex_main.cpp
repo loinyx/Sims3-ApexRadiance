@@ -48,6 +48,7 @@
 #include "s3ss_detect.h"
 #include "shader_cache.h"
 #include "platform.h"
+#include "gpu_trace.h"
 #include <format>
 #include <string>
 
@@ -256,6 +257,7 @@ DWORD InitBody() {
 // 07/10, players' Runtime Error: a C++ exception left in start-up or in the pump ends this thread (noted), never the game
 DWORD WINAPI InitThread(LPVOID) {
     CrashReport::ThreadStart();
+    GpuTrace::Start(); // reports a last session that did not close (a GPU hang), then keeps this one's last steps
     try {
         return InitBody();
     } catch (...) {
@@ -303,6 +305,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {
         break;
     }
     case DLL_PROCESS_DETACH:
+        GpuTrace::Closed(); // (a write to the mapped trace only)
         // Successful attachment is pinned: no live unload. At process exit do not
         // acquire other threads' locks or recreate/release graphics resources.
         break;

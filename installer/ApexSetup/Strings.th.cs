@@ -925,5 +925,8 @@ public static partial class Strings
         ["{0} to look at"] = "{0} รายการต้องตรวจดู",
         ["{0} updates ready"] = "มี {0} อัปเดตพร้อมแล้ว",
         ["{0} worlds you can start a new game in"] = "{0} โลกที่คุณเริ่มเกมใหม่ได้",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "การค้นหาข้อความเร็วขึ้นจะปิดอยู่ขณะที่ {0} อยู่ใน Mods\\Packages เพราะแพ็กเกจนี้รวมตารางข้อความไว้แล้ว หากต้องการใช้ ให้ลบ {0}",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "การค้นหาข้อความเร็วขึ้นปิดอยู่ เพราะ {0} ({1}) แก้โค้ดส่วนเดียวกัน หากต้องการใช้ ให้ตั้งค่า {2} ในส่วน [Patches] ของ {3} หรือลบ {1}",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "การค้นหาข้อความเร็วขึ้นปิดอยู่ในเกมครั้งก่อน เพราะ {0} แก้โค้ดส่วนเดียวกัน หากต้องการใช้ ให้ปิดส่วนของม็อดนั้นที่แก้การค้นหาข้อความ หรือลบ {0}",
     };
 }

@@ -956,5 +956,8 @@ public static partial class Strings
         ["{0} to look at"] = "{0} om naar te kijken",
         ["{0} updates ready"] = "{0} updates staan klaar",
         ["{0} worlds you can start a new game in"] = "{0} werelden waarin je een nieuw spel kunt beginnen",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "Sneller teksten opzoeken staat uit zolang {0} in Mods\\Packages staat: dat pakket voegt de teksttabellen al samen. Verwijder {0} om het te gebruiken.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "Sneller teksten opzoeken staat uit omdat {0} ({1}) dezelfde code wijzigt. Zet {2} in de sectie [Patches] van {3} om het te gebruiken, of verwijder {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "Sneller teksten opzoeken stond uit in het vorige spel omdat {0} dezelfde code wijzigt. Zet het deel van die mod dat het opzoeken van teksten wijzigt uit om het te gebruiken, of verwijder {0}.",
     };
 }

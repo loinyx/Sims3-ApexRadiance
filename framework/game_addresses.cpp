@@ -389,6 +389,11 @@ constexpr Info kInfo[] = {
     {"TestHalf", 0x00F9A5AC},
     {"TestPenumbra", 0x00FF307C},
     {"TestWallY", 0x01158A50},
+    {"StblGetString", 0x0059C5B0},
+    {"StblWalk", 0x0059C5C2},
+    {"StblClear", 0x0059AF00},
+    {"StblAdd", 0x0059B190},
+    {"StblRebuild", 0x0059BDE0},
 };
 static_assert(std::size(kInfo) == static_cast<size_t>(Id::Count), "kInfo must list every Id in order");
 
@@ -809,6 +814,12 @@ const Entry kTable[] = {
     {Id::TestHalf, K::Sig, W::Image, None, 0, {{"EB 5E F3 0F 10 0D ?? ?? ?? ?? 0F 2F C1 76 39 F3 0F 10 15 ?? ?? ?? ??", 19, M::Dword}, NOSIG}},
     {Id::TestPenumbra, K::Sig, W::Image, None, 0, {{"CC F3 0F 10 4C 24 04 D9 E8 F3 0F 10 05 ?? ?? ?? ?? F3 0F 5C C8 F3 0F 11 4C 24 04 81 64 24 04 FF FF FF 7F", 13, M::Dword}, NOSIG}},
     {Id::TestWallY, K::Sig, W::Image, None, 0, {{"0F 58 D3 F3 0F 10 1D ?? ?? ?? ?? 0F 29 74 24 10 F3 0F 11 5C 24 14", 7, M::Dword}, NOSIG}},
+    // ---- String table index: each signature unique in Steam 1.67.2 and retail 1.67.2 TS3W.exe (EA app 1.69: unverified) ----
+    {Id::StblGetString, K::Sig, W::Text, None, 0, {{"83 EC 78 53 55 56 8B D9 57 89 5C 24 1C E8 ?? ?? ?? ?? 8B 73 48 83 C3 48", 0, M::At}, NOSIG}},
+    {Id::StblWalk, K::Sig, W::Text, None, 0, {{"8B 73 48 83 C3 48 8B F8 33 ED 3B F3 89 7C 24 10 74 ?? 8B 7E 18 3B FD 74 ?? 8D 84 24 8C 00 00 00 50 8D 4C 24 24 51 8D 4F 28 E8 ?? ?? ?? ?? 8B 4C 24 20 3B 8F E4 7B 00 00 74 ?? 8B 41 10 3B C5 74 ?? 66 39 28 0F 85 ?? ?? ?? ?? 8B 36 3B F3 75 ?? 8B 7C 24 10", 0, M::At}, NOSIG}},
+    {Id::StblClear, K::Sig, W::Text, None, 0, {{"56 8B 71 48 57 8D 79 48 3B F7 74 ?? 8D 64 24 00 8B 4E 18 85 C9 74 ?? 8B 01 8B 50 04 FF D2 C7 46 18 00 00 00 00 8B 36 3B F7", 0, M::At}, NOSIG}},
+    {Id::StblAdd, K::Sig, W::Text, None, 0, {{"83 EC 30 53 55 56 57 8B D9 E8 ?? ?? ?? ?? 33 ED 3B C5 0F 84 ?? ?? ?? ?? 8B 7C 24 44", 0, M::At}, NOSIG}},
+    {Id::StblRebuild, K::Sig, W::Text, None, 0, {{"83 EC 34 55 57 8B E9 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 33 FF 3B C7 75 08 5F 32 C0 5D 83 C4 34 C3", 0, M::At}, NOSIG}},
 };
 // clang-format on
 #undef NOSIG
@@ -855,6 +866,7 @@ const Group kGroups[] = {
     {"WindowRepaint", {Id::WindowRepaintJump}},
     {"GameResolution", {Id::ResolutionRequest, Id::RendererGlobal, Id::ResolutionHandler, Id::ResolutionUi}},
     {"MemoryGuard", {Id::ResUpdateCall, Id::ResUpdate, Id::ResShrinkBoth, Id::WorldSaveCall, Id::WorldSave}},
+    {"StringTableIndex", {Id::StblGetString, Id::StblWalk, Id::StblClear, Id::StblAdd, Id::StblRebuild}},
 };
 
 // ---------------------------------------------------------------------------------------------------------------------

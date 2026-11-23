@@ -383,6 +383,43 @@ const Try kTries[] = {
     { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_AVOID_FLOW_CONTROL, "flow control avoided" },
     { D3DCOMPILE_SKIP_OPTIMIZATION, "no optimisation" },
 };
+// The last resort for a loop shader model 3.0 cannot run (X3511, or X4014 / X4121: gradients in a loop): every tex2D of
+// the generated code read at level 0 with tex2Dlod, which needs no gradients, so the loop can stay a loop. Only when
+// every texture of the effect has one level and its samplers the same minify and magnify filter: then level 0 is the
+// texel tex2D reads. ReShade's shader model 3.0 generator writes tex2D(<sampler>.s, <coords>) with plain names (and
+// "<coords> + <offset> * <sampler>.pixelsize"), no parentheses inside.
+constexpr int kLevelZero = 16; // added to *tried when the rewritten code compiled
+bool LoopErrors(const std::string& errors)
+{
+    return errors.find("X3511") != std::string::npos || errors.find("X4014") != std::string::npos || errors.find("X4121") != std::string::npos;
+}
+bool OneLevelTextures(const Effect& fx)
+{
+    for (const Sampler& s : fx.samplers)
+        if (s.texture >= fx.textures.size() || fx.textures[s.texture].levels != 1 || s.minF != s.magF || s.minF == D3DTEXF_ANISOTROPIC) return false;
+    return true;
+}
+std::string ReadsAtLevelZero(const std::string& hlsl)
+{
+    std::string out;
+    size_t from = 0;
+    for (size_t at; (at = hlsl.find("tex2D(", from)) != std::string::npos;)
+    {
+        const size_t comma = hlsl.find(".s, ", at + 6), close = hlsl.find(')', at + 6), open = hlsl.find('(', at + 6);
+        const bool word = at == 0 || !(isalnum((unsigned char)hlsl[at - 1]) || hlsl[at - 1] == '_');
+        if (!word || comma == std::string::npos || close == std::string::npos || comma > close || (open != std::string::npos && open < close))
+        {
+            out.append(hlsl, from, at + 6 - from);
+            from = at + 6;
+            continue;
+        }
+        out.append(hlsl, from, at - from);
+        out += "tex2Dlod(" + hlsl.substr(at + 6, comma + 2 - (at + 6)) + ", float4(" + hlsl.substr(comma + 4, close - (comma + 4)) + ", 0.0, 0.0))";
+        from = close + 1;
+    }
+    return out + hlsl.substr(from);
+}
+
 bool CompileSm3(const std::string& hlsl, const std::string& entry, bool vs, std::vector<uint8_t>& code, std::string& errors, int* tried)
 {
     *tried = -1;
@@ -791,17 +828,35 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
             const Shader& s = out.shaders[todo[k]];
             if (!CompileSm3(hlsl[k], s.entry, s.vs != 0, results[k].code, results[k].errors, &results[k].tried)) results[k].code.clear();
         }
-        if (!cacheFile.empty()) WriteCache(folders.cacheDir, cacheFile, key, results);
     }
+    // The level-0 last resort, for a fresh failure and for one a cache from before it kept (tried -1); -2 = tried, failed.
+    // The cache key is the generated code, which has no mip levels or filters: a cached result is checked against them
+    bool rewritten = !cached;
+    const bool oneLevel = OneLevelTextures(out);
+    for (size_t k = 0; k < todo.size(); ++k)
+    {
+        CachedShader& r = results[k];
+        if ((r.tried >= kLevelZero && !oneLevel) || (r.tried == -2 && oneLevel)) { r.tried = -1; r.code.clear(); rewritten = true; }
+        if (r.tried != -1 || !LoopErrors(r.errors) || !oneLevel) continue;
+        const Shader& s = out.shaders[todo[k]];
+        const std::string lod0 = ReadsAtLevelZero(hlsl[k]);
+        std::string unused;
+        if (lod0 != hlsl[k] && CompileSm3(lod0, s.entry, s.vs != 0, r.code, unused, &r.tried)) r.tried += kLevelZero;
+        else { r.code.clear(); r.tried = -2; }
+        rewritten = true;
+    }
+    if (rewritten && !cacheFile.empty()) WriteCache(folders.cacheDir, cacheFile, key, results);
     if (!cacheFile.empty()) ++(cached ? g_cacheHits : g_cacheMisses);
     for (size_t k = 0; k < todo.size(); ++k)
     {
         Shader& s = out.shaders[todo[k]];
         CachedShader& r = results[k];
-        if (r.tried >= 0 && r.tried < (int)std::size(kTries) && r.code.size() >= 8)
+        const int flags = r.tried % kLevelZero;
+        if (r.tried >= 0 && flags < (int)std::size(kTries) && r.code.size() >= 8)
         {
             s.code = std::move(r.code);
-            if (r.tried) out.notes.push_back("shader " + s.entry + ": " + kTries[r.tried].name);
+            if (r.tried >= kLevelZero) out.notes.push_back("shader " + s.entry + ": every texture read at level 0 (one-level textures), for its loops" + (flags ? std::string(", ") + kTries[flags].name : std::string()));
+            else if (r.tried) out.notes.push_back("shader " + s.entry + ": " + kTries[flags].name);
         }
         else s.error = ReasonFrom(r.errors.empty() ? std::string("the shader does not compile") : r.errors, folders.root);
     }

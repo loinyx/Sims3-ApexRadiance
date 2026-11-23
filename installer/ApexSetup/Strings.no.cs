@@ -965,5 +965,8 @@ public static partial class Strings
         ["{0} to look at"] = "{0} å se på",
         ["{0} updates ready"] = "{0} oppdateringer er klare",
         ["{0} worlds you can start a new game in"] = "{0} verdener du kan starte et nytt spill i",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "Raskere tekstoppslag er av mens {0} ligger i Mods\\Packages: den pakken slår allerede sammen teksttabellene. Fjern {0} for å bruke det.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "Raskere tekstoppslag er av fordi {0} ({1}) endrer den samme koden. Sett {2} i delen [Patches] i {3} for å bruke det, eller fjern {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "Raskere tekstoppslag var av i forrige spill fordi {0} endrer den samme koden. Slå av den delen av moden som endrer tekstoppslag for å bruke det, eller fjern {0}.",
     };
 }

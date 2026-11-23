@@ -959,5 +959,8 @@ public static partial class Strings
         ["{0} to look at"] = "要確認 {0} 件",
         ["{0} updates ready"] = "{0} 件の更新の準備ができました",
         ["{0} worlds you can start a new game in"] = "新しいゲームを始められるワールド {0} 個",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "{0} が Mods\\Packages にある間は、テキスト検索の高速化はオフです。このパッケージがすでに文字列テーブルを統合しています。使うには {0} を削除してください。",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "{0}（{1}）が同じコードを変更しているため、テキスト検索の高速化はオフです。使うには {3} の [Patches] セクションで {2} を設定するか、{1} を削除してください。",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "{0} が同じコードを変更しているため、前回のゲームではテキスト検索の高速化がオフでした。使うには、その MOD のテキスト検索を変更する部分をオフにするか、{0} を削除してください。",
     };
 }

@@ -972,5 +972,8 @@ public static partial class Strings
         ["{0} to look at"] = "{0} megnézendő",
         ["{0} updates ready"] = "{0} frissítés kész",
         ["{0} worlds you can start a new game in"] = "{0} világ, amelyben új játékot kezdhetsz",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "A Gyorsabb szövegkeresés ki van kapcsolva, amíg a(z) {0} a Mods\\Packages mappában van: ez a csomag már összevonja a szövegtáblákat. A használatához távolítsa el: {0}.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "A Gyorsabb szövegkeresés ki van kapcsolva, mert a(z) {0} ({1}) ugyanazt a kódot módosítja. A használatához állítsa be: {2} a(z) {3} [Patches] szakaszában, vagy távolítsa el: {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "A Gyorsabb szövegkeresés ki volt kapcsolva a legutóbbi játékban, mert a(z) {0} ugyanazt a kódot módosítja. A használatához kapcsolja ki a mod szövegkeresést módosító részét, vagy távolítsa el: {0}.",
     };
 }

@@ -33,6 +33,7 @@ function ConvertTo-TomlLiteral($Value) {
     if ($Value -is [int] -or $Value -is [long]) { return [string]$Value }
     if ($Value -is [double] -or $Value -is [decimal] -or $Value -is [single]) { return ([double]$Value).ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
     if ($Value -is [string]) { return '"' + ($Value -replace '\\', '\\' -replace '"', '\"') + '"' }
+    if ($Value -is [array]) { return '[' + (@($Value | ForEach-Object { ConvertTo-TomlLiteral $_ }) -join ', ') + ']' }
     throw "Unsupported TOML value: $Value"
 }
 

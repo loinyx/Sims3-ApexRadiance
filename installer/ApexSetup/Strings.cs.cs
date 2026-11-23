@@ -962,5 +962,8 @@ public static partial class Strings
         ["{0} to look at"] = "{0} ke kontrole",
         ["{0} updates ready"] = "Připravené aktualizace: {0}",
         ["{0} worlds you can start a new game in"] = "Světy, ve kterých lze začít novou hru: {0}",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "Rychlejší vyhledávání textů je vypnuté, dokud je {0} v Mods\\Packages: ten balíček už tabulky textů slučuje. Chcete-li je použít, odstraňte {0}.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "Rychlejší vyhledávání textů je vypnuté, protože {0} ({1}) mění stejný kód. Chcete-li je použít, nastavte {2} v sekci [Patches] souboru {3}, nebo odstraňte {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "Rychlejší vyhledávání textů bylo v minulé hře vypnuté, protože {0} mění stejný kód. Chcete-li je použít, vypněte část toho modu, která mění vyhledávání textů, nebo odstraňte {0}.",
     };
 }

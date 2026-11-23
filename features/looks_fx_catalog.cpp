@@ -32,7 +32,7 @@ namespace {
 constexpr size_t kMaxFiles = 500;              // .fx files read from the player's own folder, and from each pack
 constexpr size_t kMaxPackFiles = 3000;         // .fx files read from every downloaded pack together
 constexpr DWORD kCompileTimeoutMs = 120000;    // one file
-constexpr uint64_t kMaxTotalGpuBytes = 384ull << 20; // every user effect running at once (a 32-bit game: room left for its own)
+constexpr uint64_t kMaxTotalGpuBytes = 384ull << 20; // the default room check: every user effect running at once
 constexpr int kMaxFramePasses = 256;           // user passes drawn in one frame
 
 std::string LowerA(std::string s)
@@ -1027,7 +1027,11 @@ struct Live
     SourceState sources;
     std::vector<float> regs;
     std::string error; // Create failed: not tried again until ReleaseGpu
+    bool noRoom = false; // held back by the room check: asked again after kRoomRetryFrames
+    unsigned noRoomAt = 0;
 };
+constexpr unsigned kRoomRetryFrames = 300;
+RoomFn g_room = nullptr; // DefaultRoom
 // never destroyed: at process exit the device may be gone before static destructors run
 std::map<const Effect*, std::unique_ptr<Live>>& g_live = *new std::map<const Effect*, std::unique_ptr<Live>>();
 }
@@ -1036,6 +1040,14 @@ void ReleaseGpu()
 {
     g_live.clear();
 }
+
+bool DefaultRoom(uint64_t running, uint64_t more, std::string* why)
+{
+    if (running + more <= kMaxTotalGpuBytes) return true;
+    *why = "the shaders together would need more than 384 MB";
+    return false;
+}
+void SetRoomCheck(RoomFn room) { g_room = room; }
 
 uint64_t GpuBytes()
 {
@@ -1071,12 +1083,23 @@ bool Run(const RunFrame& f, int index, const float* values, std::string* why)
         it = used ? std::next(it) : g_live.erase(it);
     }
     std::unique_ptr<Live>& live = g_live[&fx];
-    if (!live)
+    const bool retry = live && live->noRoom && (unsigned)f.frame - live->noRoomAt >= kRoomRetryFrames;
+    if (!live || retry)
     {
-        live = std::make_unique<Live>();
-        if (GpuBytes() + fx.gpuBytes > kMaxTotalGpuBytes) live->error = "the shaders together would need more than 384 MB";
+        const bool wasHeld = live != nullptr;
+        if (!live) live = std::make_unique<Live>();
+        std::string why;
+        live->error.clear();
+        live->noRoom = !(g_room ? g_room : DefaultRoom)(GpuBytes(), fx.gpuBytes, &why);
+        if (live->noRoom)
+        {
+            live->error = why;
+            live->noRoomAt = (unsigned)f.frame;
+        }
         else if (!live->inst.Create(f.dev, u.fx, &live->error) && live->error.empty()) live->error = "could not be created";
-        if (!live->error.empty()) LOG_WARNING("[Looks] " + u.file + ": " + live->error);
+        if (!live->error.empty() && !wasHeld) LOG_WARNING("[Looks] " + u.file + ": " + live->error);
+        if (live->error.empty() && wasHeld) LOG_INFO("[Looks] " + u.file + ": running now (room for it again)");
+        if (!live->error.empty() && wasHeld && !live->noRoom) LOG_WARNING("[Looks] " + u.file + ": " + live->error);
     }
     live->lastFrame = (unsigned)f.frame; // a failed one too: not created again every 120 frames
     if (!live->error.empty()) return fail(live->error);

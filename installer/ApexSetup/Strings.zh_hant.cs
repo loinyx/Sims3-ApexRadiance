@@ -925,5 +925,8 @@ public static partial class Strings
         ["{0} to look at"] = "{0} 個待查看",
         ["{0} updates ready"] = "{0} 個更新已就緒",
         ["{0} worlds you can start a new game in"] = "{0} 個可開始新遊戲的世界",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "{0} 位於 Mods\\Packages 時，「更快的文字查詢」會關閉：該套件已經合併了字串表。要使用它，請移除 {0}。",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "「更快的文字查詢」已關閉，因為 {0}（{1}）修改了同一段程式碼。要使用它，請在 {3} 的 [Patches] 區段設定 {2}，或移除 {1}。",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "上次遊戲中「更快的文字查詢」已關閉，因為 {0} 修改了同一段程式碼。要使用它，請關閉該模組中修改文字查詢的部分，或移除 {0}。",
     };
 }

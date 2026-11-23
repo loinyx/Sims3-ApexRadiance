@@ -1548,13 +1548,14 @@ void PerformanceCard() {
         }
         FeatureSwitchRow(Performance::kWallShadingName, "Wall shading waits while moving", "New lots' walls get their shading when you stop (at most 2 s)");
         FeatureSwitchRow(Performance::kSceneBudgetName, "Spread new objects over frames", "Fewer hitches while a lot streams in; objects may appear a frame later");
-        FeatureSwitchRow(Performance::kPickSkipName, "Fewer mouse picks when still", "The object under the mouse is checked less often while nothing moves; a click then waits for a new check", true);
-        FeatureSwitchRow(Performance::kDeadlineSlicingName, "Frame deadline while moving", "Work that can wait stops at a set point in a slow frame and continues in the next", true);
+        FeatureSwitchRow(Performance::kPickSkipName, "Fewer mouse picks when still", "The object under the mouse is checked less often while nothing moves; a click then waits for a new check");
+        FeatureSwitchRow(Performance::kDeadlineSlicingName, "Frame deadline while moving", "Work that can wait stops at a set point in a slow frame and continues in the next");
         ApexUi::CardGroup("Files and objects");
         if (FeatureSwitchRow(Performance::kResourceCacheName, "Faster game file lookups", "Fewer small stutters when objects and textures load"))
             FeatureSwitchRow(Performance::kLookupMissesName, "Remember missing files", "Skips repeated searches for files no package has");
         FeatureSwitchRow(Performance::kFileListName, "Faster file lists", "Fewer stutters when Sims load outfits and shapes");
         FeatureSwitchRow(Performance::kObjectIndexName, "Faster object lookups", "Fewer hitches when lot lights update; less script work");
+        FeatureSwitchRow(Performance::kStringTableIndexName, "Faster text lookups", "Pie menus and names show faster with a lot of custom content", true);
         ApexUi::CardGroup("Textures and Sims");
         if (FeatureSwitchRow(Performance::kFastTextureName, "Faster texture compression", "Fewer hitches when the game builds terrain, Sim and lot textures")) {
             bool cores = Performance::FastTextureSeveralCores();
@@ -3558,7 +3559,7 @@ void AboutTab() {
         CreditLine("Smooth flat surfaces in Ambient Occlusion: based on Intel's XeGTAO (MIT).");
         CreditLine("Upper-floor ground light: Arro's technique, adapted in Apex Radiance.");
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
-        CreditLine("Scene update safety: contribution by @rodneypantonial.");
+        CreditLine("Scene update safety, new Performance and Ambient Occlusion options, and RTX Remix bridge fixes: contributions by @rodneypantonial.");
         CreditLine("Looks and Capture: contributed by @ModestPixels.");
         CreditLine("Restart host: adapted from Dalexlol's wrapper in sims3-modernization.");
         CreditLine("Thanks to @boringbones for testing every build.");

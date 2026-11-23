@@ -6,6 +6,14 @@ GitHub release text in a common layout. Unreleased work is described in the feat
 "In development"; it gets a page here only when it is published.
 
 - [4.1.0](4.1.0.md) (unpublished): Apex Radiance Setup becomes Apex Launcher, with Play, Health, Mods, Worlds, Saves, a Gallery of pictures and videos, light and dark that follow Windows.
+- [4.0.14](4.0.14.md): no rare freeze at the loading screen (lock order at start-up); Faster text lookups names the mod that keeps it off, in the log and in Setup.
+- [4.0.13](4.0.13.md): Video up to 4K with NV12 made on the GPU and an even frame rate; Shaders: ReShade Effect Shader Toggler files and On Sims' hair; Faster text lookups; a frozen session explained at the next start.
+- [4.0.12](4.0.12.md): Shaders: big looks in full under the RTX Remix bridge, loop shaders such as SlowSharp and MicrocontrastReducer run, an effect left out for memory starts again.
+- [4.0.11](4.0.11.md): System > Display no longer crashes with Turbo Simulation Engine whenever its device comes; Turbo under the RTX Remix bridge also before the game's first frame.
+- [4.0.10](4.0.10.md): opening System > Display no longer crashes the game when another mod made a device of its own.
+- [4.0.9](4.0.9.md): screenshots and videos work when another mod sets a 10-bit screen (converted to 8-bit on the GPU).
+- [4.0.8](4.0.8.md): no crash at start with Turbo Simulation Engine under the RTX Remix bridge (Turbo gets the device Apex draws on).
+- [4.0.7](4.0.7.md): lamp light no longer past wall ends, beside walls or under roofed rooms; switched-on lamps and top-story half walls lit at once on every story; Fewer mouse picks when still, Frame deadline while moving, the shared room solve time and six Ambient Occlusion options on by default; RTX Remix bridge fixes and Setup 1.2.7, contributed by @rodneypantonial.
 - [4.0.6](4.0.6.md): potted plants shade lamp light with soft balls baked from their mesh (87 game models, custom content baked at start), solid pots under the leaves.
 - [4.0.5](4.0.5.md): Image > Shaders in two tabs, Look and Installed shaders; Add shaders in a modal that downloads a pack as one of its shaders is added; New look; Get more packs with a search; the Apex menu drawn at the frame's own EndScene; a steady header.
 - [4.0.4](4.0.4.md): ReShade effects identical to ReShade 6.7.3 over the player's 12 packs (shared textures, mouse wheel, depth order); a look list with favourites, rename and delete; a trash button on shader rows; no crash switching off an added shader; true-size furniture shadows on by default; indoor light no longer through walls.

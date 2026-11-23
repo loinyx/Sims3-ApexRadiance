@@ -44,7 +44,7 @@ struct VideoSettings { // [capture.video]
     bool includePointer = false;
     int look = kLookWith;        // with | without
     bool savePreset = false;
-    int size = 1080;             // 720 | 1080 | 1440
+    int size = 1080;             // 720 | 1080 | 1440 | 2160
     int fps = 30;                // 24 | 30 | 60
     int quality = kQualityBalanced;
     int customMbps = 20;         // 1-200 (quality = custom)

@@ -116,6 +116,19 @@ Apex rewrote, the window it applied and the Sims3SettingsSetter overrides.
   by Apex: use one limiter.
 - **V-Sync / variable refresh.** Apex does not change the presentation interval. With G-SYNC or FreeSync, the menu's
   "monitor rate minus 3" entry keeps the frame rate inside the variable-refresh range.
+- **Mods that make a device of their own.** Turbo Simulation Engine makes a throwaway device (its own `IDirect3D9`, a
+  0x0 back buffer on a hidden window, logged at its window's 120x61) and releases it, either right after the game's
+  device or after the game's first frame. The `CreateDevice` hook cannot tell it from the game's before that frame, so
+  Display keeps a reference of its own on the `IDirect3D9` it holds, remembers each device's request, and at the
+  game's first frame takes the `IDirect3D9`, adapter, window, parameters and own request of the device Apex draws on
+  (`AdoptGameDevice`, which also lists the resolutions and logs `[Screen] Game device`). After that frame other devices'
+  `CreateDevice` and `Reset` do not reach Display. Before 4.0.11 the released `IDirect3D9` stayed in Display and opening
+  System > Display crashed the game (4.0.10 covered only a device made after the first frame).
+- **Turbo Simulation Engine's Borderless (`Janeladeborda`, on by default in `Turbo.txt`).** With *Game setting* it
+  stays Turbo's. With *Window* or *Borderless* Apex's window wins, as over Sims3SettingsSetter's: in game Turbo
+  restyled the window at start in the same second as the game's own resolution Reset, Apex put its window back and
+  logged `Another program keeps changing the game window` once, and the window then stayed Apex's. Turbo's own frame
+  limiter (`QpsVsync`, off by default) and Apex's are two limiters: use one.
 - **Apex's effects.** They release and recreate their screen resources on every Reset as before.
 - A borderless window with a resolution below the monitor's is stretched by the swap chain; the game's mouse
   coordinates follow the window (unverified in game for every resolution). Until the game has switched to the chosen

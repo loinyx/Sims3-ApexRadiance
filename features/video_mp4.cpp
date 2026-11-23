@@ -5,6 +5,10 @@
 #include "hook_guard.h"
 #include "captures.h"
 #include "mkv_remux.h"
+#include "shader_cache.h"
+#include "d3d9_hooks.h"
+#include "d3d9_extra_hooks.h"
+#include <d3dcompiler.h>
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -35,8 +39,46 @@ namespace {
 
 template <class T> void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
 
-constexpr int kSlots = 3;      // GPU copies in flight
+constexpr int kSlots = 4;      // GPU copies in flight (3 left a 4K 60 fps video short of free ones)
 constexpr size_t kQueue = 2;   // frames waiting for the encoder (32-bit game: memory stays small)
+constexpr size_t kMfPool = 6;  // the encoder's input buffers, reused (a 4K frame each: no allocation per frame)
+
+// The frame as NV12 made on the GPU (BT.709, 16-235), the encoder's own input: 1.5 bytes a pixel read back instead of 4,
+// and no colour conversion on the CPU. One A8R8G8B8 target of w/4 x 3h/2 holds the bytes in NV12's order: rows 0..h-1
+// four luma samples a texel, rows h..3h/2-1 two U V pairs a texel (memory order B G R A, so the shader writes them as
+// R = 3rd, G = 2nd, B = 1st, A = 4th). Chroma: the 2 x 2 average (bilinear at the block's centre).
+constexpr const char* kNv12Hlsl = R"(
+sampler2D src : register(s0);
+float4 c0 : register(c0); // 1/w, 1/h of the frame, h, 0
+static const float3 kY = float3(0.2126, 0.7152, 0.0722) * (219.0 / 255.0);
+static const float3 kU = float3(-0.1146, -0.3854, 0.5) * (224.0 / 255.0);
+static const float3 kV = float3(0.5, -0.4542, -0.0458) * (224.0 / 255.0);
+float Luma(float x, float y) { return dot(tex2Dlod(src, float4((x + 0.5) * c0.x, (y + 0.5) * c0.y, 0, 0)).rgb, kY) + 16.0 / 255.0; }
+float2 Chroma(float j, float r) {
+    float3 c = tex2Dlod(src, float4((2.0 * j + 1.0) * c0.x, (2.0 * r + 1.0) * c0.y, 0, 0)).rgb;
+    return float2(dot(c, kU), dot(c, kV)) + 128.0 / 255.0;
+}
+float4 Nv12PS(float2 p : VPOS) : COLOR {
+    p = floor(p); // (the pixel's integer position, whatever offset the runtime gives VPOS)
+    if (p.y < c0.z) {
+        float x = p.x * 4.0;
+        return float4(Luma(x + 2.0, p.y), Luma(x + 1.0, p.y), Luma(x, p.y), Luma(x + 3.0, p.y));
+    }
+    float r = p.y - c0.z, j = p.x * 2.0;
+    float2 a = Chroma(j, r), b = Chroma(j + 1.0, r);
+    return float4(b.x, a.y, a.x, b.y);
+}
+)";
+const ShaderCache::Id g_nv12Ps = [] {
+    ShaderCache::Desc d;
+    d.tag = "Video NV12PS";
+    d.source = kNv12Hlsl;
+    d.sourceName = "video_nv12_ps.hlsl";
+    d.entry = "Nv12PS";
+    d.target = "ps_3_0";
+    d.flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    return ShaderCache::Add(std::move(d));
+}();
 constexpr UINT kRate = 48000;  // game sound: 48 kHz stereo 16-bit
 constexpr LONGLONG kHns = 10000000;
 
@@ -56,9 +98,12 @@ struct Session {
     std::vector<std::vector<BYTE>> pool;
     bool stopping = false;
     std::atomic<bool> failed{false};
-    std::atomic<unsigned> written{0}, dropped{0};
+    std::atomic<bool> writing{false}; // the encoder takes frames (it starts in about 2 s; none are copied before)
+    std::atomic<unsigned> written{0}, dropped{0}, droppedGpu{0}; // dropped: all; droppedGpu: of them, no free GPU slot
     std::atomic<unsigned long long> bytes{0};
     std::string error, notes;
+    bool nv12 = false;    // NV12 made on the GPU (else B G R X, converted by Media Foundation)
+    DWORD frameBytes = 0; // one frame as the encoder takes it
     IMFSinkWriter* writer = nullptr;
     std::mutex writerLock;
     DWORD vs = 0, as = 0;
@@ -67,7 +112,7 @@ struct Session {
     IAudioCaptureClient* capture = nullptr;
     HANDLE audioEvent = nullptr;
     std::atomic<bool> audioStop{false};
-    LONGLONG lastVideoT = -1;
+    LONGLONG lastVideoT = -1, firstVideoT = -1; // the first and last frame's times (the frames start once the encoder runs)
     // for the log: samples the encoder refused (and the first error), game sound written and filled with silence
     std::atomic<unsigned> videoFails{0}, audioFails{0};
     std::atomic<long> firstVideoHr{S_OK}, firstAudioHr{S_OK};
@@ -76,6 +121,12 @@ struct Session {
 
 struct Slot { IDirect3DSurface9* rt = nullptr; IDirect3DSurface9* sys = nullptr; IDirect3DQuery9* q = nullptr; int state = 0; LONGLONG t = 0; };
 Slot g_slots[kSlots];
+// NV12: the frame scaled to the video's size (the shader's source) and the shader; the state the pass changes
+IDirect3DTexture9* g_rgbTex = nullptr;
+IDirect3DSurface9* g_rgbSurf = nullptr;
+IDirect3DPixelShader9* g_nv12 = nullptr;
+IDirect3DStateBlock9* g_saved = nullptr;
+IDirect3DVertexBuffer9* g_quad = nullptr; // (a buffer and DrawPrimitive: an UP draw would reach the draw hooks' observers)
 std::shared_ptr<Session> g_s;       // the recording (render thread; set under g_sLock, read by StopAndWait)
 std::mutex g_sLock;
 std::atomic<bool> g_active{false};
@@ -89,6 +140,76 @@ std::filesystem::path g_resultFile;
 
 void ReleaseSlots() {
     for (auto& s : g_slots) { SafeRelease(s.rt); SafeRelease(s.sys); SafeRelease(s.q); s.state = 0; }
+    SafeRelease(g_rgbSurf);
+    SafeRelease(g_rgbTex);
+    SafeRelease(g_nv12);
+    SafeRelease(g_saved);
+    SafeRelease(g_quad);
+}
+
+// The NV12 slots and the shader (render thread); false: the B G R X slots are used instead
+bool MakeNv12(IDirect3DDevice9* dev, UINT w, UINT h, std::string& why) {
+    std::string err;
+    if (ShaderCache::CreatePixelShader(dev, g_nv12Ps, &g_nv12, &err) != ShaderCache::Result::Ok || !g_nv12) { why = "its shader: " + err.substr(0, 200); return false; }
+    if (FAILED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &g_rgbTex, nullptr)) || !g_rgbTex ||
+        FAILED(g_rgbTex->GetSurfaceLevel(0, &g_rgbSurf))) { why = "its scaled frame"; return false; }
+    D3D9Hooks::SettleDeferredShaders(dev); // (creating the block reads the device's shaders)
+    if (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &g_saved)) || !g_saved) { why = "a state block"; return false; }
+    struct V { float x, y, z, rhw; };
+    const float x1 = w / 4.0f - 0.5f, y1 = h * 1.5f - 0.5f;
+    const V quad[4] = {{-0.5f, -0.5f, 0, 1}, {x1, -0.5f, 0, 1}, {-0.5f, y1, 0, 1}, {x1, y1, 0, 1}};
+    void* p = nullptr;
+    if (FAILED(dev->CreateVertexBuffer(sizeof quad, D3DUSAGE_WRITEONLY, D3DFVF_XYZRHW, D3DPOOL_DEFAULT, &g_quad, nullptr)) || !g_quad ||
+        FAILED(g_quad->Lock(0, 0, &p, 0)) || !p) { why = "its quad"; return false; }
+    memcpy(p, quad, sizeof quad);
+    g_quad->Unlock();
+    for (auto& sl : g_slots)
+        if (FAILED(dev->CreateRenderTarget(w / 4, h * 3 / 2, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &sl.rt, nullptr)) ||
+            FAILED(dev->CreateOffscreenPlainSurface(w / 4, h * 3 / 2, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sl.sys, nullptr)) ||
+            FAILED(dev->CreateQuery(D3DQUERYTYPE_EVENT, &sl.q))) { why = "its surfaces"; return false; }
+    return true;
+}
+
+// g_rgbTex (w x h) into the slot's NV12 target, the device's state put back after
+bool ToNv12(IDirect3DDevice9* dev, IDirect3DSurface9* rt, UINT w, UINT h) {
+    D3D9Hooks::SettleDeferredShaders(dev);
+    g_saved->Capture();
+    const ExtraHooks::VertexInputMark input = ExtraHooks::MarkVertexInput();
+    IDirect3DSurface9* savedRt[4] = {};
+    IDirect3DSurface9* savedDs = nullptr;
+    for (DWORD i = 0; i < 4; i++) if (FAILED(dev->GetRenderTarget(i, &savedRt[i]))) savedRt[i] = nullptr;
+    if (FAILED(dev->GetDepthStencilSurface(&savedDs))) savedDs = nullptr;
+    for (DWORD i = 1; i < 4; i++) D3D9Hooks::CallOriginalSetRenderTarget(dev, i, nullptr);
+    D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, rt);
+    dev->SetDepthStencilSurface(nullptr);
+    for (const auto [st, v] : {std::pair{D3DRS_ZENABLE, 0ul}, {D3DRS_ZWRITEENABLE, 0ul}, {D3DRS_ALPHABLENDENABLE, 0ul}, {D3DRS_ALPHATESTENABLE, 0ul},
+                               {D3DRS_STENCILENABLE, 0ul}, {D3DRS_CULLMODE, static_cast<DWORD>(D3DCULL_NONE)}, {D3DRS_FILLMODE, static_cast<DWORD>(D3DFILL_SOLID)},
+                               {D3DRS_COLORWRITEENABLE, 0xFul}, {D3DRS_SRGBWRITEENABLE, 0ul}, {D3DRS_FOGENABLE, 0ul}, {D3DRS_CLIPPLANEENABLE, 0ul},
+                               {D3DRS_SCISSORTESTENABLE, 0ul}})
+        dev->SetRenderState(st, v);
+    D3D9Hooks::CallOriginalSetTexture(dev, 0, g_rgbTex);
+    for (const auto [st, v] : {std::pair{D3DSAMP_MINFILTER, static_cast<DWORD>(D3DTEXF_LINEAR)}, {D3DSAMP_MAGFILTER, static_cast<DWORD>(D3DTEXF_LINEAR)},
+                               {D3DSAMP_MIPFILTER, static_cast<DWORD>(D3DTEXF_NONE)}, {D3DSAMP_ADDRESSU, static_cast<DWORD>(D3DTADDRESS_CLAMP)},
+                               {D3DSAMP_ADDRESSV, static_cast<DWORD>(D3DTADDRESS_CLAMP)}, {D3DSAMP_SRGBTEXTURE, 0ul}})
+        dev->SetSamplerState(0, st, v);
+    D3D9Hooks::CallOriginalSetVertexShader(dev, nullptr);
+    D3D9Hooks::CallOriginalSetPixelShader(dev, g_nv12);
+    const float c0[4] = { 1.0f / w, 1.0f / h, static_cast<float>(h), 0.0f };
+    D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, 0, c0, 1);
+    dev->SetFVF(D3DFVF_XYZRHW);
+    dev->SetStreamSource(0, g_quad, 0, 16);
+    dev->SetStreamSourceFreq(0, 1);
+    const bool drawn = SUCCEEDED(D3D9Hooks::CallOriginalDrawPrimitive(dev, D3DPT_TRIANGLESTRIP, 0, 2));
+    D3D9Hooks::CallOriginalSetTexture(dev, 0, nullptr);
+    D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, savedRt[0]);
+    for (DWORD i = 1; i < 4; i++) D3D9Hooks::CallOriginalSetRenderTarget(dev, i, savedRt[i]);
+    dev->SetDepthStencilSurface(savedDs);
+    g_saved->Apply(); // (after the targets: setting target 0 resets the viewport)
+    ExtraHooks::RestoreVertexInput(input);
+    D3D9Hooks::ShaderStateChanged(); // Apply put the shaders and textures back unseen by the detours
+    for (auto*& s : savedRt) SafeRelease(s);
+    SafeRelease(savedDs);
+    return drawn;
 }
 
 // ---- game sound: WASAPI process loopback of this process (and its children) ----
@@ -267,7 +388,9 @@ bool OpenWriter(Session& s, bool hevc, std::string& why) {
     if (SUCCEEDED(hr)) {
         a->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
         a->SetUINT32(MF_SINK_WRITER_DISABLE_THROTTLING, TRUE);
-        a->SetGUID(MF_TRANSCODE_CONTAINERTYPE, s.o.fragmented ? MFTranscodeContainerType_FMPEG4 : MFTranscodeContainerType_MPEG4);
+        // (Media Foundation's fragmented MP4 sink refuses HEVC at BeginWriting, MF_E_INVALIDMEDIATYPE, at any size: HEVC is
+        // written as a plain MP4)
+        a->SetGUID(MF_TRANSCODE_CONTAINERTYPE, s.o.fragmented && !hevc ? MFTranscodeContainerType_FMPEG4 : MFTranscodeContainerType_MPEG4);
         hr = MFCreateSinkWriterFromURL(s.file.c_str(), nullptr, a, &s.writer);
     }
     if (SUCCEEDED(hr)) hr = MFCreateMediaType(&out);
@@ -276,6 +399,12 @@ bool OpenWriter(Session& s, bool hevc, std::string& why) {
         out->SetGUID(MF_MT_SUBTYPE, hevc ? MFVideoFormat_HEVC : MFVideoFormat_H264);
         out->SetUINT32(MF_MT_AVG_BITRATE, static_cast<UINT32>(s.o.bitrateKbps) * 1000);
         out->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+        if (s.nv12) {
+            out->SetUINT32(MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709);
+            out->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235);
+            out->SetUINT32(MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709);
+            out->SetUINT32(MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709);
+        }
         MFSetAttributeSize(out, MF_MT_FRAME_SIZE, s.w, s.h);
         MFSetAttributeRatio(out, MF_MT_FRAME_RATE, s.o.fps, 1);
         MFSetAttributeRatio(out, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
@@ -285,12 +414,18 @@ bool OpenWriter(Session& s, bool hevc, std::string& why) {
     if (SUCCEEDED(hr)) hr = MFCreateMediaType(&in);
     if (SUCCEEDED(hr)) {
         in->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-        in->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+        in->SetGUID(MF_MT_SUBTYPE, s.nv12 ? MFVideoFormat_NV12 : MFVideoFormat_RGB32);
         in->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
         MFSetAttributeSize(in, MF_MT_FRAME_SIZE, s.w, s.h);
         MFSetAttributeRatio(in, MF_MT_FRAME_RATE, s.o.fps, 1);
         MFSetAttributeRatio(in, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-        in->SetUINT32(MF_MT_DEFAULT_STRIDE, s.w * 4); // top-down rows
+        in->SetUINT32(MF_MT_DEFAULT_STRIDE, s.nv12 ? s.w : s.w * 4); // top-down rows
+        if (s.nv12) { // what the shader made, so players read it back the same way
+            in->SetUINT32(MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709);
+            in->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235);
+            in->SetUINT32(MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709);
+            in->SetUINT32(MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709);
+        }
         hr = s.writer->SetInputMediaType(s.vs, in, nullptr);
     }
     SafeRelease(in);
@@ -346,6 +481,7 @@ void Worker(std::shared_ptr<Session> sp) {
     const bool mf = SUCCEEDED(MFStartup(MF_VERSION, MFSTARTUP_LITE));
     std::string why;
     bool ok = mf && OpenWriter(s, s.o.hevc, why);
+    if (ok && s.o.hevc && s.o.fragmented) s.notes += "HEVC is written as a plain MP4 (Windows cannot write it crash-safe); ";
     if (!ok && mf && s.o.hevc) {
         DeleteFileW(s.file.c_str());
         s.notes += "HEVC not available here, H.264 used; ";
@@ -380,6 +516,7 @@ void Worker(std::shared_ptr<Session> sp) {
         Finish(s, false, "The video could not be recorded: " + s.error);
         return;
     }
+    s.writing = true; // the render thread starts copying frames now
     HANDLE audioDone = s.hasAudio ? CreateEventW(nullptr, TRUE, FALSE, nullptr) : nullptr;
     if (audioDone && !HookGuard::StartDetached("Video: game sound", [sp, audioDone] {
             struct Done { HANDLE h; ~Done() { SetEvent(h); } } done{audioDone};
@@ -390,6 +527,14 @@ void Worker(std::shared_ptr<Session> sp) {
     }
     const LONGLONG dur = kHns / std::max(1, s.o.fps);
     unsigned long long lastSize = 0;
+    std::vector<IMFMediaBuffer*> mfPool; // each held once here; one the encoder no longer holds is free
+    const auto takeBuffer = [&]() -> IMFMediaBuffer* { // a reference for one frame
+        for (IMFMediaBuffer* b : mfPool) { b->AddRef(); if (b->Release() == 1) { b->AddRef(); return b; } }
+        IMFMediaBuffer* b = nullptr;
+        if (FAILED(MFCreateMemoryBuffer(s.frameBytes, &b)) || !b) return nullptr;
+        if (mfPool.size() < kMfPool) { mfPool.push_back(b); b->AddRef(); } // (past the pool, the encoder holding them all: used once)
+        return b;
+    };
     for (;;) {
         Frame f;
         {
@@ -403,13 +548,14 @@ void Worker(std::shared_ptr<Session> sp) {
             }
         }
         if (!f.px.empty()) {
-            IMFMediaBuffer* buf = nullptr;
+            IMFMediaBuffer* buf = takeBuffer();
             IMFSample* smp = nullptr;
             BYTE* p = nullptr;
-            const DWORD bytes = s.w * s.h * 4;
+            const DWORD bytes = s.frameBytes;
             LONGLONG t = std::max(f.t, s.lastVideoT + 1);
             s.lastVideoT = t;
-            if (SUCCEEDED(MFCreateMemoryBuffer(bytes, &buf)) && SUCCEEDED(buf->Lock(&p, nullptr, nullptr))) {
+            if (s.firstVideoT < 0) s.firstVideoT = t;
+            if (buf && SUCCEEDED(buf->Lock(&p, nullptr, nullptr))) {
                 memcpy(p, f.px.data(), bytes);
                 buf->Unlock();
                 buf->SetCurrentLength(bytes);
@@ -433,6 +579,8 @@ void Worker(std::shared_ptr<Session> sp) {
                 s.bytes = (static_cast<unsigned long long>(d.nFileSizeHigh) << 32) | d.nFileSizeLow;
         }
     }
+    for (IMFMediaBuffer* b : mfPool) b->Release(); // (the encoder releases what it still holds at Finalize)
+    mfPool.clear();
     s.audioStop = true;
     const bool audioEnded = !audioDone || WaitForSingleObject(audioDone, 5000) == WAIT_OBJECT_0;
     if (audioEnded && audioDone) CloseHandle(audioDone);
@@ -444,10 +592,10 @@ void Worker(std::shared_ptr<Session> sp) {
         SafeRelease(s.writer);
     }
     {
-        const double secs = s.lastVideoT > 0 ? s.lastVideoT / static_cast<double>(kHns) : 0.0;
-        LOG_INFO(std::format("[Video] Encoder done: {} frames written over {:.1f} s ({:.1f} fps of {} asked), {} dropped (encoder behind), {} refused{}; "
+        const double secs = s.lastVideoT > s.firstVideoT ? (s.lastVideoT - s.firstVideoT + kHns / std::max(1, s.o.fps)) / static_cast<double>(kHns) : 0.0;
+        LOG_INFO(std::format("[Video] Encoder done: {} frames written over {:.1f} s ({:.1f} fps of {} asked), {} dropped ({} with the GPU copies still busy, the rest with the encoder behind), {} refused{}; "
                              "sound {}: {:.1f} s, {:.1f} s of it silence, {} refused{}; finalize {} ms ({:#x}){}",
-                             s.written.load(), secs, secs > 0 ? s.written.load() / secs : 0.0, s.o.fps, s.dropped.load(), s.videoFails.load(),
+                             s.written.load(), secs, secs > 0 ? s.written.load() / secs : 0.0, s.o.fps, s.dropped.load(), s.droppedGpu.load(), s.videoFails.load(),
                              s.videoFails ? std::format(" (first {:#x})", static_cast<unsigned>(s.firstVideoHr.load())) : "",
                              s.hasAudio ? "on" : "off", s.audioFrames.load() / static_cast<double>(kRate), s.silentFrames.load() / static_cast<double>(kRate),
                              s.audioFails.load(), s.audioFails ? std::format(" (first {:#x})", static_cast<unsigned>(s.firstAudioHr.load())) : "",
@@ -538,24 +686,42 @@ bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Optio
     if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) { why = "the screen could not be read"; return false; }
     D3DSURFACE_DESC d{};
     bb->GetDesc(&d);
-    bb->Release();
-    if (d.MultiSampleType != D3DMULTISAMPLE_NONE) { why = "the game uses multisampled anti-aliasing; turn it off for videos"; return false; }
-    if (d.Format != D3DFMT_X8R8G8B8 && d.Format != D3DFMT_A8R8G8B8) { why = std::format("the screen format {} cannot be recorded", static_cast<int>(d.Format)); return false; }
+    if (d.MultiSampleType != D3DMULTISAMPLE_NONE) { bb->Release(); why = "the game uses multisampled anti-aliasing; turn it off for videos"; return false; }
     auto s = std::make_shared<Session>();
     s->file = file;
     s->o = o;
     s->o.fps = std::clamp(o.fps, 10, 60);
     s->h = std::min<UINT>(d.Height, static_cast<UINT>(std::max(240, o.maxHeight))) & ~1u;
-    s->w = static_cast<UINT>(static_cast<unsigned long long>(d.Width) * s->h / d.Height) & ~1u;
+    s->w = static_cast<UINT>(static_cast<unsigned long long>(d.Width) * s->h / d.Height) & ~3u; // (NV12 packs 4 a texel)
+    std::string nv12Why;
+    s->nv12 = MakeNv12(dev, s->w, s->h, nv12Why);
+    if (!s->nv12) {
+        LOG_WARNING("[Video] The frame is converted on the CPU: the GPU conversion could not be set up (" + nv12Why + ")");
+        ReleaseSlots();
+        if (s->h > 1440) { // 4 bytes a pixel: a 4K frame is 33 MB, too much for the 32-bit game's slots and queue
+            s->h = 1440;
+            s->w = static_cast<UINT>(static_cast<unsigned long long>(d.Width) * s->h / d.Height) & ~3u;
+            LOG_WARNING("[Video] Without the GPU conversion the video is 1440 lines at most");
+        }
+    }
+    s->frameBytes = s->nv12 ? s->w * s->h * 3 / 2 : s->w * s->h * 4;
     for (auto& sl : g_slots) {
+        if (s->nv12) break;
         if (FAILED(dev->CreateRenderTarget(s->w, s->h, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &sl.rt, nullptr)) ||
             FAILED(dev->CreateOffscreenPlainSurface(s->w, s->h, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sl.sys, nullptr)) ||
             FAILED(dev->CreateQuery(D3DQUERYTYPE_EVENT, &sl.q))) {
             ReleaseSlots();
+            bb->Release();
             why = "the video surfaces could not be created";
             return false;
         }
     }
+    // The 8-bit slots take the frame through StretchRect, which also converts another screen format (a 10-bit back
+    // buffer set by another mod); one trial copy says whether the GPU can
+    const bool convertible = (d.Format == D3DFMT_X8R8G8B8 || d.Format == D3DFMT_A8R8G8B8) ||
+                             SUCCEEDED(dev->StretchRect(bb, nullptr, s->nv12 ? g_rgbSurf : g_slots[0].rt, nullptr, D3DTEXF_LINEAR));
+    bb->Release();
+    if (!convertible) { ReleaseSlots(); why = std::format("the screen format {} cannot be recorded", static_cast<int>(d.Format)); return false; }
     s->qpc0 = Qpc();
     g_period = std::max<LONGLONG>(1, QpcFreq() / s->o.fps);
     g_nextDue = s->qpc0;
@@ -571,8 +737,8 @@ bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Optio
         why = "the video writer could not be started";
         return false;
     }
-    LOG_INFO(std::format("[Video] Recording {} at {}x{}, {} fps, {} kbit/s{}{}", ApexUtil::ToUtf8(file.wstring()), s->w, s->h, s->o.fps, o.bitrateKbps,
-                         o.hevc ? ", HEVC" : ", H.264", o.audio ? ", game sound" : ""));
+    LOG_INFO(std::format("[Video] Recording {} at {}x{}, {} fps, {} kbit/s{}{}, {}", ApexUtil::ToUtf8(file.wstring()), s->w, s->h, s->o.fps, o.bitrateKbps,
+                         o.hevc ? ", HEVC" : ", H.264", o.audio ? ", game sound" : "", s->nv12 ? "NV12 made on the GPU" : "B G R X (converted on the CPU)"));
     return true;
 }
 
@@ -580,20 +746,24 @@ bool Grab(IDirect3DDevice9* dev, IDirect3DSurface9* src) {
     if (!g_active.load() || !dev || g_grabbedThisFrame || !g_s) return true;
     const LONGLONG now = Qpc();
     if (now < g_nextDue - g_period / 8) return true;
-    if (g_s->failed.load()) return true;
+    if (g_s->failed.load() || !g_s->writing.load()) return true;
     IDirect3DSurface9* bb = nullptr;
     if (src) { bb = src; bb->AddRef(); }
     else if (!OnBackBuffer(dev, bb)) return true; // an off-screen pass: wait for the frame's own end
     g_grabbedThisFrame = true;
-    g_nextDue = g_s->qpc0 + ((now - g_s->qpc0) / g_period + 1) * g_period;
+    // The period this frame stands for (one taken up to 1/8 period early counts for the period ahead, so the next one is a
+    // whole period later), and its time on the video's even grid: one frame a period, evenly spaced
+    const LONGLONG k = (now - g_s->qpc0 + g_period / 8) / g_period;
+    g_nextDue = g_s->qpc0 + (k + 1) * g_period;
     Slot* slot = nullptr;
     for (auto& sl : g_slots) if (sl.state == 0) { slot = &sl; break; }
-    if (!slot) { g_s->dropped++; bb->Release(); return true; }
-    const bool copied = SUCCEEDED(dev->StretchRect(bb, nullptr, slot->rt, nullptr, D3DTEXF_LINEAR));
+    if (!slot) { g_s->dropped++; g_s->droppedGpu++; bb->Release(); return true; }
+    const bool copied = g_s->nv12 ? SUCCEEDED(dev->StretchRect(bb, nullptr, g_rgbSurf, nullptr, D3DTEXF_LINEAR)) && ToNv12(dev, slot->rt, g_s->w, g_s->h)
+                                  : SUCCEEDED(dev->StretchRect(bb, nullptr, slot->rt, nullptr, D3DTEXF_LINEAR));
     if (copied) {
         slot->q->Issue(D3DISSUE_END);
         slot->state = 1;
-        slot->t = (now - g_s->qpc0) * kHns / QpcFreq();
+        slot->t = k * g_period * kHns / QpcFreq();
     }
     bb->Release();
     return copied || !src;
@@ -624,10 +794,15 @@ void Pump(IDirect3DDevice9* dev) {
                     if (room && !g_s->pool.empty()) { px = std::move(g_s->pool.back()); g_s->pool.pop_back(); }
                 }
                 if (room) {
-                    const size_t row = static_cast<size_t>(g_s->w) * 4;
-                    px.resize(row * g_s->h);
-                    for (UINT y = 0; y < g_s->h; y++) memcpy(px.data() + y * row, static_cast<const BYTE*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch, row);
-                    if (g_s->o.mouse) Captures::DrawMousePointer(dev, px.data(), g_s->w, g_s->h, 4); // a frame or two after the grab
+                    const bool nv12 = g_s->nv12;
+                    const size_t row = static_cast<size_t>(g_s->w) * (nv12 ? 1 : 4); // NV12: w bytes in both planes
+                    const UINT rows = nv12 ? g_s->h * 3 / 2 : g_s->h;
+                    px.resize(row * rows);
+                    for (UINT y = 0; y < rows; y++) memcpy(px.data() + y * row, static_cast<const BYTE*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch, row);
+                    if (g_s->o.mouse) { // a frame or two after the grab
+                        if (nv12) Captures::DrawMousePointerNv12(dev, px.data(), g_s->w, g_s->h);
+                        else Captures::DrawMousePointer(dev, px.data(), g_s->w, g_s->h, 4);
+                    }
                     std::lock_guard<std::mutex> lk(g_s->m);
                     g_s->q.push_back({std::move(px), sl->t});
                     g_s->cv.notify_one();

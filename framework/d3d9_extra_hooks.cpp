@@ -36,6 +36,7 @@ std::atomic<SetDepthStencilObserver> g_setDsObs{nullptr};
 std::atomic<StretchRectObserver> g_stretchObs{nullptr};
 std::atomic<BeforeStretchRect> g_beforeStretch{nullptr};
 std::atomic<DrawUPObserver> g_drawUpObs{nullptr};
+std::atomic<BeforeDrawUP> g_beforeDrawUp{nullptr};
 std::atomic<DepthSubstitute> g_substitute{nullptr};
 std::atomic<DepthReport> g_report{nullptr};
 
@@ -192,6 +193,7 @@ HRESULT __stdcall HookedStretchRect(IDirect3DDevice9* dev, IDirect3DSurface9* sr
 
 HRESULT __stdcall HookedDrawPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT prims, const void* data, UINT stride) {
     D3D9Hooks::SettleDeferredShaders(dev); // (the game's pair before the draw, as the other draws)
+    if (auto before = g_beforeDrawUp.load()) before(dev);
     if (auto obs = g_drawUpObs.load()) obs(dev, "DPUP", type, prims);
     if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->draw) D3D9Hooks::g_traceCaller = _ReturnAddress(), tr->draw(dev, "DPUP", type, prims, data, stride, 0);
     return oDrawPrimitiveUP(dev, type, prims, data, stride);
@@ -199,6 +201,7 @@ HRESULT __stdcall HookedDrawPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE 
 
 HRESULT __stdcall HookedDrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT minIndex, UINT numVerts, UINT prims, const void* idx, D3DFORMAT idxFmt, const void* data, UINT stride) {
     D3D9Hooks::SettleDeferredShaders(dev); // (the game's pair before the draw, as the other draws)
+    if (auto before = g_beforeDrawUp.load()) before(dev);
     if (auto obs = g_drawUpObs.load()) obs(dev, "DIPUP", type, prims);
     if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->draw) D3D9Hooks::g_traceCaller = _ReturnAddress(), tr->draw(dev, "DIPUP", type, prims, data ? static_cast<const char*>(data) + size_t(minIndex) * stride : nullptr, stride, numVerts);
     return oDrawIndexedPrimitiveUP(dev, type, minIndex, numVerts, prims, idx, idxFmt, data, stride);
@@ -287,6 +290,7 @@ void SetSetDepthStencilObserver(SetDepthStencilObserver fn) { g_setDsObs.store(f
 void SetStretchRectObserver(StretchRectObserver fn) { g_stretchObs.store(fn); }
 void SetBeforeStretchRect(BeforeStretchRect fn) { g_beforeStretch.store(fn); }
 void SetDrawUPObserver(DrawUPObserver fn) { g_drawUpObs.store(fn); }
+void SetBeforeDrawUP(BeforeDrawUP fn) { g_beforeDrawUp.store(fn); }
 
 void SetDepthSubstitution(DepthSubstitute substitute, DepthReport report) {
     g_substitute.store(substitute);

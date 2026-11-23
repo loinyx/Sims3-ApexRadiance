@@ -61,13 +61,14 @@ Every switch works at the exact game function behind one measured cost, and foll
 | Faster room lighting (with *Lamp edits all at once*, 2.7.0 as *Lamp switches all at once*) | Camera and lighting | 2.1.0 or earlier | [room-light-queue.md](room-light-queue.md) |
 | Spread lot lighting while moving | Camera and lighting | 2.1.0 or earlier | [lot-lighting-motion.md](lot-lighting-motion.md) |
 | Wall shading waits while moving | Camera and lighting | 2.1.0 or earlier | [wall-shading-while-moving.md](wall-shading-while-moving.md) |
-| Fewer mouse picks when still (Experimental, off; not in the Overview group) | Camera and lighting | In development | [pick-skip-when-still.md](pick-skip-when-still.md) |
+| Fewer mouse picks when still (on; not in the Overview group) | Camera and lighting | Released in 4.0.7 | [pick-skip-when-still.md](pick-skip-when-still.md) |
 | Spread new objects over frames | Camera and lighting | 2.1.0 or earlier | [scene-node-budget.md](scene-node-budget.md) |
-| Frame deadline while moving (Experimental, off; not in the Overview group) | Camera and lighting | In development | [deadline-slicing.md](deadline-slicing.md) |
+| Frame deadline while moving (on; not in the Overview group) | Camera and lighting | Released in 4.0.7 | [deadline-slicing.md](deadline-slicing.md) |
 | Faster game file lookups | Files and objects | 2.1.0 or earlier | [resource-lookup-cache.md](resource-lookup-cache.md) |
 | Remember missing files (shown under the row above) | Files and objects | 2.1.0 or earlier | [remember-missing-files.md](remember-missing-files.md) |
 | Faster file lists | Files and objects | 2.1.0 or earlier | [file-list-cache.md](file-list-cache.md) |
 | Faster object lookups | Files and objects | 2.1.0 or earlier | [object-lookup-index.md](object-lookup-index.md) |
+| Faster text lookups (off; not in the Overview group) | Files and objects | Released in 4.0.13 | [faster-text-lookups.md](faster-text-lookups.md) |
 | Faster texture compression (with *Use several cores*) | Textures and Sims | 2.1.0 or earlier | [fast-texture-compression.md](fast-texture-compression.md) |
 | Faster cache compression (includes record checksums) | Textures and Sims | 2.1.0 or earlier; checksums 2.4.0 | [fast-cache-compression.md](fast-cache-compression.md) |
 | Faster Sim building | Textures and Sims | 2.3.0 | [fast-cas-sort.md](fast-cas-sort.md) |
@@ -187,7 +188,7 @@ switch's description, ending with the credit.
   *Remember missing files*, *Faster file lists*, *Spread lot lighting while moving*, *Wall shading waits while moving*,
   *Faster texture compression*, *Faster cache compression*, *Spread new objects over frames*, *Faster object lookups*).
   *Faster room lighting*, *Faster Sim building*, *Faster memory handling*, *Room to save*, *Lighter window updates*,
-  *Faster scripts* and the Lot Streaming switches are not in any profile part (`FeaturePart` in
+  *Faster scripts*, *Faster text lookups* and the Lot Streaming switches are not in any profile part (`FeaturePart` in
   [`apex_config.cpp`](../../../apex_config.cpp)): applying a profile, built-in ones included, leaves them as they are.
   Undo covers every `[patches.*]` table.
 - **Configurations from 2.5.6:** a `[ui] performance_mode` key (the removed *Optimize rendering* switch) still loads;

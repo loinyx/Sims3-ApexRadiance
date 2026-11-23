@@ -967,5 +967,8 @@ public static partial class Strings
         ["{0} to look at"] = "{0} da controllare",
         ["{0} updates ready"] = "{0} aggiornamenti pronti",
         ["{0} worlds you can start a new game in"] = "{0} mondi in cui iniziare una nuova partita",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "La Ricerca testi più veloce è disattivata finché {0} è in Mods\\Packages: quel pacchetto unisce già le tabelle di testo. Per usarla, rimuovi {0}.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "La Ricerca testi più veloce è disattivata perché {0} ({1}) modifica lo stesso codice. Per usarla, imposta {2} nella sezione [Patches] di {3}, oppure rimuovi {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "La Ricerca testi più veloce era disattivata nell'ultima partita perché {0} modifica lo stesso codice. Per usarla, disattiva la parte di quel mod che modifica la ricerca dei testi, oppure rimuovi {0}.",
     };
 }

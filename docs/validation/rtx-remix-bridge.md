@@ -126,6 +126,14 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 | 2026-11-13 | 3.2.1 (published) | Turbo Simulation Engine V3.4 (`Turbo.asi` and its split packages), no Sims3SettingsSetter, in-game runner on a town save | hang at start: the client logged `no response from server` right after Turbo's second device, then `Still waiting on the Present semaphore`; the save never loaded |
 | 2026-11-13 | release/3.2.2 c2697794, standard flavour | The same with Sims3SettingsSetter, the whole route (orbits, a pan over 8 lots, 7 min) | pass, no error in the log; `Second device asked with Turbo.asi loaded` once; 107 shaders from the ASI, 0 to compile |
 | 2026-11-13 | release/3.2.2 c2697794, standard flavour | Without Turbo, same route | pass, no error, one device as before |
+| 2026-11-19 | 4.0.7 (published), a player's crash report | Turbo and the bridge; a 0x0 HAL device created first, then the game's 1920x1080 one | crash at the start of the world load: access violation at `AddRef` in `Hooked_CreateDevice` on the released 0x0 device |
+| 2026-11-19 | release/4.0.8 fix, standard flavour, without Turbo | Start and world load under the bridge | pass, one device, no error |
+| 2026-11-19 | release/4.0.8 b6b15079 on the player's machine | Turbo loaded as a renamed file (`$RI76P92.asi`, Turbo's size) | hang at start: the name check missed it and Turbo's 0x0 request after the first frame became a real second device; the check was removed |
+| 2026-11-19 | release/4.0.8 b6b15079 on the player's machine | The same Turbo renamed back to `Turbo.asi` | pass: the game started and loaded (the fix of 4.0.7's crash) |
+| 2026-11-19 | release/4.0.11, in-game runner | `tools/second_device_probe` (Turbo's request from a file of another name) right after the game's device, before its first frame | pass: `Second device asked`, the game's device given, the world loaded and ran 4 minutes |
+| 2026-11-19 | release/4.0.11, in-game runner | The probe 600 ms after the first Present | pass: the game's device given |
+| 2026-11-19 | release/4.0.11, in-game runner | Turbo Simulation Engine V3.4 (`Turbo.asi`, default `Turbo.txt`), Display Borderless and *Game setting* | pass: Turbo asked 0.1 to 0.3 s after the first Present and got the game's device |
+| 2026-11-19 | release/4.0.11, in-game runner | No probe, no Turbo | pass: one device, no `Second device` line |
 
 ### Rewind mode (patch 0015)
 

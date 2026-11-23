@@ -57,7 +57,10 @@ std::atomic<bool> g_deviceHooked{false};
 std::once_flag g_createDeviceOnce;
 
 std::atomic<IDirect3DDevice9*> g_device{nullptr};
-std::atomic<IDirect3DDevice9*> g_gameDevice{nullptr}; // the first HAL device, from CreateDevice (g_device waits for its first EndScene)
+// Under the RTX Remix bridge, the last HAL device made with a back buffer size of its own (the game asks for its
+// resolution; throwaway devices ask for 0x0): the game's device before its first frame, for the bridge's second-device
+// answer (Hooked_CreateDevice). Apex holds a reference until that frame, so it is never a released device.
+std::atomic<IDirect3DDevice9*> g_sizedDevice{nullptr};
 std::atomic<HWND> g_window{nullptr};
 std::atomic<bool> g_frameInit{false};
 std::atomic<bool> g_restartEffects{false};
@@ -134,13 +137,16 @@ bool RenderingToBackBuffer(IDirect3DDevice9* dev) {
 // First EndScene of the game's device (render thread)
 void FrameInit(IDirect3DDevice9* dev) {
     g_device.store(dev);
+    if (IDirect3DDevice9* sized = g_sizedDevice.exchange(nullptr)) sized->Release(); // (the game's is known now)
     const HWND w = DeviceWindow(dev);
     if (w) g_window.store(w);
+    HookGuard::Try("Display on the first frame", [&] { Screen::AdoptGameDevice(dev, w); });
     if (!D3D9Hooks::Install(dev)) LOG_ERROR("[D3D] Device hooks not installed: effects and Night Lighting cannot draw");
     // the bridge's GetVertexDeclaration can answer a declaration older than the last SetFVF (ExtraHooks::UseVertexInputSetLast)
     if (Platform::RemixBridge()) ExtraHooks::EnsureTraceHooks(dev);
     D3D9Hooks::RegisterPresent("ApexCore", [](D3D9Hooks::DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
         OnPresent(ctx.device);
+        GpuTrace::Frame();
         return D3D9Hooks::HookAction::Continue;
     }, static_cast<D3D9Hooks::Priority>(-2000)); // before everything else (the profiler's frame start is -1000)
     D3D9Hooks::SetAfterPresent([](IDirect3DDevice9* d, HRESULT& hr) {
@@ -244,13 +250,16 @@ HRESULT STDMETHODCALLTYPE Hooked_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMET
     RenderCallbacks::Fire(RenderCallbacks::preReset, dev);
     HookGuard::Try("Picture before Reset", [] { Picture::Get().BeforeReset(); });
     if (dev == g_aliasDevice.load()) g_bbAlias.store(nullptr); // the Reset destroys it
-    // Window mode and resolution (System > Display); the game's own request again when the device refuses Apex's
+    // Window mode and resolution (System > Display), the game's device only (the hook is shared by every device of this
+    // d3d9.dll); the game's own request again when the device refuses Apex's
+    const IDirect3DDevice9* game = g_device.load();
+    const bool screen = pp && (!game || game == dev);
     const D3DPRESENT_PARAMETERS asked = pp ? *pp : D3DPRESENT_PARAMETERS{};
     IDirect3D9* d3d = nullptr;
-    if (pp && SUCCEEDED(dev->GetDirect3D(&d3d)) && d3d) d3d->Release(); // (the device keeps it alive)
+    if (screen && SUCCEEDED(dev->GetDirect3D(&d3d)) && d3d) d3d->Release(); // (the device keeps it alive; Display takes its own reference)
     D3DDEVICE_CREATION_PARAMETERS cp{};
-    const bool changed = pp && HookGuard::Run("Display before Reset", false, [&] {
-        return Screen::AdjustPresentParams(d3d, SUCCEEDED(dev->GetCreationParameters(&cp)) ? cp.AdapterOrdinal : 0, pp->hDeviceWindow ? pp->hDeviceWindow : cp.hFocusWindow, pp, "Reset");
+    const bool changed = screen && HookGuard::Run("Display before Reset", false, [&] {
+        return Screen::AdjustPresentParams(dev, d3d, SUCCEEDED(dev->GetCreationParameters(&cp)) ? cp.AdapterOrdinal : 0, pp->hDeviceWindow ? pp->hDeviceWindow : cp.hFocusWindow, pp, "Reset");
     });
     HRESULT hr = o_reset(dev, pp);
     const bool refused = FAILED(hr) && changed;
@@ -259,7 +268,7 @@ HRESULT STDMETHODCALLTYPE Hooked_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMET
         *pp = asked;
         hr = o_reset(dev, pp);
     }
-    if (SUCCEEDED(hr) && pp) HookGuard::Try("Display after Reset", [&] { Screen::AfterDevice(pp->hDeviceWindow ? pp->hDeviceWindow : cp.hFocusWindow, pp, !refused); });
+    if (SUCCEEDED(hr) && screen) HookGuard::Try("Display after Reset", [&] { Screen::AfterDevice(dev, pp->hDeviceWindow ? pp->hDeviceWindow : cp.hFocusWindow, pp, !refused); });
     if (SUCCEEDED(hr)) {
         if (o_getBackBuffer) NoteBackBufferAlias(dev);
         LOG_INFO(std::format("[D3D] Device reset: {}x{}, {}", pp ? pp->BackBufferWidth : 0, pp ? pp->BackBufferHeight : 0,
@@ -278,7 +287,6 @@ void HookDevice(IDirect3DDevice9* dev) {
         LOG_INFO(std::format("[D3D] Another HAL device created (EndScene {}): Apex stays on the first one", HookChain::AddressText(vt[kEndSceneSlot])));
         return;
     }
-    g_gameDevice.store(dev);
     void** vt = *reinterpret_cast<void***>(dev);
     o_endScene = reinterpret_cast<EndScene_t>(vt[kEndSceneSlot]);
     o_reset = reinterpret_cast<Reset_t>(vt[kResetSlot]);
@@ -292,22 +300,30 @@ HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3
     // Turbo Simulation Engine (Turbo.asi) makes a throwaway device after the game's, to read the device functions'
     // addresses, then releases it. A second device stops the RTX Remix bridge's server and the game hangs at its next
     // Present, so under the bridge Turbo's request gets the game's device (the same functions; the AddRef balances the
-    // Release). Its request: HAL, a 0x0 back buffer, its own hidden window. The caller is not checked:
-    // Sims3SettingsSetter's CreateDevice hook can sit between Turbo and this one.
+    // Release). Its request: HAL, a 0x0 back buffer, its own hidden window. Neither the caller nor Turbo's file name is
+    // checked: Sims3SettingsSetter's CreateDevice hook can sit between Turbo and this one, and players rename the file
+    // (a second device stops the bridge whoever asks). The device given is the one whose EndScene Apex draws on: the
+    // first HAL device can be a 0x0 probe that is released before Turbo asks. Turbo can also ask between the game's
+    // device and its first frame (a player's log: 5 ms after it): the game's device is then the last one made with a
+    // size of its own. Before the game's device there is none to give, and the request goes to the bridge.
     const HWND asking = pp && pp->hDeviceWindow ? pp->hDeviceWindow : focus;
-    if (IDirect3DDevice9* game = g_gameDevice.load(); game && out && pp && type == D3DDEVTYPE_HAL && pp->BackBufferWidth == 0 &&
-                                                      pp->BackBufferHeight == 0 && asking != g_window.load() &&
-                                                      GetModuleHandleW(L"Turbo.asi") && Platform::RemixBridge()) {
+    IDirect3DDevice9* game = g_device.load();
+    if (!game) game = g_sizedDevice.load();
+    if (game && out && pp && type == D3DDEVTYPE_HAL && pp->BackBufferWidth == 0 && pp->BackBufferHeight == 0 && asking != g_window.load() &&
+        Platform::RemixBridge()) {
         game->AddRef();
         *out = game;
-        LOG_INFO("[D3D] Second device asked with Turbo.asi loaded: the game's is given (a second one would stop the RTX Remix bridge)");
+        LOG_INFO("[D3D] Second device asked (0x0 back buffer, another window): the game's is given (a second one would stop the RTX Remix bridge)");
         return D3D_OK;
     }
     const bool hal = type == D3DDEVTYPE_HAL;
-    // Window mode and resolution (System > Display); the game's own request again when the device refuses Apex's
+    // Window mode and resolution (System > Display) follow the game's device only. Until its first frame the game's
+    // device is not known and every HAL device passes; Display takes the game's back then (AdoptGameDevice)
+    const bool screen = hal && !g_device.load();
+    // The game's own request again when the device refuses Apex's
     const D3DPRESENT_PARAMETERS asked = pp ? *pp : D3DPRESENT_PARAMETERS{};
     const HWND window = pp && pp->hDeviceWindow ? pp->hDeviceWindow : focus;
-    const bool changed = hal && pp && HookGuard::Run("Display before CreateDevice", false, [&] { return Screen::AdjustPresentParams(self, adapter, window, pp, "CreateDevice"); });
+    const bool changed = screen && pp && HookGuard::Run("Display before CreateDevice", false, [&] { return Screen::AdjustPresentParams(nullptr, self, adapter, window, pp, "CreateDevice"); });
     HRESULT hr = o_createDevice(self, adapter, type, focus, flags, pp, out);
     const bool refused = FAILED(hr) && changed;
     if (refused) {
@@ -315,8 +331,12 @@ HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3
         *pp = asked;
         hr = o_createDevice(self, adapter, type, focus, flags, pp, out);
     }
-    if (SUCCEEDED(hr) && hal && pp) HookGuard::Try("Display after CreateDevice", [&] { Screen::AfterDevice(window, pp, !refused); });
+    if (SUCCEEDED(hr) && screen && pp && out && *out) HookGuard::Try("Display after CreateDevice", [&] { Screen::AfterDevice(*out, window, pp, !refused); });
     if (SUCCEEDED(hr) && hal && out && *out) {
+        if (screen && (asked.BackBufferWidth || asked.BackBufferHeight) && Platform::RemixBridge()) {
+            (*out)->AddRef();
+            if (IDirect3DDevice9* was = g_sizedDevice.exchange(*out)) was->Release();
+        }
         LoadTiming::NoteDeviceCreated();
         LOG_INFO(std::format("[D3D] Game device created: {}x{}, {} (device {:#x}, back buffer format {}, multisample {}, flags {:#x})", pp ? pp->BackBufferWidth : 0,
                              pp ? pp->BackBufferHeight : 0, pp && pp->Windowed ? "windowed" : "exclusive fullscreen", reinterpret_cast<uintptr_t>(*out),
@@ -334,8 +354,7 @@ HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3
         // game's shadows on unknown AMD cards)
         LOG_INFO("[D3D] Platform: " + Platform::Summary());
         HookDevice(*out);
-        const HWND w = pp && pp->hDeviceWindow ? pp->hDeviceWindow : focus;
-        if (w) g_window.store(w);
+        if (screen && window) g_window.store(window); // (another mod's device after the game's first frame keeps the game's window here)
     }
     return hr;
 }

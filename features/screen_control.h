@@ -48,8 +48,11 @@ void SaveToToml(toml::table& root); // [screen]
 
 // D3D9 bootstrap (render thread). Adjust rewrites the game's request; true when it changed it (the caller retries with
 // the game's own parameters when the changed request fails, then reports the result with AfterDevice).
-bool AdjustPresentParams(IDirect3D9* d3d, UINT adapter, HWND window, D3DPRESENT_PARAMETERS* pp, const char* where);
-void AfterDevice(HWND window, const D3DPRESENT_PARAMETERS* pp, bool usedApexRequest);
+bool AdjustPresentParams(IDirect3DDevice9* device, IDirect3D9* d3d, UINT adapter, HWND window, D3DPRESENT_PARAMETERS* pp, const char* where);
+void AfterDevice(IDirect3DDevice9* device, HWND window, const D3DPRESENT_PARAMETERS* pp, bool usedApexRequest);
+// The first frame of the game's device (render thread): Display takes that device's IDirect3D9, adapter, window and
+// parameters, and the game's own request, over what a device another mod made in between left
+void AdoptGameDevice(IDirect3DDevice9* device, HWND window);
 // D3D9Hooks after the original Present (render thread): the limiter's wait and a pending mode change
 void AfterPresent(IDirect3DDevice9* device, HRESULT& hr);
 // Apex's window procedure, before anything else; true = handled

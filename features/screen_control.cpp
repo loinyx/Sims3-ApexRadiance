@@ -95,8 +95,17 @@ D3DPRESENT_PARAMETERS g_gameRequest{}; // what the game (and Sims3SettingsSetter
 D3DPRESENT_PARAMETERS g_written{};     // what Apex handed to the device last time
 D3DPRESENT_PARAMETERS g_current{};     // the parameters of the device now
 bool g_haveRequest = false, g_haveCurrent = false;
-IDirect3D9* g_d3d = nullptr; // the game's (alive as long as its device)
+IDirect3D9* g_d3d = nullptr; // a reference of Apex's own: a device another mod makes is released with its IDirect3D9
 UINT g_adapter = 0;
+// The request each device was made or reset with: another mod's device can come between the game's and its first
+// frame, on any window, and the game's own request is taken back then (AdoptGameDevice)
+struct DeviceRequest {
+    IDirect3DDevice9* device; // (only compared)
+    D3DPRESENT_PARAMETERS request, written;
+    bool refused;
+};
+std::vector<DeviceRequest> g_requests;
+IDirect3DDevice9* g_gameDevice = nullptr; // set at the game's first frame: no other device reaches Display after it
 std::atomic<bool> g_deviceWindowed{true};
 std::atomic<UINT> g_bbWidth{0}, g_bbHeight{0}; // the device's back buffer (read on the window thread)
 std::atomic<HWND> g_window{nullptr};
@@ -107,6 +116,36 @@ std::atomic<bool> g_s3ssBorderless{false};
 std::atomic<bool> g_gameExclusive{false}; // the game's own request is exclusive fullscreen (read on the window thread)
 std::atomic<bool> g_dropSaved{false}; // the window style saved under the bridge's Borderless is stale (window thread clears it)
 std::once_flag g_s3ssBorderlessOnce;
+
+// (g_lock held)
+void RememberRequest(IDirect3DDevice9* device, bool refused) {
+    for (DeviceRequest& r : g_requests)
+        if (r.device == device) {
+            r.request = g_gameRequest, r.written = g_written, r.refused = refused;
+            return;
+        }
+    g_requests.push_back({device, g_gameRequest, g_written, refused});
+}
+
+// (g_lock held) Returns the IDirect3D9 given up, for the caller to Release after the lock (it may be the last reference)
+IDirect3D9* HoldD3D(IDirect3D9* d3d) {
+    if (!d3d || d3d == g_d3d) return nullptr;
+    d3d->AddRef();
+    IDirect3D9* old = g_d3d;
+    g_d3d = d3d;
+    return old;
+}
+
+// (g_lock held) A device that is not the game's, once the game's is known (every device shares the CreateDevice and Reset hooks)
+bool NotTheGames(IDirect3DDevice9* device) { return g_gameDevice && device != g_gameDevice; }
+
+// The device's IDirect3D9 with a reference for the caller (Release it), null before the first device
+IDirect3D9* HeldD3D(UINT& adapter) {
+    std::lock_guard<std::mutex> lock(g_lock);
+    if (g_d3d) g_d3d->AddRef();
+    adapter = g_adapter;
+    return g_d3d;
+}
 
 // Highest refresh rate of a display mode of this size, 0 when the adapter has none
 UINT BestRefresh(IDirect3D9* d3d, UINT adapter, UINT w, UINT h) {
@@ -211,14 +250,11 @@ void RequestGameResolution(const Settings& s) {
         g_askWarned = true;
         return;
     }
-    IDirect3D9* d3d = nullptr;
     UINT adapter = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_lock);
-        d3d = g_d3d, adapter = g_adapter;
-    }
+    IDirect3D9* d3d = fs ? HeldD3D(adapter) : nullptr;
     // windowed: the game sets the rate to 0 itself; fullscreen: -1 would keep the current rate, which the new size may lack
     const UINT hz = fs ? BestRefresh(d3d, adapter, w, h) : 0xFFFFFFFF;
+    if (d3d) d3d->Release();
     if (fs && !hz) {
         LOG_WARNING(std::format("[Screen] No {}x{} display mode: the game's resolution stays {}x{}", w, h, gw, gh));
         g_askWarned = true;
@@ -636,12 +672,8 @@ bool g_modesListed = false;
 
 // The sizes of the device's adapter (the monitor the device runs on, which fullscreen uses; render thread)
 void ListModes() {
-    IDirect3D9* d3d = nullptr;
     UINT adapter = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_lock);
-        d3d = g_d3d, adapter = g_adapter;
-    }
+    IDirect3D9* d3d = HeldD3D(adapter);
     if (!d3d) return; // (no device yet: listed at the next frame)
     g_modesListed = true;
     g_resolutions.clear();
@@ -655,6 +687,7 @@ void ListModes() {
             g_resolutions.push_back(r);
     }
     std::sort(g_resolutions.begin(), g_resolutions.end(), [](const Resolution& a, const Resolution& b) { return a.w != b.w ? a.w > b.w : a.h > b.h; });
+    d3d->Release();
 }
 
 } // namespace
@@ -701,14 +734,22 @@ void SaveToToml(toml::table& root) {
     root.insert_or_assign("screen", std::move(t));
 }
 
-bool AdjustPresentParams(IDirect3D9* d3d, UINT adapter, HWND window, D3DPRESENT_PARAMETERS* pp, const char* where) {
+bool AdjustPresentParams(IDirect3DDevice9* device, IDirect3D9* d3d, UINT adapter, HWND window, D3DPRESENT_PARAMETERS* pp, const char* where) {
     EnsureLoaded();
     if (!pp) return false;
     std::call_once(g_s3ssBorderlessOnce, [] { g_s3ssBorderless = S3SSDetect::S3SSBorderlessConfigured(); });
-    if (window) g_window = window;
+    IDirect3D9* old = nullptr;
+    struct ReleaseAfter { // (runs after the lock below is let go)
+        IDirect3D9*& p;
+        ~ReleaseAfter() {
+            if (p) p->Release();
+        }
+    } releaseAfter{old};
     std::lock_guard<std::mutex> lock(g_lock);
+    if (NotTheGames(device)) return false;
+    if (window) g_window = window;
     if (d3d) {
-        g_d3d = d3d;
+        old = HoldD3D(d3d);
         g_adapter = adapter;
     }
     // The game keeps its parameters in its own memory and hands the same structure to every Reset ([renderer+0xE0]+0x14C):
@@ -733,14 +774,16 @@ bool AdjustPresentParams(IDirect3D9* d3d, UINT adapter, HWND window, D3DPRESENT_
     return changed;
 }
 
-void AfterDevice(HWND window, const D3DPRESENT_PARAMETERS* pp, bool usedApexRequest) {
-    if (window) g_window = window;
+void AfterDevice(IDirect3DDevice9* device, HWND window, const D3DPRESENT_PARAMETERS* pp, bool usedApexRequest) {
     if (!pp) return;
     {
         std::lock_guard<std::mutex> lock(g_lock);
+        if (NotTheGames(device)) return;
+        if (window) g_window = window;
         g_current = *pp;
         g_haveCurrent = true;
         g_written = *pp; // after a fallback the game's own request is in its memory now
+        RememberRequest(device, !usedApexRequest);
     }
     g_deviceWindowed = pp->Windowed != FALSE;
     g_bbWidth = pp->BackBufferWidth;
@@ -750,6 +793,53 @@ void AfterDevice(HWND window, const D3DPRESENT_PARAMETERS* pp, bool usedApexRequ
         LOG_WARNING("[Screen] The device refused Apex's display request: the game's own is in use");
     }
     g_applyPending = true;
+}
+
+void AdoptGameDevice(IDirect3DDevice9* dev, HWND window) {
+    IDirect3D9* d3d = nullptr;
+    if (FAILED(dev->GetDirect3D(&d3d))) d3d = nullptr;
+    IDirect3D9* old = nullptr;
+    bool other = false, found = false;
+    D3DPRESENT_PARAMETERS now{};
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        g_gameDevice = dev;
+        // Another device came in: an entry of its own, or its request written over the game's (its CreateDevice on another
+        // thread, finished after this frame); with the game's device alone the state is its entry byte for byte
+        for (const DeviceRequest& r : g_requests)
+            other |= r.device != dev || !Same(g_gameRequest, r.request) || !Same(g_written, r.written);
+        if (other) { // (with the game's device alone everything already is the game's: nothing changes)
+            old = HoldD3D(d3d);
+            D3DDEVICE_CREATION_PARAMETERS cp{};
+            if (SUCCEEDED(dev->GetCreationParameters(&cp))) g_adapter = cp.AdapterOrdinal;
+            for (const DeviceRequest& r : g_requests)
+                if (r.device == dev) {
+                    found = true;
+                    g_gameRequest = r.request, g_written = r.written; // (written: the parameters after the call, as AfterDevice keeps them)
+                    g_current = r.written;
+                    g_refused = r.refused;
+                }
+            g_haveRequest = g_haveCurrent = found; // (no entry: the game's next Reset gives its request again)
+            g_gameExclusive = found && !g_gameRequest.Windowed;
+            now = g_current;
+        }
+        g_requests.erase(std::remove_if(g_requests.begin(), g_requests.end(), [dev](const DeviceRequest& r) { return r.device != dev; }), g_requests.end());
+    }
+    if (old) old->Release();
+    if (d3d) d3d->Release();
+    if (!other) return;
+    if (window) g_window = window;
+    if (found) {
+        g_deviceWindowed = now.Windowed != FALSE;
+        g_bbWidth = now.BackBufferWidth;
+        g_bbHeight = now.BackBufferHeight;
+    }
+    g_dropSaved = false; // (set from another device's request, not the game's)
+    g_applyPending = true;
+    ListModes(); // (the menu's list again, from the game's device)
+    LOG_INFO(std::format("[Screen] Another device was made before the game's first frame: Display follows the game's ({}x{}, {}); adapter {}, "
+                         "{} resolutions of 1024x768 and above, monitor at {} Hz",
+                         now.BackBufferWidth, now.BackBufferHeight, now.Windowed ? "windowed" : "exclusive fullscreen", g_adapter, g_resolutions.size(), g_monitorHz));
 }
 
 void AfterPresent(IDirect3DDevice9*, HRESULT& hr) {

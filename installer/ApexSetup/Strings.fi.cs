@@ -957,5 +957,8 @@ public static partial class Strings
         ["{0} to look at"] = "{0} tarkistettavaa",
         ["{0} updates ready"] = "{0} päivitystä on valmiina",
         ["{0} worlds you can start a new game in"] = "{0} maailmaa, joissa voit aloittaa uuden pelin",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "Nopeampi tekstihaku on pois päältä, kun {0} on kansiossa Mods\\Packages: se paketti yhdistää jo tekstitaulukot. Poista {0}, jos haluat käyttää sitä.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "Nopeampi tekstihaku on pois päältä, koska {0} ({1}) muuttaa samaa koodia. Jos haluat käyttää sitä, aseta {2} tiedoston {3} osioon [Patches] tai poista {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "Nopeampi tekstihaku oli pois päältä edellisessä pelissä, koska {0} muuttaa samaa koodia. Jos haluat käyttää sitä, kytke pois se modin osa, joka muuttaa tekstihakua, tai poista {0}.",
     };
 }

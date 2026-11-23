@@ -29,6 +29,7 @@
 #include "object_id_map.h"
 #include "render_object_map.h"
 #include "room_light_queue.h"
+#include "string_table_index.h"
 #include "room_solve_share.h"
 #include "atrium_hold.h"
 #include <algorithm>
@@ -194,7 +195,7 @@ class LotLightingMotionPatch : public ApexPatch {
     LotLightingMotionPatch() : ApexPatch(Performance::kLotLightingName, nullptr) {
         // TOML key: never rename
         RegisterIntSetting(&budgetMs_, "budgetWhileMovingMs", Performance::kLotLightingBudgetDefault, 1, 15, "Lot lighting time while moving (ms)");
-        RegisterBoolSetting(&sharedSolveTime_, "sharedSolveTime", false, "Shared room solve time while moving");
+        RegisterBoolSetting(&sharedSolveTime_, "sharedSolveTime", true, "Shared room solve time while moving");
         g_lotPatch.store(this);
     }
     ~LotLightingMotionPatch() override { g_lotPatch.store(nullptr); }
@@ -251,7 +252,7 @@ class LotLightingMotionPatch : public ApexPatch {
     }
 
     int budgetMs_ = Performance::kLotLightingBudgetDefault;
-    bool sharedSolveTime_ = false;
+    bool sharedSolveTime_ = true;
 };
 
 class LotDetailRangePatch;
@@ -543,6 +544,11 @@ class ScriptMathPatch : public SimpleSwitchPatch {
     ScriptMathPatch() : SimpleSwitchPatch(Performance::kScriptMathName, &ScriptMath::Start, &ScriptMath::Stop) {}
 };
 
+class StringTableIndexPatch : public SimpleSwitchPatch {
+  public:
+    StringTableIndexPatch() : SimpleSwitchPatch(Performance::kStringTableIndexName, &StringTableIndex::Start, &StringTableIndex::Stop) {}
+};
+
 class MemoryGuardPatch : public ApexPatch {
   public:
     MemoryGuardPatch() : ApexPatch(Performance::kMemoryGuardName, nullptr) {}
@@ -752,6 +758,7 @@ std::string Performance::ScriptMathStatus() { return ScriptMath::StatusText(); }
 std::string Performance::SceneBudgetStatus() { return SceneBudget::StatusText(); }
 std::string Performance::ObjectIndexStatus() { return ObjectIndex::StatusText() + "; " + ObjectIdMap::StatusText() + "; " + RenderObjectMap::StatusText(); }
 std::string Performance::RoomLightQueueStatus() { return RoomLightQueue::StatusText(); }
+std::string Performance::StringTableIndexStatus() { return StringTableIndex::StatusText(); }
 
 APEX_REGISTER_FEATURE(ResourceLookupCachePatch,
                       {.displayName = "Faster Game File Lookups",
@@ -816,8 +823,8 @@ APEX_REGISTER_FEATURE(PickSkipWhenStillPatch,
                                       "RTX Remix bridge. While the camera and the mouse stay still, that check waits (at most 0.25 s), and while the camera "
                                       "moves it runs every 4th frame. A click made while the check waits is held for a new check (about 3 frames). Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                        .category = "Performance",
-                       .experimental = true,
-                       .enabledByDefault = false,
+                       .experimental = false,
+                       .enabledByDefault = true,
                        .supportedVersions = VERSION_STEAM,
                        .technicalDetails = {"The pick manager's update (0x6DFEC0, called by Scene::BeginFrame) re-picks at the last cursor position every other "
                                             "frame (camera byte +0x6FD, always 1). That re-pick is skipped while the camera (+0x0C..+0x1B, +0x30..+0x6F), the "
@@ -834,8 +841,8 @@ APEX_REGISTER_FEATURE(DeadlineSlicingPatch,
                                       "left before a 12 ms point in the frame, so it no longer piles up on a frame that is already slow. Nothing is skipped: it "
                                       "runs in the next frames. Needs Spread lot lighting while moving. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                        .category = "Performance",
-                       .experimental = true,
-                       .enabledByDefault = false,
+                       .experimental = false,
+                       .enabledByDefault = true,
                        .supportedVersions = VERSION_STEAM,
                        .technicalDetails = {"The JobManager update (vtable 0x00FD9810 + 0x1C -> 0x00599A10) marks the frame start and, while moving, runs its main-thread "
                                             "jobs (the resource finalize job 0x007297C0) with a 2 ms slice instead of [svc+0xCC] = 5; one job always runs.",
@@ -1013,6 +1020,25 @@ APEX_REGISTER_FEATURE(ScriptMathPatch,
                                             "mono_type_get_object (0x00EA8A00) is answered from a lock-free (domain, type) cache filled only with answers "
                                             "of its type_hash (insert-only, freed with the domain), cleared by mono_domain_free (0x00E75340); answers equal "
                                             "to the class's reflection_info (TypeBuilder) are not stored; the first 256 answers are checked against the game."}});
+
+APEX_REGISTER_FEATURE(StringTableIndexPatch,
+                      {.displayName = "Faster Text Lookups",
+                       .description = "Every name and text the game shows (pie menus, tooltips, catalog names) is looked up in each of its string tables in "
+                                      "turn, one table per package with text, so thousands of custom content packages make every lookup slower. This keeps one "
+                                      "index of the tables already loaded and goes straight to the table that answers, with the same text. Part of " APEX_PRODUCT_NAME
+                                      ". Credits: @loinyx",
+                       .category = "Performance",
+                       .experimental = true,
+                       .enabledByDefault = false,
+                       .supportedVersions = VERSION_STEAM,
+                       .technicalDetails = {"GetString (0x0059C5B0) walks the string table list (service + 0x48) and probes each table until one has the key with a "
+                                            "non-empty text. Its walk (0x0059C5C2) starts at the node an index names: the winning table, the list end (no table has "
+                                            "the key) or, without an answer, the first node; the game's probe, formatting and string are unchanged.",
+                                            "The index (key -> node, 12 bytes a slot, at most 32 MB) is built from the loaded tables in steps of 2 ms; the list's clear "
+                                            "(0x0059AF00), table load (0x0059B190) and rebuild (0x0059BDE0) are wrapped and make it stale. The first 256 answers of each "
+                                            "build and 1 in 64 later ones are compared with the walk; a difference turns it off for the session.",
+                                            "Stands down when another mod changed GetString or when CCStringMerge_Strings.package is in Mods\\Packages."},
+                       .gameCodeGroup = "StringTableIndex"});
 
 APEX_REGISTER_FEATURE(SceneNodeBudgetPatch,
                       {.displayName = "Spread New Objects Over Frames",

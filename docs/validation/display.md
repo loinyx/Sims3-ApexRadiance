@@ -33,8 +33,31 @@ EA app 1.69.47 (`TS3.exe`), 2026-11-11, commit `8f762fba` (resolution request fo
 | Resolution set in Apex above the game's (`Options.ini` at 1024x768) | The log has `Game resolution 1024x768 -> 3840x2160` at start; the game draws at 3840x2160, not stretched. Confirmed in game |
 | Resolution changed live from the menu: 2560x1600, then back to 3840x2160 | Each change applies through the game's own resolution change. Confirmed in game |
 
+### Another mod's device (4.0.11)
+
+2026-11-19, Steam 1.67.2, in-game runner (`tools/ingame_runner`, the night test save, Display set to Borderless unless
+said, about 4 minutes in live mode), each a separate game start. The probe is `tools/second_device_probe` (Turbo's
+request: its own `IDirect3D9`, HAL, 0x0 on a hidden window, flags 0x120, then released). The menu page cannot be
+opened by the runner: the crash path, the resolution list from the held `IDirect3D9`, runs at the game's first frame
+whenever another device was seen (`[Screen] Another device was made before the game's first frame ... resolutions`).
+Native Direct3D 9 runs had the RTX Remix bridge's `d3d9.dll` moved out for the run.
+
+| Build | Setup | Result |
+|---|---|---|
+| 4.0.10 (published) | Native D3D9, probe right after the game's device | The probe's `IDirect3D9` was destroyed by its release (0 references left) while Display still held its pointer: the player's crash, reproduced up to the menu |
+| release/4.0.11 | The same | pass: 1 reference left (Display's), released at the game's first frame; Display took the game's device back, listed 21 resolutions and set Borderless on the game's window |
+| release/4.0.11 | Native D3D9, probe 600 ms after the first Present | pass: Display untouched (0 references left after the probe's release) |
+| release/4.0.11 | Native D3D9 and the bridge, no probe | pass: no `Another device` line, Borderless as before |
+| release/4.0.11 | Turbo Simulation Engine V3.4 (`Turbo.asi`, its default `Turbo.txt`), native D3D9 | pass: Turbo's device (176x44, its window) came 0.1 s after the first Present and Display stayed on the game's |
+| release/4.0.11 | The same, Display set to *Window* | pass: one `Another program keeps changing the game window` at start (Turbo's Borderless), then the window stayed Apex's |
+| release/4.0.11 | Turbo and the bridge, Display *Game setting* | pass, Turbo's device answered with the game's |
+
+Turbo rewrote `Turbo.txt` with its Turbo Patch, automatic RAM cleaning and Smart RAM Manager off (`InstalacaoValida = 0`:
+its split game packages were not installed), so those were not exercised.
+
 ## Pending
 
+- A player's game with Turbo whose device comes right after the game's (their DXVK log): opening System > Display.
 - Focused game: 60 / 120 / 165 / 237 fps caps, measured rate and variation.
 - Live changes from the menu: Window, Borderless, Fullscreen (240 Hz) and back to Game setting; a resolution below
   the monitor's (image and mouse).

@@ -970,5 +970,8 @@ public static partial class Strings
         ["{0} to look at"] = "{0} για έλεγχο",
         ["{0} updates ready"] = "{0} ενημερώσεις είναι έτοιμες",
         ["{0} worlds you can start a new game in"] = "{0} κόσμοι στους οποίους μπορείς να ξεκινήσεις νέο παιχνίδι",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "Η Ταχύτερη αναζήτηση κειμένων είναι ανενεργή όσο το {0} βρίσκεται στο Mods\\Packages: αυτό το πακέτο ήδη συγχωνεύει τους πίνακες κειμένων. Για να τη χρησιμοποιήσετε, αφαιρέστε το {0}.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "Η Ταχύτερη αναζήτηση κειμένων είναι ανενεργή επειδή το {0} ({1}) αλλάζει τον ίδιο κώδικα. Για να τη χρησιμοποιήσετε, ορίστε {2} στην ενότητα [Patches] του {3} ή αφαιρέστε το {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "Η Ταχύτερη αναζήτηση κειμένων ήταν ανενεργή στο τελευταίο παιχνίδι επειδή το {0} αλλάζει τον ίδιο κώδικα. Για να τη χρησιμοποιήσετε, απενεργοποιήστε το μέρος αυτού του mod που αλλάζει την αναζήτηση κειμένων ή αφαιρέστε το {0}.",
     };
 }

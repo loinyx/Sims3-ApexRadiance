@@ -11614,7 +11614,10 @@ void ReportHookFailure() {
 
 void UpdateHooks() {
     static std::mutex m; // Install runs off the render thread at startup while Present may call the setters
-    std::lock_guard<std::mutex> lock(m);
+    // Present holds the registration lock while its callbacks call the setters: take it first (one lock order, #90)
+    std::unique_lock<std::recursive_mutex> reg(D3D9Hooks::RegistrationLock(), std::defer_lock);
+    std::unique_lock<std::mutex> lock(m, std::defer_lock);
+    std::lock(reg, lock);
     const bool on = !g_hookFailed && (g_enabled.load() || g_objectFix.load() || g_roofFix.load() || g_waterFix.load() || g_wallEnabled.load());
     if (on && !g_hooksRegistered) {
         g_stateUnknown = true;
@@ -11720,6 +11723,8 @@ void UpdateHooks() {
         g_hooksRegistered = true;
         if (g_status == "Off") g_status = "Waiting for the first draw";
     } else if (!on && g_hooksRegistered) {
+        // Both locks stay held, as PostScene's SyncHooks: releasing the registration lock here took m before it again (m,
+        // then UnregisterAll's lock), the inverse of a Present-time setter. Its wait for the render thread is bounded (1 s).
         D3D9Hooks::UnregisterAll(kHookName);
         g_hooksRegistered = false;
         if (!g_keepChunks) ClearChunks();

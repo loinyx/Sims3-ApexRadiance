@@ -6,6 +6,7 @@
 // without Apex, and turns that one call site off so it does not throw again every frame. The notes reach the log later,
 // from Present (ReportPending), outside any catch block.
 #include "crash_report.h"
+#include "gpu_trace.h"
 #include <atomic>
 #include <thread>
 #include <utility>
@@ -25,6 +26,7 @@ void ReportPending() noexcept;
 template <class R, class F> R Run(const char* where, R fallback, F&& f) noexcept {
     static std::atomic<bool> s_off{false};
     if (s_off.load(std::memory_order_relaxed)) return fallback;
+    GpuTrace::MarkIfOn(where); // (the last steps of a session that does not close)
     try {
         return static_cast<R>(std::forward<F>(f)());
     } catch (...) {
@@ -37,6 +39,7 @@ template <class R, class F> R Run(const char* where, R fallback, F&& f) noexcept
 template <class F> bool Run(const char* where, F&& f) noexcept {
     static std::atomic<bool> s_off{false};
     if (s_off.load(std::memory_order_relaxed)) return false;
+    GpuTrace::MarkIfOn(where);
     try {
         std::forward<F>(f)();
         return true;
@@ -50,6 +53,7 @@ template <class F> bool Run(const char* where, F&& f) noexcept {
 // Runs f(); a C++ exception is caught and noted, and the next call runs f() again (for rare calls that must not be turned
 // off for good, such as the work around a device Reset). False when it threw.
 template <class F> bool Try(const char* where, F&& f) noexcept {
+    GpuTrace::MarkIfOn(where);
     try {
         std::forward<F>(f)();
         return true;
