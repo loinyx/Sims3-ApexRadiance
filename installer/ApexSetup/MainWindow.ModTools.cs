@@ -47,6 +47,9 @@ public sealed partial class MainWindow
         if (plan.Duplicates.Count > 0)
             body.Children.Add(Warn(plan.Duplicates.Count == 1 ? T("1 resource is in more than one of these mods") : T("{0} resources are in more than one of these mods", plan.Duplicates.Count),
                 T("The merged package keeps the copy the game loads today (Resource.cfg order); the others are listed in the log.")));
+        if (plan.Shifts.Count > 0)
+            body.Children.Add(Warn(T("{0} resources would change which mod the game uses", plan.Shifts.Count),
+                T("A mod outside this merge has them too, and the merged package loads at another place: {0}", string.Join(", ", plan.Shifts.Select(x => Path.GetFileNameWithoutExtension(x.Other)).Distinct().Take(3)))));
         if (plan.Skipped.Count > 0)
         {
             var sk = new StackPanel { Spacing = 4 };

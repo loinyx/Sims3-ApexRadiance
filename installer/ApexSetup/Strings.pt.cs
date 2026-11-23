@@ -858,6 +858,8 @@ public static partial class Strings
         ["1 resource is in more than one of these mods"] = "1 recurso está em mais de um destes mods",
         ["{0} resources are in more than one of these mods"] = "{0} recursos estão em mais de um destes mods",
         ["The merged package keeps the copy the game loads today (Resource.cfg order); the others are listed in the log."] = "O pacote mesclado mantém a cópia que o jogo carrega hoje (ordem do Resource.cfg); as outras ficam listadas no log.",
+        ["{0} resources would change which mod the game uses"] = "{0} recursos mudariam de qual mod o jogo usa",
+        ["A mod outside this merge has them too, and the merged package loads at another place: {0}"] = "Um mod fora desta mesclagem também os tem, e o pacote mesclado carrega em outro lugar: {0}",
         ["Left out"] = "Deixados de fora",
         ["Include script mods (their makers usually ask not to merge them)"] = "Incluir mods de script (os criadores costumam pedir para não mesclá-los)",
         ["The originals are kept in Mods\\{0} and Split puts them back exactly."] = "Os originais ficam guardados em Mods\\{0} e Separar os devolve exatamente.",

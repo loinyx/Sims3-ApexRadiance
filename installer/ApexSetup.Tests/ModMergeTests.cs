@@ -132,6 +132,17 @@ static class ModMergeTests
             check(hostile.All(h => Why(h.Rel).StartsWith("Not a readable package") || Why(h.Rel).Contains("protected")) && Same(before, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)),
                 $"merge: hostile packages (truncated, index or resource past the end, huge counts, protected) refused at plan time, nothing written {string.Join("; ", hostile.Select(h => Why(h.Rel)))}");
             check(ModMerge.Plan(docs, all, "x", "Packages", true).Inputs.Any(m => m.Rel.EndsWith("s.package")), "merge: script mods go in when asked");
+            // keys 1 (a) and 4 (Overrides, priority 1000) also in a loose package: merged into Packages\x, c.package (before x)
+            // would win both; z.package (after x) loses them as it does today
+            List<MergeShift> Shifts(string n)
+            {
+                var loose = Path.Combine(mods, $@"Packages\{n}.package");
+                Pkg(loose, Raw(4, 4, "C4"), Raw(1, 1, "C1"));
+                try { return ModMerge.Plan(docs, all, "x", "Packages", false).Shifts; } finally { File.Delete(loose); }
+            }
+            var c = Shifts("c");
+            check(c.Count == 2 && c.All(x => !x.MergedWins && x.Other.EndsWith("c.package")) && Shifts("z").Count == 0 && plan.Shifts.Count == 0,
+                $"merge: keys that would change winner against a mod outside the merge are listed, the others are not ({c.Count})");
             check(!ModMerge.Plan(docs, [M(A)], "x", "Packages", false).CanRun && !ModMerge.Plan(docs, all, "a", "Packages", false).CanRun
                 && !ModMerge.Plan(docs, all, "x", @"..\..", false).CanRun && !ModMerge.Plan(docs, all, "x", "Elsewhere", false).CanRun,
                 "merge: refused with fewer than 2 packages, a taken name, a folder outside Mods or one the game does not load");

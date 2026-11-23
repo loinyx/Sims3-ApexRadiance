@@ -14,6 +14,8 @@ public sealed record MergeReason(string Key, string[] Args)
 public sealed record MergeSkip(ModFile Mod, MergeReason Reason);
 // one resource key ("type:group:instance") in several packages: the copy the game loads today is kept
 public sealed record MergeDuplicate(string Key, string Kept, IReadOnlyList<string> Dropped);
+// a key also in a loaded package outside the merge whose winner changes, because the merged file loads at one place
+public sealed record MergeShift(string Key, string Other, bool MergedWins);
 
 public sealed class MergePlan
 {
@@ -26,6 +28,7 @@ public sealed class MergePlan
     public List<MergeSkip> Skipped { get; } = new();
     public List<MergeDuplicate> Duplicates { get; } = new();
     public List<MergeReason> Refusals { get; } = new();
+    public List<MergeShift> Shifts { get; } = new();
     public int Resources { get; internal set; }
     public long OutputBytes { get; internal set; }      // exact: header, stored resource bytes, index
     public bool CanRun => Refusals.Count == 0;
@@ -68,8 +71,8 @@ public sealed class MergeRecord
 // originals back by hash and sends the merged file to the Recycle Bin.
 // The uninstall leaves merges alone: the merged package works without the launcher, merge.json keeps the notes once the
 // launcher's data is gone, and splitting there could stop halfway on a replaced original.
-// Shortcut: the merged file's load position replaces each original's, so a key also in a package outside the merge may
-// now win or lose against it; not checked, a plan over the whole Mods folder would show it.
+// The merged file's load position replaces each original's, so a key also in a package outside the merge may now win or
+// lose against it: the plan reads every other loaded package's index and lists those keys (Shifts) before anything runs.
 public static partial class ModMerge
 {
     public const string FolderName = "Merged (Apex Launcher)";
@@ -170,11 +173,41 @@ public static partial class ModMerge
         }
         foreach (var (k, l) in dropped)
             plan.Duplicates.Add(new($"{k.Item1:x8}:{k.Item2:x8}:{k.Item3:x16}", ok[owner[k]].Src.Mod.Rel, l));
+        if (ModConflicts.LoadKey(dirs, Slash(UnderMods(targetRel))) is { } tk && owner.Count > 0)
+            FindShifts(plan, modsDir, dirs, tk, owner.ToDictionary(o => o.Key, o => ok[o.Value].Key), ok.Select(o => Path.GetFullPath(o.Src.Mod.Path)));
         plan.Resources = plan.Sources.Sum(s => s.Keep.Count);
         plan.OutputBytes = 96 + plan.Sources.Sum(s => s.Keep.Sum(e => (long)e.FileSize)) + 4 + 32L * plan.Resources;
         if (plan.OutputBytes > MaxBytes) plan.Refusals.Add(R("The merged package would be over 2 GB."));
         if (plan.Resources > MaxEntries) plan.Refusals.Add(R("The merged package would hold too many resources."));
         return plan;
+    }
+
+    static void FindShifts(MergePlan plan, string modsDir, List<ModConflicts.Directive> dirs, (int, int, string) target,
+        Dictionary<(uint, uint, ulong), (int, int, string)> owner, IEnumerable<string> inputs)
+    {
+        var skip = new HashSet<string>(inputs, StringComparer.OrdinalIgnoreCase);
+        var off = Path.GetFullPath(Mods.Disabled(plan.Docs)) + Path.DirectorySeparatorChar;
+        var store = Path.GetFullPath(Folder(plan.Docs)) + Path.DirectorySeparatorChar;
+        List<string> files;
+        try { files = Directory.EnumerateFiles(modsDir, "*.package", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true }).ToList(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); return; }
+        foreach (var f in files)
+        {
+            if (skip.Contains(f) || f.StartsWith(off, StringComparison.OrdinalIgnoreCase) || f.StartsWith(store, StringComparison.OrdinalIgnoreCase)) continue;
+            var rel = Slash(Path.GetRelativePath(modsDir, f));
+            if (ModConflicts.LoadKey(dirs, rel) is not { } lk) continue;
+            List<ModConflicts.Entry> entries;
+            try { entries = ModConflicts.Package.Open(f).Entries; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or IndexOutOfRangeException or OverflowException) { continue; } // (unreadable: not a known winner)
+            var seen = new HashSet<(uint, uint, ulong)>();
+            foreach (var e in entries)
+            {
+                var k = (e.Type, e.Group, e.Instance);
+                if (!owner.TryGetValue(k, out var was) || !seen.Add(k)) continue;
+                bool before = ModConflicts.CompareKey(was, lk) < 0, after = ModConflicts.CompareKey(target, lk) < 0;
+                if (before != after) plan.Shifts.Add(new($"{k.Item1:x8}:{k.Item2:x8}:{k.Item3:x16}", Path.Combine("Mods", Path.GetRelativePath(modsDir, f)), after));
+            }
+        }
     }
 
     // a package's index, checked against the file before anything trusts it (untrusted input), or why not
@@ -220,6 +253,7 @@ public static partial class ModMerge
         foreach (var s in plan.Sources) log.WriteLine($"in   {s.Mod.Rel}: {s.Keep.Count} resources kept, {s.Size} bytes");
         foreach (var s in plan.Skipped) log.WriteLine($"skip {s.Mod.Rel}: {s.Reason.Text}");
         foreach (var d in plan.Duplicates) log.WriteLine($"key  {d.Key}: kept from {d.Kept}, dropped from {string.Join(", ", d.Dropped)}");
+        foreach (var x in plan.Shifts) log.WriteLine($"shift {x.Key}: the merged file now {(x.MergedWins ? "wins over" : "loses to")} {x.Other}");
         var tmp = Path.Combine(Path.GetDirectoryName(plan.TargetPath)!, $"{plan.Name}.package.tmp-{Guid.NewGuid():N}");
         var moves = new List<(string From, string To)>();
         var json = Path.Combine(plan.StoreDir, "merge.json");
