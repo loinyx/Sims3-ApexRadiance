@@ -24,6 +24,8 @@ described in [features/installer.md](../features/installer.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-23 | `2f2b4d44` | `installer/ApexSetup.Tests` | All passed | none |
+| 2026-11-23 | `2f2b4d44` | Real launcher (2.0.10) on this PC: Home with the picture on top as a gallery picture, the household's photo and none; Components; Health; the first install's list | Rendered as expected; captures reviewed | Windows 11 |
 | 2026-11-21 | 2.0.1 build of this change | Card install and update on this PC (test folders, faked drivers): the updates-first card and an update 4.0.12 → 4.0.13 from Play; an update failing on a locked `ApexRadiance.asi`; no internet through a dead proxy; a stand-in `TS3W.exe` running; a new launcher offered with `APEX_LAUNCHER_FAKE_UPDATE` and *Restart now* | The card listed the update and updated; the failure was taken back (4.0.12 stayed) and its card offered Try again and Play anyway; the notices showed in the cards; the launcher replaced itself with 2.0.2 and reopened | Windows 11 |
 | 2026-11-20 | 2.0.1 build of this change | Full cycle on this PC, `APEX_LAUNCHER_NO_DETECT=1`, faked drivers, a copied `TS3W.exe` as the only game: install from a download, then *Uninstall* through the Installed apps command with the launcher still open and settings not kept | The open launcher closed; the game folder back to `TS3W.exe` alone; install folder, data, Installed apps entry, shortcuts, Run value and Open with gone. Left: `%ProgramData%\Apex Radiance Setup` (the Smooth Motion record) when the uninstall needs no administrator | Windows 11 |
 | 2026-11-20 | 2.0.1 build of this change | Real install on this PC, separate `%LOCALAPPDATA%` and a copied `TS3W.exe` as the game | First install from a download: Apex installed, the question after it, the installed copy started with Installed apps, Start menu, desktop and Open with; a downloaded 2.0.2 replaced a running 2.0.1; an older download only opened the installed copy; an Apex Radiance Setup user (old data folder, `ApexRadianceSetup.exe`) kept language and games and installed | Windows 11 |
@@ -60,3 +62,6 @@ described in [features/installer.md](../features/installer.md).
 - The merge, split and cache tests fail now and then on this PC and pass on a rerun.
 - Dragging a picture onto another to make or join an album, with a real mouse.
 - The texts new in 4.1.0 in the 19 languages other than English and Portuguese.
+- Home (2.0.10): *Continue* opening the game into the save shown (`-worldFile`), a save picked from *Another save* with a
+  real click, and the crash or low-memory state with *Start again into this save*.
+- The Acrylic and stronger Mica window backgrounds.

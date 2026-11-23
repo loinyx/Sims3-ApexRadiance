@@ -9,7 +9,7 @@ option; Apex Launcher turns it on with its *TS3Wrap* component, on in a new inst
 
 | | |
 |---|---|
-| Availability | Experimental: `ts3wrap.exe` is in the 3.1.3 release; off by default, no in-game menu option. Setup's *Restart host* component (installs `ts3wrap.exe` and sets the key; Setup 1.1.4 and earlier copied the exe with Apex Radiance and left it off) and the relaunch in the game's start folder: Unreleased, planned for 4.0.0 (Setup 1.1.5). No longer experimental, on in a new install of Apex Launcher: Unreleased, planned for 4.1.0 |
+| Availability | Experimental: `ts3wrap.exe` is in the 3.1.3 release; off by default, no in-game menu option. Setup's *Restart host* component (installs `ts3wrap.exe` and sets the key; Setup 1.1.4 and earlier copied the exe with Apex Radiance and left it off) and the relaunch in the game's start folder: Unreleased, planned for 4.0.0 (Setup 1.1.5). No longer experimental, on in a new install of Apex Launcher, where the component is named *TS3Wrap*: Unreleased, planned for 4.1.0 |
 | Default | Off |
 | Menu | None in game; Apex Launcher > Components > *TS3Wrap* |
 | Configuration | `[ui] restart_host` in `ApexRadiance.toml`, and `ts3wrap.exe` next to `ApexRadiance.asi` |
