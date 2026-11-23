@@ -105,8 +105,6 @@ public static partial class Strings
             "{0} remplace du code du jeu que Sims 3 Modernization modifie aussi (non testés ensemble).",
         ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
             "{0} est une ancienne version qui contient Apex ; tant qu'elle est dans Game\\Bin, Apex Radiance reste désactivé. Le lanceur la déplace dans le dossier de sauvegarde (installez à sa place le Sims3SettingsSetter officiel si vous l'utilisiez).",
-        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. The launcher sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
-            "ShortWaitSpin et ThreadStackDiet de Sims3Performance entrent en conflit avec Sims 3 Modernization. Le lanceur les met tous deux à 0 (une copie est gardée dans Sims3Performance.ini.apex-backup).",
         ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
             "Les textures non compressées de Sims3SettingsSetter saccadent avec le RTX Remix bridge. Le lanceur les désactive (une copie est gardée dans S3SS.toml.apex-backup).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =

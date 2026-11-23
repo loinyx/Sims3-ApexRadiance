@@ -245,13 +245,23 @@ try
     Check(lost.Count == 1 && lost[0].Args[0].EndsWith("ld_MonoPatcher.package"), "Resource.cfg that skips MonoPatcher's folder reported");
     lost[0].Fix!();
     Check(!Compat.Check(g, Scan.Run(g, docs), docs).Any(x => x.Text.StartsWith("Mods\\Resource.cfg does not read")) && File.Exists(rcfg + ".apex-backup"), "Resource.cfg fixed, copy kept");
+    Check(Read(rcfg) == "Priority 500\r\nPackedFile Packages/*.package\r\nPriority 500\r\nPackedFile Packages/*/*.package\r\nPackedFile Packages/*/*/*.package\r\n",
+          "the added Packages lines come with their own Priority");
+    var deep = Path.Combine(docs, "Mods", "Packages", "a", "b", "c", "ts3fixes.package");
+    Directory.CreateDirectory(Path.GetDirectoryName(deep)!);
+    File.WriteAllText(deep, "pkg");
+    var tooDeep = Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.Text.StartsWith("Mods\\Resource.cfg does not read")).ToList();
+    Check(tooDeep.Count == 1 && tooDeep[0].Fix is null && tooDeep[0].Args[0] == Path.Combine("Packages", "a", "b", "c", "ts3fixes.package"),
+          "a package the Packages lines do not reach either is told to move, with no fix that changes nothing");
+    Directory.Delete(Path.Combine(docs, "Mods", "Packages", "a"), true);
     File.WriteAllText(rcfg, rcfgOld); File.Delete(rcfg + ".apex-backup");
     File.WriteAllText(B("TS3Patch.asi"), "smooth");
     await Engine.InstallAsync(g, Array.Empty<string>(), src, null, docs); // nothing to copy: only the fixes run
     Check(!File.Exists(B("TS3Patch.asi")), "Smooth Patch ASI next to S3SS moved away");
     Check(KnownMods.Found(bin, docs).Any(m => m.Name.StartsWith("simler90")), "simler90 detected as a known mod");
 
-    // 9. Sims 3 Performance Patch from the player's download (a zip), next to ts3native: its two thread patches are set to 0
+    // 9. Sims 3 Performance Patch from the player's download (a zip), next to S3SS: its ShortWaitSpin is set to 0 by the install,
+    // ThreadStackDiet is left as it came
     var dl = Path.Combine(root, "Downloads");
     Directory.CreateDirectory(Path.Combine(dl, "s3pp", "Sims3PerformancePatch"));
     File.WriteAllText(Path.Combine(dl, "s3pp", "Sims3PerformancePatch", "Sims3Performance.asi"), "s3pp");
@@ -262,8 +272,8 @@ try
     File.WriteAllText(B("ts3native.asi"), "ts3native");
     var s3ppSrc = new MixedSource(src, zip);
     await Engine.InstallAsync(g, new[] { Components.S3pp }, s3ppSrc, null, docs);
-    Check(File.Exists(B("Sims3Performance.asi")) && Read(B("Sims3Performance.ini")).Contains("ShortWaitSpin=0") && Read(B("Sims3Performance.ini")).Contains("ThreadStackDiet=0"),
-          "S3PP installed with its clash with Sims 3 Modernization fixed");
+    Check(File.Exists(B("Sims3Performance.asi")) && Read(B("Sims3Performance.ini")).Contains("ShortWaitSpin=0") && Read(B("Sims3Performance.ini")).Contains("ThreadStackDiet=1"),
+          "S3PP installed with its clash with S3SS's AdaptiveWait fixed, ThreadStackDiet kept");
     Engine.Remove(g, Components.S3pp, docs);
     Check(!File.Exists(B("Sims3Performance.asi")) && !File.Exists(B("Sims3Performance.ini")), "S3PP removed");
 
@@ -365,9 +375,14 @@ try
     File.WriteAllText(B("ts3native.asi"), "ts3native");
     File.WriteAllText(B("Sims3Performance.asi"), "s3pp");
     File.WriteAllText(B("Sims3Performance.ini"), "[Patches]\r\nShortWaitSpin=1\r\n");
+    var hadS3ss = File.Exists(B("Sims3SettingsSetter.asi"));
+    if (!hadS3ss) File.WriteAllText(B("Sims3SettingsSetter.asi"), "s3ss");
     File.SetAttributes(B("Sims3Performance.ini"), FileAttributes.ReadOnly);
     await Engine.InstallAsync(g, Array.Empty<string>(), src, null, docs);
-    Check(Read(B("Sims3Performance.ini")).Contains("ShortWaitSpin=0"), "read-only Sims3Performance.ini still fixed");
+    Check(Read(B("Sims3Performance.ini")).Contains("ShortWaitSpin=1"), "an install without Sims3Performance leaves its ini as the player set it");
+    Compat.Check(g, Scan.Run(g, docs), docs).Single(x => x.Suggest == Compat.S3ppWaitSuggest).Fix!();
+    Check(Read(B("Sims3Performance.ini")).Contains("ShortWaitSpin=0"), "read-only Sims3Performance.ini still changed on Apply");
+    if (!hadS3ss) File.Delete(B("Sims3SettingsSetter.asi"));
     foreach (var f in Directory.EnumerateFiles(bin)) File.SetAttributes(f, FileAttributes.Normal); // (so the test folder can be deleted)
 
     // 17. a second fake game (Origin 1.69.43): the layer comes from d3d9.dll itself, mods in the loader's subfolders count

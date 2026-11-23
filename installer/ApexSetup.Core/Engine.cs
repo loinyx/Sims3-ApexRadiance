@@ -556,7 +556,8 @@ public static class Engine
         }
         // the install leaves nothing known broken (checks after the copies: the bridge, Sims3Performance and S3SS rules depend on them)
         p?.Report(new(0.98, "Fixing incompatible settings"));
-        foreach (var fix in Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.CanFix))
+        // (Sims3Performance's ini is the player's: set only when this install brings Sims3Performance)
+        foreach (var fix in Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.CanFix || x.Suggest == Compat.S3ppWaitSuggest && components.Contains(Components.S3pp)))
             try { fix.Fix!(); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // the files are in place; Check installation still shows this one
         p?.Report(new(1, "Done"));

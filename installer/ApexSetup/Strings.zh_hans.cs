@@ -96,8 +96,6 @@ public static partial class Strings
             "{0} 覆盖了 Sims 3 Modernization 也会修补的游戏代码（未一起测试过）。",
         ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
             "{0} 是内含 Apex 的旧版本；只要它在 Game\\Bin 中，Apex Radiance 就不会启用。启动器会将它移到备份文件夹（如果你用过它，请改为安装官方的 Sims3SettingsSetter）。",
-        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. The launcher sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
-            "Sims3Performance 的 ShortWaitSpin 和 ThreadStackDiet 与 Sims 3 Modernization 冲突。启动器会将两者设为 0（副本保存为 Sims3Performance.ini.apex-backup）。",
         ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
             "Sims3SettingsSetter 的未压缩纹理在 RTX Remix bridge 下会造成卡顿。启动器会将其关闭（副本保存为 S3SS.toml.apex-backup）。",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
