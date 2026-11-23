@@ -11,8 +11,9 @@ public static class Health
 {
     public sealed record Item(Finding Finding, HealthArea Area, IReadOnlyList<string> Files);
 
-    // conflicts: ModConflicts' scan (seconds on a cold cache: call Gather off the UI thread when passing it)
-    public static List<Item> Gather(Game g, State s, string docs, Release? apex, IReadOnlyList<ModFile>? mods = null, ConflictCheck? conflicts = null)
+    // conflicts: ModConflicts' scan (seconds on a cold cache: call Gather off the UI thread when passing it).
+    // beforePlay: only Verify's and Compat's findings, the ones that decide a start (every StopsApex item is one of them)
+    public static List<Item> Gather(Game g, State s, string docs, Release? apex, IReadOnlyList<ModFile>? mods = null, ConflictCheck? conflicts = null, bool beforePlay = false)
     {
         var items = new List<Item>();
         // each analyzer on its own: one that throws is logged and the others still run
@@ -23,6 +24,7 @@ public static class Health
         }
         Add("files", () => Verify.Files(g, s, apex).Select(f => new Item(f, AreaOf(f), [])));
         Add("compatibility", () => Compat.Check(g, s, docs).Select(f => new Item(f, AreaOf(f), [])));
+        if (beforePlay) return items;
         if (mods is not null) Add("mods", () => ModChecks.Run(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
         if (mods is not null && conflicts is not null) Add("conflicts", () => conflicts.Check(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
         Add("saves", () => SaveHealth.Findings(SaveHealth.Check(docs), docs).Select(f => new Item(f, HealthArea.Saves, [])));
