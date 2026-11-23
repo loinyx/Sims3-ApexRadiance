@@ -3,9 +3,11 @@
 // Part of Apex Radiance. Credits: @loinyx
 #include "string_table_index.h"
 #include "string_table_index_core.h"
+#include "string_table_index_culprit.h"
 #include "apex_log.h"
 #include "apex_paths.h"
 #include "game_addresses.h"
+#include "hook_chain.h"
 #include "memory_patch.h"
 #include <windows.h>
 #include <atomic>
@@ -45,10 +47,16 @@ constexpr int kProbeHashAt = 0x0D, kProbeEndAt = 0x33;
 constexpr BYTE kProbeEnd[] = {0x8D, 0x81, 0xBC, 0x7B, 0x00, 0x00};
 constexpr BYTE kWalkEnd[] = {0x3B, 0x8F, 0xE4, 0x7B, 0x00, 0x00};
 
-bool LayoutOk() {
+// STBL_Find, from the walk's call to it; 0 when that call is not there
+uintptr_t Probe() {
     const uintptr_t call = g_walk + kWalkProbeCall;
-    if (*reinterpret_cast<const BYTE*>(call) != 0xE8) return false;
-    const uintptr_t probe = call + 5 + *reinterpret_cast<const int32_t*>(call + 1);
+    if (*reinterpret_cast<const BYTE*>(call) != 0xE8) return 0;
+    return call + 5 + *reinterpret_cast<const int32_t*>(call + 1);
+}
+
+bool LayoutOk() {
+    const uintptr_t probe = Probe();
+    if (!probe) return false;
     return MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(g_walk + kWalkEndCmp), kWalkEnd, sizeof kWalkEnd) &&
            MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(probe + kProbeHashAt), kProbeHash, sizeof kProbeHash) &&
            MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(probe + kProbeEndAt), kProbeEnd, sizeof kProbeEnd);
@@ -121,6 +129,54 @@ __declspec(naked) void WalkStub() {
     }
 }
 
+// Code a stand-down compares: address, the bytes Apex expects there
+struct Span {
+    uintptr_t at;
+    const BYTE* bytes;
+    size_t n;
+};
+
+bool ReadPtr(uintptr_t at, uintptr_t* value) { return MemPatch::ReadBytes(at, value, sizeof *value); }
+
+constexpr const char* kGameExe = "<game exe>"; // (JumpModule: the jump lands in the game's own exe)
+
+// The module a jump lands in, following up to 4 jumps through memory outside any module (trampolines, loader stubs)
+std::string JumpModule(uintptr_t at, bool* jumped) {
+    for (int hop = 0; hop < 4; ++hop) {
+        BYTE b[8] = {};
+        if (!MemPatch::ReadBytes(at, b, sizeof b)) return {};
+        const uintptr_t to = Culprit::JumpTarget(b, sizeof b, at, &ReadPtr);
+        if (!to) return {};
+        *jumped = true;
+        HMODULE mod = nullptr;
+        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(to), &mod) && mod)
+            return mod == GetModuleHandleW(nullptr) ? std::string(kGameExe) : HookChain::ModuleOf(reinterpret_cast<const void*>(to));
+        at = to;
+    }
+    return {};
+}
+
+// Names who changed the code of a stand-down: the module a patch over the first changed span jumps into (decoded at the
+// span's start, then at its first changed byte), else a loaded known mod with a setting for this site (an in-place change
+// has no jump).
+// shown: the address in the text (0: the first changed span's)
+std::string Changed(Culprit::Site site, uintptr_t shown, std::initializer_list<Span> spans) {
+    bool jumped = false;
+    for (const Span& s : spans) {
+        if (!s.at || MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(s.at), s.bytes, s.n)) continue;
+        if (!shown) shown = s.at;
+        size_t d = 0;
+        while (d + 1 < s.n && *reinterpret_cast<const BYTE*>(s.at + d) == s.bytes[d]) ++d;
+        for (const uintptr_t at : {s.at, s.at + d})
+            if (const std::string m = JumpModule(at, &jumped); !m.empty() && m != "?")
+                return m == kGameExe ? Culprit::DescribeExe(site, shown) : Culprit::Describe(site, shown, m, false);
+    }
+    if (!jumped)
+        for (const auto& k : Culprit::kKnown)
+            if (k.fix[static_cast<int>(site)] && GetModuleHandleA(k.file)) return Culprit::Describe(site, shown, k.file, false, true);
+    return Culprit::Describe(site, shown, {}, jumped);
+}
+
 bool StandDown(std::string* error, const std::string& why) {
     LOG_WARNING("[StringTableIndex] Off: " + why);
     if (error) *error = "Faster text lookups: " + why;
@@ -144,16 +200,26 @@ bool Start(std::string* error) {
     g_walk = GameAddr::Get(Id::StblWalk);
     g_walkResume = g_walk + kResume;
     const uintptr_t clear = GameAddr::Get(Id::StblClear), add = GameAddr::Get(Id::StblAdd), rebuild = GameAddr::Get(Id::StblRebuild);
+    using Culprit::Site;
     if (!MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(entry), kEntry, sizeof kEntry))
-        return StandDown(error, std::format("the text lookup's entry ({:#010x}) was changed by another mod", entry));
-    if (g_walk <= entry || g_walk - entry > 0x40 || !MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(g_walk), kWalk, sizeof kWalk) ||
+        return StandDown(error, Changed(Site::Entry, entry, {{entry, kEntry, sizeof kEntry}}));
+    if (g_walk <= entry || g_walk - entry > 0x40)
+        return StandDown(error, std::format("the table walk ({:#010x}) is not where it should be", g_walk));
+    if (!MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(g_walk), kWalk, sizeof kWalk) ||
         !MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(g_walkResume), kResumeBytes, sizeof kResumeBytes) ||
         !MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(g_walkResume + 4), kResumeTail, sizeof kResumeTail))
-        return StandDown(error, std::format("the table walk ({:#010x}) differs (another mod changed it?)", g_walk));
+        return StandDown(error, Changed(Site::Walk, g_walk,
+                                        {{g_walk, kWalk, sizeof kWalk}, {g_walkResume, kResumeBytes, sizeof kResumeBytes}, {g_walkResume + 4, kResumeTail, sizeof kResumeTail}}));
     if (!MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(clear), kClear, sizeof kClear) || !MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(add), kAdd, sizeof kAdd) ||
         !MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(rebuild), kRebuild, sizeof kRebuild))
-        return StandDown(error, "the string table list's functions differ (another mod changed them?)");
-    if (!LayoutOk()) return StandDown(error, "the string tables' hash layout differs (another mod changed it?)");
+        return StandDown(error, Changed(Site::ListFunctions, 0, {{clear, kClear, sizeof kClear}, {add, kAdd, sizeof kAdd}, {rebuild, kRebuild, sizeof kRebuild}}));
+    if (!LayoutOk()) {
+        const uintptr_t probe = Probe();
+        return StandDown(error, Changed(Site::Layout, probe ? probe : g_walk,
+                                        {{g_walk + kWalkEndCmp, kWalkEnd, sizeof kWalkEnd},
+                                         {probe ? probe + kProbeHashAt : 0, kProbeHash, sizeof kProbeHash},
+                                         {probe ? probe + kProbeEndAt : 0, kProbeEnd, sizeof kProbeEnd}}));
+    }
 
     g_clear = reinterpret_cast<ClearFn>(clear);
     g_add = reinterpret_cast<AddFn>(add);

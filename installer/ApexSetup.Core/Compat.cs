@@ -131,6 +131,7 @@ public static class Compat
             && Values(File.ReadAllText(s3ppIni), "Patches", "ShortWaitSpin", "ThreadStackDiet").Any(v => int.TryParse(v, out var n) && n > 0))
             f.Add(new(Severity.Warning, "Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup).",
                 Array.Empty<string>(), () => Rewrite(s3ppIni, t => Set(t, "Patches", new[] { "ShortWaitSpin", "ThreadStackDiet" }, v => v != "0", "0"))));
+        TextLookupsConflict(f, s, bin, docs, packages, s3pp, s3ppIni);
 
         var bridge = s.Layer == Layer.Bridge;
         // S3SS uncompressed textures stutter under the bridge (framework/s3ss_textures.cpp)
@@ -165,6 +166,46 @@ public static class Compat
             fix();
         } }).ToList();
     }
+
+    // Faster text lookups (features/string_table_index.cpp) on in ApexRadiance.toml while another mod changes the same game
+    // code: it stays off in game. Read only (the other mod's files are never changed); one finding, the first cause found:
+    // CCStringMerge's package, Sims3Performance.ini with LocalizedStringCache or StblBucketLayoutTuning on (a missing ini or
+    // key is on, as the mod's own ini says), else the module the last game's stand-down named (ApexRadiance_LOG.txt) while
+    // that file is still in Game\Bin (a stale line about a mod already removed shows nothing)
+    static void TextLookupsConflict(List<Finding> f, State s, string bin, string docs, List<string> packages, string? s3pp, string s3ppIni)
+    {
+        var toml = Engine.ApexToml(docs);
+        if (s.ApexVersion is null || !File.Exists(toml) || Values(File.ReadAllText(toml), "patches.StringTableIndex", "enabled").LastOrDefault() != "true") return;
+        const string merged = "CCStringMerge_Strings.package";
+        if (packages.Any(p => p.Equals(Path.Combine("Packages", merged), StringComparison.OrdinalIgnoreCase)))
+        {
+            f.Add(new(Severity.Warning, "Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}.", new[] { merged }));
+            return;
+        }
+        if (s3pp is not null)
+        {
+            var ini = File.Exists(s3ppIni) ? File.ReadAllText(s3ppIni) : "";
+            var on = new[] { "LocalizedStringCache", "StblBucketLayoutTuning" }
+                .Where(k => !int.TryParse(Values(ini, "Patches", k).LastOrDefault() ?? "1", out var n) || n != 0).ToList();
+            if (on.Count > 0)
+            {
+                f.Add(new(Severity.Warning, "Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}.",
+                    new[] { "Sims 3 Performance Patch", Path.GetRelativePath(bin, s3pp), string.Join(" and ", on.Select(k => k + "=0")), Path.GetRelativePath(bin, s3ppIni) }));
+                return;
+            }
+        }
+        var log = Path.Combine(docs, "Apex Radiance", "ApexRadiance_LOG.txt");
+        if (File.Exists(log) && StandDownModule(Scan.ReadShared(log)) is { } file && !file.Equals("Sims3Performance.asi", StringComparison.OrdinalIgnoreCase)
+            && (Scan.FindAsi(bin, file) ?? (File.Exists(Path.Combine(bin, file)) ? Path.Combine(bin, file) : null)) is { } path)
+            f.Add(new(Severity.Warning, "Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}.",
+                new[] { Path.GetRelativePath(bin, path) }));
+    }
+
+    // the module file the last string table index stand-down in an Apex log names (string_table_index_culprit.h Describe:
+    // "changed [likely ]by <name> (<file>)" or "changed [likely ]by <file>"), null when none
+    public static string? StandDownModule(string log) =>
+        Regex.Matches(log, @"\[StringTableIndex\] Off: [^\r\n]*? was changed (?:likely )?by (?:[^\r\n(]*\(([^()\r\n]+\.(?:asi|dll))\)|([^\s()]+\.(?:asi|dll)))\.", RegexOptions.IgnoreCase)
+            .LastOrDefault() is { } m ? (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value) : null;
 
     // What Apex Radiance recommends in game (apex_gui.cpp: Overview, Compatibility, Attention), in its words where they fit.
     // Only files that exist are read; a value Setup cannot read is reported and its file left as it is. Apex makes them only
