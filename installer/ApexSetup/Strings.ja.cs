@@ -348,5 +348,8 @@ public static partial class Strings
         ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows が Setup にドライバー設定の変更を許可しませんでした。AMD Software を閉じてから、もう一度お試しください。",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "{0} のダウンロードが壊れていました。もう一度お試しください。繰り返す場合は、ウイルス対策の Web 保護やプロキシがダウンロードを変えている可能性があります。",
         ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "ウイルス対策ソフトが Setup に必要なファイルをブロックしました。{0} を除外に追加して、Setup をもう一度実行してください。",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "{0} が Mods\\Packages にある間は、テキスト検索の高速化はオフです。このパッケージがすでに文字列テーブルを統合しています。使うには {0} を削除してください。",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "{0}（{1}）が同じコードを変更しているため、テキスト検索の高速化はオフです。使うには {3} の [Patches] セクションで {2} を設定するか、{1} を削除してください。",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "{0} が同じコードを変更しているため、前回のゲームではテキスト検索の高速化がオフでした。使うには、その MOD のテキスト検索を変更する部分をオフにするか、{0} を削除してください。",
     };
 }

@@ -346,5 +346,8 @@ public static partial class Strings
         ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows lod ikke Setup ændre driverindstillingerne. Luk AMD Software, og prøv igen.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "Overførslen af {0} var beskadiget. Prøv igen; hvis det sker igen, ændrer et webskjold i dit antivirus eller en proxy måske overførslerne.",
         ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "Dit antivirus blokerede en fil, Setup skal bruge; tilføj en undtagelse for {0}, og kør Setup igen.",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "Hurtigere tekstopslag er slået fra, mens {0} ligger i Mods\\Packages: den pakke samler allerede teksttabellerne. Fjern {0} for at bruge det.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "Hurtigere tekstopslag er slået fra, fordi {0} ({1}) ændrer den samme kode. Sæt {2} i afsnittet [Patches] i {3} for at bruge det, eller fjern {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "Hurtigere tekstopslag var slået fra i sidste spil, fordi {0} ændrer den samme kode. Slå den del af modden fra, der ændrer tekstopslag, for at bruge det, eller fjern {0}.",
     };
 }

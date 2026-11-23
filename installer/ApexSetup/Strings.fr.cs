@@ -358,5 +358,8 @@ public static partial class Strings
         ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "Windows n'a pas laissé Setup modifier les réglages du pilote. Fermez AMD Software, puis réessayez.",
         ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "Le téléchargement de {0} est endommagé. Réessayez ; si cela se répète, un bouclier web d'antivirus ou un proxy modifie peut-être les téléchargements.",
         ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "Votre antivirus a bloqué un fichier dont Setup a besoin ; ajoutez une exception pour {0} et relancez Setup.",
+        ["Faster text lookups is off while {0} is in Mods\\Packages: that package already merges the string tables. To use it, remove {0}."] = "La Recherche de textes plus rapide est désactivée tant que {0} est dans Mods\\Packages : ce paquet fusionne déjà les tables de textes. Pour l'utiliser, retirez {0}.",
+        ["Faster text lookups is off because {0} ({1}) changes the same code. To use it, set {2} in the [Patches] section of {3}, or remove {1}."] = "La Recherche de textes plus rapide est désactivée car {0} ({1}) modifie le même code. Pour l'utiliser, mettez {2} dans la section [Patches] de {3}, ou retirez {1}.",
+        ["Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}."] = "La Recherche de textes plus rapide était désactivée lors de la dernière partie car {0} modifie le même code. Pour l'utiliser, désactivez la partie de ce mod qui modifie la recherche de textes, ou retirez {0}.",
     };
 }
