@@ -860,7 +860,7 @@ public sealed partial class MainWindow
         // (the open album is always on a dark veil, whatever the theme)
         var veil = new Grid { Background = new AcrylicBrush { TintColor = Rgb(0x0A, 0x0A, 0x0D), TintOpacity = 0.55, TintLuminosityOpacity = 0.62, FallbackColor = Windows.UI.Color.FromArgb(0xE6, 0x0A, 0x0A, 0x0D) }, Opacity = 0, RequestedTheme = ElementTheme.Dark };
         var room = new Canvas();
-        var roomScroll = new ScrollViewer { Content = room, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        var roomScroll = new ScrollViewer { Content = room, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
         veil.Children.Add(roomScroll);
         // the head: the album's name, how many, open it, close
         var head = new Grid { VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(40, 28, 28, 0) };
@@ -908,11 +908,11 @@ public sealed partial class MainWindow
         finally { _boardScale = keepScale; _boardCalm = keepCalm; }
         Windows.Foundation.Size Fit(FrameworkElement c) => c.DesiredSize.Width > 1 ? c.DesiredSize : new Windows.Foundation.Size(cw, ch);
         var top0 = 128.0;
-        var left0 = (w - (cols * cw + (cols - 1) * gap)) / 2;
+        var left0 = Math.Max(40, (w - (cols * cw + (cols - 1) * gap)) / 2);
         var tall = top0 + rows * ch + (rows - 1) * gap + 60;
         if (tall < h) top0 += (h - tall) / 2;
         room.Height = Math.Max(h, top0 + rows * ch + (rows - 1) * gap + 60);
-        room.Width = w;
+        room.Width = Math.Max(w, left0 * 2 + cols * cw + (cols - 1) * gap); // (the pictures keep their size: a narrow window scrolls sideways instead of cutting them)
         for (int i = 0; i < cards.Count; i++)
         {
             var card = cards[i];
@@ -968,10 +968,11 @@ public sealed partial class MainWindow
                 var b = from[i].TransformToVisual(stage).TransformBounds(new Windows.Foundation.Rect(0, 0, from[i].ActualWidth, from[i].ActualHeight));
                 var size = Fit(card);
                 var sy = roomScroll.VerticalOffset;
+                var sx = roomScroll.HorizontalOffset;
                 var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
                 Tween(fall, t, "ScaleX", b.Width / Math.Max(1, size.Width), 360, ease);
                 Tween(fall, t, "ScaleY", b.Width / Math.Max(1, size.Width), 360, ease);
-                Tween(fall, t, "TranslateX", b.X + b.Width / 2 - (x + size.Width / 2), 360, ease);
+                Tween(fall, t, "TranslateX", b.X + b.Width / 2 - (x - sx + size.Width / 2), 360, ease);
                 Tween(fall, t, "TranslateY", b.Y + b.Height / 2 - (y - sy + size.Height / 2), 360, ease);
             }
             fall.Completed += (_, _) =>
