@@ -16,7 +16,7 @@ static class ModConflictsTests
 
     // An assembly with one method, Fixture.Entry.Init, whose body runs ops: ("call", ns, type, member, 0), ("stsfld", ...),
     // ("listen", "", "", "", event id) as EventTracker.AddListener(id, new ProcessEventDelegate(...)). events: an EventTypeId enum.
-    internal static byte[] Asm(string name, Guid mvid, (string Op, string Ns, string Type, string Member, int Id)[] ops, (string Name, int Value)[]? events = null)
+    internal static byte[] Asm(string name, Guid mvid, (string Op, string Ns, string Type, string Member, int Id)[] ops, (string Name, int Value)[]? events = null, string[]? refs = null)
     {
         var mb = new MetadataBuilder();
         StringHandle S(string s) => mb.GetOrAddString(s);
@@ -25,6 +25,7 @@ static class ModConflictsTests
         mb.AddAssembly(S(name), new Version(1, 0, 0, 0), default, default, 0, AssemblyHashAlgorithm.None);
         var corlib = mb.AddAssemblyReference(S("mscorlib"), new Version(4, 0, 0, 0), default, default, 0, default);
         var game = mb.AddAssemblyReference(S("Sims3GameplaySystems"), new Version(0, 0, 0, 0), default, default, 0, default);
+        foreach (var r in refs ?? []) mb.AddAssemblyReference(S(r), new Version(1, 0, 0, 0), default, default, 0, default);
         TypeReferenceHandle Ref(AssemblyReferenceHandle a, string ns, string t) => mb.AddTypeReference(a, S(ns), S(t));
         var voidSig = Sig(b => b.MethodSignature().Parameters(0, r => r.Void(), _ => { }));
         var objField = Sig(b => b.FieldSignature().Object());

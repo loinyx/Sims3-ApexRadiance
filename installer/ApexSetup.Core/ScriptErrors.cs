@@ -169,36 +169,43 @@ public static partial class ScriptErrors
         return map;
     }
 
-    // the type names of every S3SA assembly in a package (ModConflicts' reader and decryption); the game's own assemblies,
-    // as a core mod carries them, are left out
-    static string[] TypesIn(string package)
+    // the type names of every S3SA assembly in a package; the game's own assemblies, as a core mod carries them, are left out
+    static string[] TypesIn(string package) => Read(package, r =>
     {
+        if (Regex.IsMatch(r.GetString(r.GetAssemblyDefinition().Name), @"^(Sims3GameplaySystems|Sims3GameplayObjects|Sims3StoreObjects|Sims3Metadata|ScriptCore|SimIFace|UI|mscorlib|System(\.Xml)?)$")) return [];
+        string Full(TypeDefinitionHandle h)
+        {
+            var d = r.GetTypeDefinition(h);
+            var outer = d.GetDeclaringType();
+            var ns = r.GetString(d.Namespace);
+            return !outer.IsNil ? Full(outer) + "+" + r.GetString(d.Name) : ns.Length > 0 ? ns + "." + r.GetString(d.Name) : r.GetString(d.Name);
+        }
+        return r.TypeDefinitions.Select(Full).Where(n => n != "<Module>").ToArray();
+    }).SelectMany(t => t).ToArray();
+
+    // each S3SA assembly in a package: its name and the names of the assemblies it references
+    internal static List<(string Name, string[] Refs)> ReferencesIn(string package) => Read(package, r =>
+        (r.GetString(r.GetAssemblyDefinition().Name), r.AssemblyReferences.Select(h => r.GetString(r.GetAssemblyReference(h).Name)).ToArray()));
+
+    // one result per S3SA assembly in a package (ModConflicts' reader and decryption); a damaged one is left out
+    static List<T> Read<T>(string package, Func<MetadataReader, T> read)
+    {
+        var list = new List<T>();
         try
         {
             var pkg = ModConflicts.Package.Open(package);
-            var list = new List<string>();
             foreach (var e in pkg.Entries.Where(e => e.Type == ModConflicts.TypeS3sa))
                 try
                 {
                     var b = pkg.Read(e);
                     if ((ModConflicts.PeImage(b) ?? ModConflicts.PeImage(ModConflicts.DecryptS3sa(b))) is not { } img) continue;
                     using var pe = new PEReader(ImmutableArray.Create(img));
-                    if (!pe.HasMetadata) continue;
-                    var r = pe.GetMetadataReader();
-                    if (Regex.IsMatch(r.GetString(r.GetAssemblyDefinition().Name), @"^(Sims3GameplaySystems|Sims3GameplayObjects|Sims3StoreObjects|Sims3Metadata|ScriptCore|SimIFace|UI|mscorlib|System(\.Xml)?)$")) continue;
-                    string Full(TypeDefinitionHandle h)
-                    {
-                        var d = r.GetTypeDefinition(h);
-                        var outer = d.GetDeclaringType();
-                        var ns = r.GetString(d.Namespace);
-                        return !outer.IsNil ? Full(outer) + "+" + r.GetString(d.Name) : ns.Length > 0 ? ns + "." + r.GetString(d.Name) : r.GetString(d.Name);
-                    }
-                    list.AddRange(r.TypeDefinitions.Select(Full).Where(n => n != "<Module>"));
+                    if (pe.HasMetadata) list.Add(read(pe.GetMetadataReader()));
                 }
                 catch (Exception x) when (x is BadImageFormatException or InvalidDataException or IndexOutOfRangeException or ArgumentException or InvalidOperationException) { }
-            return list.ToArray();
         }
-        catch (Exception e) when (e is InvalidDataException or IOException or ArgumentException or IndexOutOfRangeException) { return []; }
+        catch (Exception e) when (e is InvalidDataException or IOException or ArgumentException or IndexOutOfRangeException) { }
+        return list;
     }
 
     // each with the files of the mod it names (to show it in Mods)

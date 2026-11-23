@@ -100,6 +100,22 @@ static class HealthTests
         // a mod since removed: its old logs no longer count
         Write(Path.Combine(docs, "GoneMod_Error_2030-01-01_1__x.xml"), "<GoneMod><Line>ERROR\nSystem.InvalidCastException: bad\n#0: 0x0 call in GoneMod.GoneMod.Boot:Run () ()\n</Line></GoneMod>");
 
+        // an add-on script mod without its base mod (Mono's and the game's assemblies are always there)
+        ModFile Script(string name, string[] refs)
+        {
+            var p = Path.Combine(docs, @"Mods\Packages", name + ".package");
+            File.WriteAllBytes(p, ModConflicts.WritePackage([(ModConflicts.TypeS3sa, 0u, 1ul, ModConflicts.S3saWrap(ModConflictsTests.Asm(name, Guid.NewGuid(), [], refs: refs)))]));
+            return new(p, @"Mods\Packages\" + name + ".package", new FileInfo(p).Length, ModKind.Script, true, false);
+        }
+        var addon = Script("AddOnMod", ["BaseMod", "System.Xml", "ScriptCore"]);
+        var lost = new MissingAssembly().Check([mods[0], addon], null!, docs).ToList();
+        var baseMod = Script("BaseMod", []);
+        check(lost.Count == 1 && lost[0].Finding.Args.SequenceEqual(["AddOnMod.package", "BaseMod"]) && lost[0].Files.Single() == addon.Path
+              && !new MissingAssembly().Check([addon, baseMod], null!, docs).Any() && new MissingAssembly().Check([addon, baseMod with { Enabled = false }], null!, docs).Count() == 1,
+            "mod checks: an add-on whose base assembly is missing or switched off is named; with its base mod installed it is not");
+        File.Delete(addon.Path);
+        File.Delete(baseMod.Path);
+
         var r = ScriptErrors.Read(docs, DateTime.Now.AddDays(-1), mods);
         var fixture = r.ByMod.FirstOrDefault(m => m.Mod == "fixturemod");
         check(r.Total == 5 && fixture is { Count: 2 } && fixture.Files.SequenceEqual([pkg]),
