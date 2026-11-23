@@ -59,9 +59,10 @@ public sealed class MissingAssembly : IModCheck
             found.AddRange(asms.Select(a => (m, a.Name, a.Refs)));
         }
         var provided = found.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var a in found)
-            if (a.Refs.Where(r => !Game.IsMatch(r) && !provided.Contains(r)).Distinct(StringComparer.OrdinalIgnoreCase).ToList() is { Count: > 0 } missing)
+        // one finding per package: a mod with several assemblies (Seasons Expanded has seven) is named once
+        foreach (var mod in found.GroupBy(a => a.Mod))
+            if (mod.SelectMany(a => a.Refs).Where(r => !Game.IsMatch(r) && !provided.Contains(r)).Distinct(StringComparer.OrdinalIgnoreCase).ToList() is { Count: > 0 } missing)
                 yield return new(new(Severity.Warning, "{0} needs {1}, which no installed mod provides. Until it is there, script mods loaded after it may not start.",
-                    [a.Mod.Name, string.Join(", ", missing)]), [a.Mod.Path]);
+                    [mod.Key.Name, string.Join(", ", missing)]), [mod.Key.Path]);
     }
 }

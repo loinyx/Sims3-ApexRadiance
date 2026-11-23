@@ -113,6 +113,14 @@ static class HealthTests
         check(lost.Count == 1 && lost[0].Finding.Args.SequenceEqual(["AddOnMod.package", "BaseMod"]) && lost[0].Files.Single() == addon.Path
               && !new MissingAssembly().Check([addon, baseMod], null!, docs).Any() && new MissingAssembly().Check([addon, baseMod with { Enabled = false }], null!, docs).Count() == 1,
             "mod checks: an add-on whose base assembly is missing or switched off is named; with its base mod installed it is not");
+        // a package with two assemblies that both need the missing one: named once
+        var twoPath = Path.Combine(docs, @"Mods\Packages", "TwoAsm.package");
+        File.WriteAllBytes(twoPath, ModConflicts.WritePackage([(ModConflicts.TypeS3sa, 0u, 1ul, ModConflicts.S3saWrap(ModConflictsTests.Asm("TwoA", Guid.NewGuid(), [], refs: ["BaseMod"]))),
+            (ModConflicts.TypeS3sa, 0u, 2ul, ModConflicts.S3saWrap(ModConflictsTests.Asm("TwoB", Guid.NewGuid(), [], refs: ["BaseMod", "OtherBase"])))]));
+        var two = new ModFile(twoPath, @"Mods\Packages\TwoAsm.package", new FileInfo(twoPath).Length, ModKind.Script, true, false);
+        var twoLost = new MissingAssembly().Check([two], null!, docs).ToList();
+        check(twoLost.Count == 1 && twoLost[0].Finding.Args[1] == "BaseMod, OtherBase", "mod checks: a package with several assemblies is named once, with everything it misses");
+        File.Delete(twoPath);
         File.Delete(addon.Path);
         File.Delete(baseMod.Path);
 
