@@ -155,6 +155,10 @@ try
     // 5. wrong ts3native build is reported
     File.WriteAllText(B("ts3native.log"), "SKIP all: host is not TS3W.exe at 0x400000");
     Check(Scan.Run(g, docs).Ts3NativeWrongBuild, "wrong ts3native build detected");
+    File.WriteAllText(B("probe.bin"), "xx Apex Edition xx ###S3SSWindow");
+    Check(Scan.ContainsEach(B("probe.bin"), "apex edition", "S3SS Log - Started at ", "###s3sswindow").SequenceEqual([true, false, true]) && Scan.Contains(B("probe.bin"), "APEX"),
+        "one read of a file answers each text, case-insensitive");
+    File.Delete(B("probe.bin"));
 
     // 6. switch the renderer: bridge -> DXVK (as the UI's Apply does: remove, then install), then DXVK -> the game's own D3D9
     Engine.Remove(g, Components.Bridge, docs); // nothing installed by Setup: a no-op

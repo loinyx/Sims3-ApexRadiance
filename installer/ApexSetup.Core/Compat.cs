@@ -45,9 +45,10 @@ public static class Compat
             var rel = Path.GetRelativePath(bin, asi);
             // the old standalone (S3SSApex.asi under another name): the Apex Edition name without S3SS's two strings, as
             // s3ss_detect.cpp tells them apart; S3SS stays recommended
-            if (Scan.Contains(asi, "Apex Edition") && !(Scan.Contains(asi, "S3SS Log - Started at ") && Scan.Contains(asi, "###S3SSWindow")))
+            var has = Scan.ContainsEach(asi, "Apex Edition", "S3SS Log - Started at ", "###S3SSWindow", "Another copy of ApexRadiance.asi is already running");
+            if (has[0] && !(has[1] && has[2]))
                 f.Add(new(Severity.Error, "{0} in Game\\Bin loads a second copy of Apex Radiance.", new[] { rel }, () => MoveAside(bin, rel)));
-            else if (Scan.Contains(asi, "Apex Edition"))
+            else if (has[0])
             {
                 combined = true;
                 f.Add(new(Severity.Error, "{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it).",
@@ -55,7 +56,7 @@ public static class Compat
             }
             // a renamed ApexRadiance.asi: the copy loaded second stays idle (apex_main.cpp DllMain; its debugger line is in
             // every release since 1.0.0 and not in the combined build); without ApexRadiance.asi it is the copy that runs
-            else if (File.Exists(B("ApexRadiance.asi")) && Scan.Contains(asi, "Another copy of ApexRadiance.asi is already running"))
+            else if (File.Exists(B("ApexRadiance.asi")) && has[3])
                 f.Add(new(Severity.Warning, "{0} in Game\\Bin is another copy of Apex Radiance; only one copy runs. Apply moves it to the backup folder.",
                     new[] { rel }, () => MoveAside(bin, rel), Suggest: "Two copies of the mod"));
         }
