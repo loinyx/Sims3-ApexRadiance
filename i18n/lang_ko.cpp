@@ -171,6 +171,8 @@ const I18n::Pair kPairs[] = {
     {"Pie menus and names show faster with a lot of custom content", "사용자 지정 콘텐츠가 많아도 파이 메뉴와 이름이 더 빨리 표시됩니다"},
     {"Every name and text the game shows (pie menus, tooltips, catalog names) is looked up in each of its string tables in turn, one table per package with text, so thousands of custom content packages make every lookup slower. This keeps one index of the tables already loaded and goes straight to the table that answers, with the same text. Part of Apex Radiance. Credits: @loinyx", "게임이 보여 주는 모든 이름과 텍스트(파이 메뉴, 툴팁, 카탈로그 이름)는 텍스트가 있는 패키지마다 하나씩 있는 문자열 테이블을 차례로 뒤져 찾기 때문에, 사용자 지정 콘텐츠 패키지가 수천 개면 검색할 때마다 느려집니다. 이 기능은 이미 불러온 테이블의 색인을 하나 유지하고 답이 있는 테이블로 바로 가며, 텍스트는 같습니다. Apex Radiance의 일부입니다. Credits: @loinyx"},
     {"4K videos, and ReShade looks that leave Sims' hair alone", "4K 동영상, 그리고 심의 머리카락은 그대로 두는 ReShade 룩"},
+    {"Performance: Faster text lookups names the mod that keeps it off, and Setup warns about it", "성능: 텍스트 검색 가속을 꺼 두게 만드는 모드의 이름을 알려 주고, 설치 프로그램도 경고합니다"},
+    {"Night Lights: the game no longer freezes at the loading screen in rare starts", "야간 조명: 드문 실행에서 로딩 화면에 멈추던 문제가 사라졌습니다"},
     {"Shaders: ReShade Effect Shader Toggler .ini files choose where each shader runs", "셰이더: ReShade Effect Shader Toggler의 .ini 파일이 각 셰이더가 적용될 위치를 고릅니다"},
     {"Shaders: On Sims' hair sets how much of each shader reaches Sims' hair", "셰이더: 심의 머리카락에서 각 셰이더가 심의 머리카락에 얼마나 적용될지 정합니다"},
     {"Capture: videos in 4K", "캡처: 4K 동영상"},
