@@ -234,7 +234,7 @@ public sealed partial class MainWindow
         Process p;
         try { p = Launch.Start(g, save); }
         catch (Exception e) { App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
-        var session = _session = new Session(p);
+        var session = _session = new Session(p, Docs);
         _running = true;
         if (_settings.HideWhilePlaying) { TrayShow(T("Apex Launcher · The Sims 3 is running")); AppWindow.Hide(); }
         RefreshAll();
