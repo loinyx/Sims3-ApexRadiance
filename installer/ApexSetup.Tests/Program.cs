@@ -1397,7 +1397,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         ModChecks.All.Add(new FakeModCheck(false));
         ModChecks.All.Add(new FakeModCheck(true));
         var mf = ModChecks.Run(Mods.List(lg, ldocs), lg, ldocs);
-        ModChecks.All.Clear();
+        ModChecks.All.RemoveAll(c => c is FakeModCheck);
         Check(mf.Count == 1 && mf[0].Files.Single().EndsWith("hair.package"), "mod checks: a finding names its mod; a failing check is skipped");
         Check(Health.StateOf(mf.Select(m => new Health.Item(m.Finding, HealthArea.Mods, m.Files))) == HealthState.NeedsYou
             && Health.StateOf([]) == HealthState.Ready
