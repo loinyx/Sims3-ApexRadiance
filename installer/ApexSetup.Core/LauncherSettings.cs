@@ -12,6 +12,9 @@ public sealed class LauncherSettings
     public bool WelcomedBack { get; set; }
     public bool DesktopShortcut { get; set; } = true;
     public string HomePicture { get; set; } = "gallery"; // the picture on top of Home: "gallery", "household" or "none"
+    public int HomePictureHeight { get; set; } = 330;     // its height on Home, in pixels
+    public int HomePictureStrength { get; set; } = 100;   // how strongly it shows, 30 to 100 (%)
+    public string Backdrop { get; set; } = "mica";        // the window's background: "mica", "micaalt", "acrylic" or "solid"
     public bool NavCompact { get; set; }                  // the side pane kept to its icons (the toggle at its top)
 
     static string FilePath => Path.Combine(Paths.Data, "settings.json");

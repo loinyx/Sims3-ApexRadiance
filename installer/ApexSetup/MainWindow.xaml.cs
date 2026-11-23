@@ -48,6 +48,7 @@ public sealed partial class MainWindow : Window
         // (a test run can pick the theme; otherwise it is Windows')
         if (Environment.GetEnvironmentVariable("APEX_LAUNCHER_THEME") is { } pick) Root.RequestedTheme = pick == "light" ? ElementTheme.Light : ElementTheme.Dark;
         _light = Root.ActualTheme == ElementTheme.Light;
+        ApplyBackdrop();
         ThemeChrome();
         Root.ActualThemeChanged += (_, _) => ThemeChanged();
         _ui.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(ThemeChanged);

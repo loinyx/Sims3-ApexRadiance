@@ -89,8 +89,8 @@ public sealed partial class MainWindow
         if (mode == "gallery" && HomePicture() is { } shot)
         {
             // the picture fades into the card at its foot, so the words and buttons sit on the card's own colour
-            var g = new Grid { Height = 330 };
-            g.Children.Add(new Image { Source = Thumb(shot, 1600), Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Center });
+            var g = new Grid { Height = Math.Clamp(_settings.HomePictureHeight, 200, 480) };
+            g.Children.Add(new Image { Source = Thumb(shot, 1600), Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Center, Opacity = Math.Clamp(_settings.HomePictureStrength, 30, 100) / 100.0 });
             var card = ((SolidColorBrush)Res("ApexCardBrush")).Color;
             var fade = new LinearGradientBrush { StartPoint = new(0, 1), EndPoint = new(0, 0) };
             fade.GradientStops.Add(new GradientStop { Color = card, Offset = 0 });
@@ -427,5 +427,20 @@ public sealed partial class MainWindow
         }
         s.Children.Add(row);
         return s;
+    }
+
+    // the window's background, as chosen in Settings: Windows' Mica (tinted by the desktop wallpaper), its stronger kind,
+    // Acrylic, or the launcher's own solid colour
+    void ApplyBackdrop()
+    {
+        SystemBackdrop = _settings.Backdrop switch
+        {
+            "micaalt" => new MicaBackdrop { Kind = Microsoft.UI.Composition.SystemBackdrops.MicaKind.BaseAlt },
+            "acrylic" => new DesktopAcrylicBackdrop(),
+            "solid" => null,
+            _ => new MicaBackdrop(),
+        };
+        if (_settings.Backdrop == "solid") Root.SetValue(Panel.BackgroundProperty, Res("ApexPaneBrush"));
+        else Root.ClearValue(Panel.BackgroundProperty);
     }
 }
