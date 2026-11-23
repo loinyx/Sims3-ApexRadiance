@@ -38,7 +38,8 @@ public enum SessionEnd { Normal, LowMemory, Crash }
 public sealed record SessionInfo(DateTime Started, TimeSpan Played, long PeakBytes, SessionEnd End, int ExitCode);
 
 // One play session: the game process followed until it closes (also when Steam or the restart host starts it again
-// under the same name), its memory sampled, and how it ended worked out from the exit code and the peak.
+// under the same name), its memory sampled, and how it ended worked out from the exit code, the crash files written
+// during it and the peak.
 public sealed class Session
 {
     // The Sims 3 is 32-bit with 4 GB of address space: a peak this close to it ends as the low-memory crash players know
@@ -51,7 +52,9 @@ public sealed class Session
     public TimeSpan Played => DateTime.Now - Started;
 
     Process? _p;
-    public Session(Process p) => _p = p;
+    readonly string? _docs;
+    // docs: the game's Documents folder, where EA's xcpt logs and Apex Radiance's crash report land
+    public Session(Process p, string? docs = null) => (_p, _docs) = (p, docs);
 
     // samples every interval until the game is gone; progress gets each sample
     public async Task<SessionInfo> WatchAsync(IProgress<Session>? progress = null, TimeSpan? interval = null, CancellationToken ct = default)
@@ -66,22 +69,46 @@ public sealed class Session
                 await Task.Delay(interval ?? TimeSpan.FromSeconds(5), ct);
             }
             try { exit = _p?.ExitCode ?? 0; } catch (InvalidOperationException) { }
-            // a restart (Steam's, the launcher's or the restart host's) brings up a new process within seconds
+            // a restart (Steam's, the launcher's or the restart host's) brings up a new process within seconds; the restart
+            // host first asks the player and waits for the old bridge, so it is followed for as long as it runs
             _p = null;
-            for (int i = 0; i < 10 && _p is null; i++)
+            for (int i = 0; _p is null && (i < 10 || HostRunning()); i++)
             {
                 _p = GameNames.SelectMany(Process.GetProcessesByName).FirstOrDefault();
                 if (_p is null) await Task.Delay(TimeSpan.FromSeconds(2), ct);
             }
             if (_p is null) break;
         }
-        return new SessionInfo(Started, Played, PeakBytes, Classify(exit, PeakBytes), exit);
+        return new SessionInfo(Started, Played, PeakBytes, Classify(exit, PeakBytes, _docs is not null && CrashFileSince(_docs, Started)), exit);
     }
 
-    public static SessionEnd Classify(int exitCode, long peakBytes) =>
-        (uint)exitCode >= 0xC0000000 ? (peakBytes >= LowMemoryBytes ? SessionEnd.LowMemory : SessionEnd.Crash)
+    static bool HostRunning()
+    {
+        var host = Process.GetProcessesByName("ts3wrap");
+        foreach (var p in host) p.Dispose();
+        return host.Length > 0;
+    }
+
+    // a crash the exit code does not show (EA's handler, or a restart that hid it): EA's "xcpt *.txt" or Apex Radiance's
+    // ApexRadiance_Crash.txt/.dmp (framework/crash_report.cpp) written since the session started
+    public static bool CrashFileSince(string docs, DateTime started)
+    {
+        bool Newer(string f) => File.GetLastWriteTime(f) >= started;
+        try
+        {
+            var apex = Path.Combine(docs, "Apex Radiance");
+            return Directory.Exists(docs) && Directory.EnumerateFiles(docs, "xcpt *.txt").Any(Newer)
+                   || new[] { "ApexRadiance_Crash.txt", "ApexRadiance_Crash.dmp" }.Select(n => Path.Combine(apex, n)).Any(f => File.Exists(f) && Newer(f));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); return false; }
+    }
+
+    public static SessionEnd Classify(int exitCode, long peakBytes, bool crashFile = false) =>
+        (uint)exitCode >= 0xC0000000 || crashFile ? (peakBytes >= LowMemoryBytes ? SessionEnd.LowMemory : SessionEnd.Crash)
         : peakBytes >= LowMemoryBytes ? SessionEnd.LowMemory : SessionEnd.Normal;
 
-    // the restart host (ts3wrap) asks the player itself after a low-memory save: the launcher stays quiet then
-    public static bool ShouldOffer(SessionInfo s, bool restartHostOn) => !restartHostOn && s.End != SessionEnd.Normal;
+    // the restart host (ts3wrap) asks the player itself after a low-memory save, but a crash ends it without a question
+    // (docs/features/performance/restart-host.md): the launcher offers after a crash either way
+    public static bool ShouldOffer(SessionInfo s, bool restartHostOn) =>
+        s.End == SessionEnd.Crash || !restartHostOn && s.End == SessionEnd.LowMemory;
 }

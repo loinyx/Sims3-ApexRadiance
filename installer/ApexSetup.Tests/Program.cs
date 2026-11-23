@@ -1434,8 +1434,25 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Check(Session.Classify(0, 1L << 30) == SessionEnd.Normal && Session.Classify(0, 3_500L << 20) == SessionEnd.LowMemory
             && Session.Classify(unchecked((int)0xC0000005), 1L << 30) == SessionEnd.Crash, "a session ends normally, low on memory or in a crash");
         var crash = new SessionInfo(DateTime.Now, TimeSpan.FromHours(1), 1L << 30, SessionEnd.Crash, -1);
-        Check(Session.ShouldOffer(crash, false) && !Session.ShouldOffer(crash, true) && !Session.ShouldOffer(crash with { End = SessionEnd.Normal }, false),
-            "start again is offered after a crash, unless the restart host asks itself");
+        var low = crash with { End = SessionEnd.LowMemory };
+        Check(Session.ShouldOffer(crash, false) && Session.ShouldOffer(crash, true) && !Session.ShouldOffer(crash with { End = SessionEnd.Normal }, false)
+              && Session.ShouldOffer(low, false) && !Session.ShouldOffer(low, true),
+            "start again is offered after a crash, also with the restart host on; after a low-memory end only when the host does not ask itself");
+        Check(Session.Classify(0, 1L << 30, crashFile: true) == SessionEnd.Crash, "a crash file written during the session is a crash, whatever the exit code");
+        var cdocs = Path.Combine(lr, "crashdocs");
+        Directory.CreateDirectory(Path.Combine(cdocs, "Apex Radiance"));
+        var since = DateTime.Now;
+        File.WriteAllText(Path.Combine(cdocs, "xcpt old.txt"), "old");
+        File.SetLastWriteTime(Path.Combine(cdocs, "xcpt old.txt"), since.AddHours(-1));
+        File.WriteAllText(Path.Combine(cdocs, "Apex Radiance", "ApexRadiance_Crash.txt"), "old");
+        File.SetLastWriteTime(Path.Combine(cdocs, "Apex Radiance", "ApexRadiance_Crash.txt"), since.AddHours(-1));
+        var noneNew = !Session.CrashFileSince(cdocs, since);
+        File.WriteAllText(Path.Combine(cdocs, "xcpt 0x00401000 26-11-24 10.00.00.txt"), "new");
+        var xcptNew = Session.CrashFileSince(cdocs, since);
+        File.Delete(Path.Combine(cdocs, "xcpt 0x00401000 26-11-24 10.00.00.txt"));
+        File.WriteAllText(Path.Combine(cdocs, "Apex Radiance", "ApexRadiance_Crash.dmp"), "new");
+        Check(noneNew && xcptNew && Session.CrashFileSince(cdocs, since) && !Session.CrashFileSince(Path.Combine(lr, "no docs"), since),
+            "crash files: EA's xcpt log or Apex's crash report written since the start count, older ones and a missing folder do not");
 
         // the launcher's data moves over from Setup's folder once
         var oldLocal = Paths.LocalAppData;
