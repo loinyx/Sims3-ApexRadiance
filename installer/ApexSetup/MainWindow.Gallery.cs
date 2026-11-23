@@ -48,6 +48,7 @@ public sealed partial class MainWindow
 
     void BuildGallery()
     {
+        _spotlightOpen = false; // (laid again: no album stays open over it)
         var host = ScreenGallery;
         host.Children.Clear();
         if (_game is null) { host.Children.Add(Heading(T("Gallery"))); host.Children.Add(Muted(T("Choose the game first."))); return; }
@@ -847,8 +848,11 @@ public sealed partial class MainWindow
 
     // An album opened from its pile: the board dims and the album's pictures fly out of the pile to the middle, large;
     // a picture opens in the viewer, a click on the dim, the close button or Esc sends them back to the pile.
+    bool _spotlightOpen, _boardStale; // an album open over the board; the board to lay again once it closes
+
     void Spotlight(CustomAlbum album, List<Picture> members, List<FrameworkElement> from)
     {
+        _spotlightOpen = true;
         if (_boardFrame is not Grid stage || _gal is null || members.Count == 0) return;
         var look = Gallery.Look(_gal, _galAlbum);
         var w = stage.ActualWidth;
@@ -974,7 +978,9 @@ public sealed partial class MainWindow
             {
                 stage.Children.Remove(veil);
                 foreach (var f in from) f.Opacity = 1;
-                if (open) { _galAlbum = album.Key; BuildGallery(); }
+                _spotlightOpen = false;
+                if (open) { _boardStale = false; _galAlbum = album.Key; BuildGallery(); }
+                else if (_boardStale) { _boardStale = false; RefreshBoard(page: true); }
             };
             Play(fall);
         }
@@ -2856,6 +2862,7 @@ public sealed partial class MainWindow
         to.Push(_lastKept ?? System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData));
         var state = from.Pop();
         if (System.Text.Json.JsonSerializer.Deserialize(state, SetupJson.Default.GalleryData) is not { } back) return;
+        back.Book = _galBook; back.LastAlbum = _galAlbum; // (undo takes back board changes, not the view or the album you are in)
         _gal = back;
         _lastKept = state;
         _lastKeptAt = 0;
@@ -3167,7 +3174,9 @@ public sealed partial class MainWindow
                 popup.IsOpen = false;
                 _viewing = false;
                 if (_gal is not null && opened == System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData)) return;
-                if (stay && _galBook) RefreshBoard(page: true); else BuildGallery();
+                // (an album open over the board stays open: the board is laid again when it closes)
+                if (stay && _spotlightOpen) _boardStale = true;
+                else if (stay && _galBook) RefreshBoard(page: true); else BuildGallery();
             };
             Play(away);
         }
