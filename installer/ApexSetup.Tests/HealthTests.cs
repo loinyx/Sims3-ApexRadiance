@@ -225,6 +225,12 @@ static class HealthTests
         var items = Health.Gather(g, s, docs, null, Mods(), broken);
         check(items.Count > 0 && items.Any(i => i.Area == HealthArea.Saves || i.Area == HealthArea.Disk || i.Finding.Text.Contains("not installed")) && !items.Any(i => i.Finding.Text.Contains("likely wins")),
             "conflicts: a scan that throws leaves the other Health checks in place");
+        var counting = new ConflictCheck { Offline = true, Scan = o => throw new InvalidOperationException("Play ran the conflict scan") };
+        var play = Health.Gather(g, s, docs, null, Mods(), counting, beforePlay: true);
+        var full = items.Where(i => i.Area is not (HealthArea.Mods or HealthArea.Saves or HealthArea.Disk or HealthArea.Stability)).Select(i => i.Finding.Text).ToList();
+        check(play.All(i => i.Area is not (HealthArea.Saves or HealthArea.Disk or HealthArea.Stability)) && counting.Scans == 0
+              && play.Select(i => i.Finding.Text).Where(t => full.Contains(t)).Count() == full.Count && play.Where(Health.StopsApex).Count() == items.Where(Health.StopsApex).Count(),
+            "health: the check before Play has the files and compatibility findings only, no conflict scan, and the same blockers");
         var (log, failed) = (Engine.Log, 0);
         Engine.Log = _ => failed++;
         List<Health.Item> rest;

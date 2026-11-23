@@ -200,20 +200,24 @@ public sealed partial class MainWindow
             if (WelcomeUpdates().Count > 0 && !_playAnyway) { if (_step is InstallStep or DoneStep) Show(Home); return; } // (it failed or was cancelled: its card said why)
             Show(Home);
         }
-        _ = CheckHealth();
-        await HealthReady();
-        // the fixes that are safe to make without asking (each keeps a copy of the file it changes)
-        if (_settings.FixSafeAutomatically && _health.Any(i => i.Finding.CanFix))
+        // Play waits only for the checks that decide the start; the full check (mod conflicts, saves, script errors) runs
+        // in the background and fills Health when it is done
+        var (docs, apex) = (Docs, _latest.GetValueOrDefault(Releases.Apex));
+        Task<List<Health.Item>> BeforePlay() => _state is { } s ? Task.Run(() => Health.Gather(g, s, docs, apex, beforePlay: true)) : Task.FromResult(new List<Health.Item>());
+        var found = await BeforePlay();
+        // the fixes that are safe to make without asking (each keeps a copy of the file it changes). Never an administrator
+        // prompt from Play: where the game's folder needs one, they wait on Health. A fix that fails does not stop the start.
+        if (_settings.FixSafeAutomatically && found.Any(i => i.Finding.CanFix) && (Elevation.IsElevated || DryRun || Elevation.CanWrite(g.Bin))
+            && await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); },
+                T("Fixed."), null, "Fix incompatible settings"))
         {
-            if (!await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); },
-                T("Fixed."), null, "Fix incompatible settings")) return;
-            RefreshGame();
-            _ = CheckHealth();
-            await HealthReady();
+            RefreshGame(); // (starts the full check too)
+            found = await BeforePlay();
         }
-        if (_healthState == HealthState.Blocked)
+        else _ = CheckHealth();
+        if (Health.StateOf(found) == HealthState.Blocked)
         {
-            var first = _health.First(Health.StopsApex).Finding;
+            var first = found.First(Health.StopsApex).Finding;
             var r = await ShowDialog(new ContentDialog
             {
                 Title = T("One thing before you play"), Content = T(first.Text, first.Args) + "\n\n" + T("The game starts without Apex Radiance until this is fixed."),
