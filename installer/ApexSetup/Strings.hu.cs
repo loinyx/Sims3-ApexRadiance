@@ -106,8 +106,6 @@ public static partial class Strings
             "A(z) {0} olyan játékkódot ír felül, amelyet a Sims 3 Modernization is módosít (együtt nem tesztelték).",
         ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
             "A(z) {0} egy régi verzió, benne az Apexszel; amíg a Game\\Bin mappában van, az Apex Radiance kikapcsolva marad. A launcher áthelyezi a biztonsági mentések mappájába (ha használtad, telepítsd helyette a hivatalos Sims3SettingsSetter-t).",
-        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. The launcher sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
-            "A Sims3Performance ShortWaitSpin és ThreadStackDiet beállítása ütközik a Sims 3 Modernizationnel. A launcher mindkettőt 0-ra állítja (egy másolat megmarad Sims3Performance.ini.apex-backup néven).",
         ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
             "A Sims3SettingsSetter tömörítetlen textúrái akadozást okoznak az RTX Remix bridge mellett. A launcher kikapcsolja őket (egy másolat megmarad S3SS.toml.apex-backup néven).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =

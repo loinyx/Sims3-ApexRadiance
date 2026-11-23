@@ -99,8 +99,6 @@ public static partial class Strings
             "{0}이(가) Sims 3 Modernization도 수정하는 게임 코드를 덮어써요(함께 테스트되지 않음).",
         ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
             "{0}은(는) Apex가 포함된 예전 빌드예요. Game\\Bin에 있는 동안 Apex Radiance는 꺼져 있어요. 런처가 백업 폴더로 옮겨요(사용하던 경우 그 자리에 공식 Sims3SettingsSetter를 설치하세요).",
-        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. The launcher sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
-            "Sims3Performance의 ShortWaitSpin과 ThreadStackDiet가 Sims 3 Modernization과 충돌해요. 런처가 둘 다 0으로 설정해요(사본은 Sims3Performance.ini.apex-backup으로 보관돼요).",
         ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
             "Sims3SettingsSetter의 비압축 텍스처는 RTX Remix bridge에서 끊김을 일으켜요. 런처가 이를 꺼요(사본은 S3SS.toml.apex-backup으로 보관돼요).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =

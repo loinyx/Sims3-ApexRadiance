@@ -98,8 +98,6 @@ public static partial class Strings
             "{0} korvaa pelikoodia, jota myös Sims 3 Modernization muuttaa (ei testattu yhdessä).",
         ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
             "{0} on vanha versio, jonka sisällä on Apex; niin kauan kuin se on kansiossa Game\\Bin, Apex Radiance pysyy pois päältä. Käynnistin siirtää sen varmuuskopiokansioon (asenna sen tilalle virallinen Sims3SettingsSetter, jos käytit sitä).",
-        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. The launcher sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
-            "Sims3Performancen ShortWaitSpin ja ThreadStackDiet ovat ristiriidassa Sims 3 Modernizationin kanssa. Käynnistin asettaa molemmat arvoon 0 (kopio säilytetään nimellä Sims3Performance.ini.apex-backup).",
         ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
             "Sims3SettingsSetterin pakkaamattomat tekstuurit saavat pelin nykimään RTX Remix bridgen kanssa. Käynnistin poistaa ne käytöstä (kopio säilytetään nimellä S3SS.toml.apex-backup).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =

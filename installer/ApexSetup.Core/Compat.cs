@@ -17,6 +17,7 @@ public sealed record Finding(Severity Severity, string Text, string[] Args, Acti
 // mistakes the mods' own guides describe.
 public static class Compat
 {
+    public const string S3ppWaitSuggest = "Turn off ShortWaitSpin";
     const string ModernizationPlayers = "https://github.com/rodneypantonial/sims3-modernization/blob/main/docs/PLAYERS.md";
     const string ModernizationCompat = "https://github.com/rodneypantonial/sims3-modernization/blob/main/docs/COMPATIBILITY.md";
 
@@ -84,12 +85,18 @@ public static class Compat
         if (!File.Exists(cfg) && packages.Count(p => CfgReads(Engine.ResourceCfg, p)) is var reads and > 0)
             f.Add(new(Severity.Error, "Mods has {0} .package files but no Resource.cfg, so the game loads none of them.", new[] { reads.ToString() },
                 () => Engine.EnsureResourceCfg(docs)));
-        // Setup's own packages (ts3fixes, MonoPatcher's subfolder) under a Resource.cfg that does not reach them
+        // Setup's own packages (ts3fixes, MonoPatcher's subfolder) under a Resource.cfg that does not reach them. The Packages
+        // lines go in under their own Priority (else they take the one the player's file ends with); a package they would
+        // not reach either (4 folders deep, loose in Mods) is told to move: a fix that changes nothing would stay forever
+        static string WithPackages(string t) => Engine.ResourceCfg.Split("\r\n").Skip(1).Where(l => l != "" && !t.Contains(l, StringComparison.OrdinalIgnoreCase)).ToList() is { Count: > 0 } add
+            ? t.TrimEnd() + "\r\n" + string.Concat(add.Prepend(Engine.ResourceCfg.Split("\r\n")[0]).Select(l => l + "\r\n")) : t;
         if (File.Exists(cfg) && File.ReadAllText(cfg) is var cfgText)
             foreach (var p in packages.Where(p => (Path.GetFileName(p).Equals("ts3fixes.package", StringComparison.OrdinalIgnoreCase)
                                                    || Path.GetFileName(p).StartsWith("ld_MonoPatcher", StringComparison.OrdinalIgnoreCase)) && !CfgReads(cfgText, p)))
-                f.Add(new(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it. The launcher adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup).",
-                    new[] { p }, () => Rewrite(cfg, t => t.TrimEnd() + "\r\n" + string.Concat(Engine.ResourceCfg.Split("\r\n").Skip(1).Where(l => l != "" && !t.Contains(l, StringComparison.OrdinalIgnoreCase)).Select(l => l + "\r\n")))));
+                f.Add(CfgReads(WithPackages(cfgText), p)
+                    ? new(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it. The launcher adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup).",
+                        new[] { p }, () => Rewrite(cfg, WithPackages))
+                    : new(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it. Move it to Mods\\Packages.", new[] { p }));
 
         // script mods built for the other edition (sims3-modernization's EA app notes)
         // by version, not edition: Origin 1.69.43 takes the 1.69 builds too
@@ -124,13 +131,15 @@ public static class Compat
             f.Add(new(Severity.Warning, "MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed.", Array.Empty<string>(),
                 Link: "https://aka.ms/vs/17/release/vc_redist.x86.exe"));
 
-        // Sims3Performance next to sims3-modernization: the two thread patches clash (framework/s3pp_settings.cpp)
+        // Sims3Performance's ShortWaitSpin patches the same wait imports as S3SS's AdaptiveWait (sims3-modernization docs/69);
+        // its ThreadStackDiet composes with ts3native's [ThreadStack]. Another mod's file: changed on Apply, or by Install when
+        // it installs Sims3Performance (Engine.InstallAsync), never by Play's automatic fixes
         var s3pp = Scan.FindAsi(bin, "Sims3Performance.asi");
         var s3ppIni = Path.ChangeExtension(s3pp ?? "", ".ini");
-        if (s3pp is not null && s.Ts3Native && File.Exists(s3ppIni)
-            && Values(File.ReadAllText(s3ppIni), "Patches", "ShortWaitSpin", "ThreadStackDiet").Any(v => int.TryParse(v, out var n) && n > 0))
-            f.Add(new(Severity.Warning, "Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. The launcher sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup).",
-                Array.Empty<string>(), () => Rewrite(s3ppIni, t => Set(t, "Patches", new[] { "ShortWaitSpin", "ThreadStackDiet" }, v => v != "0", "0"))));
+        if (s3pp is not null && s.S3ss && File.Exists(s3ppIni)
+            && Values(File.ReadAllText(s3ppIni), "Patches", "ShortWaitSpin").Any(v => int.TryParse(v, out var n) && n > 0))
+            f.Add(new(Severity.Warning, "Sims3Performance's ShortWaitSpin patches the same game calls as Sims3SettingsSetter's AdaptiveWait. Apply sets it to 0 (a copy is kept as Sims3Performance.ini.apex-backup).",
+                Array.Empty<string>(), () => Rewrite(s3ppIni, t => Set(t, "Patches", new[] { "ShortWaitSpin" }, v => v != "0", "0")), Suggest: S3ppWaitSuggest));
         TextLookupsConflict(f, s, bin, docs, packages, s3pp, s3ppIni);
 
         var bridge = s.Layer == Layer.Bridge;
