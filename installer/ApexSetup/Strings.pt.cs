@@ -1376,5 +1376,7 @@ public static partial class Strings
         ["Solid colour"] = "Cor sólida",
         ["Window background"] = "Fundo da janela",
         ["Mica and Acrylic take a tint from your desktop wallpaper; Solid colour takes none."] = "Mica e Acrílico pegam um tom do papel de parede da área de trabalho; Cor sólida não pega nenhum.",
+        ["Search folders and tags"] = "Buscar pastas e tags",
+        ["No folder or tag has \"{0}\"."] = "Nenhuma pasta ou tag tem \"{0}\".",
     };
 }

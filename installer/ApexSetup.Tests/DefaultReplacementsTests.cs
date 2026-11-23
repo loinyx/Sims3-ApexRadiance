@@ -106,6 +106,10 @@ static class DefaultReplacementsTests
         var r = DefaultReplacements.Analyze(gi, mod);
         check(r.IsDefault && r.Resources == 7 && r.Replaced == 6 && Math.Abs(r.Share - 6.0 / 7) < 1e-9,
             $"defaults: 6 of the mod's 7 resources replace the game's (name map left out) {r.Replaced}/{r.Resources}");
+        var tuning = Path.Combine(dir, "Mods", "tuning.package");
+        Write(tuning, (Xml, 0, 0x400, [2]));
+        var tuned = DefaultReplacements.Analyze(gi, tuning);
+        check(tuned.Replaced == 1 && !tuned.IsDefault, "defaults: a mod that only overrides the game's tuning is not a default replacement");
         var sofa = r.Objects.FirstOrDefault(o => o.Instance == 0x100);
         check(r.Objects.Count == 2 && sofa is { Name: "Game Sofa", Kind: Kind.BuyComfort, Resources: 2, PngInstance: 0x77 }
             && r.Objects.Any(o => o is { Instance: 0x101, Name: "objectInstance" }),

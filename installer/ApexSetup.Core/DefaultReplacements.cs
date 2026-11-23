@@ -14,7 +14,9 @@ public sealed record ReplacedItem(uint Type, uint Group, ulong Instance, ulong P
 public sealed record Replacements(int Resources, int Replaced, IReadOnlyList<ReplacedItem> Objects, IReadOnlyList<ReplacedItem> CasParts,
     int Images, IReadOnlyList<(string Type, int Count)> Other)
 {
-    public bool IsDefault => Replaced > 0;
+    // a default replacement changes something the player sees: an object, a Create a Sim part or a texture; a mod that
+    // only overrides the game's tuning or scripts (gameplay overhauls) is not one
+    public bool IsDefault => Objects.Count > 0 || CasParts.Count > 0 || Images > 0;
     // 1: a pure default replacement; below 1: overrides bundled with new content
     public double Share => Resources == 0 ? 0 : (double)Replaced / Resources;
     public static readonly Replacements None = new(0, 0, [], [], 0, []);

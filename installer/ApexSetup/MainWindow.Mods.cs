@@ -344,19 +344,49 @@ public sealed partial class MainWindow
         };
         if (!groups.SelectMany(g => g.Items).Any(p => p.Key.Equals(_modPlace, StringComparison.OrdinalIgnoreCase))) _modPlace = AllMods;
 
-        var sig = string.Join("|", groups.Select(g => g.Key + (_collapsed.Contains(g.Key) ? "-" : "+") + string.Join(",", g.Items.Select(p => $"{p.Key}:{p.Count}:{p.Color}")))) + Lang;
+        // a search keeps the places whose name has it, and the folders above a folder that has it (so the tree still reads)
+        var q = _sideQuery;
+        if (q.Length > 0)
+            for (int gi = 0; gi < groups.Count; gi++)
+            {
+                var hits = groups[gi].Items.Where(p => p.Label.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+                var keep = groups[gi].Items.Where(p => hits.Contains(p) || groups[gi].Key == "folders" && hits.Any(h => h.Key.StartsWith(p.Key + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))).ToList();
+                groups[gi] = groups[gi] with { Items = keep };
+            }
+        var sig = q + "?" + string.Join("|", groups.Select(g => g.Key + (_collapsed.Contains(g.Key) ? "-" : "+") + string.Join(",", g.Items.Select(p => $"{p.Key}:{p.Count}:{p.Color}")))) + Lang;
         if (sig == _folderSig) { SelectPlace(); return; }
         _folderSig = sig;
         var items = new List<FrameworkElement>();
         foreach (var (key, label, add, places) in groups)
         {
+            if (q.Length > 0 && places.Count == 0) continue;
             items.Add(GroupHeader(key, label, add));
-            if (_collapsed.Contains(key)) continue;
+            if (_collapsed.Contains(key) && q.Length == 0) continue;
             foreach (var p in places) items.Add(PlaceItem(p));
-            if (key == "tags") items.Add(PlaceItem(new Place(NewTag, T("New tag"), "plus", -1)));
+            if (key == "tags" && q.Length == 0) items.Add(PlaceItem(new Place(NewTag, T("New tag"), "plus", -1)));
         }
+        if (q.Length > 0 && items.Count == 0) items.Add(new TextBlock { Text = T("No folder or tag has \"{0}\".", q), Style = (Style)Application.Current.Resources["ApexMuted"], Margin = new Thickness(10, 4, 10, 0) });
         ModFolders.ItemsSource = items;
         SelectPlace();
+    }
+
+    string _sideQuery = "";
+    int _sideTyped;
+    void OnModSideSearch(object sender, TextChangedEventArgs e)
+    {
+        var mine = ++_sideTyped;
+        After(220, () =>
+        {
+            if (mine != _sideTyped || ModSideSearch.Text.Trim() == _sideQuery) return;
+            _sideQuery = ModSideSearch.Text.Trim();
+            var typing = ModSideSearch.FocusState != FocusState.Unfocused;
+            FillSide();
+            if (typing) ModSideSearch.Focus(FocusState.Programmatic); // (the rebuilt list must not take the keys still being typed)
+        });
+    }
+    void OnModSideSearchKey(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Escape && ModSideSearch.Text.Length > 0) { ModSideSearch.Text = ""; e.Handled = true; }
     }
 
     void SelectPlace() => ModFolders.SelectedItem = (ModFolders.ItemsSource as List<FrameworkElement>)?.FirstOrDefault(i => i.Tag as string == _modPlace);
