@@ -198,4 +198,36 @@ public sealed class SaveCard(Save save) : INotifyPropertyChanged
         }
         catch (Exception) { return null; } // (a thumbnail in a format Windows does not read: the placeholder stays)
     }
+
+    // the household photo cut to its Sims (the game draws them small in a wide transparent frame); the whole photo when
+    // it has no transparent edge
+    public static async Task<ImageSource?> SimsOf(byte[]? bytes)
+    {
+        if (bytes is null || bytes.Length < 8) return null;
+        try
+        {
+            using var ms = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            await ms.WriteAsync(System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.AsBuffer(bytes));
+            ms.Seek(0);
+            var dec = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(ms);
+            var sb = await dec.GetSoftwareBitmapAsync(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied);
+            int w = sb.PixelWidth, h = sb.PixelHeight;
+            var px = new byte[w * h * 4];
+            sb.CopyToBuffer(System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.AsBuffer(px));
+            int x0 = w, y0 = h, x1 = -1, y1 = -1;
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                    if (px[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+            if (x1 < 0 || (x1 - x0 + 1) * (y1 - y0 + 1) > w * h * 0.9) return await ImageOf(bytes);
+            int cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+            var cut = new Windows.Graphics.Imaging.SoftwareBitmap(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, cw, ch, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied);
+            var rows = new byte[cw * ch * 4];
+            for (int y = 0; y < ch; y++) Buffer.BlockCopy(px, ((y0 + y) * w + x0) * 4, rows, y * cw * 4, cw * 4);
+            cut.CopyFromBuffer(System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.AsBuffer(rows));
+            var src = new Microsoft.UI.Xaml.Media.Imaging.SoftwareBitmapSource();
+            await src.SetBitmapAsync(cut);
+            return src;
+        }
+        catch (Exception) { return await ImageOf(bytes); }
+    }
 }
