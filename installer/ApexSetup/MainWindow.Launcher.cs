@@ -845,7 +845,17 @@ public sealed partial class MainWindow
             on => { _settings.FixSafeAutomatically = on; _settings.Save(); }));
         host.Children.Add(Section(T("Updates")));
         host.Children.Add(Row(T("Apex Launcher {0}", App.Version), T("Updates itself from each Apex Radiance release."), null));
+        host.Children.Add(Toggle(T("Install updates when I press Play"), T("The ready updates go in first, then the game starts. Off: Play starts the game as it is."), _settings.InstallUpdatesOnPlay,
+            on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
         host.Children.Add(InstallModeRow());
+        host.Children.Add(Section(T("Home")));
+        var picture = new ComboBox { MinWidth = 200 };
+        string[] kinds = ["gallery", "household", "none"];
+        foreach (var k in kinds) picture.Items.Add(k switch { "gallery" => T("A picture from the gallery"), "household" => T("The household's photo"), _ => T("No picture") });
+        picture.SelectedIndex = Math.Max(0, Array.IndexOf(kinds, _settings.HomePicture));
+        picture.SelectionChanged += (_, _) => { _settings.HomePicture = kinds[Math.Max(0, picture.SelectedIndex)]; _settings.Save(); };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picture, T("Picture on top"));
+        host.Children.Add(Row(T("Picture on top"), T("The gallery picture you chose there or the newest one, the photo the game keeps of the household, or none."), picture));
         host.Children.Add(Section(T("General")));
         host.Children.Add(Row(T("Language"), Languages.First(l => l.Code == Lang).Name, Button(T("Change"), () => OnLanguage(LangButton, new RoutedEventArgs()))));
         host.Children.Add(Row(T("Game folder"), _game?.Root ?? T("No game chosen"), Id(Button(T("Change"), () => Show(GameStep)), "SettingsGame")));
