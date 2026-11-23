@@ -215,7 +215,8 @@ try
         Check(Text().Count == 0, "a module no longer in Game\\Bin: no finding");
         Check(Compat.StandDownModule("[StringTableIndex] Off: the string tables' hash layout (0x0059af50) was changed likely by Sims 3 Performance Patch (Sims3Performance.asi). To use")
               == "Sims3Performance.asi" && Compat.StandDownModule("[StringTableIndex] Off: the table walk (0x0059c5c2) was changed by a patch in memory (no file), likely a loader or trainer") is null
-              && Compat.StandDownModule("[StringTableIndex] Off: CCStringMerge_Strings.package is in Mods\\Packages (string tables already merged)") is null,
+              && Compat.StandDownModule("[StringTableIndex] Off: CCStringMerge_Strings.package is in Mods\\Packages (string tables already merged)") is null
+              && Compat.StandDownModule("[StringTableIndex] Off: the text lookup's entry (0x0059c5b0) was changed by My Mod.asi. To use") == "My Mod.asi",
             "stand-down line: known name (file), likely, in memory, merged package");
         File.WriteAllText(merge, "pkg");
         Check(Text().SingleOrDefault()?.Args.SequenceEqual(new[] { "CCStringMerge_Strings.package" }) == true, "CCStringMerge_Strings.package: its own finding");

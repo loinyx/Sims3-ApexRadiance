@@ -11723,7 +11723,8 @@ void UpdateHooks() {
         g_hooksRegistered = true;
         if (g_status == "Off") g_status = "Waiting for the first draw";
     } else if (!on && g_hooksRegistered) {
-        reg.unlock(); // UnregisterAll waits for the render thread, which may need the registration lock (d3d9_hooks.h)
+        // Both locks stay held, as PostScene's SyncHooks: releasing the registration lock here took m before it again (m,
+        // then UnregisterAll's lock), the inverse of a Present-time setter. Its wait for the render thread is bounded (1 s).
         D3D9Hooks::UnregisterAll(kHookName);
         g_hooksRegistered = false;
         if (!g_keepChunks) ClearChunks();

@@ -165,11 +165,18 @@ std::string Changed(Culprit::Site site, uintptr_t shown, std::initializer_list<S
     for (const Span& s : spans) {
         if (!s.at || MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(s.at), s.bytes, s.n)) continue;
         if (!shown) shown = s.at;
+        std::vector<BYTE> cur(s.n);
+        if (!MemPatch::ReadBytes(s.at, cur.data(), s.n)) continue; // (the span itself may be unreadable)
         size_t d = 0;
-        while (d + 1 < s.n && *reinterpret_cast<const BYTE*>(s.at + d) == s.bytes[d]) ++d;
-        for (const uintptr_t at : {s.at, s.at + d})
-            if (const std::string m = JumpModule(at, &jumped); !m.empty() && m != "?")
-                return m == kGameExe ? Culprit::DescribeExe(site, shown) : Culprit::Describe(site, shown, m, false);
+        while (d + 1 < s.n && cur[d] == s.bytes[d]) ++d;
+        if (const std::string m = JumpModule(s.at, &jumped); !m.empty() && m != "?")
+            return m == kGameExe ? Culprit::DescribeExe(site, shown) : Culprit::Describe(site, shown, m, false);
+        // mid-instruction: an immediate changed in place can read as a jump, so only a jump into another module counts
+        bool midJump = false;
+        if (const std::string m = d ? JumpModule(s.at + d, &midJump) : std::string(); !m.empty() && m != "?" && m != kGameExe) {
+            jumped = true;
+            return Culprit::Describe(site, shown, m, false);
+        }
     }
     if (!jumped)
         for (const auto& k : Culprit::kKnown)

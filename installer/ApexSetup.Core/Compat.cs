@@ -204,7 +204,7 @@ public static class Compat
     // the module file the last string table index stand-down in an Apex log names (string_table_index_culprit.h Describe:
     // "changed [likely ]by <name> (<file>)" or "changed [likely ]by <file>"), null when none
     public static string? StandDownModule(string log) =>
-        Regex.Matches(log, @"\[StringTableIndex\] Off: [^\r\n]*? was changed (?:likely )?by (?:[^\r\n(]*\(([^()\r\n]+\.(?:asi|dll))\)|([^\s()]+\.(?:asi|dll)))\.", RegexOptions.IgnoreCase)
+        Regex.Matches(log, @"\[StringTableIndex\] Off: [^\r\n]*? was changed (?:likely )?by (?:[^\r\n(]*\(([^()\r\n]+\.(?:asi|dll))\)|([^()\r\n]+?\.(?:asi|dll)))\.", RegexOptions.IgnoreCase)
             .LastOrDefault() is { } m ? (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value) : null;
 
     // What Apex Radiance recommends in game (apex_gui.cpp: Overview, Compatibility, Attention), in its words where they fit.
