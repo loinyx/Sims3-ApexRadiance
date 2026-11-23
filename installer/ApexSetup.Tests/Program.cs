@@ -162,6 +162,10 @@ try
     Check(Scan.Run(g with { Edition = Edition.Steam, Version = "1.67.2" }, docs).Ts3NativeWrongBuild, "the EA ts3native in the Steam game detected");
     File.Delete(B("ts3native.launcher.log"));
     File.WriteAllBytes(B("ts3native.asi"), asiBytes);
+    File.WriteAllText(B("probe.bin"), "xx Apex Edition xx ###S3SSWindow");
+    Check(Scan.ContainsEach(B("probe.bin"), "apex edition", "S3SS Log - Started at ", "###s3sswindow").SequenceEqual([true, false, true]) && Scan.Contains(B("probe.bin"), "APEX"),
+        "one read of a file answers each text, case-insensitive");
+    File.Delete(B("probe.bin"));
 
     // 6. switch the renderer: bridge -> DXVK (as the UI's Apply does: remove, then install), then DXVK -> the game's own D3D9
     Engine.Remove(g, Components.Bridge, docs); // nothing installed by Setup: a no-op

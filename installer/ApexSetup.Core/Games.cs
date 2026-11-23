@@ -122,7 +122,13 @@ public static class Games
     // the game, its launchers (they hold the game's files) and the restart host that starts it again
     // (and the RTX Remix bridge's server, which holds Game\Bin\.trex while it runs; another Remix game's counts too)
     public static readonly string[] Processes = { "TS3W", "TS3", "Sims3Launcher", "Sims3LauncherW", "ts3wrap", "NvRemixBridge" };
-    static bool DefaultIsRunning() => Processes.Any(n => Process.GetProcessesByName(n).Length > 0);
+    // one process snapshot for all the names (each GetProcessesByName takes a whole snapshot), every handle closed
+    static bool DefaultIsRunning()
+    {
+        var all = Process.GetProcesses();
+        try { return all.Any(p => Processes.Contains(p.ProcessName, StringComparer.OrdinalIgnoreCase)); }
+        finally { foreach (var p in all) p.Dispose(); }
+    }
 
     static IEnumerable<string> SteamLibraries()
     {

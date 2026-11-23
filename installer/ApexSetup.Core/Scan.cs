@@ -157,16 +157,22 @@ public static class Scan
     }
 
     // DXVK has no version resource; its name is in the binary (case-insensitive ASCII search)
-    public static bool Contains(string file, string text)
+    public static bool Contains(string file, string text) => ContainsEach(file, text)[0];
+
+    // several strings in one read of the file (an ASI is megabytes): one answer per text, in order
+    public static bool[] ContainsEach(string file, params string[] texts)
     {
         var data = File.ReadAllBytes(file);
-        var needle = Encoding.ASCII.GetBytes(text.ToLowerInvariant());
-        for (int i = 0, n = data.Length - needle.Length; i <= n; i++)
+        return texts.Select(text =>
         {
-            int j = 0;
-            while (j < needle.Length && (data[i + j] | 0x20) == (needle[j] | 0x20)) j++; // (both sides: '_' | 0x20 is not '_')
-            if (j == needle.Length) return true;
-        }
-        return false;
+            var needle = Encoding.ASCII.GetBytes(text.ToLowerInvariant());
+            for (int i = 0, n = data.Length - needle.Length; i <= n; i++)
+            {
+                int j = 0;
+                while (j < needle.Length && (data[i + j] | 0x20) == (needle[j] | 0x20)) j++; // (both sides: '_' | 0x20 is not '_')
+                if (j == needle.Length) return true;
+            }
+            return false;
+        }).ToArray();
     }
 }

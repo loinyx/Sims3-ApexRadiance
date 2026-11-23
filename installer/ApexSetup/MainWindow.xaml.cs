@@ -81,7 +81,7 @@ public sealed partial class MainWindow : Window
         Lang = Environment.GetEnvironmentVariable("APEX_LAUNCHER_LANG") ?? SavedChoice() ?? SystemLanguage(System.Globalization.CultureInfo.CurrentUICulture); // (the variable: UI tests in one language)
         Root.Language = Bcp47(Lang);
         // every screen's buttons follow the game starting or closing (the status and Manage rows are built with that state)
-        _timer.Tick += (_, _) => { var r = Games.IsRunning(); if (r != _running) { _running = r; RefreshAll(); } };
+        _timer.Tick += (_, _) => { if (_session is not null) return; var r = Games.IsRunning(); if (r != _running) { _running = r; RefreshAll(); } }; // (a watched game: its Session tells the end)
         // closing in the middle of an install or a removal would leave the game half changed
         AppWindow.Closing += (w, a) =>
         {
