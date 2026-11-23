@@ -6,7 +6,7 @@ using static ApexSetup.Strings;
 
 namespace ApexSetup;
 
-// Home, like a game's own page: the picture as a wide rounded card, the save to go back to on a glass card in its corner
+// Home, like a game's own page: the picture as a wide rounded card, the save to go back to straight on it, low in its corner,
 // with Continue (and a "more" menu for the rarer choices), health as a small glass note in the other corner, and rows of
 // the other saves and the newest pictures under it. The picture is the player's choice in Settings: a gallery picture,
 // the household's own photo, or none.
@@ -113,9 +113,13 @@ public sealed partial class MainWindow
                 if (!t.IsFaulted && await SaveCard.SimsOf(t.Result) is { } img) photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Bottom });
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
+        // a soft shade in the corner where the words sit, so they read on any picture without a box over it
+        var black = Windows.UI.Color.FromArgb(255, 8, 8, 8);
+        pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0xC8), (0.3, 0x66), (0.6, 0)]) });
+        pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0x8C), (0.35, 0x26), (0.55, 0)], across: true) });
         g.Children.Add(new Border { Child = pic, CornerRadius = new CornerRadius(12), Margin = new Thickness(40, 16, 40, 0), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexCardBrush") });
 
-        // the save to go back to on a glass card in the picture's corner, like the health note (white words on every theme)
+        // the save to go back to in the picture's lower corner (white words on every theme)
         var words = new StackPanel { Spacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
         var kick = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         kick.Children.Add(new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)), CornerRadius = new CornerRadius(11), Padding = new Thickness(9, 3, 9, 3),
@@ -132,12 +136,10 @@ public sealed partial class MainWindow
         var acts = HomeActions(saves, save);
         acts.Margin = new Thickness(0, 16, 0, 0);
         words.Children.Add(acts);
-        g.Children.Add(new Border
-        {
-            Child = words, Padding = new Thickness(28, 24, 28, 26), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1),
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB8, 20, 20, 20)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 255, 255, 255)),
-            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(64, 0, 0, 24),
-        });
+        words.HorizontalAlignment = HorizontalAlignment.Left;
+        words.VerticalAlignment = VerticalAlignment.Bottom;
+        words.Margin = new Thickness(72, 0, 40, 44);
+        g.Children.Add(words);
 
         var chip = HealthChip();
         chip.HorizontalAlignment = HorizontalAlignment.Right;
@@ -272,7 +274,7 @@ public sealed partial class MainWindow
         var note = first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1
             : _healthState == HealthState.NeedsYou ? T("Nothing stops the game from starting.") : T("Everything is in place.");
         var white = new SolidColorBrush(Microsoft.UI.Colors.White);
-        var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(12, 9, 14, 9), MaxWidth = 340 };
+        var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 10, 18, 10), MaxWidth = 360 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -289,13 +291,23 @@ public sealed partial class MainWindow
         g.Children.Add(chev);
         var b = new Button
         {
-            Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1),
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB8, 20, 20, 20)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 255, 255, 255)),
+            Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(1),
+            Background = Glass(0.28), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x2E, 255, 255, 255)),
         };
+        // (frosted glass that blurs the picture behind it, a little lighter under the pointer)
+        b.Resources["ButtonBackgroundPointerOver"] = Glass(0.16);
+        b.Resources["ButtonBackgroundPressed"] = Glass(0.4);
+        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x47, 255, 255, 255));
         b.Click += (_, _) => Show(HealthScreen);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("Open Health"));
         return b;
     }
+
+    static Microsoft.UI.Xaml.Media.AcrylicBrush Glass(double tint) => new()
+    {
+        TintColor = Windows.UI.Color.FromArgb(255, 20, 20, 20), TintOpacity = tint, TintLuminosityOpacity = 0.25,
+        FallbackColor = Windows.UI.Color.FromArgb(0xC8, 20, 20, 20),
+    };
 
     // ---------- the other saves: a row of tiles, each with its household ----------
 
