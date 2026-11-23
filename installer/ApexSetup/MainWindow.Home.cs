@@ -95,56 +95,67 @@ public sealed partial class MainWindow
 
     UIElement HomeTop(List<Save> saves, Save? save)
     {
-        var g = _homeHero = new Grid { Height = 520 };
-        var white = new SolidColorBrush(Microsoft.UI.Colors.White);
-        var soft = new SolidColorBrush(Windows.UI.Color.FromArgb(0xE6, 255, 255, 255));
-
-        // the picture as a rounded card inside the page's margins, at full strength unless Settings softens it
-        var pic = new Grid();
         var mode = _settings.HomePicture;
-        if (mode == "gallery" && HomePicture() is { } shot)
-            pic.Children.Add(new Image { Source = Thumb(shot, 2000), Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Center, Opacity = Math.Clamp(_settings.HomePictureStrength, 30, 100) / 100.0 });
-        else if (mode == "household" && save is not null)
-        {
-            var photo = new Grid { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 24, 80, 0) };
-            pic.Children.Add(photo);
-            _ = Task.Run(() => Saves.Photo(save)).ContinueWith(async t =>
-            {
-                if (!t.IsFaulted && await SaveCard.SimsOf(t.Result) is { } img) photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Bottom });
-            }, TaskScheduler.FromCurrentSynchronizationContext());
-        }
-        // a soft shade in the corner where the words sit, so they read on any picture without a box over it
-        var black = Windows.UI.Color.FromArgb(255, 8, 8, 8);
-        pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0xC8), (0.3, 0x66), (0.6, 0)]) });
-        pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0x8C), (0.35, 0x26), (0.55, 0)], across: true) });
-        g.Children.Add(new Border { Child = pic, CornerRadius = new CornerRadius(12), Margin = new Thickness(40, 16, 40, 0), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexCardBrush") });
+        var shot = mode == "gallery" ? HomePicture() : null;
+        var onPhoto = _homeOnPhoto = shot is not null;
+        var g = _homeHero = new Grid { Height = onPhoto ? 520 : double.NaN };
+        // on the picture the words are white on every theme; on the plain card they take the theme's own colours
+        Brush text = onPhoto ? new SolidColorBrush(Microsoft.UI.Colors.White) : Res("TextFillColorPrimaryBrush");
+        Brush soft = onPhoto ? new SolidColorBrush(Windows.UI.Color.FromArgb(0xE6, 255, 255, 255)) : Res("ApexSoftTextBrush");
 
-        // the save to go back to in the picture's lower corner (white words on every theme)
+        var pic = new Grid();
+        if (shot is not null)
+        {
+            // the picture as a rounded card inside the page's margins, at full strength unless Settings softens it, with a soft
+            // shade in the corner where the words sit so they read on any picture without a box over it
+            pic.Children.Add(new Image { Source = Thumb(shot, 2000), Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Center, Opacity = Math.Clamp(_settings.HomePictureStrength, 30, 100) / 100.0 });
+            var black = Windows.UI.Color.FromArgb(255, 8, 8, 8);
+            pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0xC8), (0.3, 0x66), (0.6, 0)]) });
+            pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0x8C), (0.35, 0x26), (0.55, 0)], across: true) });
+        }
+        else
+        {
+            // no picture: a plain card, lit softly from the right by the accent, with the household standing there when chosen
+            var accent = ((SolidColorBrush)Res("ApexAccentBrush")).Color;
+            pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(accent, [(0, 0), (0.55, 0), (1, 0x1C)], across: true) });
+            if (mode == "household" && save is not null)
+            {
+                // (low on the right, under the health note; the game stores these photos small, so they stay small)
+                var photo = new Grid { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Height = 170, Margin = new Thickness(0, 0, 96, 12) };
+                pic.Children.Add(photo);
+                _ = Task.Run(() => Saves.Photo(save)).ContinueWith(async t =>
+                {
+                    if (!t.IsFaulted && await SaveCard.SimsOf(t.Result) is { } img) photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Bottom });
+                }, TaskScheduler.FromCurrentSynchronizationContext());
+            }
+        }
+        g.Children.Add(new Border { Child = pic, CornerRadius = new CornerRadius(12), Margin = new Thickness(40, 40, 40, 0), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexCardBrush") });
+
+        // the save to go back to, low in the corner of the picture or centred on the plain card
         var words = new StackPanel { Spacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
         var kick = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        kick.Children.Add(new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)), CornerRadius = new CornerRadius(11), Padding = new Thickness(9, 3, 9, 3),
-            Child = new TextBlock { Text = "The Sims 3", FontSize = 12, Foreground = white } });
+        kick.Children.Add(new Border { Background = onPhoto ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)) : Res("ApexPillBrush"), CornerRadius = new CornerRadius(11), Padding = new Thickness(9, 3, 9, 3),
+            Child = new TextBlock { Text = "The Sims 3", FontSize = 12, Foreground = onPhoto ? text : soft } });
         kick.Children.Add(new TextBlock { Text = save is null ? T("Welcome") : T("Continue where you left off"), FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Foreground = soft });
         words.Children.Add(kick);
         _homeWords = words;
         words.Children.Add(_homeName = new TextBlock
         {
             Text = save?.Name ?? "The Sims 3", FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 48, FontWeight = FontWeights.SemiBold,
-            TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 4, 0, 0), Foreground = white,
+            TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 4, 0, 0), Foreground = text,
         });
         words.Children.Add(new TextBlock { Text = save is null ? T("No saves yet: they show here once you save a game.") : SavedWhen(save.LastPlayed), FontSize = 14, Foreground = soft });
         var acts = HomeActions(saves, save);
         acts.Margin = new Thickness(0, 16, 0, 0);
         words.Children.Add(acts);
-        words.HorizontalAlignment = HorizontalAlignment.Left;
-        words.VerticalAlignment = VerticalAlignment.Bottom;
-        words.Margin = new Thickness(72, 0, 40, 44);
+        words.VerticalAlignment = onPhoto ? VerticalAlignment.Bottom : VerticalAlignment.Center;
+        words.Margin = onPhoto ? new Thickness(72, 0, 40, 44) : new Thickness(72, 80, 40, 40);
         g.Children.Add(words);
 
         var chip = HealthChip();
         chip.HorizontalAlignment = HorizontalAlignment.Right;
         chip.VerticalAlignment = VerticalAlignment.Top;
-        chip.Margin = new Thickness(0, 32, 56, 0);
+        chip.Margin = new Thickness(0, 56, 56, 0);
         g.Children.Add(chip);
         return g;
     }
@@ -152,16 +163,16 @@ public sealed partial class MainWindow
     Grid? _homeHero;
     StackPanel? _homeWords;
     TextBlock? _homeName;
-    bool _homeFitHooked;
+    bool _homeFitHooked, _homeOnPhoto;
 
     // the top keeps the picture's own wide shape as the window grows, within the share of the window Settings' picture
-    // height allows; the name grows a little with it
+    // height allows (a plain card takes the height of its words); the name grows a little with it
     void FitHome()
     {
         double w = Scroller.ActualWidth, h = Scroller.ActualHeight;
         if (_homeHero is null || w <= 0 || h <= 0) return;
         var share = Math.Clamp(_settings.HomePictureHeight / 480.0 * 0.9, 0.42, 0.88);
-        _homeHero.Height = Math.Clamp(w * 0.44, 360, Math.Max(360, h * share));
+        if (_homeOnPhoto) _homeHero.Height = Math.Clamp(w * 0.44, 360, Math.Max(360, h * share));
         if (_homeName is not null) { _homeName.FontSize = Math.Clamp(w / 32, 40, 64); _homeName.LineHeight = _homeName.FontSize * 1.08; }
         if (_homeWords is not null) _homeWords.MaxWidth = Math.Max(560, w * 0.42);
     }
@@ -170,18 +181,21 @@ public sealed partial class MainWindow
     StackPanel HomeActions(List<Save> saves, Save? save)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var glass = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1F, 255, 255, 255));
+        // (on the picture: white on frosted white; on the plain card: the theme's own fills)
+        Brush glass = _homeOnPhoto ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x1F, 255, 255, 255)) : Res("ApexPillBrush");
+        Brush ink = _homeOnPhoto ? new SolidColorBrush(Microsoft.UI.Colors.White) : Res("TextFillColorPrimaryBrush");
+        Brush inkSoft = _homeOnPhoto ? new SolidColorBrush(Windows.UI.Color.FromArgb(0xCC, 255, 255, 255)) : Res("ApexSoftTextBrush");
         if (_running)
         {
-            var playing = new TextBlock { FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), VerticalAlignment = VerticalAlignment.Center };
+            var playing = new TextBlock { FontWeight = FontWeights.SemiBold, Foreground = ink, VerticalAlignment = VerticalAlignment.Center };
             var pill = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
             pill.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 8, Height = 8, Fill = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center });
             pill.Children.Add(playing);
             row.Children.Add(new Border { Child = pill, Background = glass, CornerRadius = new CornerRadius(8), Padding = new Thickness(18, 0, 20, 0), Height = 56 });
             var mem = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             var bar = new ProgressBar { Width = 160, Maximum = 1, VerticalAlignment = VerticalAlignment.Center };
-            var used = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xCC, 255, 255, 255)) };
-            mem.Children.Add(new TextBlock { Text = T("Memory"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xCC, 255, 255, 255)) });
+            var used = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = inkSoft };
+            mem.Children.Add(new TextBlock { Text = T("Memory"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = inkSoft });
             mem.Children.Add(bar);
             mem.Children.Add(used);
             row.Children.Add(mem);
@@ -248,7 +262,7 @@ public sealed partial class MainWindow
         var more = new Button
         {
             Width = 56, Height = 56, Padding = new Thickness(0), CornerRadius = new CornerRadius(8), Background = glass, BorderThickness = new Thickness(0), Flyout = menu,
-            Content = new FontIcon { Glyph = "", FontSize = 16, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) },
+            Content = new FontIcon { Glyph = "", FontSize = 16, Foreground = ink },
         };
         ToolTipService.SetToolTip(more, T("Another save"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, T("Another save"));
