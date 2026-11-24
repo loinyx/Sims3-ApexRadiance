@@ -245,6 +245,8 @@ static class ModToolsTests
             // the remembered view
             ModViewPrefs.Save(new ModViewPrefs.Prefs(Path.Combine("Packages", "B"), true, 4, ["tags", "game"]));
             ModViewPrefs.LastPlay = new DateTime(2026, 11, 18, 22, 0, 0, DateTimeKind.Utc);
+            ModViewPrefs.MergeLater = [@"Mods\Packages\a.package*1*2", @"Mods\Packages\b.package*3*4", @"Mods\Packages\a.package*1*2"];
+            check(ModViewPrefs.MergeLater.SequenceEqual([@"Mods\Packages\a.package*1*2", @"Mods\Packages\b.package*3*4"]), "view: the newer versions put off are kept, each once");
             var p = ModViewPrefs.Load();
             check(p.Place == Path.Combine("Packages", "B") && p.Grid && p.Sort == 4 && p.Collapsed.SequenceEqual(["tags", "game"])
                 && ModViewPrefs.LastPlay == new DateTime(2026, 11, 18, 22, 0, 0, DateTimeKind.Utc), "view: place, grid, sort, folded groups and the last game kept");

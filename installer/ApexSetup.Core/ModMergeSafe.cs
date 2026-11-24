@@ -18,8 +18,9 @@ public static partial class ModMerge
     // The packages of the merge that change the same game data in different ways, in groups, and those whose order against a
     // loaded package outside it would change. One package holds one copy of a resource, and which copy the game uses is not
     // verified in game, so any choice made here could take a mod's part out: it is the player's.
-    // Keys: what clashes, by package. exclude: the merged file of the merge being changed, which holds copies of its own mods.
-    static List<(List<int> Group, SortedSet<string> Outside, int Resources, Dictionary<int, HashSet<(uint, uint, ulong)>> Keys)> Clashes(string docs, string modsDir, List<ModConflicts.Directive> dirs, (int, int, string) target,
+    // Keys: what clashes, by package. Pairs: with which others of them each one clashes, in how many resources. OutsideOf: and
+    // with which outside ones. exclude: the merged file of the merge being changed, which holds copies of its own mods.
+    static List<(List<int> Group, SortedSet<string> Outside, int Resources, Dictionary<int, HashSet<(uint, uint, ulong)>> Keys, Dictionary<int, Dictionary<int, int>> Pairs, Dictionary<int, SortedSet<string>> OutsideOf)> Clashes(string docs, string modsDir, List<ModConflicts.Directive> dirs, (int, int, string) target,
         IReadOnlyList<(MergeSource Src, (int, int, string) Key)> ok, string? exclude)
     {
         using var read = new Contents();
@@ -27,6 +28,7 @@ public static partial class ModMerge
         int Top(int i) => of[i] == i ? i : of[i] = Top(of[i]);
         var keys = new Dictionary<int, HashSet<(uint, uint, ulong)>>(); // (what clashes, by package)
         var outside = new Dictionary<int, SortedSet<string>>();
+        var pairs = new Dictionary<int, Dictionary<int, int>>();
         void Add(int i, (uint, uint, ulong) k) => (keys.TryGetValue(i, out var l) ? l : keys[i] = new()).Add(k);
         var owners = new Dictionary<(uint, uint, ulong), List<(int I, ModConflicts.Entry E)>>();
         for (var i = 0; i < ok.Count; i++)
@@ -39,10 +41,21 @@ public static partial class ModMerge
         {
             // (the copies by content: one kind is no clash, more put every package that holds one in a group)
             var kinds = new List<(int I, ModConflicts.Entry E)>();
+            var kindOf = new List<int>();
             foreach (var x in l)
-                if (!kinds.Any(y => read.Same(ok[y.I].Src.Mod.Path, y.E, ok[x.I].Src.Mod.Path, x.E))) kinds.Add(x);
+            {
+                var at = kinds.FindIndex(y => read.Same(ok[y.I].Src.Mod.Path, y.E, ok[x.I].Src.Mod.Path, x.E));
+                kindOf.Add(at >= 0 ? at : kinds.Count);
+                if (at < 0) kinds.Add(x);
+            }
             if (kinds.Count < 2) continue;
             foreach (var x in l) { Add(x.I, k); of[Top(x.I)] = Top(l[0].I); }
+            var copies = l.Select((x, n) => (x.I, Kind: kindOf[n])).Distinct().ToList();
+            foreach (var (a, b) in copies.SelectMany(x => copies.Where(y => y.I != x.I && y.Kind != x.Kind).Select(y => (x.I, y.I))).Distinct())
+            {
+                var with = pairs.TryGetValue(a, out var p) ? p : pairs[a] = new();
+                with[b] = with.GetValueOrDefault(b) + 1;
+            }
         }
 
         var skip = ok.Select(o => Path.GetFullPath(o.Src.Mod.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -70,7 +83,7 @@ public static partial class ModMerge
             }
         }
         return keys.Keys.GroupBy(Top).OrderBy(g => g.Key).Select(g => (g.Order().ToList(),
-            new SortedSet<string>(g.SelectMany(i => outside.GetValueOrDefault(i) ?? []), StringComparer.OrdinalIgnoreCase), g.SelectMany(i => keys[i]).Distinct().Count(), keys)).ToList();
+            new SortedSet<string>(g.SelectMany(i => outside.GetValueOrDefault(i) ?? []), StringComparer.OrdinalIgnoreCase), g.SelectMany(i => keys[i]).Distinct().Count(), keys, pairs, outside)).ToList();
     }
 
     // resources compared by content, each file opened once

@@ -342,6 +342,50 @@ static class ModMergeTests
         ModMerge.Split(docs, plain);
         ModMerge.Split(docs, own);
         check(Same(beforeScripts, Snap(docs)), "scripts: both split, every file back identical");
+
+        // ---- the choices of the merge dialog: what the rows say is what is planned ----
+        Make("s3", (S3sa, 303, asm1, false, asm1.Length), Raw(220, 220, "s3 tuning"));
+        var chosen = new[] { "p1", "p2", "p3", "p4", "s1", "s2", "s3" }.Select(n => M(n)).ToList();
+        var ch = new MergeChoices();
+        var apart = true;
+        List<MergePlan> now = [];
+        MergePlan? own2 = null;
+        bool Plan(long part = long.MaxValue)
+        {
+            var (o, l) = (ch.Order, ch.LeaveOut);
+            now = ModMerge.PlanParts(docs, chosen, "Dlg", Folder, false, o, l, part);
+            own2 = apart ? ModMerge.Plan(docs, now[0].Scripts.ToList(), "Dlg scripts", Folder, true, o, l) : null;
+            return ch.Take(now, own2, o, l);
+        }
+        MergeChoice Row(string n) => ch.Rows.Single(r => r.Mod.Rel == Rel(n));
+        List<string> In() => now.Concat(own2 is null ? [] : [own2]).SelectMany(p => p.Inputs).Select(m => Path.GetFileNameWithoutExtension(m.Name)).ToList();
+        check(Plan() && ch.Rows.Count == 7 && ch.Rows.Take(4).All(r => r.Undecided && !r.In) && Row("p2").Meets is { Resources: 1, Outside.Count: 0 } pm && pm.With.Single() is { Value: 1 } pw && pw.Key == Rel("p4")
+            && Row("p1").Meets is null && Row("p1").In && Row("s1").Scripts && !Row("p2").Scripts && Row("s1").Meets!.With.ContainsKey(Rel("s3")) && In().SequenceEqual(["p1", "p3", "s2"]),
+            "dialog: the mods that conflict come first, say with whom and in how many resources, and stay out until decided on");
+        // a conflict not known when the plan was asked for: not silently in
+        Row("p1").Pick = true;
+        check(!ch.Take(now, own2, [Rel("p3"), Rel("p1"), Rel("s2")], []), "dialog: a plan made for another order is not taken as the one on screen");
+        Row("p1").Pick = null;
+        Row("p2").Pick = Row("p4").Pick = Row("s1").Pick = Row("s3").Pick = true;
+        ch.Rows.Move(ch.Rows.IndexOf(Row("p4")), 0);
+        check(Plan() && In().SequenceEqual(["p4", "p2", "p1", "p3", "s1", "s3", "s2"]) && Row("p4").Share == new MergeShare(1, 0) && Row("p2").Share == new MergeShare(0, 1),
+            "dialog: the mods put in follow the rows, each saying whose copy counts");
+        check(Plan(400) && now.Count == 1 && In().Take(2).SequenceEqual(["p4", "p2"]) && ch.Rows.Count == 7 && Row("p1").Why!.Key.StartsWith("Too big") && Row("p4").Why is null, "dialog: a mod too big for its part keeps its row and says why");
+        Row("p2").Pick = false;
+        apart = false;
+        Plan();
+        check(Plan() && ch.Rows.Count == 4 && In().SequenceEqual(["p4", "p1", "p3"]) && ch.Others(now, own2).Count == 3 && ch.Rows.Any(r => r.Mod.Rel == Rel("p2") && !r.In),
+            "dialog: a mod left out keeps its row, script mods left out have none and say why");
+        apart = true;
+        Plan();
+        check(Plan() && ch.Rows.Count == 7 && Row("s1").Pick == true && In().Count == 6 && ch.Others(now, own2).Count == 0, "dialog: script mods that come back keep their choice");
+        File.Delete(Path.Combine(mods, P("s3")));
+        var put = Path.Combine(mods, P("p1"));
+        var (stamp, key1) = (File.GetLastWriteTimeUtc(put), ModViewPrefs.LaterKey(M("p1")));
+        File.SetLastWriteTimeUtc(put, stamp.AddHours(1));
+        var key2 = ModViewPrefs.LaterKey(M("p1"));
+        File.SetLastWriteTimeUtc(put, stamp);
+        check(key1 != key2 && key1 == ModViewPrefs.LaterKey(M("p1")), "dialog: an update put off is offered again once its file changes");
         Empty();
 
         // ---- newer versions of the mods inside a merge ----
