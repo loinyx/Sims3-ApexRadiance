@@ -98,7 +98,7 @@ public sealed partial class MainWindow
         foot.ColumnDefinitions.Add(new ColumnDefinition());
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var allOn = on == mine.Count;
-        foot.Children.Add(MainButton(allOn ? T("Turn all {0} off", mine.Count) : T("Turn all {0} on", mine.Count), () => SetMods(mine, !allOn)));
+        foot.Children.Add(MainButton(allOn ? T("Turn all {0} off", mine.Count) : T("Turn all {0} on", mine.Count), () => SetMods(mine, !allOn), accent: !allOn));
         var remove = IconButton("trash-2", T("Move all {0} to the Recycle Bin", mine.Count), "ApexErrorBrush");
         remove.Width = remove.Height = 36;
         remove.BorderThickness = new Thickness(1);
@@ -123,11 +123,15 @@ public sealed partial class MainWindow
         g.Children.Add(t);
         if (hint is not null)
         {
-            var h = new TextBlock { Text = hint, FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(h, 2);
-            g.Children.Add(h);
+            // (under the text: beside it, the pane has no room for both in Portuguese or German)
+            g.Children.Remove(t);
+            var both = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            both.Children.Add(t);
+            both.Children.Add(new TextBlock { Text = hint, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+            Grid.SetColumn(both, 1);
+            g.Children.Add(both);
         }
-        var b = new Button { Content = g, Height = 44, Padding = new Thickness(14, 0, 14, 0), CornerRadius = new CornerRadius(10), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        var b = new Button { Content = g, MinHeight = 44, Padding = new Thickness(14, 6, 14, 7), CornerRadius = new CornerRadius(10), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
         b.Click += (_, _) => click();
         return b;

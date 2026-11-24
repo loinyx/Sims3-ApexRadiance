@@ -280,6 +280,7 @@ static class ModMergeTests
 
         // ---- the Recycle Bin can't take a file: it comes back in the list, switched off ----
         var noBin = ModMerge.Run(ModMerge.Plan(docs, [M("e4"), M("e5"), M("e6")], "NoBin", Folder, false), null, default).Merged;
+        check(ModMerge.FreeName(docs, Folder, "NoBin") == "NoBin 2" && ModMerge.FreeName(docs, Folder, "Fresh") == "Fresh", "plan: the name offered for a new merge is one no file or merge has yet");
         var bin = ModMerge.Recycle;
         ModMerge.Recycle = p => throw new SetupException("Windows couldn't move the file to the Recycle Bin.");
         var binOut = new MergeEdit();

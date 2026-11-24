@@ -88,6 +88,9 @@ public sealed partial class MainWindow
         if (_game is null) { await Message(T("The files were not added"), T("Choose the game first.")); return; }
         if (_step != ModsScreen) Show(ModsScreen);
         if (!_modsLoaded) await LoadModsAsync();
+        // (a read already under way, as when the launcher starts from "Open with": the files are compared with its list and
+        // go to the folder it finds, never to Mods itself)
+        while (_modsLoading) await Task.Delay(50);
         ModAdd? add;
         try { add = await ReadFilesAsync(paths); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The files could not be read"), ErrorText(e)); return; }
