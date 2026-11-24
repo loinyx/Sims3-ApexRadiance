@@ -18,7 +18,7 @@ namespace ApexSetup;
 // through ModLibrary and ModMerge, notes and tags through ModNotes.
 public sealed partial class MainWindow
 {
-    const string DefaultMods = "*default", AllMods = "*all", NewMods = "*new", LookMods = "*look", DupMods = "*dup", OffMods = "*off",
+    const string DefaultMods = "*default", AllMods = "*all", NewMods = "*new", LookMods = "*look", DupMods = "*dup", OffMods = "*off", MergedMods = "*merged",
         AsiMods = "*asi", NewTag = "*newtag";
 
     string _modPlace = AllMods;
@@ -94,6 +94,7 @@ public sealed partial class MainWindow
             _modRows = mods.Select(m => new ModRow(m, _modFindings.TryGetValue(m.Path, out var l) ? l : [])
             {
                 IsNew = since is { } s && Added(m) > s,
+                Inside = m.FileType == "package" ? ModMerge.Info(docs, m)?.Originals.Count ?? 0 : 0,
                 DuplicateOf = dups.TryGetValue(m.Path, out var d) ? Path.GetFileNameWithoutExtension(d) : null,
                 DetectedKinds = kinds.TryGetValue(m.Path, out var k) && k.Kinds.Any() ? k.Kinds.Select(x => x.ToString()).ToList()
                     : [m.FileType == "asi" ? "Asi" : m.Kind.ToString()],
@@ -182,7 +183,8 @@ public sealed partial class MainWindow
             FillSide();
             var inPlace = _modRows.Where(r => InPlace(r, _modPlace)).ToList();
             var shown = Sorted(inPlace.Where(Matches)).ToList();
-            ModRow.ShowPlace = !IsFolder(_modPlace);
+            // (the rows already made say where they are, or stop saying it, with the place shown)
+            if (ModRow.ShowPlace == IsFolder(_modPlace)) { ModRow.ShowPlace = !ModRow.ShowPlace; foreach (var r in _modRows) r.Refresh(); }
             Sync(shown);
             ModsSelectAll.Visibility = ModsSelectNone.Visibility = Visibility.Visible;
             ModList.Visibility = ModListHead.Visibility = _modsGrid ? Visibility.Collapsed : Visibility.Visible;
@@ -261,7 +263,7 @@ public sealed partial class MainWindow
     (string Crumb, string Title) PlaceTitle(string place) => place switch
     {
         AllMods => ("", T("All mods")), NewMods => ("", T("New since last play")), DefaultMods => ("", T("Default replacements")), LookMods => ("", T("Needs a look")), DupMods => ("", T("Duplicates")),
-        OffMods => ("", T("Turned off")), AsiMods => ("", T("Game plugins")),
+        OffMods => ("", T("Turned off")), MergedMods => ("", T("Merges")), AsiMods => ("", T("Game plugins")),
         _ when place.StartsWith('#') => (T("Tag"), place[1..]),
         "" => ("", "Mods"),
         _ => (string.Join(" › ", new[] { "Mods" }.Concat(place.Split(Path.DirectorySeparatorChar).SkipLast(1))), Path.GetFileName(place)),
@@ -278,6 +280,7 @@ public sealed partial class MainWindow
             LookMods => NeedsLook(r),
             DupMods => r.DuplicateOf is not null,
             OffMods => !m.Enabled,
+            MergedMods => r.Inside > 0,
             AsiMods => m.FileType == "asi",
             _ when place.StartsWith('#') => ModNotes.TagsOf(m.Rel).Contains(place[1..], StringComparer.OrdinalIgnoreCase),
             _ => InDir(m, place),
@@ -343,7 +346,7 @@ public sealed partial class MainWindow
         {
             ("library", T("LIBRARY"), null, new List<Place> { new(AllMods, T("All mods"), "layers", N(AllMods)) }
                 .Concat(new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)), new(NewMods, T("New since last play"), "sparkles", N(NewMods)), new(DefaultMods, T("Default replacements"), "replace", N(DefaultMods)), new(LookMods, T("Needs a look"), "triangle-alert", N(LookMods), Warn: true),
-                    new(DupMods, T("Duplicates"), "copy", N(DupMods)), new(OffMods, T("Turned off"), "power-off", N(OffMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace)).ToList()),
+                    new(DupMods, T("Duplicates"), "copy", N(DupMods)), new(MergedMods, T("Merges"), "merge", N(MergedMods)), new(OffMods, T("Turned off"), "power-off", N(OffMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace)).ToList()),
             ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", perDir.GetValueOrDefault(d), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
             ("tags", T("TAGS"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
         };
@@ -594,7 +597,7 @@ public sealed partial class MainWindow
             menu.Items.Add(i);
         }
         foreach (var (k, l, i) in new[] { (AllMods, T("All mods"), "layers"), (AsiMods, T("Game plugins (ASI)"), "plug"), (NewMods, T("New since last play"), "sparkles"), (DefaultMods, T("Default replacements"), "replace"), (LookMods, T("Needs a look"), "triangle-alert"),
-                     (DupMods, T("Duplicates"), "copy"), (OffMods, T("Turned off"), "power-off") }) Add(k, l, i);
+                     (DupMods, T("Duplicates"), "copy"), (MergedMods, T("Merges"), "merge"), (OffMods, T("Turned off"), "power-off") }) Add(k, l, i);
         menu.Items.Add(new MenuFlyoutSeparator());
         foreach (var d in _modDirs) Add(d, new string(' ', 3 * d.Count(c => c == Path.DirectorySeparatorChar)) + Path.GetFileName(d), "folder");
         if (ModNotes.Tags.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
@@ -917,7 +920,7 @@ public sealed partial class MainWindow
         ModsFooter.Text = string.Join(" · ", new[]
         {
             _modShown.Count == 1 ? T("1 shown") : T("{0} shown", _modShown.Count),
-            picked.Count > 0 ? T("{0} selected", picked.Count) : null,
+            picked.Count == 1 ? T("1 selected") : picked.Count > 0 ? T("{0} selected", picked.Count) : null,
             picked.Count > 0 ? ModRow.SizeText(picked.Sum(r => r.File.Size)) : null,
         }.Where(x => x is not null));
         ModsSelectNone.Visibility = picked.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -1330,12 +1333,11 @@ public sealed partial class MainWindow
         ModColFolders.Width = new GridLength(compact ? 0 : narrow ? 220 : 248);
         ModSide.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         ModsPlaces.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
-        ModColDetails.Width = new GridLength(narrow ? 0 : 340);
         Grid.SetColumn(ModDetailsPane, narrow ? 1 : 2);
         ModDetailsPane.Shadow = narrow ? new ThemeShadow() : null;
         ModDetailsPane.Translation = new System.Numerics.Vector3(0, 0, narrow ? 32 : 0);
         // (the type and size columns go on a small window; the type stays as the row's icon)
-        ModRow.KindColumn = new GridLength(compact ? 0 : 140);
+        ModRow.KindColumn = new GridLength(compact ? 0 : 132);
         ModRow.SizeColumn = new GridLength(compact ? 0 : 72);
         ModHeadKind.Width = ModRow.KindColumn;
         ModHeadSize.Width = ModRow.SizeColumn;
@@ -1378,8 +1380,9 @@ public sealed partial class MainWindow
     {
         var manual = ModNotes.Get(r.File.Rel)?.Kinds;
         r.Kinds = manual is { Count: > 0 } ? manual : r.DetectedKinds;
-        r.KindOverride = manual is { Count: > 0 } ? KindLabel(manual[0]) : null;
-        r.KindIconOverride = manual is { Count: > 0 } ? KindIcon(manual[0]) : null;
+        // (a merge holds mods of many types: its row says what it is)
+        r.KindOverride = manual is { Count: > 0 } ? KindLabel(manual[0]) : r.Inside > 0 ? T("Merged") : null;
+        r.KindIconOverride = manual is { Count: > 0 } ? KindIcon(manual[0]) : r.Inside > 0 ? "merge" : null;
     }
 
     // every type, by group, ticked as the mod is now; Done saves it, Back to detected forgets the choice
@@ -1454,24 +1457,14 @@ public sealed partial class MainWindow
         ModDetailsFoot.Visibility = Visibility.Collapsed;
         _mergePaint = null;
         var picked = DraftRow() is { } open ? [open] : Picked(); // (a merge with changes not saved stays open whatever the list shows)
-        ModDetailsPane.Visibility = _findPage is not null || _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        // (nothing chosen: no pane, the list has the whole width)
+        ModDetailsPane.Visibility = _findPage is not null || picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        ModColDetails.Width = new GridLength(_modsNarrow || ModDetailsPane.Visibility == Visibility.Collapsed ? 0 : ModDetailsPane.Width);
         // (over the grid the pane would hide whole columns of tiles: the grid makes room for it instead)
         var room = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
         if (ModGrid.Padding.Right != 24 + room) { ModGrid.Padding = new Thickness(0, 0, 24 + room, 72); FitModGrid(); }
         PlaceSelectionBar();
-        if (picked.Count == 0)
-        {
-            var empty = new StackPanel { Spacing = 12, Margin = new Thickness(0, 56, 0, 0), HorizontalAlignment = HorizontalAlignment.Center };
-            var icon = Lucide.Icon("layout-grid", 30, Res("ApexMutedBrush"), 1.5);
-            icon.HorizontalAlignment = HorizontalAlignment.Center;
-            empty.Children.Add(icon);
-            var t = Muted(T("Choose a mod to see what it is, add a picture, notes or tags, rename, move or remove it. Choose several to change them together, or drag them onto a folder or tag."));
-            t.TextAlignment = TextAlignment.Center;
-            t.MaxWidth = 250;
-            empty.Children.Add(t);
-            host.Children.Add(empty);
-            return;
-        }
+        if (picked.Count == 0) return;
         if (picked.Count > 1) { FillManyDetails(picked); return; }
         FillOneModDetails(picked[0]);
     }

@@ -66,16 +66,17 @@ public sealed partial class MainWindow
     void DetailsTabs(List<(string Key, string Label)> tabs, ModFile? count)
     {
         var bar = new SelectorBar();
+        var side = tabs.Count > 4 ? 4 : 8; // (five tabs, as a default replacement has, still fit the pane)
         foreach (var (key, label) in tabs)
         {
-            var tab = new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab, FontSize = 13, Padding = new Thickness(8, 10, 8, 8) };
+            var tab = new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab, FontSize = 13, Padding = new Thickness(side, 10, side, 8) };
             bar.Items.Add(tab);
             if (key == "conflicts" && count is not null) _ = CountConflictsAsync(count, bar, tab);
         }
         bar.SelectionChanged += (s, _) => { if (s.SelectedItem?.Tag is string k && k != _detailsTab) { _detailsTab = k; DispatcherQueue.TryEnqueue(FillModDetails); } }; // (later: the fill removes this bar)
         // (more tabs than fit in a long language: the row scrolls to the open one)
         bar.Loaded += (_, _) => bar.SelectedItem?.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
-        ModDetailsHead.Children.Add(new ScrollViewer { Content = bar, Margin = new Thickness(12, 0, 12, 0), HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        ModDetailsHead.Children.Add(new ScrollViewer { Content = bar, Margin = new Thickness(tabs.Count > 4 ? 8 : 12, 0, tabs.Count > 4 ? 8 : 12, 0), HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled });
         ModDetailsHead.Children.Add(new Border { Height = 1, Background = Res("ApexCardBorderBrush") });
     }
 
@@ -165,7 +166,7 @@ public sealed partial class MainWindow
             "asi" => StripBadge(T("In the game folder"), "plug", "#CECBF6"),
             _ => StripBadge(T("Installed by Apex Launcher"), "lock", "#CECBF6"),
         });
-        var sub = string.Join(" · ", new[] { r.Kinds.Count > 0 ? KindLabel(r.Kinds[0]) : null, r.Size, m.Enabled || m.Locked ? null : T("Off") }.OfType<string>());
+        var sub = string.Join(" · ", new[] { r.Kind, r.Size, m.Enabled || m.Locked ? null : T("Off") }.OfType<string>());
         return HeadPanel(r, null, tile, nameRow, sub, sw, badges);
     }
 
@@ -416,7 +417,7 @@ public sealed partial class MainWindow
         if (d.Objects.Count > 0) parts.Add(d.Objects.Count == 1 ? T("1 object") : T("{0} objects", d.Objects.Count));
         if (d.CasParts.Count > 0) parts.Add(d.CasParts.Count == 1 ? T("1 Create a Sim part") : T("{0} Create a Sim parts", d.CasParts.Count));
         if (d.Images > 0) parts.Add(d.Images == 1 ? T("1 texture") : T("{0} textures", d.Images));
-        return parts.Count == 0 ? T("Replaces {0} of the game's resources", d.Replaced) : T("Replaces {0}", string.Join(", ", parts));
+        return parts.Count == 0 ? (d.Replaced == 1 ? T("Replaces 1 of the game's resources") : T("Replaces {0} of the game's resources", d.Replaced)) : T("Replaces {0}", string.Join(", ", parts));
     }
 
     // ---------- the footer ----------
@@ -436,7 +437,7 @@ public sealed partial class MainWindow
             main.Height = 36;
             ToolTipService.SetToolTip(main, T("Split it into its {0} original mods", merge.Originals.Count));
         }
-        else main = MainButton(m.Enabled ? T("Turn off") : T("Turn on"), () => SetMods([r], !r.File.Enabled));
+        else main = MainButton(m.Enabled ? T("Turn off") : T("Turn on"), () => SetMods([r], !r.File.Enabled), accent: !m.Enabled);
         f.Children.Add(main);
         void Icon(Button b)
         {
@@ -462,9 +463,11 @@ public sealed partial class MainWindow
         }
     }
 
-    static Button MainButton(string text, Action click)
+    // (accent: the screen's main action; turning mods off is not one)
+    static Button MainButton(string text, Action click, bool accent = true)
     {
-        var b = new Button { Content = text, Style = (Style)Application.Current.Resources["AccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Height = 36 };
+        var b = new Button { Content = text, HorizontalAlignment = HorizontalAlignment.Stretch, Height = 36 };
+        if (accent) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         b.Click += (_, _) => click();
         return Dims(b);
     }

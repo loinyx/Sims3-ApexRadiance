@@ -20,6 +20,8 @@ public sealed class ModRow : INotifyPropertyChanged
     public string? DuplicateOf { get; set; }
     // of the mods inside a merge, how many the list holds a newer version of
     public int NewVersions { get; set; }
+    // a merge: how many mods it holds (the row says so, and shows as a merge)
+    public int Inside { get; set; }
 
     public string Name => File.FileType == "package" ? System.IO.Path.GetFileNameWithoutExtension(File.Name) : File.Name;
     public string FullName => File.Name + "\n" + Place(File);
@@ -37,8 +39,8 @@ public sealed class ModRow : INotifyPropertyChanged
     public string Sub => NewVersions == 0 ? Line : (NewVersions == 1 ? T("1 new version") : T("{0} new versions", NewVersions)) + (Line.Length > 0 ? " · " + Line : "");
     string Line => Findings.Count > 0 ? Findings[0]
         : DuplicateOf is { } d ? T("Same as {0}", d)
-        : ModNotes.Get(File.Rel)?.Notes is { } n ? n.Split('\n')[0]
-        : ShowPlace ? Place(File) : "";
+        : ModNotes.Get(File.Rel)?.Notes is { Length: > 0 } n ? n.Split('\n')[0]
+        : string.Join(" · ", new[] { ShowPlace ? Place(File) : "", Inside > 0 ? T("{0} mods inside", Inside) : "" }.Where(x => x.Length > 0));
     public Brush SubBrush => Findings.Count > 0 || NewVersions > 0 || DuplicateOf is not null ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
     public Visibility LookVisible => Findings.Count > 0 || DuplicateOf is not null ? Visibility.Visible : Visibility.Collapsed;
     public Visibility TagsVisible => TagPills.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -66,9 +68,8 @@ public sealed class ModRow : INotifyPropertyChanged
     public Visibility Placeholder => _image is null ? Visibility.Visible : Visibility.Collapsed;
 
     // the list's columns, narrowed on a small window (set before the rows are shown)
-    public static GridLength KindColumn { get; set; } = new(140);
+    public static GridLength KindColumn { get; set; } = new(132);
     public static GridLength SizeColumn { get; set; } = new(72);
-    public static double NameMax { get; set; } = 10000;
 
     // the screen's handler: switch the file and return the moved file, or null when it stayed (the reason shown there)
     public static Func<ModRow, bool, ModFile?>? Toggle;
