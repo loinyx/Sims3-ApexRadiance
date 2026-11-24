@@ -184,12 +184,14 @@ public sealed class SaveCard(Save save) : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 
     // image bytes from a package (a JPEG or PNG the game stored) as something an Image shows; null when not an image
-    public static async Task<ImageSource?> ImageOf(byte[]? bytes)
+    // (width: decoded no wider than that)
+    public static async Task<ImageSource?> ImageOf(byte[]? bytes, int width = 0)
     {
         if (bytes is null || bytes.Length < 8) return null;
         try
         {
             var bmp = new BitmapImage();
+            if (width > 0) bmp.DecodePixelWidth = width;
             using var ms = new Windows.Storage.Streams.InMemoryRandomAccessStream();
             await ms.WriteAsync(System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.AsBuffer(bytes));
             ms.Seek(0);

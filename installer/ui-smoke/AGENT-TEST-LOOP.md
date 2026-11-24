@@ -93,7 +93,8 @@ Repeat until the tester stops you or a round finds nothing new three times in a 
 - Selecting: click, Ctrl and Shift, the row checkboxes, the selection bar.
 - A mod's details: picture (add and remove), rename in place and Undo, tags (make, give, take off, edit, delete),
   notes kept after leaving and coming back, creator (guessed and typed), type, folder and Move, "Replaces in the
-  game" for default replacements, "Inside" for objects and Create a Sim parts.
+  game" for default replacements, "Content" for objects and Create a Sim parts
+  (and the resource list: search, copy, save as text), "Conflicts" (give priority and Undo, See in Health).
 - On and off for one mod, many mods, a whole folder; turning a mod with items off warns about saves.
 - Folders: make, rename, drag a mod or a folder into another, delete an empty one; a folder that cannot be deleted
   says why.

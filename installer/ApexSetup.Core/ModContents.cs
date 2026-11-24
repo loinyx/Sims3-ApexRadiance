@@ -3,49 +3,16 @@ using System.Text;
 
 namespace ApexSetup;
 
-// What a package holds, for the Mods screen's details: the catalog names of its objects and how many Create a Sim parts
-// of each kind. Layouts follow the community's documentation of the Sims 3 formats (the Sims 3 Wiki, as the S3PI
-// library reads them):
+// The names and the Create a Sim parts in a package's resources, for the Mods screen's details (ModInspect). Layouts follow
+// the community's documentation of the Sims 3 formats (the Sims 3 Wiki, as the S3PI library reads them):
 // - STBL (0x220557DA): "STBL", version byte, uint16, uint32 count, uint16, uint32, then per string a uint64 key and a
 //   UTF-16 text after its int32 length in characters. The top byte of the instance is the language (0 = English).
 // - OBJD (0x319E4F1D): its catalog block holds the name's and the description's STBL keys side by side (two uint64),
 //   after a material list of varying length; the name is found as the first such pair the package's STBL knows.
 // - CASP (0x034AEECB): uint32 version, int32 offset, a list of presets (int32 count; each an int32-length UTF-16 text and
 //   a uint32), the part's own name (7-bit length, UTF-16 big endian), float, byte, then the uint32 clothing type.
-// Names: the objects' catalog names; PartNames: the CAS parts' own (internal) names; Parts: how many of each kind
-public sealed record ModContents(IReadOnlyList<string> Names, IReadOnlyList<string> PartNames, IReadOnlyList<(string Kind, int Count)> Parts);
-
 public static class ModContent
 {
-    const uint Stbl = 0x220557DA, Objd = 0x319E4F1D, Casp = 0x034AEECB;
-    const int MaxObjects = 200, MaxParts = 400, MaxNames = 60;
-
-    public static ModContents Read(string path)
-    {
-        var index = Dbpf.Index(path);
-        var names = new List<string>();
-        var partNames = new List<string>();
-        var parts = new Dictionary<string, int>();
-        if (index.Count(e => e.Type == Objd) is > 0 and var objects) parts["Object"] = objects;
-        // the package's own strings, English first
-        var text = new Dictionary<ulong, string>();
-        foreach (var e in index.Where(e => e.Type == Stbl).OrderBy(e => e.Instance >> 56 == 0 ? 0 : 1).Take(40))
-            if (Dbpf.Read(path, e, 4 << 20) is { } d)
-                foreach (var (k, v) in Strings(d)) text.TryAdd(k, v);
-        foreach (var e in index.Where(e => e.Type == Objd).Take(MaxObjects))
-        {
-            if (text.Count > 0 && names.Count < MaxNames && Dbpf.Read(path, e, 1 << 20) is { } d && NameIn(d, text) is { } n && !names.Contains(n)) names.Add(n);
-        }
-        foreach (var e in index.Where(e => e.Type == Casp).Take(MaxParts))
-            if (Dbpf.Read(path, e, 1 << 20) is { } d && Part(d) is { } p)
-            {
-                parts[KindOf(p.Clothing)] = parts.GetValueOrDefault(KindOf(p.Clothing)) + 1;
-                // (a part named only by numbers says nothing to a player)
-                if (partNames.Count < MaxNames && p.Name.Any(char.IsLetter) && !partNames.Contains(p.Name)) partNames.Add(p.Name);
-            }
-        return new ModContents(names, partNames, parts.OrderByDescending(x => x.Value).Select(x => (x.Key, x.Value)).ToList());
-    }
-
     public static IEnumerable<(ulong Key, string Text)> Strings(byte[] d)
     {
         if (d.Length < 21 || BinaryPrimitives.ReadUInt32LittleEndian(d) != 0x4C425453) yield break; // "STBL"
@@ -56,14 +23,14 @@ public static class ModContent
             var key = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(at));
             var len = BinaryPrimitives.ReadInt32LittleEndian(d.AsSpan(at + 8));
             at += 12;
-            if (len < 0 || at + len * 2 > d.Length) yield break;
+            if (len < 0 || len > (d.Length - at) / 2) yield break;
             yield return (key, Encoding.Unicode.GetString(d, at, len * 2));
             at += len * 2;
         }
     }
 
     // the first name/description key pair the strings know (the catalog block's two STBL keys, side by side)
-    static string? NameIn(byte[] d, Dictionary<ulong, string> text)
+    internal static string? NameIn(byte[] d, Dictionary<ulong, string> text)
     {
         for (int at = 4; at + 16 <= d.Length; at++)
         {

@@ -8,8 +8,9 @@ using static ApexSetup.Strings;
 namespace ApexSetup;
 
 // One mod's details: a picture strip with its name, badges and switch; tabs that only show when they hold something
-// (Inside for what it holds or a merge's mods, Replaces for a default replacement, Problems when something needs a look,
-// Notes); facts as tiles; and one main action for the case with icon buttons beside it.
+// (Inside for a merge's mods, Content for what a package holds, Conflicts for the mods that share its game data, Replaces
+// for a default replacement, Problems when something needs a look, Notes); facts as tiles; and one main action for the
+// case with icon buttons beside it.
 public sealed partial class MainWindow
 {
     string _detailsTab = "overview";
@@ -32,7 +33,8 @@ public sealed partial class MainWindow
 
         var tabs = new List<(string Key, string Label)> { ("overview", T("Overview")) };
         if (merge is not null) tabs.Add(("inside", T("Inside ({0})", merge.Originals.Count)));
-        else if (m.FileType == "package") tabs.Add(("inside", T("Inside")));
+        else if (m.FileType == "package") tabs.Add(("content", T("Content")));
+        if (merge is null && m.Enabled && (m.FileType == "package" || ModInspect.OnlyInHealth(_conflicts?.Found ?? [], m, _mods).Count > 0)) tabs.Add(("conflicts", T("Conflicts")));
         if (r.Defaults.IsDefault && _gameIndex is not null) tabs.Add(("replaces", T("Replaces")));
         if (problems.Count > 0) tabs.Add(("problems", T("Problems ({0})", problems.Count)));
         if (mine) tabs.Add(("notes", T("Notes")));
@@ -41,17 +43,26 @@ public sealed partial class MainWindow
         ModDetailsHead.Children.Add(DetailsStrip(r, merge, problems.Count > 0, mine));
         if (tabs.Count > 1)
         {
-            var bar = new SelectorBar { Margin = new Thickness(12, 0, 12, 0) };
-            foreach (var (key, label) in tabs) bar.Items.Add(new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab });
+            var bar = new SelectorBar();
+            foreach (var (key, label) in tabs)
+            {
+                var tab = new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab, FontSize = 13, Padding = new Thickness(8, 10, 8, 8) };
+                bar.Items.Add(tab);
+                if (key == "conflicts") _ = CountConflictsAsync(m, bar, tab);
+            }
             bar.SelectionChanged += (s, _) => { if (s.SelectedItem?.Tag is string k && k != _detailsTab) { _detailsTab = k; DispatcherQueue.TryEnqueue(FillModDetails); } }; // (later: the fill removes this bar)
-            ModDetailsHead.Children.Add(bar);
+            // (more tabs than fit in a long language: the row scrolls to the open one)
+            bar.Loaded += (_, _) => bar.SelectedItem?.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
+            ModDetailsHead.Children.Add(new ScrollViewer { Content = bar, Margin = new Thickness(12, 0, 12, 0), HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled });
             ModDetailsHead.Children.Add(new Border { Height = 1, Background = Res("ApexCardBorderBrush") });
         }
 
         var host = ModDetails;
         switch (_detailsTab)
         {
-            case "inside": host.Children.Add(merge is not null ? MergeCards(r, merge) : InsidePanel(r)); break;
+            case "inside": host.Children.Add(MergeCards(r, merge!)); break;
+            case "content": host.Children.Add(ContentTab(m.Path)); break;
+            case "conflicts": host.Children.Add(ConflictsTab(m)); break;
             case "replaces": host.Children.Add(ReplacesTab(r)); break;
             case "problems": foreach (var p in problems) host.Children.Add(Warn(p.Title, p.Text, p.Action, p.Run)); break;
             case "notes": host.Children.Add(NotesBox(r, 200)); break;
