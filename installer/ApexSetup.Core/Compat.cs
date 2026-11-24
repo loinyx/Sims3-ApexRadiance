@@ -145,7 +145,7 @@ public static class Compat
 
         var bridge = s.Layer == Layer.Bridge;
         // S3SS uncompressed textures stutter under the bridge (framework/s3ss_textures.cpp)
-        var toml = Path.Combine(docs, "S3SS", "S3SS.toml");
+        var toml = Scan.SetterFile(docs);
         string[] texSections = { "patches.UncompressedLotTexturesPatch", "patches.UncompressedSimTexturesPatch" };
         if (bridge && s.S3ss && File.Exists(toml) && texSections.Any(sec => Values(File.ReadAllText(toml), sec, "enabled").Contains("true")))
             f.Add(new(Severity.Warning, "Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup).",

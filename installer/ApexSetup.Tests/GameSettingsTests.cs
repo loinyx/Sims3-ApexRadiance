@@ -24,6 +24,12 @@ static class GameSettingsTests
         Directory.CreateDirectory(docs);
         var g = new Game(root, bin, "TS3W.exe", Edition.Steam, "1.67.2");
         string rules = Path.Combine(bin, "GraphicsRules.sgr"), ini = Path.Combine(bin, "Sims3.ini"), cards = Path.Combine(bin, "GraphicsCards.sgr"), options = Path.Combine(docs, "Options.ini");
+        var folders = new Dictionary<string, string> { ["en-us"] = "The Sims 3", ["fr-fr"] = "Les Sims 3", ["pt-pt"] = "Os Sims 3", ["pt-br"] = "The Sims 3", ["de-de"] = "Die Sims 3" };
+        string Pick(string? game, string windows, params string[] played) => Scan.PickFolder(folders, game, windows, played.Contains);
+        check(Pick("en-US", "fr-FR", "The Sims 3", "Les Sims 3") == "The Sims 3" && Pick("en-US", "fr-FR") == "The Sims 3" && Pick("en-US", "fr-FR", "The Sims 3") == "The Sims 3"
+              && Pick("fr_FR", "en-US", "Les Sims 3", "The Sims 3") == "Les Sims 3" && Pick("xx-XX", "fr-FR", "The Sims 3", "Les Sims 3") == "The Sims 3", "Documents folder: the game's language decides, not Windows'");
+        check(Pick(null, "fr-CA") == "Les Sims 3" && Pick(null, "fr-FR", "The Sims 3") == "The Sims 3" && Pick(null, "sv-SE") == "The Sims 3" && Pick(null, "pt-BR") == "The Sims 3",
+            "Documents folder: Windows' language with none in the registry, and the folder the game has played in first");
         try
         {
             Put(rules, Rules); Put(ini, Ini); Put(options, Options);

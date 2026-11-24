@@ -15,7 +15,7 @@ public static class SetterSettings
     const string Smooth = "SmoothPatchPrecise", OldSmooth = "SmoothPatchClassic";
     static readonly string[] SmoothKeys = ["enabled", "frameRateLimit", "frameRateLimitInactive", "tickRateLimit"];
 
-    public static string FileOf(string docs) => Path.Combine(docs, "S3SS", "S3SS.toml");
+    public static string FileOf(string docs) => Scan.SetterFile(docs);
     static string? Value(string text, string patch, string key) => GameSettings.IniValue(text, "patches." + patch, key);
 
     // the patches that would change ("enabled" missing is off, its default)

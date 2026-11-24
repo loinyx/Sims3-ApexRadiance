@@ -732,7 +732,7 @@ public static class Engine
     {
         if (File.Exists(ApexToml(docs))) return false;
         if (File.Exists(Path.Combine(docs, "S3SS", "Apex", "Apex.toml"))) return true;
-        var s3ss = Path.Combine(docs, "S3SS", "S3SS.toml");
+        var s3ss = Scan.SetterFile(docs);
         try
         {
             return File.Exists(s3ss) && Regex.IsMatch(File.ReadAllText(s3ss),

@@ -642,7 +642,7 @@ Every feature ("patch") derives from `ApexPatch` ([framework/patch_base.h](../fr
 ### 5.3 Config file (`ApexRadiance.toml`)
 
 Location: `Documents\Electronic Arts\<localized game folder>\Apex Radiance\` ([framework/apex_paths.h](../framework/apex_paths.h)).
-The localized folder name is resolved from the game executable's string table, with `"The Sims 3"` as fallback.
+The localized folder name comes from the game executable's string table. The game's language decides it, as `TS3W.exe` does: the first `Locale` under its registry key (`Software\Sims(Steam)` or `Software\Sims`, 32-bit view), Windows' language only when there is none, and English for a language it does not have. A folder that holds `Options.ini` goes first. An `Apex Radiance` folder left in the folder of Windows' language moves along; Sims3SettingsSetter's file is read where it was saved last.
 
 | Table | Contents |
 |---|---|

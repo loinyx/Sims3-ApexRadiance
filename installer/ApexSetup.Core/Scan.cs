@@ -36,9 +36,37 @@ public static class Scan
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DOCUMENTS") is { } test) return test;
         var ea = Path.Combine(PlayerShellFolder("Personal") ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Electronic Arts");
-        var dir = Path.Combine(ea, FolderName(g.ExePath) ?? "The Sims 3");
-        // a game switched to another language keeps using the English folder (framework/apex_paths.cpp)
-        return !Directory.Exists(dir) && Directory.Exists(Path.Combine(ea, "The Sims 3")) ? Path.Combine(ea, "The Sims 3") : dir;
+        return Path.Combine(ea, PickFolder(Folders(g.ExePath), GameLocale(g.ExePath), System.Globalization.CultureInfo.CurrentCulture.Name, f => File.Exists(Path.Combine(ea, f, "Options.ini"))));
+    }
+
+    // Earlier versions went by Windows' language alone. Apex's own folder left in that one comes along, where the right one
+    // has none yet (framework/apex_paths.cpp does the same).
+    public static void BringApex(Game g)
+    {
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DOCUMENTS") is not null) return;
+        var docs = DocumentsFor(g);
+        var old = Path.Combine(Path.GetDirectoryName(docs)!, WindowsFolder(Folders(g.ExePath), System.Globalization.CultureInfo.CurrentCulture.Name), "Apex Radiance");
+        var now = Path.Combine(docs, "Apex Radiance");
+        try
+        {
+            if (Directory.Exists(now) || !Directory.Exists(old)) return;
+            Engine.CheckWritable();
+            Directory.CreateDirectory(docs);
+            Directory.Move(old, now);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) { Engine.Log(e); }
+    }
+
+    // Sims3SettingsSetter goes by Windows' language: its file may be beside the game's folder. The one saved last is in use.
+    public static string SetterFile(string docs)
+    {
+        var own = Path.Combine(docs, "S3SS", "S3SS.toml");
+        try
+        {
+            return Directory.EnumerateDirectories(Path.GetDirectoryName(Path.GetFullPath(docs)) ?? docs).Select(d => Path.Combine(d, "S3SS", "S3SS.toml"))
+                .Where(File.Exists).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault() ?? own;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return own; }
     }
 
     // Setup runs elevated (app.manifest): a standard player who types an administrator's password runs it as that account, whose
@@ -65,18 +93,52 @@ public static class Scan
     [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode)] static extern bool WTSQuerySessionInformationW(nint server, int session, int info, out nint buf, out int bytes);
     [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(nint mem);
 
-    // As Apex does (framework/apex_paths.cpp GameFolderName): the exe has one string-table block per language, the
-    // language code at the block's first id and the folder name two ids later (blocks of 100 ids from 1000).
-    static string? FolderName(string exe)
+    // The folder the game uses. Its rule (framework/apex_paths.cpp has it too): the language in its registry, English when it
+    // has no such language; Windows' language only with none in the registry. One the game has played in (it holds
+    // Options.ini) goes first, for editions that keep their language elsewhere.
+    public static string PickFolder(IReadOnlyDictionary<string, string> folders, string? game, string windows, Func<string, bool> played)
     {
-        var mod = LoadLibraryExW(exe, 0, 0x2 /* LOAD_LIBRARY_AS_DATAFILE */);
-        if (mod == 0) return null;
+        var order = new List<string>();
+        if (game is not null) order.Add(folders.GetValueOrDefault(game.ToLowerInvariant().Replace('_', '-'), "The Sims 3"));
+        order.Add(WindowsFolder(folders, windows));
+        order.Add("The Sims 3");
+        return order.FirstOrDefault(played) ?? order[0];
+    }
+
+    static string WindowsFolder(IReadOnlyDictionary<string, string> folders, string windows)
+    {
+        windows = windows.ToLowerInvariant();
+        return folders.GetValueOrDefault(windows) ?? folders.FirstOrDefault(f => f.Key.Split('-')[0] == windows.Split('-')[0]).Value ?? "The Sims 3";
+    }
+
+    // the first "Locale" under the game's registry key, whose name is in the exe (Steam's has its own)
+    static string? GameLocale(string exe)
+    {
         try
         {
-            // the user locale (GetUserDefaultLocaleName, as Apex), not the display language
-            var locale = System.Globalization.CultureInfo.CurrentCulture.Name.ToLowerInvariant();
-            var language = locale.Split('-')[0];
-            string? same = null;
+            var root = _registry.GetOrAdd(exe, e => File.ReadAllBytes(e).AsSpan().IndexOf("Software\\Sims(Steam)\0"u8) >= 0 ? @"Software\Sims(Steam)" : @"Software\Sims");
+            using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry32);
+            using var key = machine.OpenSubKey(root);
+            foreach (var name in key?.GetSubKeyNames() ?? [])
+            {
+                using var k = key!.OpenSubKey(name);
+                if (k?.GetValue("Locale") is string { Length: > 0 } l) return l;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException) { Engine.Log(e); }
+        return null;
+    }
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _registry = new(StringComparer.OrdinalIgnoreCase);
+
+    // Language code to folder name: the exe has one string-table block per language, the code at the block's first id and the
+    // folder name two ids later (blocks of 100 ids from 1000).
+    static Dictionary<string, string> Folders(string exe)
+    {
+        var all = new Dictionary<string, string>();
+        var mod = LoadLibraryExW(exe, 0, 0x2 /* LOAD_LIBRARY_AS_DATAFILE */);
+        if (mod == 0) return all;
+        try
+        {
             var buf = new char[260];
             for (uint block = 1000; block < 4000; block += 100)
             {
@@ -84,12 +146,9 @@ public static class Scan
                 if (n <= 0) continue;
                 var code = new string(buf, 0, n).ToLowerInvariant();
                 n = LoadStringW(mod, block + 2, buf, buf.Length);
-                if (n <= 0) continue;
-                var folder = new string(buf, 0, n);
-                if (code == locale) return folder;
-                if (same is null && code.Split('-')[0] == language) same = folder;
+                if (n > 0) all.TryAdd(code, new string(buf, 0, n));
             }
-            return same;
+            return all;
         }
         finally { FreeLibrary(mod); }
     }
