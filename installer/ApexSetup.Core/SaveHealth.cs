@@ -30,6 +30,21 @@ public static class SaveHealth
     // (two checks at once, e.g. Check now while the start-up check runs, write the history one after the other)
     static readonly object Gate = new();
 
+    // a save's sizes over time, oldest first (what Check recorded)
+    public static List<SizePoint> History(string name) => Load().GetValueOrDefault(name) ?? [];
+
+    // a renamed save keeps its history
+    public static void Renamed(string from, string to)
+    {
+        lock (Gate)
+        {
+            var history = Load();
+            if (!history.Remove(from, out var points)) return;
+            history[to] = points;
+            Fs.Retry(() => Fs.WriteAtomic(FilePath, JsonSerializer.Serialize(history, SetupJson.Default.DictionaryStringListSizePoint)));
+        }
+    }
+
     public static List<SaveReport> Check(string docs, bool record = true)
     {
         var history = Load();

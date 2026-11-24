@@ -431,13 +431,14 @@ public static partial class ModLibrary
         return added;
     }
 
+    // (a file, or a whole folder: a save)
     public static void Recycle(string path)
     {
-        if (!File.Exists(path)) return;
+        if (!File.Exists(path) && !Directory.Exists(path)) return;
         // (Windows asks before it deletes for good a file the Recycle Bin can't take: a network folder, a file too big)
         var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = Path.GetFullPath(path) + "\0\0", fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_WANTNUKEWARNING };
         var r = SHFileOperation(ref op);
-        if (r != 0 || op.fAnyOperationsAborted || File.Exists(path)) throw new SetupException("Windows couldn't move the file to the Recycle Bin.");
+        if (r != 0 || op.fAnyOperationsAborted || File.Exists(path) || Directory.Exists(path)) throw new SetupException("Windows couldn't move the file to the Recycle Bin.");
     }
 
     const uint FO_DELETE = 3;
