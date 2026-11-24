@@ -132,7 +132,7 @@ public sealed partial class MainWindow
             if (_sp != p) return;
             (p.Info, p.Contents, p.Stars, p.Memories) = (info, contents, stars, contents.Items(SaveKind.Memory));
             p.Family = await SaveCard.SimsOf(photo);
-            p.Cover = SpCover(p) is { } cover ? await SpImage(cover, 0, ct) : null;
+            p.Cover = await Task.Run(() => SpCover(p, ct), ct) is { } cover ? await SpImage(cover, 0, ct) : null;
             if (_sp != p) return;
             SpBuild(p);
 
@@ -155,10 +155,9 @@ public sealed partial class MainWindow
         }
     }
 
-    // the picture behind the header: a starred memory, else one from the middle of them, else a house of the world
-    static SaveItem? SpCover(SavePageState p) =>
-        p.Memories.Count > 0 ? p.Memories.Cast<SaveItem?>().FirstOrDefault(i => p.Stars.Contains(i!.Value.Key)) ?? p.Memories[p.Memories.Count / 2]
-        : p.Contents.Sample(SaveKind.LotThumbnail, 1).Cast<SaveItem?>().FirstOrDefault();
+    // the picture behind the header, as on the Saves home: a memory of a place, else one from the middle of them, else a house
+    static SaveItem? SpCover(SavePageState p, CancellationToken ct) =>
+        SaveCover.Best(p.Contents, ct) ?? (p.Memories.Count > 0 ? p.Memories[p.Memories.Count / 2] : SaveCover.Lots(p.Contents, 1).Cast<SaveItem?>().FirstOrDefault());
 
     // a few pictures at a time, off the window's thread; null when the page was left, the picture is no longer wanted, or
     // it can't be read

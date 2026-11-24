@@ -215,25 +215,9 @@ public sealed partial class MainWindow
             _homeTick.Start();
             return row;
         }
-        var ups = WelcomeUpdates();
-        var update = ups.Count > 0 && _settings.InstallUpdatesOnPlay;
+        var update = WelcomeUpdates().Count > 0 && _settings.InstallUpdatesOnPlay;
         var blocked = _healthState == HealthState.Blocked;
-        var play = new Button { Height = 56, Padding = new Thickness(22, 0, 28, 0), CornerRadius = new CornerRadius(8), IsEnabled = !_busy && !Maintenance };
-        if (!blocked) play.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
-        var pc = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-        pc.Children.Add(new FontIcon { Glyph = "", FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
-        var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        var title = blocked ? T("Play anyway") : T("Play");
-        label.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold });
-        var sub = blocked ? T("The game starts without Apex Radiance") : update ? (ups.Count == 1 ? T("1 update installs first") : T("{0} updates install first", ups.Count)) : null;
-        if (sub is not null) label.Children.Add(new TextBlock { Text = sub, FontSize = 12, Opacity = 0.75 });
-        pc.Children.Add(label);
-        play.Content = pc;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(play, "PlayButton");
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(play, title);
-        if (update) ToolTipService.SetToolTip(play, string.Join("\n", ups.Select(c => Name(c) + " " + (ReleaseOf(c)?.Version ?? ""))));
-        play.Click += async (_, _) => await PlayAsync(null, update: update);
-        row.Children.Add(play);
+        row.Children.Add(PlayButton(null));
 
         var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft };
         if (update && !blocked)
@@ -255,6 +239,30 @@ public sealed partial class MainWindow
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, T("More"));
         row.Children.Add(more);
         return row;
+    }
+
+    // the large Play: the game's main menu, or straight into a save
+    Button PlayButton(string? save)
+    {
+        var ups = WelcomeUpdates();
+        var update = ups.Count > 0 && _settings.InstallUpdatesOnPlay;
+        var blocked = _healthState == HealthState.Blocked;
+        var play = new Button { Height = 56, Padding = new Thickness(22, 0, 28, 0), CornerRadius = new CornerRadius(8), IsEnabled = !_busy && !Maintenance };
+        if (!blocked) play.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+        var pc = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+        pc.Children.Add(new FontIcon { Glyph = "", FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
+        var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        var title = blocked ? T("Play anyway") : T("Play");
+        label.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold });
+        var sub = blocked ? T("The game starts without Apex Radiance") : update ? (ups.Count == 1 ? T("1 update installs first") : T("{0} updates install first", ups.Count)) : null;
+        if (sub is not null) label.Children.Add(new TextBlock { Text = sub, FontSize = 12, Opacity = 0.75 });
+        pc.Children.Add(label);
+        play.Content = pc;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(play, save is null ? "PlayButton" : "PlaySaveButton");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(play, save is null ? title : T("Play {0}", save));
+        if (update) ToolTipService.SetToolTip(play, string.Join("\n", ups.Select(c => Name(c) + " " + (ReleaseOf(c)?.Version ?? ""))));
+        play.Click += async (_, _) => await PlayAsync(save, update: update);
+        return play;
     }
 
     Action? _homeTickAction;

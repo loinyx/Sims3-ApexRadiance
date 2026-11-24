@@ -112,30 +112,6 @@
                     </StackPanel>
                 </Grid>
             </DataTemplate>
-            <!-- a save in Saves: the household photo, its name, when it was played, and what to do with it -->
-            <DataTemplate x:Key="SaveTemplate" x:DataType="local:SaveCard">
-                <Border Style="{StaticResource ApexCard}" Padding="0">
-                    <StackPanel>
-                        <Border Height="150" CornerRadius="12,12,0,0" Background="{ThemeResource ApexPillBrush}">
-                            <Grid>
-                                <FontIcon Glyph="&#xE716;" FontSize="30" Foreground="{ThemeResource ApexIconMutedBrush}" Visibility="{x:Bind Placeholder, Mode=OneWay}" />
-                                <Image Source="{x:Bind Photo, Mode=OneWay}" Stretch="Uniform" />
-                            </Grid>
-                        </Border>
-                        <StackPanel Padding="14,10,14,12" Spacing="4">
-                            <TextBlock Text="{x:Bind Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Text="{x:Bind When}" Style="{StaticResource ApexMuted}" />
-                            <Grid Margin="0,6,0,0" ColumnSpacing="8">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <HyperlinkButton Content="{x:Bind PlayText}" Click="{x:Bind OnPlay}" Padding="0" />
-                                <Button Grid.Column="1" Click="{x:Bind OnBackup}" Padding="8,4" AutomationProperties.Name="{x:Bind BackupText}" ToolTipService.ToolTip="{x:Bind BackupText}">
-                                    <FontIcon Glyph="&#xE896;" FontSize="13" />
-                                </Button>
-                            </Grid>
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-            </DataTemplate>
         </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="40" />
@@ -651,18 +627,8 @@
                         <StackPanel x:Name="ScreenHome" Spacing="16" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenWorlds" Spacing="16" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenSaves" Spacing="16" Visibility="Collapsed">
-                            <Grid>
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="Saves" Style="{StaticResource ApexTitle}" />
-                                    <TextBlock Text="Each card shows the household photo stored in the save." Style="{StaticResource ApexMuted}" />
-                                </StackPanel>
-                                <Button x:Name="SavesBackupAll" Content="Back up all" HorizontalAlignment="Right" VerticalAlignment="Center" Click="OnBackupAll" />
-                            </Grid>
                             <InfoBar x:Name="SavesInfo" IsClosable="True" />
-                            <ItemsControl x:Name="SaveGrid" ItemTemplate="{StaticResource SaveTemplate}">
-                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><local:CardGrid MinItemWidth="220" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                            </ItemsControl>
-                            <TextBlock x:Name="SavesEmpty" Tag="dyn" Style="{StaticResource ApexMuted}" Visibility="Collapsed" />
+                            <StackPanel x:Name="SavesHost" Tag="dyn" Spacing="18" />
                         </StackPanel>
                         <Grid x:Name="ScreenHealth" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenNews" Spacing="16" Visibility="Collapsed" />
