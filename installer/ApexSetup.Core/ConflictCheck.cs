@@ -34,7 +34,7 @@ public sealed class ConflictCheck : IModCheck
     public List<DuplicateEntry> Duplicates => Last?.Duplicates ?? [];
 
     // (Rules goes up when the scan's rules change, so a result kept from older rules is scanned again)
-    const int Rules = 5;
+    const int Rules = 6;
     public static string Fingerprint(IEnumerable<ModFile> mods) => $"rules {Rules}\n" +
         string.Join("\n", mods.Where(Scanned).OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
             .Select(m => $"{m.Path}|{m.Size}|{(File.Exists(m.Path) ? File.GetLastWriteTimeUtc(m.Path).Ticks : 0)}"));
@@ -64,7 +64,7 @@ public sealed class ConflictCheck : IModCheck
         Scans++;
         var o = new ModConflicts.Options
         {
-            Roots = Directory.Exists(global::ApexSetup.Scan.Packages(docs)) ? [global::ApexSetup.Scan.Packages(docs)] : [],
+            Roots = Directory.Exists(Path.Combine(docs, "Mods")) ? [Path.Combine(docs, "Mods")] : [], LoadedOnly = true,
             Bin = game.Bin, Game = game.Root,
             Hooks = ModConflicts.HookTable.Load(Offline, Path.Combine(Paths.Data, "hook-table.csv")),
         };

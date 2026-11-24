@@ -50,6 +50,7 @@ public static partial class ModConflicts
         public string? Game { get; init; }                  // the install folder (holds Game\Bin)
         public Rules Rules { get; init; } = Rules.Load();
         public bool Describe { get; init; }
+        public bool LoadedOnly { get; init; }               // only what the game loads: no archive, nor a package no Resource.cfg line names
         public bool ModFolders { get; init; }               // every first-level folder is one mod (its files are versions of it)
         public List<KnownAsi> KnownAsi { get; init; } = new();
         public HookTable? Hooks { get; init; }              // applied to the edition of the exe in Bin (or Game)
@@ -677,6 +678,30 @@ public static partial class ModConflicts
                 catch (Exception e) when (e is InvalidDataException or IOException or ArgumentException) { }
         return d;
     }
+    // One build of a script, adapted: in a folder Resource.cfg loads first, a copy of the same build as the others' (Tiny UI Fix
+    // makes one of each script whose windows it enlarges). Another build there is another version of the mod, a conflict.
+    static bool Adapted(List<(PkgRec Rec, Entry E)> l, List<(PkgRec Rec, Entry E)> sorted)
+    {
+        if (l[0].E.Type != TypeS3sa || sorted.Count != l.Count || !sorted.Skip(1).All(x => x.Rec.Key!.Value.Item1 > sorted[0].Rec.Key!.Value.Item1)) return false;
+        var builds = l.Select(x => { try { return Build(x.Rec.Pkg.Read(x.E)); } catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { return null; } }).ToList();
+        return builds[0] is not null && builds.All(b => b == builds[0]);
+    }
+
+    // which build of an assembly a script resource holds: its name and module id, null when it can't be read
+    public static string? Build(byte[] s3sa)
+    {
+        try
+        {
+            if (Image(s3sa) is not { } img) return null;
+            using var pe = new PEReader(ImmutableArray.Create(img));
+            if (!pe.HasMetadata) return null;
+            var r = pe.GetMetadataReader();
+            var m = r.GetModuleDefinition();
+            return r.GetString(m.Name) + " " + r.GetGuid(m.Mvid);
+        }
+        catch (Exception e) when (e is BadImageFormatException or InvalidDataException or InvalidOperationException or IndexOutOfRangeException or ArgumentException) { return null; }
+    }
+
     static byte[]? Image(byte[] s3sa) => PeImage(s3sa) ?? PeImage(DecryptS3sa(s3sa));
 
     // The packages that share some keys. Recs: in load order (the one in use first), those Resource.cfg does not load last.
@@ -880,6 +905,7 @@ public static partial class ModConflicts
                 var ext = Path.GetExtension(f).ToLowerInvariant();
                 if (ext is not (".package" or ".zip" or ".rar" or ".7z" or ".asi" or ".dbc")) continue;
                 var rel = Slash(Path.GetRelativePath(@base, f));
+                if (o.LoadedOnly && (ext is ".zip" or ".rar" or ".7z" || ext == ".package" && LoadKey(dirs, rel) is null)) continue;
                 var relRoot = Slash(Path.GetRelativePath(root, f));
                 var file = $"{rootName}/{relRoot}";
                 // ModFolders: every first-level folder is one mod (a collection of versions); else every file
@@ -968,6 +994,7 @@ public static partial class ModConflicts
             if (l.Count < 2) continue;
             var sorted = l.Where(x => x.Rec.Key is not null).OrderBy(x => x.Rec.Key!.Value, Comparer<(int, int, string)>.Create(CompareKey)).ToList();
             var side = Sides(l);
+            if (Adapted(l, sorted)) Array.Clear(side);
             var ps = l.Select(x => x.Rec.Party).Distinct().ToList();
             var id = string.Join(" | ", l.Select(x => x.Rec.Label).OrderBy(x => x, StringComparer.Ordinal));
             if (!pairs.TryGetValue(id, out var g))

@@ -390,7 +390,7 @@ public sealed partial class MainWindow
     // how many mods it conflicts with, as Health counts: not the ignored ones, nor the ones a priority settled
     int OpenConflicts(ModFile m, List<SharedMod> rows)
     {
-        bool Open(ModConflict? c) => c is not null && !_settings.IgnoredConflicts.Contains(c.Id);
+        bool Open(ModConflict? c) => c is { Level: not ConflictLevel.Small } && !_settings.IgnoredConflicts.Contains(c.Id);
         var found = _conflicts?.Found ?? [];
         return rows.Count(r => Open(ModInspect.InHealth(found, m, r))) + ModInspect.OnlyInHealth(found, m, _mods).Count(Open);
     }
@@ -501,13 +501,11 @@ public sealed partial class MainWindow
         {
             var what = string.Join(", ", r.Different.Select(d => DataText(d.Kind, d.Count)));
             if (r.Identical > 0 && r.Conflict) what += " · " + (r.Identical == 1 ? T("1 more is the same in both") : T("{0} more are the same in both", r.Identical));
-            else if (!r.Conflict) what = r.Identical == 1 ? T("1 resource") : T("{0} resources", r.Identical);
             return Row(Path.GetFileNameWithoutExtension(r.Mod.Name), what, ModInspect.InHealth(found, m, r), acts);
         }
 
         var over = rows.Where(r => r is { Conflict: true, Wins: true }).ToList();
         var under = rows.Where(r => r is { Conflict: true, Wins: false }).ToList();
-        var same = rows.Where(r => !r.Conflict).ToList();
         var other = scripts ? ModInspect.OnlyInHealth(found, m, _mods) : [];
         if (over.Count > 0) Part(over.Count == 1 ? T("Replaces 1 mod") : T("Replaces {0} mods", over.Count), "ApexSuccessBrush", over.Select(r => ModLine(r)));
         var up = false;
@@ -524,10 +522,10 @@ public sealed partial class MainWindow
             }).ToList());
         if (other.Count > 0)
             Part(T("Other conflicts"), "ApexWarningBrush", other.Select(c => Row(string.Join(", ", c.Parties.Where(p => !p.Equals(Path.GetFileNameWithoutExtension(m.Path), StringComparison.OrdinalIgnoreCase))), T(c.Title) + ". " + T(c.Say, c.SayArgs), c)));
-        if (same.Count > 0) Part(same.Count == 1 ? T("The same data in 1 mod") : T("The same data in {0} mods", same.Count), "ApexMutedBrush", same.Select(r => ModLine(r)));
-        if (over.Count + under.Count + other.Count + same.Count == 0)
+        // (identical copies change nothing, whichever the game uses: they are no conflict)
+        if (over.Count + under.Count + other.Count == 0)
         {
-            if (!_healthChecking) panel.Children.Add(Empty(T("No conflicts"), T("It shares no game data with your other mods.")));
+            if (!_healthChecking) panel.Children.Add(Empty(T("No conflicts"), T("None of your other mods change the same thing.")));
             return;
         }
         if (up) panel.Children.Add(new TextBlock { Text = T("With priority, the file goes to the folder the game reads first. You can undo it."), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });

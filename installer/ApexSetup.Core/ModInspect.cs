@@ -215,7 +215,7 @@ public static class ModInspect
             && (!IsData(c) || c.Parties.Any(p => !File(p, _ => true)))).ToList();
     }
 
-    static bool IsData(ModConflict c) => c.Raw.StartsWith("resource key:", StringComparison.Ordinal);
+    static bool IsData(ModConflict c) => c.Raw.Split(':')[0] is "resource key" or "decided" or "add-on" or "translation";
     static bool Names(ModConflict c, ModFile m) => c.Files.Contains(m.Path, StringComparer.OrdinalIgnoreCase);
 }
 
@@ -284,6 +284,8 @@ public sealed class SharedData
             if (_order[me] is null && _order[other.Key] is null) continue;
             var different = new Dictionary<DataKind, int>();
             var identical = 0;
+            // (a script's adapted copy of the same build in a folder that loads first: ModConflicts.Adapted)
+            var adapted = _order[me] is { } mo && _order[other.Key] is { } oo && mo.Item1 != oo.Item1;
             try
             {
                 using var a = Dbpf.OpenShared(inside ?? mod.Path);
@@ -291,7 +293,7 @@ public sealed class SharedData
                 foreach (var (_, ea, eb) in other)
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (Same(a, ea, b, eb)) identical++;
+                    if (Same(a, ea, b, eb, adapted)) identical++;
                     else different[ModInspect.KindOf(ea.Type)] = different.GetValueOrDefault(ModInspect.KindOf(ea.Type)) + 1;
                 }
             }
@@ -302,8 +304,9 @@ public sealed class SharedData
         return found.OrderByDescending(x => x.Conflict).ThenBy(x => x.Mod.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
-    // one that can't be read counts as different; two that blank the same media are the same fix
-    static bool Same(Stream a, Dbpf.Entry ea, Stream b, Dbpf.Entry eb)
+    // the scan's rules: one that can't be read counts as different; two that blank the same media are the same fix; tuning and
+    // texts by what they mean
+    static bool Same(Stream a, Dbpf.Entry ea, Stream b, Dbpf.Entry eb, bool adapted)
     {
         if (ModConflicts.Blankable.Contains(ea.Type) && ea.MemSize <= ModConflicts.TinyBytes && eb.MemSize <= ModConflicts.TinyBytes) return true;
         if (ea.Compressed == eb.Compressed && ea.Size == eb.Size)
@@ -312,8 +315,10 @@ public sealed class SharedData
             var (ra, rb) = (Dbpf.Read(a, ea with { Compressed = false }, MaxResource), Dbpf.Read(b, eb with { Compressed = false }, MaxResource));
             if (ra is not null && rb is not null && ra.AsSpan().SequenceEqual(rb)) return true;
         }
-        if (!ea.Compressed && !eb.Compressed) return false;
         var (da, db) = (Dbpf.Read(a, ea, MaxResource), Dbpf.Read(b, eb, MaxResource));
-        return da is not null && db is not null && da.AsSpan().SequenceEqual(db);
+        if (da is null || db is null) return false;
+        if (da.AsSpan().SequenceEqual(db)) return true;
+        if (adapted && ea.Type == ModConflicts.TypeS3sa && ModConflicts.Build(da) is { } build) return build == ModConflicts.Build(db);
+        return ModConflicts.Meaning(ea.Type, da) == ModConflicts.Meaning(eb.Type, db);
     }
 }

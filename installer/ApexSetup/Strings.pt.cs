@@ -2070,5 +2070,6 @@ public static partial class Strings
         ["{0} interface files"] = "{0} arquivos de interface",
         ["Content"] = "Conteúdo",
         ["Conflicts"] = "Conflitos",
+        ["None of your other mods change the same thing."] = "Nenhum outro mod seu muda a mesma coisa.",
     };
 }

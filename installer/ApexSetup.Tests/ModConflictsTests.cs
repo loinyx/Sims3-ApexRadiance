@@ -127,6 +127,20 @@ static class ModConflictsTests
         var threeLast = In("ThreeLast", ("Packages/a.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))), ("Packages/b.package", Pkg(Xml(1, doc))), ("Packages/c.package", Pkg(Xml(1, doc))));
         check(three is [{ Parties.Length: 3 } t3] && Of(t3) is { Winner: "a", Alike: ["b"], Level: ConflictLevel.Look } && threeLast is [var tl] && Of(tl) is { Winner: "a", Alike.Length: 0 },
             "mod conflicts: of two mods with the same copy and one with another, the one like the copy in use loses nothing");
+        // a script adapted for a folder that loads first is the same build, no conflict; another build is, and so are two in one folder
+        var build = Guid.NewGuid();
+        byte[] Script(Guid id, int pad) => Pkg((ModConflicts.TypeS3sa, 0, 9, ModConflicts.S3saWrap([.. Asm("Fixture", id, []), .. new byte[pad]])));
+        var adapted = In("Adapted", ("Overrides/fix.package", Script(build, 8)), ("Packages/mod.package", Script(build, 0)));
+        var other = In("AdaptedOld", ("Overrides/fix.package", Script(Guid.NewGuid(), 8)), ("Packages/mod.package", Script(build, 0)));
+        var beside = In("AdaptedBeside", ("Packages/fix.package", Script(build, 8)), ("Packages/mod.package", Script(build, 0)));
+        check(!adapted.Any(c => c.Kind is "decided" or "resource key") && other.Any(c => c.Kind == "decided") && beside.Any(c => c.Kind == "resource key"),
+            $"mod conflicts: a script's adapted copy of the same build in a folder that loads first is no conflict, another build is ({string.Join(" / ", adapted.Concat(other).Concat(beside).Select(c => c.Kind))})");
+        var off = Path.Combine(tmp, "Off", "Mods");
+        foreach (var f in new[] { "Packages/a.package", "Disabled (Apex Launcher)/Packages/b.package" })
+        { Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(off, f))!); File.WriteAllBytes(Path.Combine(off, f), Pkg(Xml(1, f))); }
+        File.WriteAllText(Path.Combine(off, "Resource.cfg"), "Priority 500\nPackedFile Packages/*.package\n");
+        check(ModConflicts.Scan(new() { Roots = { off }, Rules = rules, LoadedOnly = true }).Conflicts.Count == 0 && ModConflicts.Scan(new() { Roots = { off }, Rules = rules }).Conflicts.Count == 1,
+            "mod conflicts: a mod the game does not load conflicts with nothing");
         // only texts differ, beside tuning both hold alike: a matter of texts, with how many
         var words = In("Words", ("Packages/a.package", Pkg(Xml(1, doc), Texts(3, (1, "a"), (2, "b"), (3, "c")))), ("Packages/b.package", Pkg(Xml(1, doc), Texts(3, (1, "a"), (2, "B"), (3, "C")))));
         check(words is [{ Kind: "resource key" } wd] && wd.Text.Contains("(STBL 1; 1 identical; 2 texts differ)") && Of(wd) is { Level: ConflictLevel.Small, SayArgs: ["a", "2"], Finding: null },
