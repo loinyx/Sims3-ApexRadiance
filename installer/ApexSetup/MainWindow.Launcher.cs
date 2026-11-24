@@ -57,7 +57,7 @@ public sealed partial class MainWindow
     // filled again when it is done, and a newer check replaces an older one still running)
     ConflictCheck? _conflicts;
     int _healthRun;
-    bool _healthChecking;
+    bool _healthChecking, _savesRecovered;
     Task _healthDone = Task.CompletedTask;
     // (the task ends when this check's result is in _health; Play awaits it, the rest let it run)
     Task CheckHealth()
@@ -78,6 +78,8 @@ public sealed partial class MainWindow
             {
                 // (a merge cut off during its move, by a closed window or a crash: its originals go back before anything reads the mods or the game starts)
                 try { ModMerge.Recover(docs); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { App.Log(e); }
+                // (the same for a change to a save; only in the first check after the start, so it never meets a change being made)
+                if (!_savesRecovered && !Maintenance) { _savesRecovered = true; SaveCopies.Recover(docs); }
                 if (mods is null) try { mods = read = Mods.List(g, docs, kinds: false); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
                 return Health.Gather(g, s, docs, apex, mods, mods is null ? null : conflicts);
             }
@@ -417,43 +419,6 @@ public sealed partial class MainWindow
         }
         host.Children.Add(Muted(T("Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it.")));
     }
-
-    // ---------- Saves ----------
-
-    void FillSaves()
-    {
-        if (_game is null) { SavesEmpty.Text = T("Choose the game first."); SavesEmpty.Visibility = Visibility.Visible; return; }
-        var docs = Docs;
-        var cards = Saves.List(docs).Select(s => new SaveCard(s)).ToList();
-        SaveGrid.ItemsSource = cards;
-        SavesEmpty.Text = T("No saves yet. They show here after you save a game.");
-        SavesEmpty.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        SavesBackupAll.IsEnabled = cards.Count > 0;
-        SaveCard.Play = c => _ = PlayAsync(c.Save.Name);
-        SaveCard.Backup = c => _ = BackupAsync([c.Save]);
-        _ = Task.Run(async () =>
-        {
-            foreach (var c in cards)
-            {
-                var bytes = Saves.Photo(c.Save);
-                DispatcherQueue.TryEnqueue(async () => c.Photo = await SaveCard.ImageOf(bytes));
-            }
-            await Task.CompletedTask;
-        });
-    }
-
-    async Task BackupAsync(List<Save> saves)
-    {
-        var docs = Docs;
-        try
-        {
-            var n = await Task.Run(() => saves.Select(s => Saves.Backup(s, docs)).Count());
-            SetInfo(SavesInfo, InfoBarSeverity.Success, n == 1 ? T("Save backed up") : T("{0} saves backed up", n), Saves.BackupDir(docs), T("Open folder"), () => OpenFolder(Saves.BackupDir(docs)));
-        }
-        catch (Exception e) { App.Log(e); SetInfo(SavesInfo, InfoBarSeverity.Error, T("The backup did not finish"), ErrorText(e)); }
-    }
-
-    void OnBackupAll(object sender, RoutedEventArgs e) => _ = BackupAsync(Saves.List(Docs));
 
     // ---------- Health ----------
 

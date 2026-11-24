@@ -216,7 +216,7 @@ public static class Worlds
     }
 
     // "IslaParadiso" → "Isla Paradiso", "AppaloosaPlains" → "Appaloosa Plains"; World Adventures' destinations by name
-    static string Pretty(string file) => file switch
+    public static string Pretty(string file) => file switch
     {
         "China" => "Shang Simla", "Egypt" => "Al Simhara", "France" => "Champs Les Sims",
         _ => System.Text.RegularExpressions.Regex.Replace(file, "(?<=[a-z])(?=[A-Z])", " "),

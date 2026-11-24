@@ -85,6 +85,9 @@ public static class SaveHealth
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
+    // a copy made since the save was last played, or not long ago
+    public static bool RecentCopy(DateTime? copy, Save s) => copy is { } c && (c >= s.LastPlayed || c >= DateTime.Now.AddDays(-BackupDays));
+
     public static List<Finding> Findings(IEnumerable<SaveReport> reports, string docs)
     {
         var f = new List<Finding>();
@@ -98,7 +101,7 @@ public static class SaveHealth
             if (r.History.FirstOrDefault(p => p.When >= DateTime.Now.AddDays(-GrowthDays)) is { Bytes: > 0 } first && r.Bytes > first.Bytes * (1 + FastGrowth) && r.Bytes - first.Bytes > 20L << 20)
                 f.Add(new(Severity.Info, "The save {0} grew from {1} MB to {2} MB in {3} days.", [r.Save.Name, (first.Bytes >> 20).ToString(), mb, Math.Max(1, (int)(DateTime.Now - first.When).TotalDays).ToString()]));
             // a save played since its last backup, more than BackupDays ago (or never backed up)
-            if (r.Incomplete is null && (r.LastBackup is not { } b || (b < r.Save.LastPlayed && b < DateTime.Now.AddDays(-BackupDays))))
+            if (r.Incomplete is null && !RecentCopy(r.LastBackup, r.Save))
             {
                 var save = r.Save;
                 f.Add(new(Severity.Info, r.LastBackup is null ? "The save {0} has no backup yet." : "The save {0} was last backed up {1} days ago.",

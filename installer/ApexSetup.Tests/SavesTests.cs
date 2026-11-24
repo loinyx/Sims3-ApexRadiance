@@ -177,6 +177,25 @@ static class SavesTests
               && small is { Width: 4, Height: 4 } && small.Bgra.AsSpan(0, 4).SequenceEqual(new byte[] { 0, 255, 0, 255 }) && Dds.Decode(Dxt1(8, 2, 1, 1), 64) is { Width: 8 },
             "pictures: a DXT1 memory decodes, at full size or at the smaller size asked for");
 
+        // a view of a town (detail from edge to edge) is a cover; the same with the plumbob, a thought bubble or in the dark is not, nor a plain wall
+        SavePicture View(int light, byte[]? mark = null)
+        {
+            var px = new byte[64 * 64 * 4];
+            for (var i = 0; i < 64 * 64; i++)
+            {
+                var v = (byte)((i % 64 / 2 + i / 64 / 2) % 2 == 0 ? light : light / 3);
+                (px[i * 4], px[i * 4 + 1], px[i * 4 + 2], px[i * 4 + 3]) = (v, v, v, 255);
+                if (mark is not null && i % 64 is >= 30 and < 36 && i / 64 is >= 10 and < 16) mark.CopyTo(px, i * 4);
+            }
+            return new(64, 64, px);
+        }
+        check(SaveCover.Score(View(160)) > 12 && SaveCover.Score(View(160, [20, 200, 20])) == 0 && SaveCover.Score(View(160, [240, 240, 240])) == 0 && SaveCover.Score(View(40)) == 0
+              && SaveCover.Score(new(64, 64, Enumerable.Repeat((byte)120, 64 * 64 * 4).ToArray())) == 0 && SaveCover.Score(new(4, 4, new byte[64])) == 0,
+            "cover: a memory of a place is told from one with a Sim, a dark one and a plain one");
+        check(SaveHealth.RecentCopy(DateTime.Now.AddDays(-40), new("", "", DateTime.Now.AddDays(-50))) && SaveHealth.RecentCopy(DateTime.Now.AddDays(-3), new("", "", DateTime.Now))
+              && !SaveHealth.RecentCopy(DateTime.Now.AddDays(-40), new("", "", DateTime.Now)) && !SaveHealth.RecentCopy(null, new("", "", DateTime.Now)),
+            "copies: one made since the save was played, or not long ago, protects it");
+
         // DXT5: alpha 255 and 0 by index, over white
         var d5 = Dxt1(4, 1, 0xFFFF)[..128].Concat(new byte[] { 255, 0, 0x01, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0 }).ToArray();
         Encoding.ASCII.GetBytes("DXT5").CopyTo(d5, 84);
@@ -259,6 +278,11 @@ static class SavesTests
               && SaveContents.Png(c.Items(SaveKind.LotThumbnail)[0])!.AsSpan().SequenceEqual(Png("lot one")) && SaveContents.Data(mem)!.AsSpan().SequenceEqual(MemA)
               && faces.Count == 2 && faces.All(f => f.Type == Face) && c.Sample(SaveKind.Portrait, 10).Count == 3 && mem.Key == "00b2d882:0269d005:00000000000000a1",
             "contents: a picture on demand (a memory decoded, a portrait as stored), and a sample that reads nothing else");
+
+        // (the two pictures are 8 pixels: too small to be a view; the fuller lot first)
+        check(SaveCover.Best(c) is null && SaveCover.Fan(c, 5).Select(i => i.Instance).Distinct().Count() == SaveCover.Fan(c, 5).Count && SaveCover.Fan(c, 5).Count <= 2
+              && SaveCover.Lots(c, 9).Count == 2 && SaveCover.Lots(c, 1).Single().Size == c.Items(SaveKind.LotThumbnail).Max(i => i.Size) && SaveCover.Lots(SaveContents.Read(Path.Combine(docs, "Saves", "Nowhere.sims3")), 9).Count == 0,
+            "cover: no view among small memories, no picture twice in the fan, the lots with the most in them, none in an empty save");
 
         // stars and the Gallery
         SaveStars.Set(s.Name, mem.Key, true);
