@@ -23,6 +23,7 @@ public static class Lucide
         ["chevron-down"] = "M 6 9 l 6 6 6 -6",
         ["chevron-left"] = "M 15 6 l -6 6 6 6",
         ["chevron-right"] = "M 9 18 l 6 -6 -6 -6",
+        ["chevron-up"] = "M 18 15 l -6 -6 -6 6",
         ["circle-check"] = "M 2 12 A 10 10 0 1 0 22 12 A 10 10 0 1 0 2 12 Z M 9 12 l 2 2 4 -4",
         ["code-xml"] = "M 18 16 l 4 -4 -4 -4 M 6 8 l -4 4 4 4 M 14.5 4 l -5 16",
         ["copy"] = "M 10 8 H 20 A 2 2 0 0 1 22 10 V 20 A 2 2 0 0 1 20 22 H 10 A 2 2 0 0 1 8 20 V 10 A 2 2 0 0 1 10 8 Z M 4 16 c -1.1 0 -2 -0.9 -2 -2 V 4 c 0 -1.1 0.9 -2 2 -2 h 10 c 1.1 0 2 0.9 2 2",

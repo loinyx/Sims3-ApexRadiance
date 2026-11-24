@@ -9,7 +9,7 @@ static class ModMergeTests
     const uint S3sa = 0x073FAA07;
 
     // a DBPF 2.0 package: each resource with its type, instance, stored bytes, compression flag and unpacked size
-    static void Pkg(string path, params (uint Type, ulong Inst, byte[] Data, bool Comp, int Mem)[] res)
+    internal static void Pkg(string path, params (uint Type, ulong Inst, byte[] Data, bool Comp, int Mem)[] res)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using var f = File.Create(path);
@@ -30,7 +30,7 @@ static class ModMergeTests
         f.Position = 0x2C; w.Write(size);
         f.Position = 0x40; w.Write(index);
     }
-    static (uint, ulong, byte[], bool, int) Raw(uint t, ulong i, string s) => (t, i, Encoding.UTF8.GetBytes(s), false, Encoding.UTF8.GetByteCount(s));
+    internal static (uint, ulong, byte[], bool, int) Raw(uint t, ulong i, string s) => (t, i, Encoding.UTF8.GetBytes(s), false, Encoding.UTF8.GetByteCount(s));
 
     // RefPack of a 4-byte pattern repeated: 4 literals, then copies at distance 4, as the game's compressor writes them
     static byte[] Pack(byte[] data)

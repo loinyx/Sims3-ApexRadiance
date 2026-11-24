@@ -1685,6 +1685,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
 ModConflictsTests.Run(Check);
 InstallTests.Run(Check);
 ModMergeTests.Run(Check);
+MergeDraftTests.Run(Check);
 ModKindsTests.Run(Check);
 GameSettingsTests.Run(Check);
 HealthTests.Run(Check);

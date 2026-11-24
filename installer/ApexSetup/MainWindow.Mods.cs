@@ -102,7 +102,7 @@ public sealed partial class MainWindow
             _modsLoaded = true;
             OfferPutBack(gone);
             Safe(LoadModPicturesAsync(_modRows));
-            Safe(LoadDefaultsAsync(g, _modRows));
+            Safe(LoadMergeUpdatesAsync(LoadDefaultsAsync(g, _modRows), _modRows));
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not read your mods"), ErrorText(e)); }
         finally { _modsLoading = false; }
@@ -892,7 +892,9 @@ public sealed partial class MainWindow
     {
         foreach (var r in e.AddedItems.OfType<ModRow>()) r.Picked = true;
         foreach (var r in e.RemovedItems.OfType<ModRow>()) r.Picked = false;
-        if (!_fillingMods) { FillModDetails(); FillFooter(); }
+        if (_fillingMods || AskPickedElsewhere()) return;
+        FillModDetails();
+        FillFooter();
     }
 
     // a row's checkbox: in or out of the selection, the rest stays picked
@@ -1362,7 +1364,14 @@ public sealed partial class MainWindow
         panel.ItemHeight = cell + 52;
     }
 
-    void CloseModDetails() { ModList.SelectedItems.Clear(); ModGrid.SelectedItems.Clear(); FillModDetails(); FillFooter(); }
+    void CloseModDetails()
+    {
+        if (AskLeaveMerge(CloseModDetails)) return;
+        ModList.SelectedItems.Clear();
+        ModGrid.SelectedItems.Clear();
+        FillModDetails();
+        FillFooter();
+    }
 
     // the player's choice of type, else the package's own
     static void ApplyKinds(ModRow r)
@@ -1374,7 +1383,8 @@ public sealed partial class MainWindow
     }
 
     // every type, by group, ticked as the mod is now; Done saves it, Back to detected forgets the choice
-    void PickKinds(ModRow r, FrameworkElement anchor)
+    // (inside: a mod inside a merge, whose choice is kept with the merge)
+    void PickKinds(ModRow r, FrameworkElement anchor, Action<List<string>?>? inside = null)
     {
         var picked = r.Kinds.ToHashSet();
         var list = new StackPanel { Spacing = 2 };
@@ -1401,6 +1411,7 @@ public sealed partial class MainWindow
             {
                 // (ticking exactly what the package says is no choice: it stays automatic)
                 var same = kinds is not null && kinds.ToHashSet().SetEquals(r.DetectedKinds);
+                if (inside is not null) { flyout.Hide(); inside(same ? null : kinds?.ToList()); return; }
                 ModNotes.SetKinds(r.File.Rel, same ? null : kinds?.OrderBy(k => r.Kinds.Contains(k) ? r.Kinds.ToList().IndexOf(k) : int.MaxValue));
                 ApplyKinds(r);
                 r.Refresh();
@@ -1411,7 +1422,7 @@ public sealed partial class MainWindow
             catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         }
         var back = new HyperlinkButton { Content = T("Back to detected"), FontSize = 12, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
-            IsEnabled = ModNotes.Get(r.File.Rel)?.Kinds is not null };
+            IsEnabled = inside is not null || ModNotes.Get(r.File.Rel)?.Kinds is not null };
         back.Click += (_, _) => Save(null);
         var done = new Button { Content = T("Done"), Style = (Style)Application.Current.Resources["AccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Right };
         done.Click += (_, _) => { if (picked.Count == 0) Save(null); else Save(picked); };
@@ -1441,7 +1452,8 @@ public sealed partial class MainWindow
         ModDetailsFoot.Children.Clear();
         ModDetailsFoot.ColumnDefinitions.Clear();
         ModDetailsFoot.Visibility = Visibility.Collapsed;
-        var picked = Picked();
+        _mergePaint = null;
+        var picked = DraftRow() is { } open ? [open] : Picked(); // (a merge with changes not saved stays open whatever the list shows)
         ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         // (over the grid the pane would hide whole columns of tiles: the grid makes room for it instead)
         var room = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;

@@ -18,6 +18,8 @@ public sealed class ModRow : INotifyPropertyChanged
     // what of it replaces the game's own resources (a default replacement), when the game's index is read
     public Replacements Defaults { get; set; } = Replacements.None;
     public string? DuplicateOf { get; set; }
+    // of the mods inside a merge, how many the list holds a newer version of
+    public int NewVersions { get; set; }
 
     public string Name => File.FileType == "package" ? System.IO.Path.GetFileNameWithoutExtension(File.Name) : File.Name;
     public string FullName => File.Name + "\n" + Place(File);
@@ -32,11 +34,12 @@ public sealed class ModRow : INotifyPropertyChanged
     public Brush SizeBrush => File.Size > 200L << 20 ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
     public Brush TileBrush { get; }
     public static bool ShowPlace = true;
-    public string Sub => Findings.Count > 0 ? Findings[0]
+    public string Sub => NewVersions == 0 ? Line : (NewVersions == 1 ? T("1 new version") : T("{0} new versions", NewVersions)) + (Line.Length > 0 ? " · " + Line : "");
+    string Line => Findings.Count > 0 ? Findings[0]
         : DuplicateOf is { } d ? T("Same as {0}", d)
         : ModNotes.Get(File.Rel)?.Notes is { } n ? n.Split('\n')[0]
         : ShowPlace ? Place(File) : "";
-    public Brush SubBrush => Findings.Count > 0 || DuplicateOf is not null ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
+    public Brush SubBrush => Findings.Count > 0 || NewVersions > 0 || DuplicateOf is not null ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
     public Visibility LookVisible => Findings.Count > 0 || DuplicateOf is not null ? Visibility.Visible : Visibility.Collapsed;
     public Visibility TagsVisible => TagPills.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SubVisible => Sub.Length > 0 || TagPills.Count > 0 ? Visibility.Visible : Visibility.Collapsed;

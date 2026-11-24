@@ -105,7 +105,7 @@ Step "merge three mods, verified, with a log" {
   Click 'Merge into one package…'; Start-Sleep 2; Dialog 'PrimaryButton'; Start-Sleep 6; Dialog 'CloseButton' } {
   (Get-ChildItem $set -Filter '*merged*.package').Count -eq 1 -and (Get-ChildItem (Join-Path $docs 'Merged (Apex Launcher)') -Recurse -Filter merge.json).Count -eq 1 }
 Step "split the merge back" {
-  $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split it back into its 3 mods'; Dialog 'PrimaryButton'; Start-Sleep 4 } {
+  $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split into mods'; Dialog 'PrimaryButton'; Start-Sleep 4 } {
   (Get-ChildItem $set -Filter '*merged*.package').Count -eq 0 -and (Test-Path (Join-Path $set "$($names[4]).package")) }
 Step "start a problem-mod hunt" { Click 'Find a problem mod'; Dialog 'PrimaryButton'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -ge 2 }
 Step "stop it: every mod back" { Click 'Stop and put every mod back'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -eq 0 -and (Get-ChildItem $set -Filter *.package).Count -eq $src.Count }
