@@ -182,6 +182,7 @@
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Home" Tag="8"><NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem x:Name="NavComponents" Content="Components" Tag="2"><NavigationViewItem.Icon><FontIcon Glyph="&#xE74C;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="Game settings" Tag="16"><NavigationViewItem.Icon><FontIcon Glyph="&#xE9E9;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="Mods" Tag="9"><NavigationViewItem.Icon><FontIcon Glyph="&#xF0E2;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="Worlds" Tag="10" Visibility="Collapsed"><NavigationViewItem.Icon><FontIcon Glyph="&#xE909;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="Saves" Tag="11"><NavigationViewItem.Icon><FontIcon Glyph="&#xE74E;" /></NavigationViewItem.Icon></NavigationViewItem>
@@ -664,6 +665,9 @@
                         <StackPanel x:Name="ScreenNews" Spacing="16" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenSettings" Spacing="10" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenGallery" Spacing="16" Visibility="Collapsed" />
+                        <!-- 16 Game settings, 17 the install's step with the same options (MainWindow.GameSettings.cs) -->
+                        <StackPanel x:Name="ScreenGameSettings" Spacing="10" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenWizardSettings" Spacing="8" Visibility="Collapsed" />
 
                         <!-- 6 About -->
                         <StackPanel x:Name="ScreenAbout" Spacing="14" Visibility="Collapsed">

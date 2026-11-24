@@ -239,7 +239,7 @@ public static class Fs
         });
     }
     public static void Move(string from, string to) { RestorePoints.Touch(from); RestorePoints.Touch(to); Retry(() => File.Move(from, to, true)); }
-    public static void Write(string path, string text) { RestorePoints.Touch(path); Retry(() => WriteAtomic(path, text)); }
+    public static void Write(string path, string text, System.Text.Encoding? encoding = null) { RestorePoints.Touch(path); Retry(() => WriteAtomic(path, text, encoding)); }
 
     // a file an antivirus scan or the game's launcher holds a moment: tried again 4 times, waiting 0.5, 1, 2 and 4 s (a scan of
     // a large package just written can take seconds); a missing file fails at once
@@ -269,12 +269,12 @@ public static class Fs
     public static void WriteFpsKey(string path, string text, int? was, int set) { RestorePoints.Touch(path, fps: true, fpsWas: was, fpsSet: set); Retry(() => WriteAtomic(path, text)); }
     // a temporary file in the same folder, then moved over: a crash never leaves half of ApexRadiance.toml. A read-only target is
     // made writable (the restore point keeps it as it was); a failed move leaves no temporary file behind.
-    public static void WriteAtomic(string path, string text)
+    public static void WriteAtomic(string path, string text, System.Text.Encoding? encoding = null)
     {
         var tmp = path + ".apex-tmp";
         try
         {
-            File.WriteAllText(tmp, text);
+            if (encoding is null) File.WriteAllText(tmp, text); else File.WriteAllText(tmp, text, encoding);
             Writable(path);
             File.Move(tmp, path, true);
         }

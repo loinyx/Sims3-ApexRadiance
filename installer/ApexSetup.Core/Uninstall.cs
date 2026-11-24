@@ -14,6 +14,7 @@ public static class Uninstall
     public static List<string> FromGame(Game g, string docs)
     {
         var left = new List<string>();
+        GameSettings.RestoreBin(g); // (before its copies, in the backup folder, go)
         Engine.RemoveAll(g, docs);
         var dir = Manifest.DirOf(g.Bin);
         if (Manifest.Load(g.Bin).Files.Count > 0) { left.Add(dir); return left; } // (a file could not be put back: its backup stays where Repair can find it)
@@ -38,6 +39,7 @@ public static class Uninstall
     public static List<string> FromDocuments(Game g, string docs, bool keepSettings)
     {
         Mods.EnableAll(g, docs);
+        GameSettings.RestoreDocs(docs);
         return keepSettings ? [] : ApexSettings(docs);
     }
 

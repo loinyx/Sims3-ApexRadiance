@@ -58,11 +58,11 @@ public sealed partial class MainWindow : Window
         // the log's context line: the game, its edition and version, the renderer and the loaders Setup found
         App.Context = () => _game is not { } cg ? "no game chosen"
             : $"game {cg.Root} ({cg.Label} {cg.Version}, {cg.Exe}); renderer {_state?.Layer.ToString() ?? "?"}; loaders {(Scan.Loaders(cg.Bin) is { Count: > 0 } ls ? string.Join(", ", ls) : "none")}";
-        Root.SizeChanged += (_, _) => QueueAudit();
+        Root.SizeChanged += (_, _) => { QueueAudit(); if (Wizard) WizardChrome(); };
         // (the version under the sidebar only fits it expanded)
         Nav.DisplayModeChanged += (_, _) => ShowSetupVersion();
         _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer,
-            ScreenHome, ScreenMods, ScreenWorlds, ScreenSaves, ScreenHealth, ScreenNews, ScreenSettings, ScreenGallery };
+            ScreenHome, ScreenMods, ScreenWorlds, ScreenSaves, ScreenHealth, ScreenNews, ScreenSettings, ScreenGallery, ScreenGameSettings, ScreenWizardSettings };
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
         // 1180 x 760 at the monitor's scale, never past its work area (a small laptop screen)
@@ -370,7 +370,7 @@ public sealed partial class MainWindow : Window
     void GoFromStatus(int to) { _backTo = Welcome; Show(to); }
     void OnBack(object sender, RoutedEventArgs e)
     {
-        if (_step == RendererStep) { Show(ComponentsStep); return; }
+        if (_step is RendererStep or WizardSettings) { Show(ComponentsStep); return; }
         if (_step == InstallStep && _failChoice is not null) { _failChoice.TrySetResult(_failDxvk ? "dxvk" : null); return; }
         if (_step == InstallStep) { _installCts?.Cancel(); BackButton.IsEnabled = false; return; } // (Cancel and undo)
         var to = _backTo >= 0 ? _backTo : _step == GameStep && !FirstInstall ? SettingsScreen : Math.Max(Welcome, _step - 1);
@@ -389,12 +389,15 @@ public sealed partial class MainWindow : Window
                 else Show(GameStep);
                 break;
             case RendererStep: Show(ComponentsStep); break;
+            case WizardSettings: { var (add, del) = Plan(); await InstallAsync(add, del); break; }
             case GameStep: if (CanLeaveGame()) Show(ComponentsStep); break;
             case ComponentsStep:
             {
                 var (add, del) = Plan();
                 if (_offline && add.Count > 0) { await LoadReleasesAsync(); break; } // (the button reads Try again)
                 var fixes = _game is not null && _state is not null && Compat.Check(_game, _state).Any(x => x.CanFix);
+                // (a first install asks for the game settings before it starts)
+                if (Wizard && FirstInstall && !Maintenance && add.Count > 0) { Show(WizardSettings); break; }
                 // (nothing to do: the button is off and says so; only driver or frame limit changes: no component work, no fixes)
                 if (add.Count + del.Count > 0 || fixes) await InstallAsync(add, del);
                 else if (SettingChanges().Count > 0) await InstallAsync(add, del, settingsOnly: true);
@@ -421,7 +424,7 @@ public sealed partial class MainWindow : Window
         // the aurora moves only while it shows, and not when Windows' animation effects are off
         FirstAurora.Run(FirstRun.Visibility == Visibility.Visible);
         WizardAurora.Run(Wizard);
-        BackButton.Visibility = _step is GameStep or RendererStep || _step == ComponentsStep && FirstInstall || _step == InstallStep && Wizard && _busy
+        BackButton.Visibility = _step is GameStep or RendererStep or WizardSettings || _step == ComponentsStep && FirstInstall || _step == InstallStep && Wizard && _busy
             ? Visibility.Visible : Visibility.Collapsed; // (in the launcher Components has no step before it; the install's own step can be cancelled)
         BackButton.Content = _step == InstallStep ? (_failChoice is not null ? (_failDxvk ? T("Install with DXVK") : T("Back")) : T("Cancel and undo")) : T("Back");
         if (_step == InstallStep && _failChoice is not null) BackButton.Visibility = Visibility.Visible;
@@ -429,7 +432,7 @@ public sealed partial class MainWindow : Window
         if (_step != InstallStep) BackButton.IsEnabled = true;
         // a game with Apex and nothing to update: the status card's own buttons are the actions, no wizard to go into
         var settled = _step == Welcome && _state?.ApexVersion is not null && _game is not null && WelcomeUpdates().Count == 0 && _updated is null;
-        NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or DoneStep or RendererStep || _step == InstallStep && _failChoice is not null ? Visibility.Visible : Visibility.Collapsed;
+        NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or WizardSettings or DoneStep or RendererStep || _step == InstallStep && _failChoice is not null ? Visibility.Visible : Visibility.Collapsed;
         var (wa, wd) = _step == ComponentsStep ? Plan() : (new List<string>(), new List<string>());
         var settings = _step == ComponentsStep ? SettingChanges().Select(c => c.Label).ToList() : new List<string>();
         var work = wa.Concat(wd).Concat(settings).ToList();
@@ -440,6 +443,8 @@ public sealed partial class MainWindow : Window
                 : _state?.ApexVersion is not null ? T("Next") : T("Get started"),
             RendererStep => T("Use {0}", RendererShort(_renderer)),
             ComponentsStep when _offline && wa.Count > 0 => T("Try again"),
+            WizardSettings => T("Install"),
+            ComponentsStep when Wizard && FirstInstall && !Maintenance && wa.Count > 0 => T("Next"),
             ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Nothing to apply")) : _state?.ApexVersion is null ? T("Install")
                 : work.Count == 1 ? T("Apply 1 change") : T("Apply {0} changes", work.Count),
             InstallStep when _failChoice is not null => T("Try again"),
@@ -449,15 +454,17 @@ public sealed partial class MainWindow : Window
         NextButton.IsEnabled = !_busy && _step switch
         {
             GameStep => CanLeaveGame(),
+            WizardSettings => !_running && !_offline,
             // removals and fixes need no download; installs wait for the release check (offline: the button retries it)
             ComponentsStep => !_loading && !_running && _game is not null && (work.Count > 0 || fixes),
             _ => true,
         };
         FooterNote.Text = _step switch
         {
-            ComponentsStep when _running && Wizard => T("Waiting for the game to close\u2026"),
+            ComponentsStep or WizardSettings when _running && Wizard => T("Waiting for the game to close\u2026"),
             GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."),
             GameStep when Wizard && _gameAllSet => T("All set to install."),
+            WizardSettings => T("Nothing changes until you install. Each file is copied first."),
             InstallStep when Wizard && _busy => T("Don't close the window."),
             InstallStep when _failChoice is not null && _failDxvk => T("Try again, or install with DXVK instead of the bridge."),
             ComponentsStep when _loading => T("Checking the latest versions\u2026"),
@@ -493,7 +500,7 @@ public sealed partial class MainWindow : Window
         Steps(StepsGame, 1);
         Steps(StepsComponents, 2);
         Steps(StepsRenderer, 2);
-        Steps(StepsInstall, 3);
+        Steps(StepsInstall, 4);
     }
 
     void OnFirstStart(object sender, RoutedEventArgs e) => Show(GameStep);
@@ -506,12 +513,12 @@ public sealed partial class MainWindow : Window
     readonly Dictionary<FrameworkElement, Panel> _moved = new();
     StackPanel? _fpsBox;
     (string? Bin, bool Writable) _writableFor = (null, true);
-    bool Wizard => _wizardFlow && _step is GameStep or ComponentsStep or RendererStep or InstallStep or DoneStep;
+    bool Wizard => _wizardFlow && _step is GameStep or ComponentsStep or RendererStep or WizardSettings or InstallStep or DoneStep;
 
     void WizardChrome()
     {
         var on = Wizard;
-        if (!on && _step is not (GameStep or ComponentsStep or RendererStep or InstallStep or DoneStep)) _wizardFlow = false;
+        if (!on && _step is not (GameStep or ComponentsStep or RendererStep or WizardSettings or InstallStep or DoneStep)) _wizardFlow = false;
         Nav.IsPaneVisible = !on;
         ContentFrame.MaxWidth = on ? 760 : double.PositiveInfinity;
         ContentFrame.HorizontalAlignment = HorizontalAlignment.Stretch; // (with MaxWidth: the card keeps its width, centred, whatever the step holds)
@@ -531,7 +538,7 @@ public sealed partial class MainWindow : Window
         {
             WizardVersion.Text = Latest(Components.Apex) ?? "";
             WizardVersionPill.Visibility = WizardVersion.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-            Steps(WizardSteps, _step == GameStep ? 1 : _step is ComponentsStep or RendererStep ? 2 : 3);
+            Steps(WizardSteps, _step == GameStep ? 1 : _step is ComponentsStep or RendererStep ? 2 : _step == WizardSettings ? 3 : 4);
         }
     }
 
@@ -824,10 +831,16 @@ public sealed partial class MainWindow : Window
         // (in the install's card the steps sit in its header, WizardSteps; each screen's own row stays hidden)
         host.Visibility = FirstInstall && (host == WizardSteps || !Wizard) ? Visibility.Visible : Visibility.Collapsed;
         if (host.Visibility != Visibility.Visible) return;
-        var names = new[] { T("Game"), T("Components"), T("Install") };
+        var others = new List<FrameworkElement>(); // (what a narrow window leaves out)
+        var names = new[] { T("Game"), T("Components"), T("Game settings"), T("Install") };
         for (int i = 1; i <= names.Length; i++)
         {
-            if (i > 1) host.Children.Add(new Border { Width = 40, Height = 1, VerticalAlignment = VerticalAlignment.Center, Background = App.Brush("ApexCardBorderBrush") });
+            if (i > 1)
+            {
+                var line = new Border { Width = 24, Height = 1, VerticalAlignment = VerticalAlignment.Center, Background = App.Brush("ApexCardBorderBrush") };
+                host.Children.Add(line);
+                others.Add(line);
+            }
             var done = i < current;
             var on = i == current;
             var dot = new Border
@@ -848,9 +861,15 @@ public sealed partial class MainWindow : Window
             var step = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             step.Children.Add(dot);
             step.Children.Add(label);
+            if (!on) others.Add(label);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(step, T("Step {0} of {1}: {2}", i, names.Length, names[i - 1]));
             host.Children.Add(step);
         }
+        // (a narrow window or a language with long words: only the current step keeps its name)
+        if (host != WizardSteps || ContentFrame.ActualWidth <= 0) return;
+        host.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        const double brand = 290; // (the logo, the name, the version and the card's own sides)
+        if (host.DesiredSize.Width > Math.Min(Nav.ActualWidth - 48, ContentFrame.MaxWidth) - brand) foreach (var l in others) l.Visibility = Visibility.Collapsed;
     }
 
     // ---------- the update card (Welcome, a game with Apex) ----------
@@ -1911,7 +1930,13 @@ public sealed partial class MainWindow : Window
     {
         if (_game is not { } g || _busy || _running) return;
         if (Preview is not null) { await Message(T("Preview"), T("This is a preview: nothing was installed.")); return; }
-        if (!await CanChangeHere(inline ? "welcome" : "components", drivers: !inline && SettingChanges(remove).Any(c => c.Kind is "nv" or "amd"))) return;
+        var firstInstall = FirstInstall;
+        if (!await CanChangeHere(inline ? "welcome" : "components", drivers: !inline && SettingChanges(remove).Any(c => c.Kind is "nv" or "amd")))
+        {
+            // (installed in the administrator window, which wrote the game folder's settings: the player's own files here)
+            if (firstInstall && !FirstInstall) await ApplyWizardSettings(g, bin: false, docs: true);
+            return;
+        }
         var from = _step == InstallStep ? ComponentsStep : _step;
         // busy before the checks: a second click (or the Performance Patch watcher) during them starts nothing
         _busy = true;
@@ -2033,6 +2058,7 @@ public sealed partial class MainWindow : Window
             if (order.Contains(Components.S3pp)) _s3ppArchive = null;
             _defaultsFor = null; // (the switches follow the game as it is now)
             AfterFrameGenOff();
+            if (firstInstall && order.Contains(Components.Apex)) await ApplyWizardSettings(g, bin: true, docs: !Maintenance);
             _busy = false;
             if (inline)
             {

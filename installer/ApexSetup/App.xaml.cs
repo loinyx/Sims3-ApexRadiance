@@ -98,6 +98,12 @@ public partial class App : Application
             Environment.Exit(MainWindow.UninstallElevated());
             return;
         }
+        // the administrator copy of Game settings: no window, the game folder's files, then it closes
+        if (MainWindow.GameSettingsElevated(maintain, screen, argv) is { } code)
+        {
+            Environment.Exit(code);
+            return;
+        }
         var uninstall = argv.Contains(LauncherInstall.UninstallArg);
         // (a test or a dry run never installs: APEX_LAUNCHER_PORTABLE=1 runs the exe where it is)
         var portable = Environment.GetEnvironmentVariable(LauncherInstall.PortableVar) == "1" || Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1";

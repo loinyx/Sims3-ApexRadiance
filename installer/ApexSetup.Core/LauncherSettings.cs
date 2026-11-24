@@ -17,6 +17,9 @@ public sealed class LauncherSettings
     public string Backdrop { get; set; } = "mica";        // the window's background: "mica", "micaalt", "acrylic" or "solid"
     public bool NavCompact { get; set; }                  // the side pane kept to its icons (the toggle at its top)
 
+    // the game options chosen before the game ever wrote Options.ini, by its Documents folder: set at the first Play
+    public Dictionary<string, Dictionary<string, string>> PendingOptions { get; set; } = new();
+
     static string FilePath => Path.Combine(Paths.Data, "settings.json");
 
     public static LauncherSettings Load()

@@ -50,6 +50,8 @@ public sealed partial class MainWindow
             case NewsScreen: BuildNews(); break;
             case SettingsScreen: BuildSettings(); break;
             case GalleryScreen: BuildGallery(); break;
+            case GameSettingsScreen: BuildGameSettings(); break;
+            case WizardSettings: BuildWizardSettings(); break;
         }
     }
 
@@ -234,6 +236,7 @@ public sealed partial class MainWindow
     async Task StartGameAsync(Game g, string? save)
     {
         Process p;
+        PlayPendingOptions(g, ended: false);
         try { p = Launch.Start(g, save); }
         catch (Exception e) { App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
         var session = _session = new Session(p, Docs);
@@ -249,6 +252,7 @@ public sealed partial class MainWindow
         try { SessionHistory.Add(info); ModViewPrefs.LastPlay = info.Started + info.Played; } catch (Exception e) { App.Log(e); }
         _session = null;
         _running = Games.IsRunning();
+        PlayPendingOptions(g, ended: true);
         AppWindow.Show();
         Activate();
         _tray?.Hide();
@@ -303,7 +307,7 @@ public sealed partial class MainWindow
         _defaultsFor = null;
         _modsLoaded = false;
         RefreshGame(); // (starts the full check too)
-        if (_step is Welcome or GameStep && !FirstInstall) Show(Home); // (a first install finished in the administrator window)
+        if (_step is Welcome or GameStep or WizardSettings && !FirstInstall) Show(Home); // (a first install finished in the administrator window)
         else RefreshAll();
         return false;
     }
@@ -320,6 +324,7 @@ public sealed partial class MainWindow
         if (_afmfWant is { } af) d["afmf"] = B(af);
         if (_fpsWant is { } fps) d["fps"] = fps.ToString(System.Globalization.CultureInfo.InvariantCulture);
         if (_s3ppArchive is { } a && _s3ppFor == _game?.Bin) d["s3pparchive"] = a;
+        if (FirstInstall && _gsFor == _game?.Bin) foreach (var (k, v) in GameSettingsChanges().Where(c => GameSettings.InBin(c.Key))) d["game." + k] = v;
         return d;
         static string B(bool b) => b ? "1" : "0";
     }
@@ -342,6 +347,8 @@ public sealed partial class MainWindow
         if (d.ContainsKey("afmf")) _afmfWant = On("afmf");
         if (d.TryGetValue("fps", out var f) && int.TryParse(f, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fps)) _fpsWant = fps;
         if (d.TryGetValue("s3pparchive", out var a) && File.Exists(a)) { _s3ppArchive = a; _s3ppFor = _game.Bin; }
+        LoadGameSettings();
+        foreach (var (k, v) in d.Where(x => x.Key.StartsWith("game.", StringComparison.Ordinal))) _gsWant[k["game.".Length..]] = v;
         RefreshAll();
         return true;
     }

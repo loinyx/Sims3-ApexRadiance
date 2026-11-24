@@ -194,7 +194,7 @@ function OneRun([int]$run) {
     try {
         Step "run ${run}: start" { }
         # the launcher's own screens: each one, Play (refused by the dry run), a mod search, Health's Check now and its tabs
-        foreach ($n in 'Home', 'Mods', 'Worlds', 'Saves', 'Health', "What's new", 'Settings') {
+        foreach ($n in 'Home', 'Game settings', 'Mods', 'Worlds', 'Saves', 'Health', "What's new", 'Settings') {
             Nav $n
             Step "screen $n" { Shot ("screen-" + ($n -replace '[^A-Za-z]', '')) }
         }

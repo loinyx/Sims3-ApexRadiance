@@ -1686,6 +1686,7 @@ ModConflictsTests.Run(Check);
 InstallTests.Run(Check);
 ModMergeTests.Run(Check);
 ModKindsTests.Run(Check);
+GameSettingsTests.Run(Check);
 HealthTests.Run(Check);
 ModToolsTests.Run(Check);
 GalleryTests.Run(Check);

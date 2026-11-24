@@ -58,7 +58,7 @@ public sealed partial class MainWindow
     async Task AuditTourAsync()
     {
         var scale = Content.XamlRoot.RasterizationScale;
-        int[] screens = [Home, ComponentsStep, ModsScreen, WorldsScreen, SavesScreen, HealthScreen, NewsScreen, SettingsScreen];
+        int[] screens = [Home, ComponentsStep, ModsScreen, WorldsScreen, SavesScreen, HealthScreen, NewsScreen, SettingsScreen, GameSettingsScreen];
         foreach (var (w, h) in new[] { (760, 560), (980, 680), (1180, 760), (1440, 900), (1920, 1080) })
         {
             AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(w * scale), (int)(h * scale)));
