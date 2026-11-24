@@ -167,8 +167,9 @@ Apex Launcher keeps everything above as its *Components* screen and adds the scr
 *Components*, Apex Radiance sits on its own card on top with its version and whether it is up to date. Under it,
 *Parts of Apex* (Sims 3 Modernization, Graphics, frame generation and the frame limit, *TS3Wrap*) and the mods by other
 modders (Sims3SettingsSetter, the Sims 3 Performance Patch, MonoPatcher) are rows of one height: icon, name and one
-line, the state in a column of its own, and the controls on the right. Modernization's channel, the renderer (DXVK,
-the RTX Remix bridge or the Windows default) and the frame limit are menus in their rows; a choice the card or driver
+line, the state in a column of its own, and the controls on the right; a first install shows the same rows, the other
+mods included, without the state column. Modernization's channel, the renderer (the RTX Remix bridge first, DXVK
+or the Windows default) and the frame limit are menus in their rows; a choice the card or driver
 blocks says why. A row that Apply changes carries a dot, and the footer lists those changes. It runs
 as the signed-in user, not as administrator: a change to the game folder or to a driver setting is written as a plan
 (`%LOCALAPPDATA%\Apex Launcher\ops`) and applied by the same exe started once with administrator rights

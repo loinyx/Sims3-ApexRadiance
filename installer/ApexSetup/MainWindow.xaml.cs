@@ -733,6 +733,16 @@ public sealed partial class MainWindow : Window
             Row(IconBox("gauge"), T("Apex frame limit"), FpsDesc.Text, null, State(FpsPill), _fpsWant is not null, Adopt(_fpsBox, FpsCard));
         }
         Row(IconBox("rotate-ccw"), T("TS3Wrap"), Why(RestartToggle, RestartPill, T("Reopens your last save with fresh memory when the game runs low.")), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
+        if (!wizard) return;
+        // the mods by other modders, offered in the install too (outside it, the Other mods cards below the list)
+        Label(T("Other mods"));
+        Row(IconBox("sliders-horizontal"), "Sims3SettingsSetter", Why(S3ssToggle, S3ssPill, T("Fixes for game and graphics settings.")), null, null, false, Mirror(S3ssToggle, "Sims3SettingsSetter"));
+        Row(IconBox("zap"), "Sims 3 Performance Patch", T("Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."), null, null, false,
+            S3ppToggle.Visibility == Visibility.Visible ? Mirror(S3ppToggle, "Sims 3 Performance Patch")
+            : S3ppWait.Visibility == Visibility.Visible ? new ProgressRing { Width = 16, Height = 16, IsActive = true }
+            : Button(T("Download on Nexus Mods"), () => OnS3ppDownload(this, new RoutedEventArgs())));
+        if (MonoCard.Visibility == Visibility.Visible)
+            Row(IconBox("file-code"), "MonoPatcher", Why(MonoToggle, MonoPill, T("Needed only by some script mods; turn it on if a mod asks for it.")), null, null, false, Mirror(MonoToggle, "MonoPatcher"));
     }
 
     void OnContentFrameSized(object sender, SizeChangedEventArgs e) { if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
@@ -1520,7 +1530,7 @@ public sealed partial class MainWindow : Window
     {
         // DXVK and the bridge need what DXVK asks of the card and its driver (Gpu); one already installed stays listed, so it can
         // be removed
-        var tags = new List<string> { RDxvk, RBridge, RNative };
+        var tags = new List<string> { RBridge, RDxvk, RNative }; // (the recommended one first)
         if (VulkanBlocked && s.Layer != Layer.Bridge) tags.Remove(RBridge);
         if (VulkanBlocked && s.Layer != Layer.Dxvk) tags.Remove(RDxvk);
         // (another d3d9.dll is only ever kept or replaced by DXVK or the bridge: nothing removes it, so Windows default is no choice)
