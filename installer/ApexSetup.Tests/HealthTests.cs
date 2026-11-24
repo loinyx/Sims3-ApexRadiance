@@ -147,6 +147,22 @@ static class HealthTests
         var week = ScriptErrors.Read(docs, DateTime.Now.AddDays(-1), mods);
         check(week.ByMod.Any(m => m.Mod == "Crashy.asi" && m.Crashes == 3) && week.Total == 7 && ScriptErrors.Findings(week).Any(f => f.Finding.Severity == Severity.Warning && f.Finding.Args.Contains("Crashy.asi")),
             $"script errors: the week's crashes count toward the pattern, whatever the script window ({week.Total})");
+        // who a crash is put on: a fault in the game called straight from a mod is that mod's; a fault deep in a hook's own code
+        // is the hook's, whatever mod sits further down the stack
+        static string Xcpt(string fault, params string[] frames) =>
+            $"[Exception info]\r\ntype: ACCESS_VIOLATION reading from address 0x00000000 (NULL)\r\naddress: 0x00401000 \"{fault}\":0x0001:0x00001000\r\n\r\n[Call stack]\r\n"
+            + string.Concat(frames.Select(x => $"{x}\r\n0x00401000\r\n\r\n")) + "\r\n[Stack data]\r\n";
+        const string Exe = @"C:\G\Game\Bin\TS3W.exe", Hooky = @"C:\G\Game\Bin\Hooky.asi", Apex = @"C:\G\Game\Bin\ApexRadiance.asi";
+        var called = Path.Combine(docs, "xcpt PC 30-02-01 10.00.00.txt");
+        var deep = Path.Combine(docs, "xcpt PC 30-02-01 11.00.00.txt");
+        File.WriteAllText(called, Xcpt(Exe, Exe, Hooky, Exe, Apex));
+        File.WriteAllText(deep, Xcpt(Apex, Apex, Apex, Apex, Apex, Hooky, Exe));
+        var who = ScriptErrors.Read(docs, DateTime.Now.AddDays(-1), mods);
+        check(who.Errors.Any(e => e.Log == called && e.Mod == "Hooky.asi" && e.Why == "called" && e.Exception == "TS3W.exe")
+              && who.Errors.Any(e => e.Log == deep && e.Mod == "Apex Radiance" && e.Why is null),
+            "crashes: a fault in the game called straight from a mod is that mod's; deep in a hook's own code it is the hook's");
+        File.Delete(called);
+        File.Delete(deep);
         Health.Item Err(string text, Action? fix = null) { var f = new Finding(Severity.Error, text, [], fix); return new(f, Health.AreaOf(f), []); }
         check(Health.StateOf([Err("Apex Radiance is not installed in this game.")]) == HealthState.Blocked && Health.StateOf([Err("No ASI loader in Game\\Bin: x")]) == HealthState.Blocked
             && Health.StateOf([Err("Sims 3 Modernization's ts3native is the build for the other edition and does nothing."), Err("{0} is missing: the RTX Remix bridge does not start.")]) == HealthState.NeedsYou

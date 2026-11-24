@@ -3447,8 +3447,35 @@ public sealed partial class MainWindow
                 if (card.ActualWidth <= 0) { photo.Opacity = 1; return; }
                 var dst = Bounds(card);
                 from!.Opacity = 0;
-                photo.Opacity = 0;
-                Fly(pic, dst, src, turn, true, 600, () => { photo.Opacity = 1; if (pic.Video) PlayIn(); }, sharpCopy);
+                // (the card itself grows out of the one clicked: it holds the picture already read, so the first frame is the
+                // picture; a flown copy was built again and showed an empty frame until it landed)
+                var k = (float)(src.Width / Math.Max(1, dst.Width));
+                var comp = Microsoft.UI.Xaml.Media.CompositionTarget.GetCompositorForCurrentThread();
+                var ease = comp.CreateCubicBezierEasingFunction(new Vector2(0.16f, 1f), new Vector2(0.3f, 1f));
+                var time = TimeSpan.FromMilliseconds(AnimationsOn ? 560 : 1);
+                card.CenterPoint = new Vector3((float)card.ActualWidth / 2, (float)card.ActualHeight / 2, 0);
+                var scale = comp.CreateVector3KeyFrameAnimation();
+                scale.Target = "Scale";
+                scale.InsertKeyFrame(0, new Vector3(k, k, 1));
+                scale.InsertKeyFrame(1, Vector3.One, ease);
+                scale.Duration = time;
+                var move = comp.CreateVector3KeyFrameAnimation();
+                move.Target = "Translation";
+                move.InsertKeyFrame(0, new Vector3((float)(src.X + src.Width / 2 - (dst.X + dst.Width / 2)), (float)(src.Y + src.Height / 2 - (dst.Y + dst.Height / 2)), 0));
+                move.InsertKeyFrame(1, Vector3.Zero, ease);
+                move.Duration = time;
+                var spin = comp.CreateScalarKeyFrameAnimation();
+                spin.Target = "Rotation";
+                spin.InsertKeyFrame(0, (float)turn);
+                spin.InsertKeyFrame(1, 0, ease);
+                spin.Duration = time;
+                var batch = comp.CreateScopedBatch(Microsoft.UI.Composition.CompositionBatchTypes.Animation);
+                card.StartAnimation(scale);
+                card.StartAnimation(move);
+                card.StartAnimation(spin);
+                batch.End();
+                batch.Completed += (_, _) => { if (pic.Video) PlayIn(); };
+                photo.Opacity = 1;
             }
             void Start()
             {

@@ -14,9 +14,11 @@ namespace ApexSetup;
 // All three formats seen on a real install; the frame layout matches NRaas' ErrorTrap output.
 public static partial class ScriptErrors
 {
-    // Earlier: a crash in a file replaced since (an update): history, not a pattern
-    public sealed record Error(DateTime When, string? Mod, IReadOnlyList<string> Files, string Exception, bool Crash, string Log, bool Earlier = false);
-    public sealed record ModErrors(string? Mod, IReadOnlyList<string> Files, int Count, int Crashes, DateTime Newest, string Exception, bool Earlier = false);
+    // Earlier: a crash in a file replaced since (an update): history, not a pattern. Why: how a crash was tied to its cause
+    // (null: it faulted in that module; "called": in the game's code, called straight from that module; "memory": the
+    // game's memory was nearly full, whatever faulted)
+    public sealed record Error(DateTime When, string? Mod, IReadOnlyList<string> Files, string Exception, bool Crash, string Log, bool Earlier = false, string? Why = null);
+    public sealed record ModErrors(string? Mod, IReadOnlyList<string> Files, int Count, int Crashes, DateTime Newest, string Exception, bool Earlier = false, string? Why = null);
     // Unread: script logs past MaxFiles, not read (the counts are then "at least")
     public sealed record Report(DateTime Since, List<Error> Errors, List<ModErrors> ByMod, int Unread = 0)
     {
@@ -44,6 +46,8 @@ public static partial class ScriptErrors
         var crashFrom = from < week ? from : week;
         var errors = new List<Error>();
         Func<string, (string Mod, string File)?> map = Mapper(docs, mods);
+        var sessions = SessionHistory.List();
+        var apexReport = ApexReport(docs);
         // (every crash log: a mod that writes one log per script error must not push the few crashes out of the cap)
         IEnumerable<FileInfo> logs;
         var unread = 0;
@@ -67,7 +71,7 @@ public static partial class ScriptErrors
                 text = System.Text.Encoding.UTF8.GetString(buf);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
-            errors.AddRange(IsCrash(f.Name) ? Native(text, f, mods) : Script(text, f, map));
+            errors.AddRange(IsCrash(f.Name) ? Native(text, f, mods, sessions, apexReport) : Script(text, f, map));
         }
         // script errors of a mod no longer installed (no file or folder of that name among the mods) are nothing to act on:
         // its old logs drop out. Crashes always stay (one in d3d9.dll is the renderer's, not a mod's).
@@ -77,8 +81,8 @@ public static partial class ScriptErrors
                 || m.Rel.Split(Path.DirectorySeparatorChar).Any(part => part.Equals(mod, StringComparison.OrdinalIgnoreCase)));
             errors = errors.Where(e => e.Crash || e.Mod is not { } name || Installed(name)).ToList();
         }
-        var byMod = errors.GroupBy(e => (Mod: e.Mod ?? "", e.Earlier)).Select(g => new ModErrors(g.Key.Mod == "" ? null : g.Key.Mod, g.SelectMany(e => e.Files).Distinct().ToList(), g.Count(),
-                g.Count(e => e.Crash), g.Max(e => e.When), g.GroupBy(e => e.Exception).OrderByDescending(x => x.Count()).First().Key, g.Key.Earlier))
+        var byMod = errors.GroupBy(e => (Mod: e.Mod ?? "", e.Earlier, e.Why)).Select(g => new ModErrors(g.Key.Mod == "" ? null : g.Key.Mod, g.SelectMany(e => e.Files).Distinct().ToList(), g.Count(),
+                g.Count(e => e.Crash), g.Max(e => e.When), g.GroupBy(e => e.Exception).OrderByDescending(x => x.Count()).First().Key, g.Key.Earlier, g.Key.Why))
             .OrderByDescending(m => m.Newest).ThenByDescending(m => m.Count).ToList();
         return new(from, errors.OrderByDescending(e => e.When).ToList(), byMod, unread);
     }
@@ -118,20 +122,81 @@ public static partial class ScriptErrors
         return t;
     }
 
-    // the game's crash log: only the module that faulted ("address: 0x... "<path>":...") is named. A module further down the
-    // call stack is not: plugins that hook the game's frame (Apex Radiance, the settings setter) sit in nearly every stack
-    // without having done anything. A fault in the game's exe or in Windows is the game's own.
-    static IEnumerable<Error> Native(string text, FileInfo f, IReadOnlyList<ModFile>? mods)
+    // Apex Radiance's own crash report (framework/crash_report.cpp; only the newest is kept): when it was written, the file
+    // that faulted and the files the code addresses on the stack point into, nearest first
+    public sealed record ApexCrash(DateTime When, string Fault, List<string> Refs);
+
+    public static ApexCrash? ApexReport(string docs)
+    {
+        try
+        {
+            var path = Path.Combine(docs, "Apex Radiance", "ApexRadiance_Crash.txt");
+            if (!File.Exists(path)) return null;
+            var text = File.ReadAllText(path);
+            var when = Regex.Match(text, @"crash report, (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)");
+            var fault = Regex.Match(text, @"^Exception \w+ at [0-9A-Fa-f]+ ([^\s+]+)\+0x", RegexOptions.Multiline);
+            if (!when.Success || !fault.Success) return null;
+            var refs = Regex.Matches(text, @"^\s+\+[0-9A-Fa-f]+: [0-9A-Fa-f]+ ([^\s+]+\.(?:asi|dll|exe))\+0x", RegexOptions.Multiline | RegexOptions.IgnoreCase).Select(m => m.Groups[1].Value).ToList();
+            return new(DateTime.Parse(when.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), fault.Groups[1].Value, refs);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or FormatException) { return null; }
+    }
+
+    // the game's exe and Windows' files: a fault there is in the game's own code unless a mod called it with bad data
+    static bool GameOrWindows(string file) =>
+        Regex.IsMatch(Path.GetFileName(file), @"^TS3W?\.exe$", RegexOptions.IgnoreCase)
+        || Path.IsPathRooted(file) && file.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows), StringComparison.OrdinalIgnoreCase)
+        || !Path.IsPathRooted(file) && File.Exists(Path.Combine(Environment.SystemDirectory, file)) && !file.Equals("d3d9.dll", StringComparison.OrdinalIgnoreCase);
+
+    static bool HookLayer(string file) => Regex.IsMatch(Path.GetFileName(file), @"^(ApexRadiance|ts3native)\.asi$", RegexOptions.IgnoreCase);
+
+    // The game's crash log, read with everything that says who did it:
+    // - the file that faulted ("address: 0x... "<path>":...") is the first suspect; a file further down the call stack is not
+    //   (Apex Radiance and Sims 3 Modernization hook the game's frame and sit in nearly every stack without having done anything);
+    // - a fault in the game's code or Windows' is the game's own, unless the frames right above it are a mod's: that mod called
+    //   it. A fault in Apex Radiance's or Sims 3 Modernization's hooks with another mod's frames right above is that mod's call;
+    // - Apex Radiance's own report of the same crash fills a call stack the game's log lost;
+    // - the game's memory nearly full in that session (the launcher's session record) is the cause, whatever faulted;
+    // - a file replaced since the crash is an update since: the crash is history.
+    static IEnumerable<Error> Native(string text, FileInfo f, IReadOnlyList<ModFile>? mods, List<SessionInfo> sessions, ApexCrash? apex)
     {
         if (!text.Contains("[Exception info]")) yield break;
         var type = Regex.Match(text, @"^type:\s*([A-Z_]+)", RegexOptions.Multiline).Groups[1].Value;
+        if (type.Length == 0) type = "crash";
         var fault = Regex.Match(text, @"^address:\s*0x[0-9a-fA-F]+\s+""([^""]+)""", RegexOptions.Multiline).Groups[1].Value;
-        string? module = fault.Length > 0 && !Regex.IsMatch(Path.GetFileName(fault), @"^TS3W?\.exe$", RegexOptions.IgnoreCase)
-            && !fault.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows), StringComparison.OrdinalIgnoreCase) ? fault : null;
+        var stack = text.IndexOf("[Call stack]", StringComparison.Ordinal) is var at and >= 0 ? text[at..] : "";
+        if (stack.IndexOf("[Stack data]", StringComparison.Ordinal) is var end and > 0) stack = stack[..end];
+        var frames = Regex.Matches(stack, @"^([A-Za-z]:\\[^\r\n]+\.(?:asi|dll|exe))\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase).Select(m => m.Groups[1].Value).ToList();
+        var bin = fault.Length > 0 ? Path.GetDirectoryName(fault) : null;
+        // (the game's log lost the stack: Apex Radiance's report of the same moment has it, as file names in Game\Bin)
+        if (frames.Count <= 1 && apex is not null && Math.Abs((apex.When - f.LastWriteTime).TotalSeconds) < 15 && bin is not null)
+            frames = [fault, .. apex.Refs.Select(r => File.Exists(Path.Combine(bin, r)) ? Path.Combine(bin, r) : r)];
+        if (fault.Length == 0 && frames.Count > 0) fault = frames[0];
+
+        // the frames right above the fault (its caller and the one above): a mod among them is the one that called
+        var near = frames.Skip(1).Take(3).ToList(); // (raw frames: a run of the faulting file's own frames is its own code)
+        string? caller = near.FirstOrDefault(x => !GameOrWindows(x) && !x.Equals(fault, StringComparison.OrdinalIgnoreCase)
+                                                  && (!HookLayer(x) || !HookLayer(fault)));
+        string? module = null, why = null, into = type;
+        if (fault.Length > 0 && !GameOrWindows(fault))
+        {
+            module = fault;
+            // (a hook passes calls on: a crash inside one, called straight from another mod, is that mod's call)
+            if (HookLayer(fault) && caller is not null && !HookLayer(caller)) { why = "called"; into = NameOf(fault); module = caller; }
+        }
+        else if (caller is not null) { module = caller; why = "called"; into = Path.GetFileName(fault); } // (TS3W.exe, or the Windows file)
+
+        // the game's memory nearly full in the session that crashed: that is the cause, not the file the allocation failed in
+        var session = sessions.FirstOrDefault(s => s.Started <= f.LastWriteTime && f.LastWriteTime <= s.Started + s.Played + TimeSpan.FromMinutes(5));
+        if (session is not null && session.PeakBytes >= Session.LowMemoryBytes * 9 / 10)
+        {
+            yield return new(f.LastWriteTime, null, [], $"{session.PeakBytes >> 20}", true, f.FullName, false, "memory");
+            yield break;
+        }
         var file = module is null ? null : mods?.FirstOrDefault(m => m.Path.Equals(module, StringComparison.OrdinalIgnoreCase))?.Path ?? module;
         // (the file was replaced after the crash: an update since, so the crash is history)
         var earlier = module is not null && File.Exists(module) && File.GetLastWriteTime(module) > f.LastWriteTime.AddMinutes(1);
-        yield return new(f.LastWriteTime, module is null ? null : NameOf(module), file is null ? [] : [file], type.Length > 0 ? type : "crash", true, f.FullName, earlier);
+        yield return new(f.LastWriteTime, module is null ? null : NameOf(module), file is null ? [] : [file], into, true, f.FullName, earlier, why);
     }
 
     // what a faulting file is, by its version info: a d3d9.dll is the renderer put in Game\Bin, not "a mod"
@@ -237,17 +302,35 @@ public static partial class ScriptErrors
         {
             var sev = m.Count - m.Crashes >= 5 ? Severity.Warning : Severity.Info; // (unverified cut: one stray error is common with ErrorTrap)
             // the game crashes now and then without any mod: one or two in a place is a note, three a pattern worth a look
-            if (m.Crashes > 0 && m.Earlier)
+            if (m.Crashes > 0 && m.Why == "memory")
+            {
+                // (the memory was nearly full: no file is blamed for where the allocation happened to fail)
+                var full = r.Errors.Where(e => e.Crash && e.Why == "memory").Max(e => e.When).ToString("g");
+                f.Add(new(new(m.Crashes >= 2 ? Severity.Warning : Severity.Info, m.Crashes == 1
+                        ? "The game crashed once with its memory nearly full (peak {1} MB of 4096), on {2}. Fewer mods, less CC or a smaller world lowers it."
+                        : "The game crashed {0} times with its memory nearly full (peak {1} MB of 4096), last on {2}. Fewer mods, less CC or a smaller world lowers it.",
+                    [m.Crashes.ToString(), m.Exception, full]), m.Files));
+            }
+            else if (m.Crashes > 0 && m.Earlier)
             {
                 // (crashes in a file updated since: a note, never a pattern; nothing has crashed there since the update)
-                var before = r.Errors.Where(e => e.Crash && e.Earlier && e.Mod == m.Mod).Max(e => e.When).ToString("g");
+                var before = r.Errors.Where(e => e.Crash && e.Earlier && e.Mod == m.Mod && e.Why == m.Why).Max(e => e.When).ToString("g");
                 f.Add(new(new(Severity.Info, m.Crashes == 1 ? "{1} crashed the game once on {2}, before it was updated. No crash in it since."
                         : "{1} crashed the game {0} times before it was updated, last on {2}. No crash in it since.",
                     [m.Crashes.ToString(), m.Mod!, before]), m.Files));
             }
+            else if (m.Crashes > 0 && m.Why == "called" && m.Mod is not null)
+            {
+                // (the fault was in the game's code or a hook, called straight from this mod)
+                var last = r.Errors.Where(e => e.Crash && !e.Earlier && e.Mod == m.Mod && e.Why == m.Why).Max(e => e.When).ToString("g");
+                f.Add(new(new(m.Crashes >= CrashPattern ? Severity.Warning : Severity.Info, m.Crashes == 1
+                        ? "The game crashed once in a call {1} made into {3}, on {2}."
+                        : "{1} crashed the game {0} times in calls it made into {3}. This past week, last on {2}.",
+                    [m.Crashes.ToString(), m.Mod, last, m.Exception]), m.Files));
+            }
             else if (m.Crashes > 0)
             {
-                var last = r.Errors.Where(e => e.Crash && !e.Earlier && e.Mod == m.Mod).Max(e => e.When).ToString("g");
+                var last = r.Errors.Where(e => e.Crash && !e.Earlier && e.Mod == m.Mod && e.Why == m.Why).Max(e => e.When).ToString("g");
                 f.Add(new(new(m.Crashes >= CrashPattern ? Severity.Warning : Severity.Info, m.Crashes == 1
                         ? m.Mod is null ? "The game crashed once in its own code, on {1}." : "The game crashed once in {1}, on {2}."
                         : m.Mod is null ? "The game crashed {0} times in its own code. This past week, last on {1}." : "{1} crashed the game {0} times. This past week, last on {2}.",

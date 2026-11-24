@@ -425,7 +425,8 @@ public sealed partial class MainWindow
 
     FrameworkElement PlaceItem(Place p)
     {
-        var g = new Grid { ColumnSpacing = 10, Tag = p.Key, Padding = new Thickness(14 * p.Depth, 0, 0, 0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        // (as tall as the row, a little wider than its text: a held mod sees a full row light up, not a thin line)
+        var g = new Grid { ColumnSpacing = 10, Tag = p.Key, Padding = new Thickness(14 * p.Depth + 6, 0, 6, 0), Margin = new Thickness(-6, 2, -6, 2), MinHeight = 28, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
