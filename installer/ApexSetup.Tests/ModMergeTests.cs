@@ -519,6 +519,15 @@ static class ModMergeTests
             check(mixed.CanRun && mixed.Inputs.Select(m => m.Name).SequenceEqual(["k3.package", "k4.package"]) && mixed.Skipped.Count == 2 && mixed.Resources == 3
                 && mixed.Skipped.Single(s => s.Mod.Name == "k1.package").Reason.Args[0] == "k2" && !ModMerge.Plan(docs, [M(P("k1")), M(P("k2"))], "x", "Packages", false).CanRun,
                 "merge: mods that change the same resource differently stay out, each naming the other; the same content packed and unpacked goes in once");
+            // tuning written another way (a byte order mark, a comment, the layout, the attribute order) is alike too; another value is not
+            Pkg(Path.Combine(mods, P("x1")), Raw(0x0333406C, 30, "<a k=\"1\" j=\"2\"><v>5</v></a>"), Raw(31, 31, "x1"));
+            Pkg(Path.Combine(mods, P("x2")), Raw(0x0333406C, 30, "\uFEFF<?xml version=\"1.0\"?>\r\n<a j=\"2\" k=\"1\">\r\n  <!-- five -->\r\n  <v>5</v>\r\n</a>"), Raw(32, 32, "x2"));
+            var alike = ModMerge.Plan(docs, [M(P("x1")), M(P("x2"))], "x", "Packages", false);
+            Pkg(Path.Combine(mods, P("x3")), Raw(0x0333406C, 30, "<a k=\"1\" j=\"2\"><v>6</v></a>"), Raw(33, 33, "x3"));
+            var unlike = ModMerge.Plan(docs, [M(P("x1")), M(P("x3"))], "x", "Packages", false);
+            foreach (var n in new[] { "x1", "x2", "x3" }) File.Delete(Path.Combine(mods, P(n)));
+            check(alike.CanRun && alike.Skipped.Count == 0 && alike.Resources == 3 && !unlike.CanRun && unlike.Skipped.Count == 2,
+                "merge: the same tuning written another way goes in once; one changed value keeps the two mods out");
             // the player's choice between them: both go in, the first one's copy counts, and it is kept through an edit
             foreach (var (first, other, text) in new[] { ("k1", "k2", "one"), ("k2", "k1", "two") })
             {

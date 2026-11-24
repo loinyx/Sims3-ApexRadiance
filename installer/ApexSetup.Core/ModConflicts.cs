@@ -14,7 +14,8 @@ namespace ApexSetup;
 
 // Mod-vs-mod conflict scan: which installed mods clash with each other, by fixed rules only. Read-only: links
 // found inside mods are printed, never fetched (the only download is the hook table, ModConflictsHooks.cs). Output names types, members, resource keys and counts, never mod code.
-//   CONFLICT: one resource key in packages of 2+ mods with different bytes (and the likely winner by load order); 2+ core
+//   CONFLICT: one resource key in packages of 2+ mods with a different meaning (ModConflictsSame.cs; and the likely winner
+//     by load order; a translation, an add-on or a folder set to load first is told as such); 2+ core
 //     mods replacing one game assembly; one script assembly name with different builds; 2+ mods storing the same game
 //     interaction Singleton; 2+ ASIs with known hook tables sharing an exe address.
 //   WARNING: 2+ mods with write-type calls, event listeners or native imports and strings in one area of the rule table
@@ -678,6 +679,77 @@ public static partial class ModConflicts
     }
     static byte[]? Image(byte[] s3sa) => PeImage(s3sa) ?? PeImage(DecryptS3sa(s3sa));
 
+    // The packages that share some keys. Recs: in load order (the one in use first), those Resource.cfg does not load last.
+    // All: the types of the shared keys, Types: of those that differ. Real: the keys that differ where some copy is more than a placeholder (TinyBytes or
+    // less in every copy: blank intro videos and the like, the same fix whichever wins). Texts: the texts that differ in
+    // the text tables among them, null when one can't be read.
+    sealed class Shared(List<Party> parties, List<PkgRec> recs, string winner, bool alt, List<string> notLoaded)
+    {
+        public readonly List<Party> Parties = parties;
+        public readonly List<PkgRec> Recs = recs;
+        public readonly string Winner = winner;
+        public readonly bool Alt = alt;
+        public readonly List<string> NotLoaded = notLoaded;
+        public readonly Dictionary<string, int> All = new(), Types = new();
+        public readonly List<string> Keys = new();
+        public readonly HashSet<PkgRec> Unlike = new();
+        public int Same, Real;
+        public int? Texts = 0;
+    }
+
+    // The copies of one key by what they mean: each one's number is the place of the first copy like it (its own when it
+    // is unlike the ones before, or can't be read). Read one at a time; a copy with the bytes of the first costs no more.
+    static int[] Sides(List<(PkgRec Rec, Entry E)> l)
+    {
+        var side = new int[l.Count];
+        var digest = new UInt128?[l.Count];
+        byte[]? first = null;
+        var firstAt = 0;
+        for (var i = 0; i < l.Count; i++)
+        {
+            var e = l[i].E;
+            side[i] = i;
+            // (too large for tuning or texts, and no other copy of its size: different, without reading it)
+            if (e.MemSize > MeaningCap && l.Count(x => x.E.MemSize == e.MemSize) == 1) continue;
+            byte[] b;
+            try { b = l[i].Rec.Pkg.Read(e); }
+            catch (Exception x) when (x is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { continue; }
+            if (first is null) { (first, firstAt) = (b, i); continue; }
+            if (b.AsSpan().SequenceEqual(first)) { side[i] = firstAt; continue; }
+            var mine = Canon(e.Type, b);
+            if (mine is null && l.Count == 2) continue; // (two copies, and only this one's bytes say what it is: they differ)
+            digest[firstAt] ??= Meaning(e.Type, first);
+            digest[i] = mine ?? Digest(0, b);
+            for (var j = 0; j < i; j++)
+                if (side[j] == j && digest[j] == digest[i]) { side[i] = j; break; }
+        }
+        return side;
+    }
+
+    // What two packages that differ on some keys are to each other, with the conflict's parties (the one in use first).
+    //   translation: the one in use holds only texts, of a mod that holds more.
+    //   add-on: all the one in use holds is in the other, which holds more, and its name says it is a piece of it.
+    //   decided: the one in use is in a folder Resource.cfg gives a higher Priority than the others'.
+    //   resource key: anything else, and whenever the piece is not the one in use (it has no effect then).
+    static (string Kind, List<Party> Parties) Relation(Shared g)
+    {
+        var loaded = g.Recs.Where(r => r.Key is not null).ToList();
+        if (loaded.Count == 2 && g.Recs.Count == 2)
+        {
+            var (piece, whole) = (loaded[0], loaded[1]);
+            static bool Content(Entry e) => e.Type is not (TypeKey or TypeManifest);
+            static bool OnlyTexts(PkgRec r) => r.Pkg.Entries.Where(Content).All(e => e.Type == TypeStbl);
+            static string Name(PkgRec r) => Path.GetFileNameWithoutExtension(r.Label[(r.Label.LastIndexOfAny(['/', '!']) + 1)..]);
+            List<Party> ps = [piece.Party, whole.Party];
+            if (g.Types.Keys.All(t => t == "STBL") && OnlyTexts(piece) && !OnlyTexts(whole)) return ("translation", ps);
+            var keys = whole.Pkg.Entries.Where(Content).Select(e => (e.Type, e.Group, e.Instance)).ToHashSet();
+            var mine = piece.Pkg.Entries.Where(Content).Select(e => (e.Type, e.Group, e.Instance)).ToHashSet();
+            if (mine.Count < keys.Count && mine.IsSubsetOf(keys) && SaysPiece(Name(piece), Name(whole))) return ("add-on", ps);
+        }
+        if (loaded.Count > 1 && loaded.Skip(1).All(r => r.Key!.Value.Item1 > loaded[0].Key!.Value.Item1)) return ("decided", g.Parties);
+        return ("resource key", g.Parties);
+    }
+
     public static Report Scan(Options o)
     {
         var temps = new List<string>(); // extracted archives: kept until the key comparison has read them
@@ -881,7 +953,7 @@ public static partial class ModConflicts
                 DoAsi(p, File.ReadAllBytes(f), f, f);
             }
 
-        // (1) resource keys: the likely winner by load order; identical bytes = duplicate; one archive or mod = alternatives
+        // (1) resource keys: the likely winner by load order; the same meaning = duplicate; one archive or mod = alternatives
         var byKey = new Dictionary<string, List<(PkgRec Rec, Entry E)>>();
         foreach (var rec in recs)
             foreach (var e in rec.Pkg.Entries)
@@ -890,39 +962,52 @@ public static partial class ModConflicts
                 if (!byKey.TryGetValue(e.Key, out var l)) byKey[e.Key] = l = new();
                 l.Add((rec, e));
             }
-        // Dup[1]: differing keys where some copy is more than a placeholder (TinyBytes or less in every copy: blank intro
-        // videos and the like, the same fix whichever wins)
-        var pairs = new Dictionary<string, (List<Party> Parties, string Winner, Dictionary<string, int> Types, List<string> Keys, int[] Dup, bool Alt, List<string> NotLoaded)>();
+        var pairs = new Dictionary<string, Shared>();
         foreach (var (k, l) in byKey)
         {
             if (l.Count < 2) continue;
             var sorted = l.Where(x => x.Rec.Key is not null).OrderBy(x => x.Rec.Key!.Value, Comparer<(int, int, string)>.Create(CompareKey)).ToList();
-            var same = false;
-            try { var first = l[0].Rec.Pkg.Read(l[0].E); same = l.Skip(1).All(x => x.Rec.Pkg.Read(x.E).AsSpan().SequenceEqual(first)); }
-            catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { } // unreadable: different
+            var side = Sides(l);
             var ps = l.Select(x => x.Rec.Party).Distinct().ToList();
             var id = string.Join(" | ", l.Select(x => x.Rec.Label).OrderBy(x => x, StringComparer.Ordinal));
             if (!pairs.TryGetValue(id, out var g))
-                pairs[id] = g = (ps, sorted.FirstOrDefault().Rec?.Label ?? "-", new(), new(), new int[2], OneMod(ps), l.Where(x => x.Rec.Key is null).Select(x => x.Rec.Label).ToList());
+                pairs[id] = g = new(ps, sorted.Select(x => x.Rec).Concat(l.Select(x => x.Rec)).Distinct().ToList(), sorted.FirstOrDefault().Rec?.Label ?? "-", OneMod(ps), l.Where(x => x.Rec.Key is null).Select(x => x.Rec.Label).ToList());
             var tn = TypeName(l[0].E.Type);
+            g.All[tn] = g.All.GetValueOrDefault(tn) + 1;
+            if (side.All(x => x == side[0])) { g.Same++; continue; }
             g.Types[tn] = g.Types.GetValueOrDefault(tn) + 1;
-            if (same) g.Dup[0]++;
-            else
-            {
-                if (!Blankable.Contains(l[0].E.Type) || l.Any(x => x.E.MemSize > TinyBytes)) g.Dup[1]++;
-                if (g.Keys.Count < 5) g.Keys.Add($"{tn} {k}");
-            }
+            if (!Blankable.Contains(l[0].E.Type) || l.Any(x => x.E.MemSize > TinyBytes)) g.Real++;
+            if (g.Keys.Count < 5) g.Keys.Add($"{tn} {k}");
+            // (who holds another copy than the one in use; with none loaded, than the first)
+            var used = sorted.Count > 0 ? l.IndexOf(sorted[0]) : 0;
+            for (var i = 0; i < l.Count; i++)
+                if (side[i] != side[used]) g.Unlike.Add(l[i].Rec);
+            if (l[0].E.Type == TypeStbl && g.Texts is not null)
+                try
+                {
+                    var first = l[used].Rec.Pkg.Read(l[used].E);
+                    foreach (var x in l.Where((_, i) => side[i] == i && side[i] != side[used])) g.Texts += TextsThatDiffer(first, x.Rec.Pkg.Read(x.E));
+                }
+                catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { g.Texts = null; }
         }
         foreach (var (id, g) in pairs)
         {
-            var total = g.Types.Values.Sum();
+            var differ = g.Types.Values.Sum();
+            var total = differ + g.Same;
             var types = string.Join(", ", g.Types.Select(t => $"{t.Key} {t.Value}"));
             var nl = g.NotLoaded.Count > 0 ? $"; not loaded by Resource.cfg: {string.Join(", ", g.NotLoaded)}" : "";
             if (g.Alt) report.Info.Add(new(g.Parties[0].Name, $"{total} keys in several packages of one {(g.Parties.Count == 1 ? "archive" : "mod")} (versions or alternatives: install one): {id}{nl}"));
-            else if (g.Dup[0] == total) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"duplicate copy: {total} identical resources ({types}) in {id}"));
-            else if (g.Dup[1] == 0) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"the same fix twice: {total - g.Dup[0]} keys replaced by small placeholders in each ({types}) in {id}"));
-            else report.Conflicts.Add(new("resource key", $"{total - g.Dup[0]} shared keys with different content ({types}{(g.Dup[0] > 0 ? $"; {g.Dup[0]} identical" : "")}): {id}; likely winner: {g.Winner}{nl}",
-                g.Parties.Select(p => p.Name).ToArray(), g.Keys.ToArray()));
+            else if (differ == 0) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"duplicate copy: {total} identical resources ({string.Join(", ", g.All.Select(t => $"{t.Key} {t.Value}"))}) in {id}"));
+            else if (g.Real == 0) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"the same fix twice: {differ} keys replaced by small placeholders in each ({types}) in {id}"));
+            else
+            {
+                var (kind, who) = Relation(g);
+                var texts = g.Texts is > 0 and var t && g.Types.Count == 1 ? $"; {t} texts differ" : "";
+                // (the others that hold the copy in use: they lose nothing there)
+                var alike = g.Recs.Skip(1).Where(r => r.Key is not null && !g.Unlike.Contains(r)).Select(r => r.Label).ToList();
+                report.Conflicts.Add(new(kind, $"{differ} shared keys with different content ({types}{(g.Same > 0 ? $"; {g.Same} identical" : "")}{texts}): {id}; likely winner: {g.Winner}{nl}"
+                    + (alike.Count > 0 && g.Winner != "-" ? $"; same copy as the winner: {string.Join(" | ", alike)}" : ""), who.Select(p => p.Name).ToArray(), g.Keys.ToArray()));
+            }
         }
 
         // (2) core mods, (3) assembly copies, (4) singletons, (5) ASI hook tables; parties all of one mod (ModFolders) = INFO

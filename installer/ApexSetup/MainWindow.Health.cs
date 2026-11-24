@@ -446,7 +446,7 @@ public sealed partial class MainWindow
         for (int i = 0; i < files.Count; i++)
         {
             var (party, file) = files[i];
-            var info = c.Winner is { } w ? (w.Equals(party, StringComparison.OrdinalIgnoreCase) ? T("In use") : T("Replaced by the other"))
+            var info = c.Winner is { } w ? (w.Equals(party, StringComparison.OrdinalIgnoreCase) ? T("In use") : c.Alike.Contains(party, StringComparer.OrdinalIgnoreCase) ? T("Same as the one in use") : T("Replaced by the other"))
                 : c.Title == "Two versions of the same mod" && dates[i] is { } d ? (d == newest ? T("Newest, from {0}", d.ToString("d MMM yyyy", LangCulture())) : T("From {0}", d.ToString("d MMM yyyy", LangCulture()))) : "";
             var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(14, 8, 8, 8), MinHeight = 48, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition());
