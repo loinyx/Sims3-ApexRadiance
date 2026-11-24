@@ -3333,7 +3333,10 @@ public sealed partial class MainWindow
             photo.Children.Add(card);
             shown = card;
             // (once in place the cached copy gives way to a sharp one, read off screen first so nothing blinks)
-            var sharpCopy = Thumb(path, root.Size.Width);
+            // (the picture itself, read at the size it is shown: a cached copy may not be made yet, and then the view opened
+            // on the small one; a video keeps its cached frame)
+            var sharpCopy = pic.Video ? Thumb(path, root.Size.Width)
+                : new BitmapImage { DecodePixelType = DecodePixelType.Logical, DecodePixelWidth = (int)Math.Max(640, root.Size.Width), UriSource = new Uri(path) };
             var loader = new Image { Source = sharpCopy, Width = 1, Height = 1, Opacity = 0.01, IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
             void Sharpen()
             {
@@ -3400,7 +3403,7 @@ public sealed partial class MainWindow
                 if (card.ActualWidth > 0) Rise(); else { void Once(object o, SizeChangedEventArgs e) { card.SizeChanged -= Once; Rise(); } card.SizeChanged += Once; }
             }
             // (the sharp picture is read before the card grows, so it never opens on the small copy and sharpens later;
-            // a slow read waits at most a quarter of a second, then the card grows and sharpens when ready)
+            // a slow read waits at most 0.8 s, then the card grows and sharpens when ready)
             if (sharpCopy.PixelWidth > 0 || pic.Video) Start();
             else
             {
@@ -3408,7 +3411,7 @@ public sealed partial class MainWindow
                 void Go() { if (started || closing) return; started = true; Start(); }
                 loader.ImageOpened += (_, _) => Go();
                 loader.ImageFailed += (_, _) => Go();
-                After(250, Go);
+                After(800, Go);
             }
         }
 
