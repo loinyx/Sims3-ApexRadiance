@@ -14,11 +14,13 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
     public Finding? Finding { get; init; }
     // which mod comes first is a matter of the folder it is in (not for a menu command or a script: those don't go by it)
     public bool CanOrder { get; init; }
+    // the mods that hold the same copy as the one in use: they lose nothing
+    public string[] Alike { get; init; } = [];
 
     // resources that only look or read differently: texts, pictures, icons, sounds and videos
     static readonly HashSet<string> LooksOnly = new(StringComparer.OrdinalIgnoreCase)
         { "STBL", "_IMG", "PNG", "ICON", "0xb1cc1af6", "0x01a527db", "0x01eef63a", "0x8070223d" };
-    static readonly Regex Types = new(@"different content \(([^)]*)\)"), Type = new(@"(\w+) \d+"),
+    static readonly Regex Types = new(@"different content \(([^)]*)\)"), Type = new(@"(\w+) \d+"), Texts = new(@"; (\d+) texts differ\)"), Same = new(@"; same copy as the winner: (.+)$"),
         Version = new(@"[\s_\-.]*\(?(v\.?\s*\d+([._]\d+)*|\d+([._]\d+)+)\)?$", RegexOptions.IgnoreCase); // ("V.1.2", "_v130", "1.2": not a bare number, which is part of a name)
 
     public static ModConflict Of(ConflictEntry c, string[] files)
@@ -26,6 +28,7 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
         // (the resource types, up to a "; n identical")
         var types = Types.Match(c.Text) is { Success: true } m ? Type.Matches(m.Groups[1].Value.Split(';')[0]).Select(x => x.Groups[1].Value).ToList() : [];
         var looks = types.Count > 0 && types.All(LooksOnly.Contains);
+        var texts = Texts.Match(c.Text) is { Success: true } n ? n.Groups[1].Value : null;
         var (level, title, say) = c.Kind switch
         {
             "assembly" => (ConflictLevel.Fix, "Two versions of the same mod", "The game loads only one, and you can't choose which. Keep the newest."),
@@ -34,18 +37,28 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
             "interaction" when c.Text.Contains("+DEBUG_", StringComparison.Ordinal) =>
                 (ConflictLevel.Small, "Mods that replace the same menu command", "It's a cheats menu command. Only one mod keeps it. Everything else works as usual."),
             "interaction" => (ConflictLevel.Small, "Mods that replace the same menu command", "Only one mod keeps the command. Everything else works as usual."),
+            // (the scan tells these only when the piece is the one in use: Parties are the piece, then the mod it is for)
+            "translation" => (ConflictLevel.Small, "A translation of a mod", "{0} translates {1}. Nothing to fix."),
+            "add-on" => (ConflictLevel.Small, "A mod that changes part of another", "{0} replaces part of {1} on purpose. Nothing to fix."),
+            "decided" when c.Winner is not null => (ConflictLevel.Small, "One mod is set to load first", "{0} is in a folder that loads first, so the game uses it there. Everything else works as usual."),
+            _ when looks && texts is not null => (ConflictLevel.Small, "Mods that change the same picture or text",
+                c.Winner is null ? "Texts that differ: {0}. Only one mod's texts appear. Everything else works as usual." : "Texts that differ: {1}. The ones from {0} appear. Everything else works as usual."),
             _ when looks => (ConflictLevel.Small, "Mods that change the same picture or text", c.Winner is null ? "Only one appears. Everything else works as usual." : "The one from {0} appears. Everything else works as usual."),
             _ => (ConflictLevel.Look, "Mods that change the same game data", c.Winner is null ? "The game uses only one there. Everything else works as usual." : "The game uses {0} there. Everything else works as usual."),
         };
-        string[] args = say.Contains("{0}") && c.Winner is { } w ? [w] : [];
+        string[] args = c.Kind is "translation" or "add-on" ? c.Parties[..2]
+            : say.StartsWith("Texts", StringComparison.Ordinal) ? (c.Winner is { } first ? [first, texts!] : [texts!])
+            : say.Contains("{0}") && c.Winner is { } w ? [w] : [];
         var what = c.Kind == "interaction" ? c.Text[(c.Text.IndexOf("replace ", StringComparison.Ordinal) + 8)..].Split(' ')[0] : "";
-        var id = string.Join("|", c.Parties.Select(Plain).Order(StringComparer.Ordinal).Prepend(what).Prepend(c.Kind));
+        // (one id whatever the scan calls two mods with the same data, so one the player ignored stays ignored)
+        var id = string.Join("|", c.Parties.Select(Plain).Order(StringComparer.Ordinal).Prepend(what).Prepend(c.Kind is "translation" or "add-on" or "decided" ? "resource key" : c.Kind));
         var finding = level == ConflictLevel.Small ? null
             : c.Winner is { } win ? new Finding(Severity.Warning, "{0} change the same game data. {1} likely wins and the others' changes are lost.", [string.Join(", ", c.Parties), win])
             : new Finding(Severity.Warning, title, []);
-        return new(id, level, title, say, args, c.Parties, c.Winner, files, $"{c.Kind}: {c.Text}") { Finding = finding, CanOrder = level != ConflictLevel.Fix && c.Kind != "interaction" };
+        return new(id, level, title, say, args, c.Parties, c.Winner, files, $"{c.Kind}: {c.Text}") { Finding = finding, CanOrder = level != ConflictLevel.Fix && c.Kind != "interaction",
+            Alike = Same.Match(c.Text) is { Success: true } a ? a.Groups[1].Value.Split(" | ").Select(x => Path.GetFileNameWithoutExtension(x.Trim())).ToArray() : [] };
     }
 
     // a mod's name without its version ("S3DecoratingTools_V.1.2"), as two versions of it share
-    static string Plain(string party) => Version.Replace(party, "") is { Length: > 0 } s ? s.ToLowerInvariant() : party.ToLowerInvariant();
+    internal static string Plain(string party) => Version.Replace(party, "") is { Length: > 0 } s ? s.ToLowerInvariant() : party.ToLowerInvariant();
 }

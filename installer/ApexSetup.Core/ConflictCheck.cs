@@ -34,7 +34,7 @@ public sealed class ConflictCheck : IModCheck
     public List<DuplicateEntry> Duplicates => Last?.Duplicates ?? [];
 
     // (Rules goes up when the scan's rules change, so a result kept from older rules is scanned again)
-    const int Rules = 4;
+    const int Rules = 5;
     public static string Fingerprint(IEnumerable<ModFile> mods) => $"rules {Rules}\n" +
         string.Join("\n", mods.Where(Scanned).OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
             .Select(m => $"{m.Path}|{m.Size}|{(File.Exists(m.Path) ? File.GetLastWriteTimeUtc(m.Path).Ticks : 0)}"));

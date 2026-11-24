@@ -89,16 +89,17 @@ public static partial class ModMerge
             return b;
         }
 
-        // the same bytes as stored, or once unpacked (two tools pack one resource differently); one that can't be read differs
+        // the same bytes as stored, or once unpacked (two tools pack one resource differently), or the same to the game (tuning
+        // or texts written another way, ModConflicts.SameMeaning); one that can't be read differs
         public bool Same(string a, ModConflicts.Entry ea, string b, ModConflicts.Entry eb)
         {
-            if (ea.MemSize != eb.MemSize) return false;
+            // (of another size and too large for tuning or texts: different, without reading it)
+            if (ea.MemSize != eb.MemSize && Math.Max(ea.MemSize, eb.MemSize) > ModConflicts.MeaningCap) return false;
             try
             {
                 var (x, y) = (Stored(a, ea), Stored(b, eb));
                 if (ea.Compressed == eb.Compressed && x.AsSpan().SequenceEqual(y)) return true;
-                if (ea.Compressed != 0xFFFF && eb.Compressed != 0xFFFF) return false;
-                return (ea.Compressed == 0xFFFF ? ModConflicts.RefPack(x) : x).AsSpan().SequenceEqual(eb.Compressed == 0xFFFF ? ModConflicts.RefPack(y) : y);
+                return ModConflicts.SameMeaning(ea.Type, ea.Compressed == 0xFFFF ? ModConflicts.RefPack(x) : x, eb.Compressed == 0xFFFF ? ModConflicts.RefPack(y) : y);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or IndexOutOfRangeException or OverflowException) { return false; }
         }
