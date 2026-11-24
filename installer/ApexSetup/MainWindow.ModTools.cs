@@ -12,131 +12,12 @@ public sealed partial class MainWindow
 {
     // ---------- merge ----------
 
-    async Task MergeAsync(List<ModRow> rows, string? name, string? folder)
-    {
-        if (_game is null) return;
-        var docs = Docs;
-        var include = false;
-        var mods = rows.Select(r => r.File).ToList();
-        folder ??= rows.Select(r => DirOf(r.File)).GroupBy(d => d).OrderByDescending(g => g.Count()).First().Key;
-        name ??= (Path.GetFileName(folder) is { Length: > 0 } f ? f : "Mods") + "-merged";
-        IReadOnlyList<string> priority = [];
-        MergePlan plan;
-        while (true)
-        {
-            try { plan = await Task.Run(() => ModMerge.Plan(docs, mods, name, folder, include, priority)); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("These mods can't be merged"), ErrorText(e)); return; }
-            var answer = await MergePlanDialog(plan, name, folder, include, p => Task.Run(() => ModMerge.Plan(docs, mods, name, folder, include, p)));
-            if (answer is null) return;
-            // (a changed name or script choice, or a plan that could not run, is planned again)
-            var changed = answer.Value.Name != name || answer.Value.Scripts != include;
-            name = answer.Value.Name;
-            include = answer.Value.Scripts;
-            plan = answer.Value.Plan;
-            priority = plan.Priority;
-            if (!changed && plan.CanRun) break;
-        }
-        if (!plan.CanRun) return;
-        await MergeRunDialog(plan);
-    }
+    // one package to write: its file's name, the work, and where its log is once it started
+    sealed record MergeJob(string File, Func<IProgress<MergeProgress>, CancellationToken, MergeResult> Run, Func<string?> Log);
 
-    // the plan, before anything is written: what goes in, the mods that clash and whose part is kept, what is left out and why.
-    // A choice is planned at once (again), so the numbers and the buttons are always the merge that would run.
-    async Task<(string Name, bool Scripts, MergePlan Plan)?> MergePlanDialog(MergePlan plan, string name, string folder, bool scripts, Func<IReadOnlyList<string>, Task<MergePlan>> again)
-    {
-        var body = new StackPanel { Spacing = 14, MinWidth = 440, MaxWidth = 520 };
-        var box = new TextBox { Header = T("Name of the merged package"), Text = name };
-        body.Children.Add(box);
-        var line = Muted("");
-        body.Children.Add(line);
-        var d = new ContentDialog { CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
-        var refused = new StackPanel { Spacing = 8 };
-        var leftOut = new StackPanel { Spacing = 4 };
-
-        void Fill()
-        {
-            var all = plan.Inputs.Count + plan.Skipped.Count;
-            d.Title = plan.Skipped.Count == 0 ? T("Merge {0} mods", all) : T("Merge {0} of the {1} mods chosen", plan.Inputs.Count, all);
-            line.Text = T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, plan.Inputs.Count, plan.Resources, ModRow.SizeText(plan.OutputBytes));
-            d.PrimaryButtonText = plan.CanRun ? T("Merge") : T("Check again");
-            leftOut.Children.Clear();
-            var gone = plan.Skipped.Where(s => s.Reason.Key != ModMerge.ClashReason).ToList(); // (the ones that clash say so above)
-            if (gone.Count > 0) leftOut.Children.Add(new TextBlock { Text = T("Left out"), FontSize = 13, FontWeight = FontWeights.SemiBold });
-            foreach (var s in gone.Take(30))
-                leftOut.Children.Add(new TextBlock { Text = $"{Path.GetFileNameWithoutExtension(s.Mod.Name)}: {T(s.Reason.Key, s.Reason.Args)}", FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
-            if (gone.Count > 30) leftOut.Children.Add(Muted(T("and {0} more", gone.Count - 30)));
-            leftOut.Visibility = gone.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            refused.Children.Clear();
-            foreach (var r in plan.Refusals) refused.Children.Add(Warn(T(r.Key, r.Args), null));
-            refused.Visibility = plan.Refusals.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        if (plan.Clashes.Count > 0)
-        {
-            var picks = new List<(MergeClash Clash, ComboBox Box)>();
-            var run = 0;
-            async void Choose()
-            {
-                var mine = ++run;
-                var order = new List<string>();
-                foreach (var (clash, pick) in picks.Where(p => p.Box.SelectedIndex > 0))
-                {
-                    var first = clash.Mods[pick.SelectedIndex - 1].Rel;
-                    order.Add(first);
-                    order.AddRange(clash.Mods.Select(m => m.Rel).Where(r => r != first));
-                }
-                d.IsPrimaryButtonEnabled = false;
-                try
-                {
-                    var next = await again(order);
-                    if (mine != run) return; // (chosen again meanwhile)
-                    plan = next;
-                    Fill();
-                }
-                catch (Exception e) { App.Log(e); }
-                if (mine == run) d.IsPrimaryButtonEnabled = true;
-            }
-            var list = new StackPanel { Spacing = 8 };
-            list.Children.Add(new TextBlock { Text = plan.Clashes.Count == 1 ? T("Conflict") : T("{0} conflicts", plan.Clashes.Count), FontSize = 13, FontWeight = FontWeights.SemiBold });
-            list.Children.Add(Muted(T("Where they change the same thing, one package keeps one copy. Leave them out, or choose whose copy counts.")));
-            foreach (var clash in plan.Clashes)
-            {
-                string Name(ModFile m) => Path.GetFileNameWithoutExtension(m.Name);
-                var card = new StackPanel { Spacing = 8, Padding = new Thickness(14, 12, 14, 14) };
-                card.Children.Add(new TextBlock { Text = string.Join(", ", clash.Mods.Select(Name)), FontSize = 13, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-                card.Children.Add(new TextBlock
-                {
-                    FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap,
-                    Text = (clash.Resources == 1 ? T("1 resource with different content.") : T("{0} resources with different content.", clash.Resources))
-                        + (clash.Outside.Count > 0 ? " " + T("Outside the merge, it also meets {0}: which of them the game uses could change.", string.Join(", ", clash.Outside.Take(3))) : ""),
-                });
-                var pick = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-                pick.Items.Add(T("Leave out"));
-                foreach (var m in clash.Mods) pick.Items.Add(clash.Mods.Count == 1 ? T("Merge it anyway") : T("Merge, {0} has priority", Name(m)));
-                var first = plan.Priority.FirstOrDefault(r => clash.Mods.Any(m => m.Rel.Equals(r, StringComparison.OrdinalIgnoreCase)));
-                pick.SelectedIndex = first is null ? 0 : clash.Mods.ToList().FindIndex(m => m.Rel.Equals(first, StringComparison.OrdinalIgnoreCase)) + 1;
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(pick, string.Join(", ", clash.Mods.Select(Name)));
-                pick.SelectionChanged += (_, _) => Choose();
-                picks.Add((clash, pick));
-                card.Children.Add(pick);
-                list.Children.Add(new Border { Child = card, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = new SolidColorBrush(Pick(0x0AFFFFFF, 0x06000000)) });
-            }
-            body.Children.Add(list);
-        }
-        body.Children.Add(leftOut);
-        var scriptBox = new CheckBox { Content = T("Include script mods (their makers usually ask not to merge them)"), IsChecked = scripts };
-        if (scripts || plan.Skipped.Any(s => s.Reason.Key.StartsWith("A script mod"))) body.Children.Add(scriptBox);
-        body.Children.Add(refused);
-        body.Children.Add(Muted(T("The originals are kept in {0}. Split puts them back as they were.", ModMerge.ShownFolder)));
-        Fill();
-        d.Content = new ScrollViewer { Content = body, MaxHeight = 460, Padding = new Thickness(0, 0, 14, 0) };
-        if (await ShowDialog(d) != ContentDialogResult.Primary) return null;
-        var n = box.Text.Trim();
-        return (n.Length > 0 ? n : name, scriptBox.IsChecked == true, plan);
-    }
-
-    // the run: a step list with a bar and the time, the log as it is written, Cancel until the originals start moving
-    async Task MergeRunDialog(MergePlan plan)
+    // the run, one package after the other: a step list with a bar and the time, the log as it is written, Cancel until the
+    // originals start moving. The packages already done stay done when a later one fails or is stopped.
+    async Task<(List<MergeResult> Done, Exception? Error)> MergeRunDialog(List<MergeJob> jobs, Func<List<MergeResult>, string>? title = null)
     {
         var steps = new[] { (MergeStep.Check, T("Check the files")), (MergeStep.Write, T("Write the merged package")), (MergeStep.Verify, T("Check every resource against the originals")),
             (MergeStep.Move, T("Keep the originals aside")), (MergeStep.Finish, T("Put the merged package in place")) };
@@ -163,7 +44,7 @@ public sealed partial class MainWindow
             icons[step] = iconHost;
         }
         var bar = new ProgressBar { Maximum = 1 };
-        var time = new TextBlock { FontSize = 12, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Right };
+        var time = new TextBlock { FontSize = 12, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Right, TextWrapping = TextWrapping.Wrap };
         var log = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, FontFamily = new FontFamily("Consolas"), FontSize = 11, Height = 120 };
         ScrollViewer.SetVerticalScrollBarVisibility(log, ScrollBarVisibility.Auto);
         var body = new StackPanel { Spacing = 14, Width = 480 };
@@ -173,7 +54,7 @@ public sealed partial class MainWindow
         body.Children.Add(log);
         var cts = new CancellationTokenSource();
         var running = true; // (a failed run leaves the bar short of the end: Close then closes, it does not stop)
-        var d = new ContentDialog { Title = T("Merging into {0}", Path.GetFileName(plan.TargetRel)), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Title = T("Merging into {0}", jobs[0].File), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
         d.CloseButtonClick += (_, e) => { if (running && !cts.IsCancellationRequested) { e.Cancel = true; cts.Cancel(); d.CloseButtonText = T("Stopping…"); } };
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var current = MergeStep.Check;
@@ -191,61 +72,77 @@ public sealed partial class MainWindow
             });
             text.Foreground = Res(state == "wait" ? "ApexMutedBrush" : "ApexSoftTextBrush");
         }
-        Mark(MergeStep.Check, "now");
-        var progress = new Progress<MergeProgress>(p =>
+        var job = 0;
+        Progress<MergeProgress> Follow(int mine) => new(p =>
         {
+            if (mine != job) return; // (said late, by the package before)
             if (p.Step != current) { foreach (var (s, _) in steps.TakeWhile(x => x.Item1 != p.Step)) Mark(s, "done"); current = p.Step; Mark(p.Step, "now"); }
             var (_, _, det) = rows[p.Step];
             det.Text = p.Total <= 0 ? "" : p.Step == MergeStep.Move ? $"{p.Done} / {p.Total}" : $"{ModRow.SizeText(p.Done)} / {ModRow.SizeText(p.Total)}";
             var share = 1.0 / steps.Length;
-            bar.Value = Array.FindIndex(steps, x => x.Item1 == p.Step) * share + (p.Total > 0 ? share * p.Done / p.Total : 0);
+            bar.Value = (job + Array.FindIndex(steps, x => x.Item1 == p.Step) * share + (p.Total > 0 ? share * p.Done / p.Total : 0)) / jobs.Count;
             time.Text = clock.Elapsed.ToString(@"mm\:ss");
         });
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(400);
+        var (before, shownLog) = ("", ""); // (the logs of the packages already done)
         void ReadLog()
         {
-            if (plan.LogPath is { } lp && File.Exists(lp))
-                try { using var fs = new FileStream(lp, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); using var sr = new StreamReader(fs); var all = sr.ReadToEnd(); if (all.Length != log.Text.Length) { log.Text = all; log.SelectionStart = all.Length; } }
+            if (jobs[job].Log() is { } lp && File.Exists(lp))
+                try { using var fs = new FileStream(lp, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); using var sr = new StreamReader(fs); var all = before + sr.ReadToEnd(); if (all.Length != shownLog.Length) { log.Text = shownLog = all; log.SelectionStart = all.Length; } }
                 catch (IOException) { }
         }
         timer.Tick += (_, _) => { time.Text = clock.Elapsed.ToString(@"mm\:ss"); ReadLog(); };
         timer.Start();
         var shown = ShowDialog(d);
-        MergeResult? result = null;
+        var done = new List<MergeResult>();
         Exception? error = null;
-        try { result = await ModWork(() => ModMerge.Run(plan, progress, cts.Token)); }
+        try
+        {
+            for (; job < jobs.Count; job++)
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                if (jobs.Count > 1) d.Title = T("Merging into {0}, {1} of {2}", jobs[job].File, job + 1, jobs.Count);
+                foreach (var (s, _) in steps) { Mark(s, "wait"); rows[s].Detail.Text = ""; }
+                current = MergeStep.Check;
+                Mark(MergeStep.Check, "now");
+                var (now, progress) = (jobs[job], Follow(job));
+                done.Add(await ModWork(() => now.Run(progress, cts.Token)));
+                ReadLog(); // (a merge quicker than the timer still shows its whole log)
+                before = shownLog.Length > 0 ? shownLog + "\r\n" : "";
+            }
+            job = jobs.Count - 1;
+        }
         catch (Exception e) { error = e; App.Log(e); }
         running = false;
         timer.Stop();
         clock.Stop();
-        ReadLog(); // (a merge quicker than the timer still shows its whole log)
-        if (result is not null)
+        if (error is not null) ReadLog();
+        // (several logs: the folder they are in)
+        if ((error is null ? done[^1].LogPath : jobs[job].Log() ?? done.LastOrDefault()?.LogPath) is { } path)
+        {
+            d.PrimaryButtonText = jobs.Count == 1 ? T("Open log") : T("Open log folder");
+            d.PrimaryButtonClick += (_, e) => { e.Cancel = true; if (jobs.Count == 1) OpenLog(path); else OpenFolder(Path.GetDirectoryName(path)!); };
+        }
+        d.CloseButtonText = T("Close");
+        if (error is null)
         {
             foreach (var (s, _) in steps) Mark(s, "done");
             bar.Value = 1;
-            d.Title = T("Merged {0} mods", result.Mods);
-            time.Text = T("{0} resources · {1} · verified · {2:0.0} s", result.Resources, ModRow.SizeText(result.Bytes), result.Elapsed.TotalSeconds);
-            d.CloseButtonText = T("Close");
-            d.PrimaryButtonText = T("Open log");
-            d.PrimaryButtonClick += (_, e) => { e.Cancel = true; OpenLog(result.LogPath); };
+            d.Title = title?.Invoke(done) ?? T("Merged {0} mods", done.Sum(r => r.Mods));
+            time.Text = T("{0} resources · {1} · verified · {2:0.0} s", done.Sum(r => r.Resources), ModRow.SizeText(done.Sum(r => r.Bytes)), done.Sum(r => r.Elapsed.TotalSeconds));
         }
         else
         {
             Mark(current, "fail");
             d.Title = error is OperationCanceledException ? T("Merge stopped") : T("The merge did not finish");
             // (a SetupException from Run says what is out of place itself, such as originals left in the merge folder)
-            time.Text = error is OperationCanceledException ? T("Nothing was changed.") : ErrorText(error!) + (error is SetupException ? "" : " " + T("Your mods are as they were."));
-            d.CloseButtonText = T("Close");
-            if (plan.LogPath is { } lp) { d.PrimaryButtonText = T("Open log"); d.PrimaryButtonClick += (_, e) => { e.Cancel = true; OpenLog(lp); }; }
+            time.Text = (done.Count > 0 ? T("Done before it: {0}.", string.Join(", ", done.Select(r => r.Merged.Name))) + " " : "")
+                + (error is OperationCanceledException ? T(done.Count > 0 ? "The rest was not merged." : "Nothing was changed.")
+                : ErrorText(error) + (error is SetupException || done.Count > 0 ? "" : " " + T("Your mods are as they were.")));
         }
         await shown;
-        // (the game's caches point at the files as they were: cleared, a mod that looks missing in the game shows again)
-        if (result is not null)
-            SetInfo(ModsInfo, InfoBarSeverity.Success, T("{0} mods merged into {1}", result.Mods, result.Merged.Name),
-                (plan.Skipped.Count == 0 ? "" : plan.Skipped.Count == 1 ? T("1 mod was left out.") + " " : T("{0} mods were left out.", plan.Skipped.Count) + " ")
-                + T("Something missing in the game? Clear its caches."), T("Clear the game caches"), async () => await ClearCachesAfterMerge());
-        await ModsAgain();
+        return (done, error);
     }
 
     async Task ClearCachesAfterMerge()

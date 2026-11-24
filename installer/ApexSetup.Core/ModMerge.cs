@@ -20,6 +20,9 @@ public sealed record MergeClash(IReadOnlyList<ModFile> Mods, IReadOnlyList<strin
 // of the resources a mod in the merge holds differently from another one in it: how many are its own copy, and how many
 // another mod's copy replaces (the rest of the mod goes in whole)
 public sealed record MergeShare(int Kept, int Replaced);
+// whom a mod clashes with: the other mods of the merge (by Rel, in how many resources), those outside it, and its clashing
+// resources in all
+public sealed record MergeMeets(IReadOnlyDictionary<string, int> With, IReadOnlyList<string> Outside, int Resources);
 
 public sealed class MergePlan
 {
@@ -37,6 +40,7 @@ public sealed class MergePlan
     public IReadOnlyList<string> Order { get; init; } = [];
     public IReadOnlyList<string> Priority => Order;    // (the name the plan dialog reads)
     public Dictionary<string, MergeShare> Shares { get; } = new(StringComparer.OrdinalIgnoreCase); // by Rel, the mods that clash and go in
+    public Dictionary<string, MergeMeets> Meets { get; } = new(StringComparer.OrdinalIgnoreCase); // by Rel, every mod that clashes, in or out (of a merge in parts: on the first part)
     // the script mods set aside: they can be merged on their own, as a second merge
     public IEnumerable<ModFile> Scripts => Skipped.Where(s => s.Reason.Key == ModMerge.ScriptReason).Select(s => s.Mod);
     public List<MergeReason> Refusals { get; } = new();
@@ -156,6 +160,7 @@ public static partial class ModMerge
         var dirs = File.Exists(cfg) ? ModConflicts.ParseResourceCfg(File.ReadAllText(cfg)) : null;
         var skipped = new List<MergeSkip>();
         var clashes = new List<MergeClash>();
+        var meets = new Dictionary<string, MergeMeets>(StringComparer.OrdinalIgnoreCase);
         var clashKeys = new Dictionary<string, HashSet<(uint, uint, ulong)>>(StringComparer.OrdinalIgnoreCase); // (by Rel)
         var groupOf = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -254,13 +259,14 @@ public static partial class ModMerge
             var left = new HashSet<int>();
             // (against the first part's name: shortcut: a loaded package named between two parts of one merge is judged by the first part's place, upgrade if parts ever clash with one)
             if (ModConflicts.LoadKey(dirs, Slash(UnderMods(Path.Combine("Mods", Path.GetRelativePath(modsDir, Path.Combine(folderFull, name + ".package")))))) is { } tk)
-                foreach (var (group, outside, count, keys) in Clashes(docs, modsDir, dirs, tk, ok, of?.Merged.Path))
+                foreach (var (group, outside, count, keys, pairs, outsideOf) in Clashes(docs, modsDir, dirs, tk, ok, of?.Merged.Path))
                 {
                     clashes.Add(new(group.Select(i => ok[i].Src.Mod).ToList(), outside.ToList(), count));
                     foreach (var i in group)
                     {
                         groupOf[ok[i].Src.Mod.Rel] = clashes.Count;
                         clashKeys[ok[i].Src.Mod.Rel] = keys[i];
+                        meets[ok[i].Src.Mod.Rel] = new((pairs.GetValueOrDefault(i) ?? []).GroupBy(p => ok[p.Key].Src.Mod.Rel, p => p.Value, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.Max(), StringComparer.OrdinalIgnoreCase), outsideOf.GetValueOrDefault(i)?.ToList() ?? [], keys[i].Count);
                         if (Rank(i) >= 0 && !Out(i)) continue;
                         left.Add(i);
                         var with = group.Where(x => x != i).Select(x => Path.GetFileNameWithoutExtension(ok[x].Src.Mod.Name)).Concat(outside).Take(3);
@@ -296,6 +302,7 @@ public static partial class ModMerge
         var plans = parts.Select((p, i) => Make(parts.Count == 1 ? name : $"{name} {i + 1}", p)).ToList();
         plans[0].Skipped.AddRange(skipped);
         plans[0].Clashes.AddRange(clashes);
+        foreach (var (rel, m) in meets) plans[0].Meets[rel] = m;
         return plans;
     }
 

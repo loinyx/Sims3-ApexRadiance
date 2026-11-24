@@ -132,6 +132,7 @@ public sealed partial class MainWindow
             FillMods();
         }
         catch (Exception e) when (e is not OutOfMemoryException) { App.Log(e); }
+        await FindMergeUpdatesAsync(rows);
     }
 
     // when a mod arrived: the later of its creation (a copy) and last change (an update)
@@ -193,6 +194,7 @@ public sealed partial class MainWindow
             ModsViewListIcon.Stroke = Res(_modsGrid ? "ApexSoftTextBrush" : "TextOnAccentFillColorPrimaryBrush");
             ModsViewGalleryIcon.Stroke = Res(_modsGrid ? "TextOnAccentFillColorPrimaryBrush" : "ApexSoftTextBrush");
             HuntBanner();
+            ShowMergeUpdates();
 
             // empty: say what to do here
             ModsEmpty.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;

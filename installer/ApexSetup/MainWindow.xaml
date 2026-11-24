@@ -836,6 +836,7 @@
                                 <StackPanel x:Name="ModHuntContent" Tag="dyn" Spacing="10" />
                             </Border>
                             <InfoBar x:Name="ModsInfo" IsClosable="True" />
+                            <Border x:Name="ModMergeBar" Tag="dyn" Visibility="Collapsed" Padding="16,12" CornerRadius="8" Background="{ThemeResource ApexCardBrush}" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1" />
                         </StackPanel>
                         <Grid x:Name="ModListHead" Grid.Row="3" ColumnSpacing="12" Padding="0">
                             <Grid.ColumnDefinitions>

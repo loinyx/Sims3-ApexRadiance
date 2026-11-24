@@ -129,6 +129,14 @@ public static class ModViewPrefs
         Write(d);
     }
 
+    // newer versions of merged mods the player put off ("Later"), by file: one that changes again is offered again
+    public static string LaterKey(ModFile m) { var f = new FileInfo(m.Path); return $"{m.Rel}*{(f.Exists ? f.Length : 0)}*{(f.Exists ? f.LastWriteTimeUtc.Ticks : 0)}"; }
+    public static List<string> MergeLater
+    {
+        get => (Read().GetValueOrDefault("mergelater") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries).ToList();
+        set { var d = Read(); d["mergelater"] = string.Join("|", value.Distinct(StringComparer.OrdinalIgnoreCase).TakeLast(500)); Write(d); }
+    }
+
     // the end of the last game session: mods newer than it are "new since last play"
     public static DateTime? LastPlay
     {
