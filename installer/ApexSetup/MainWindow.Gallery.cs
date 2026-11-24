@@ -259,7 +259,7 @@ public sealed partial class MainWindow
             var drop = new MenuFlyoutItem { Text = T("Delete the album"), Icon = new FontIcon { Glyph = "\uE74D" } };
             drop.Click += async (_, _) =>
             {
-                if (!await Confirm(T("Delete {0}?", one.Name), T("Only the album goes: its pictures stay in your Screenshots folder and the other albums."), T("Delete"))) return;
+                if (!await Confirm(T("Delete {0}?", one.Name), T("Only the album is deleted. Its pictures stay in your Screenshots folder and other albums."), T("Delete"))) return;
                 _gal.Custom.Remove(one);
                 _gal.Albums.Remove(one.Key);
                 Keep();
@@ -291,7 +291,7 @@ public sealed partial class MainWindow
             hint.Click += async (_, _) => { if (await AlbumDialog(null) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
             s.Children.Add(hint);
         }
-        var note = Muted(T("Pictures go to the household saved right after they were taken; change one in its viewer. Albums sit inside their household."));
+        var note = Muted(T("Pictures go to the household you saved right after taking them. To change it, open the picture. Albums are inside their household."));
         note.TextWrapping = TextWrapping.Wrap;
         note.FontSize = 12;
         note.Margin = new Thickness(12, 18, 0, 0);
@@ -1384,7 +1384,7 @@ public sealed partial class MainWindow
         else if (_custTab == 3)
         {
             // the stickers: a click sticks one where the board is being looked at
-            var hint = new TextBlock { Text = T("Click one to stick it on the board. Drag it around; right-click it to make it bigger, smaller or take it off."), FontSize = 12, Opacity = 0.65, TextWrapping = TextWrapping.Wrap };
+            var hint = new TextBlock { Text = T("Click one to stick it on the board. Drag to move it. Right-click it to make it bigger, smaller or take it off."), FontSize = 12, Opacity = 0.65, TextWrapping = TextWrapping.Wrap };
             body.Children.Add(hint);
             foreach (var (group, set) in StickerSets)
             {
@@ -1516,7 +1516,7 @@ public sealed partial class MainWindow
                     list.Children.Add(b);
                 }
                 var more = q.Length == 0 ? T("{0} fonts on this PC: search to use any of them.", all.Count)
-                    : names.Count == 0 ? T("No font with that name.") : names.Count == 40 ? T("The first 40; type more to narrow them.") : "";
+                    : names.Count == 0 ? T("No font with that name.") : names.Count == 40 ? T("Showing the first 40. Type more to narrow the list.") : "";
                 if (more.Length > 0) list.Children.Add(new TextBlock { Text = more, FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 2, 0, 0) });
             }
             search.TextChanged += (_, _) => { _fontQuery = search.Text.Trim(); Show(_fontQuery); };
@@ -2949,7 +2949,7 @@ public sealed partial class MainWindow
         if (_galSaves.Count > 0) body.Children.Add(house);
         body.Children.Add(new TextBlock { Text = T("Icon"), Margin = new Thickness(0, 14, 0, 0) });
         body.Children.Add(grid);
-        var d = new ContentDialog { Title = album is null ? T("New album") : T("Change the album"), Content = body, PrimaryButtonText = album is null ? T("Make it") : T("Save"), CloseButtonText = T("Cancel"),
+        var d = new ContentDialog { Title = album is null ? T("New album") : T("Change the album"), Content = body, PrimaryButtonText = album is null ? T("Create album") : T("Save"), CloseButtonText = T("Cancel"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot, IsPrimaryButtonEnabled = name.Text.Trim().Length > 0 };
         name.TextChanged += (_, _) => d.IsPrimaryButtonEnabled = name.Text.Trim().Length > 0;
         if (await ShowDialog(d) != ContentDialogResult.Primary) return null;
@@ -3524,7 +3524,7 @@ public sealed partial class MainWindow
             {
                 if (!await Confirm(T("Move this picture to the Recycle Bin?"), T("You can put it back from the Recycle Bin."), T("Move it"))) return;
                 try { Gallery.Remove(_gal!, p.Path); removed = true; pics.RemoveAt(at); if (pics.Count == 0) { Close(); return; } at = Math.Min(at, pics.Count - 1); Fill(); }
-                catch (Exception e) { App.Log(e); await Message(T("The picture was not moved"), ErrorText(e)); }
+                catch (Exception e) { App.Log(e); await Message(T("Couldn't move the picture"), ErrorText(e)); }
             };
             Grid.SetColumn(bin, 1);
             foot.Children.Add(bin);

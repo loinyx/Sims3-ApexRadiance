@@ -117,8 +117,8 @@ public sealed class ModRow : INotifyPropertyChanged
 
     public static string LockText(ModFile f) => f.FileType switch
     {
-        "asi" => T("In the game folder: installed and removed in Components or by hand."),
-        _ => T("Installed by the launcher: switch it in Components."),
+        "asi" => T("In the game folder. Install or remove it in Components or by hand."),
+        _ => T("Installed by the launcher. Turn it on or off in Components."),
     };
 
     public static string KindName(ModKind k) => k switch

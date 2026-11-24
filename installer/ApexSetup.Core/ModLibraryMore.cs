@@ -12,7 +12,7 @@ public static partial class ModLibrary
         var to = Path.Combine(intoRel, Path.GetFileName(rel));
         if (to.Equals(rel, StringComparison.OrdinalIgnoreCase)) return rel;
         if (intoRel.Equals(rel, StringComparison.OrdinalIgnoreCase) || intoRel.StartsWith(rel + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            throw new SetupException("A folder can't go inside itself.");
+            throw new SetupException("A folder can't be moved into itself.");
         MoveWithOffCopy(docs, rel, to);
         return to;
     }
@@ -44,7 +44,7 @@ public static partial class ModLibrary
             if (item.ZipEntry is { } entry)
             {
                 using var zip = ZipFile.OpenRead(item.Source);
-                (zip.GetEntry(entry) ?? throw new SetupException("The zip changed while it was being added.")).ExtractToFile(target);
+                (zip.GetEntry(entry) ?? throw new SetupException("The zip changed while it was being added. Try adding it again.")).ExtractToFile(target);
                 // (checked again where it landed: the zip may have changed since it was inspected)
                 if (item.Kind == "package" && ModInstall.PackageProblems(target).FirstOrDefault() is { } late) { File.Delete(target); skipped.Add($"{item.Name}: {late}"); continue; }
             }

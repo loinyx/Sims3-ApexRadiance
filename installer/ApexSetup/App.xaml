@@ -105,6 +105,18 @@
             <Style x:Key="ApexSection" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
                 <Setter Property="FontSize" Value="15" />
             </Style>
+            <!-- a choice drawn as a whole card (the install's graphics cards): no radio circle of its own, the card paints the state -->
+            <Style x:Key="ApexOptionCard" TargetType="RadioButton">
+                <Setter Property="UseSystemFocusVisuals" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <ContentPresenter Content="{TemplateBinding Content}" Background="Transparent"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Stretch" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
             <Style x:Key="ApexPill" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource ApexPillBrush}" />
                 <Setter Property="CornerRadius" Value="11" />

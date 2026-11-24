@@ -26,7 +26,7 @@ public sealed partial class MainWindow
         // what needs a look
         var problems = new List<(string Title, string? Text, string? Action, Action? Run)>();
         if (m.Enabled && !Loaded(m))
-            problems.Add((T("The game does not load this folder"), T("Mods\\Resource.cfg does not list it, so the game skips this mod. Move it into Packages (or a folder inside it) to use it."), null, null));
+            problems.Add((T("The game does not load this folder"), T("Mods\\Resource.cfg doesn't list this folder, so the game skips this mod. Move it into Packages, or a folder inside it."), null, null));
         if (r.DuplicateOf is { } dup) problems.Add((T("Same as {0}", dup), T("The same file is in two places. Keep the newer one and remove the other."), null, null));
         foreach (var f in r.Findings) problems.Add((f, null, T("See in Health"), () => Show(HealthScreen)));
 
@@ -229,7 +229,7 @@ public sealed partial class MainWindow
         var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 14, FontWeight = FontWeights.SemiBold, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0),
             BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), IsReadOnly = !mine };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(creator, T("Creator"));
-        ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name; write the maker's name to set it.") : T("The maker's name."));
+        ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name. Type the maker's name to change it.") : T("The maker's name."));
         creator.LostFocus += (_, _) =>
         {
             try { ModNotes.SetCreator(r.File.Rel, creator.Text); }
@@ -243,7 +243,7 @@ public sealed partial class MainWindow
         if (m.Locked) host.Children.Add(Note("lock", "ApexMutedBrush", ModRow.LockText(m)));
         host.Children.Add(tiles);
         if (!m.Enabled && !m.Locked && HasItems(r))
-            host.Children.Add(Warn(T("Off: a game saved now loses its items"), T("Lots and Sims that use its objects or outfits lose them the next time a game is saved without it.")));
+            host.Children.Add(Warn(T("Off: saving now removes its items"), T("Lots and Sims that use its objects or outfits lose them the next time you save without it.")));
 
         // what it is
         var what = Section(T("What it is"), mine ? T("Change") : null, out var change);
@@ -347,7 +347,7 @@ public sealed partial class MainWindow
     UIElement MergeCards(ModRow r, MergeRecord info)
     {
         var s = new StackPanel { Spacing = 10 };
-        var explain = Note("lightbulb", "ApexAccentBrush", T("The game loads this as one file instead of {0}, so it starts faster. The {0} mods are kept as they were, and any of them can come back out.", info.Originals.Count));
+        var explain = Note("lightbulb", "ApexAccentBrush", T("The game loads this as one file instead of {0}, so it starts faster. The {0} mods are kept as they were, and you can take any of them out.", info.Originals.Count));
         s.Children.Add(new Border { Child = explain, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(10), Background = Res("ApexAccentSoftBrush"), BorderBrush = Res("ApexAccentLineBrush"), BorderThickness = new Thickness(1) });
         var head = Section(T("Made from {0} mods", info.Originals.Count), Mine(r) ? T("Edit merge") : null, out var edit);
         if (edit is not null) edit.Click += (_, _) => Safe(EditMergeAsync(r, info));
@@ -389,7 +389,7 @@ public sealed partial class MainWindow
             }
             s.Children.Add(new Border { Child = g, CornerRadius = new CornerRadius(12), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) });
         }
-        s.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked when it was made on {0}: every resource read back identical.", info.Created.ToLocalTime().ToString("d"))));
+        s.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked on {0}, when it was made: every resource matched.", info.Created.ToLocalTime().ToString("d"))));
         return s;
     }
 
@@ -409,11 +409,11 @@ public sealed partial class MainWindow
             var stay = boxes.Count(b => b.Box.IsChecked == true);
             var added = adds.Count(a => a.Box.IsChecked == true);
             var keep = stay + added;
-            after.Text = keep == 0 ? T("After saving: every mod is back on its own and the merge goes away.")
-                : keep == 1 ? T("After saving: a merge of one is no merge, so every mod is back on its own.")
+            after.Text = keep == 0 ? T("After saving: every mod is separate again and the merge is removed.")
+                : keep == 1 ? T("After saving: a merge needs at least 2 mods, so every mod is separate again.")
                 : added == 0 && stay == info.Originals.Count ? T("After saving: the same {0} mods, in one file.", keep)
-                : added == 0 ? T("After saving: {0} mods in one file, written again and checked. The others are back on their own, still on.", keep)
-                : T("After saving: {0} mods in one file, {1} of them new, written again and checked.", keep, added);
+                : added == 0 ? T("After saving: {0} mods in one file, rebuilt and checked. The others are separate again and stay on.", keep)
+                : T("After saving: {0} mods in one file, {1} of them new, rebuilt and checked.", keep, added);
         }
         foreach (var o in info.Originals.OrderBy(o => o.Rel, StringComparer.OrdinalIgnoreCase))
         {
@@ -473,8 +473,8 @@ public sealed partial class MainWindow
             ModsInfo.Message = "";
             ModMerge.TakeOutResult? res = null;
             try { res = await Task.Run(() => ModMerge.Edit(Docs, r.File, outRels, addFiles)); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merge was not changed as asked"), ErrorText(e)); }
-            if (res is not null) ModsResult(res.Remerged is { } m ? T("{0} now holds {1} mods", m.Merged.Name, m.Mods) : T("Every mod is back on its own"), null);
+            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merged package couldn't be changed"), ErrorText(e)); }
+            if (res is not null) ModsResult(res.Remerged is { } m ? T("{0} now holds {1} mods", m.Merged.Name, m.Mods) : T("Every mod is separate again"), null);
             // (read again after a failure too: the split may be done, with the merged file already in the Recycle Bin)
             _modsLoaded = false;
             _folderSig = "";
@@ -495,11 +495,11 @@ public sealed partial class MainWindow
         body.Children.Add(new TextBlock
         {
             Text = n > 2 ? T("{0} goes back where it was. The other {1} are merged again into {2} and checked.", name, n - 1, r.Name)
-                : T("{0} goes back where it was, and so does the other mod: a merge of one is no merge.", name),
+                : T("{0} goes back where it was, and so does the other mod: a merge needs at least 2 mods.", name),
             TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush"),
         });
         body.Children.Add(new TextBlock { Text = T("Then {0}", name), FontSize = 12, Foreground = Res("ApexMutedBrush") });
-        var on = new RadioButton { GroupName = "after", IsChecked = true, Content = T("Stays on, as its own mod") };
+        var on = new RadioButton { GroupName = "after", IsChecked = true, Content = T("Stays on, as a separate mod") };
         var off = new RadioButton { GroupName = "after", Content = T("Turned off: the game's own items come back") };
         var bin = new RadioButton { GroupName = "after", Content = T("Goes to the Recycle Bin") };
         body.Children.Add(on);
@@ -514,7 +514,7 @@ public sealed partial class MainWindow
         ModsInfo.Message = "";
         ModMerge.TakeOutResult? res = null;
         try { res = await Task.Run(() => ModMerge.TakeOut(Docs, r.File, rels)); }
-        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merge was not changed as asked"), ErrorText(e)); }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merged package couldn't be changed"), ErrorText(e)); }
         _modsLoaded = false;
         _folderSig = "";
         await LoadModsAsync();
@@ -522,7 +522,7 @@ public sealed partial class MainWindow
         var back = _modRows.FirstOrDefault(x => x.File.Rel.Equals(rels[0], StringComparison.OrdinalIgnoreCase));
         if (back is not null && then == 1) SetMods([back], false);
         else if (back is not null && then == 2) await ModsChange(() => ModLibrary.Remove(back.File), T("{0} moved to the Recycle Bin", name));
-        else ModsResult(res.Remerged is { } m ? T("{0} is back on its own; {1} now holds {2} mods", name, m.Merged.Name, m.Mods) : T("{0} is back on its own; the other mod is back too", name), null);
+        else ModsResult(res.Remerged is { } m ? T("{0} is on its own again; {1} now has {2} mods", name, m.Merged.Name, m.Mods) : T("{0} and the other mod are on their own again", name), null);
     }
 
     // ---------- the footer ----------
@@ -550,7 +550,7 @@ public sealed partial class MainWindow
         }
         if (merge is not null && mine)
         {
-            var split = IconButton("scissors", T("Split it back into its {0} mods", merge.Originals.Count));
+            var split = IconButton("scissors", T("Split it into its {0} original mods", merge.Originals.Count));
             split.Click += (_, _) => Safe(SplitAsync(r));
             Icon(split);
             var power = IconButton(m.Enabled ? "power-off" : "power", m.Enabled ? T("Turn off") : T("Turn on"));

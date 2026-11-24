@@ -73,7 +73,7 @@ public sealed partial class MainWindow
             body.Children.Add(new Border { Child = came, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush") });
         }
         else body.Children.Add(new TextBlock { Text = T("Install it for this Windows account, or keep it as a single file you can run from any folder. Your settings and games are kept either way."), TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush"), Margin = new Thickness(0, 0, 0, 8) });
-        body.Children.Add(Option(true, "hard-drive", T("Install (recommended)"), T("Adds Apex Launcher to the Start menu and Installed apps, easy to remove. Updates itself in place.")));
+        body.Children.Add(Option(true, "hard-drive", T("Install (recommended)"), T("Adds Apex Launcher to the Start menu and Installed apps, where you can remove it. Updates itself in place.")));
         body.Children.Add(Option(false, "package", T("Keep portable"), T("Runs from {0}, nothing added to Windows. Updates itself in place.", ShortPath(Path.GetDirectoryName(self) ?? self))));
         Pick(true);
         var d = new ContentDialog
@@ -104,7 +104,7 @@ public sealed partial class MainWindow
         catch (Exception e)
         {
             App.Log(e);
-            await Message(install ? T("Apex Launcher could not install itself") : T("Apex Launcher could not become portable"),
+            await Message(install ? T("Apex Launcher could not install itself") : T("Apex Launcher could not switch to portable"),
                 ErrorText(e) + "\n\n" + T("It keeps running from here."));
         }
     }
@@ -127,10 +127,12 @@ public sealed partial class MainWindow
         DoneChoice.Visibility = ask ? Visibility.Visible : Visibility.Collapsed;
         if (!ask) return;
         var self = Environment.ProcessPath!;
+        // one list, as the install's own lists: keep it on this PC (recommended, in the launcher's own folder) or a single file
+        var list = new StackPanel();
         foreach (var (value, icon, title, text) in new[]
         {
             (true, "hard-drive", T("Keep Apex Launcher on this PC"), T("In the Start menu, on the desktop and in Installed apps. Start the game from it.")),
-            (false, "folder", T("Keep it as a single file"), T("Runs from {0}, nothing added to Windows.", ShortPath(Path.GetDirectoryName(self) ?? self))),
+            (false, "folder", T("Keep it as a single file"), T("Runs from {0}. Nothing is added to Windows.", ShortPath(Path.GetDirectoryName(self) ?? self))),
         })
         {
             var on = value == _doneInstall;
@@ -138,26 +140,36 @@ public sealed partial class MainWindow
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
-                Child = Lucide.Icon(icon, 17, Res(value ? "ApexAccentBrush" : "ApexMutedBrush")) });
+            g.Children.Add(new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(10), Background = Res(on ? "ApexAccentSoftBrush" : "ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
+                Child = Lucide.Icon(icon, 17, Res(on ? "ApexAccentBrush" : "ApexSoftTextBrush")) });
             var s = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            s.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
+            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            head.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            if (value)
+                head.Children.Add(new Border { Style = (Style)Application.Current.Resources["ApexPill"], Background = Res("ApexAccentSoftBrush"), VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock { Text = T("Recommended"), FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexAccentTextBrush") } });
+            s.Children.Add(head);
             s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+            // (where it goes: the launcher's own folder in the player's programs)
+            if (value) s.Children.Add(new TextBlock { Text = Path.GetDirectoryName(Paths.InstalledExe) ?? "", FontFamily = new FontFamily("Consolas"), FontSize = 11, Foreground = Res("ApexMutedBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 2, 0, 0) });
             Grid.SetColumn(s, 1);
             g.Children.Add(s);
-            var check = new Border { Width = 20, Height = 20, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1.5), VerticalAlignment = VerticalAlignment.Center,
-                Background = on ? Res("ApexAccentBrush") : null, BorderBrush = Res(on ? "ApexAccentBrush" : "ApexMutedBrush"),
-                Child = on ? Lucide.Icon("check", 12, Res("TextOnAccentFillColorPrimaryBrush"), 3) : null };
+            var check = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(1.5), VerticalAlignment = VerticalAlignment.Center,
+                BorderBrush = Res(on ? "ApexAccentBrush" : "ApexMutedBrush"),
+                Child = on ? new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Res("ApexAccentBrush") } : null };
             Grid.SetColumn(check, 2);
             g.Children.Add(check);
-            var card = new Border { Child = g, Padding = new Thickness(16, 14, 16, 14), CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(on ? 1.5 : 1),
-                BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush"), Background = on ? Res("ApexAccentSoftBrush") : null };
-            var b = new Button { Content = card, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(14), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            var row = new Border { Child = g, Padding = new Thickness(16, 13, 16, 13), Background = on ? Res("ApexAccentSoftBrush") : null,
+                BorderThickness = new Thickness(0, list.Children.Count > 0 ? 1 : 0, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
+            var b = new Button { Content = row, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             b.Click += (_, _) => { _doneInstall = value; FillDoneChoice(); UpdateFooter(); };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title);
-            DoneChoice.Children.Add(b);
+            list.Children.Add(b);
         }
+        DoneChoice.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"),
+            Background = Res("ApexHairlineBrush"), Margin = new Thickness(0, 10, 0, 0) });
     }
 
     // Settings: this copy, installed or not, and the way to switch

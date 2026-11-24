@@ -97,7 +97,7 @@ public static partial class ModMerge
         var refusals = new List<MergeReason>();
         try { name = ModLibrary.CleanName(name); }
         catch (SetupException e) { refusals.Add(new(e.Key, e.Args)); }
-        if (name.Equals(FolderName, StringComparison.OrdinalIgnoreCase)) refusals.Add(R("That name is the launcher's own folder."));
+        if (name.Equals(FolderName, StringComparison.OrdinalIgnoreCase)) refusals.Add(R("That name is taken by the launcher's own folder."));
         var folderFull = Path.GetFullPath(Path.Combine(modsDir, folderRel));
         bool Inside(string full, string dir) => full.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || full.Equals(dir, StringComparison.OrdinalIgnoreCase);
         if (!Inside(folderFull, modsDir) || Inside(folderFull, Path.GetFullPath(Mods.Disabled(docs))) || Inside(folderFull, Path.GetFullPath(Folder(docs))))
@@ -118,7 +118,7 @@ public static partial class ModMerge
         // (a store left holding only merge.json is what an earlier split could not delete: cleaned first, it holds no original)
         if (!File.Exists(plan.TargetPath)) DeleteStore(plan.StoreDir);
         if (File.Exists(plan.TargetPath) || File.Exists(Path.Combine(Mods.Disabled(docs), UnderMods(targetRel))) || Directory.Exists(plan.StoreDir))
-            plan.Refusals.Add(R("A file or merge named {0} is already there.", name));
+            plan.Refusals.Add(R("A file or merge named {0} already exists here.", name));
 
         var cfg = Path.Combine(modsDir, "Resource.cfg");
         if (!File.Exists(cfg)) { plan.Refusals.Add(R("There is no Resource.cfg in Mods, so the game loads no packages from there.")); return plan; }
@@ -144,7 +144,7 @@ public static partial class ModMerge
             else
             {
                 (entries, why) = Probe(m.Path);
-                if (entries is not null && !includeScripts && entries.Any(e => e.Type == ModConflicts.TypeS3sa)) why = R("A script mod: left out unless scripts are included.");
+                if (entries is not null && !includeScripts && entries.Any(e => e.Type == ModConflicts.TypeS3sa)) why = R("A script mod: left out unless you include scripts.");
             }
             if (why is not null) { plan.Skipped.Add(new(m, why)); continue; }
             var fi = new FileInfo(m.Path);
@@ -220,24 +220,24 @@ public static partial class ModMerge
             using (var fs = File.OpenRead(path))
             {
                 len = fs.Length;
-                if (len < 96) return (null, R("Not a readable package: {0}", "too short"));
+                if (len < 96) return (null, R("Can't read this package: {0}", "too short"));
                 fs.ReadExactly(head);
             }
             var magic = Encoding.Latin1.GetString(head, 0, 4);
             if (magic == "DBPP") return (null, R("A protected package: its contents can't be copied."));
-            if (magic != "DBPF" || U32(head, 4) != 2) return (null, R("Not a readable package: {0}", "not DBPF 2"));
-            if (len > MaxBytes) return (null, R("Not a readable package: {0}", "over 2 GB"));
+            if (magic != "DBPF" || U32(head, 4) != 2) return (null, R("Can't read this package: {0}", "not DBPF 2"));
+            if (len > MaxBytes) return (null, R("Can't read this package: {0}", "over 2 GB"));
             uint count = U32(head, 36), size = U32(head, 44), at = U32(head, 64);
-            if (count > MaxEntries) return (null, R("Not a readable package: {0}", "index count too large"));
-            if (at < 96 || (long)at + size > len || (count > 0 && size < 4 + 20L * count)) return (null, R("Not a readable package: {0}", "index outside the file"));
+            if (count > MaxEntries) return (null, R("Can't read this package: {0}", "index count too large"));
+            if (at < 96 || (long)at + size > len || (count > 0 && size < 4 + 20L * count)) return (null, R("Can't read this package: {0}", "index outside the file"));
             var entries = ModConflicts.Package.Open(path).Entries;
-            if (entries.Count != count) return (null, R("Not a readable package: {0}", "index count"));
-            if (entries.Any(e => e.FileSize < 0 || (long)e.Offset + e.FileSize > len)) return (null, R("Not a readable package: {0}", "a resource points past the end"));
+            if (entries.Count != count) return (null, R("Can't read this package: {0}", "index count"));
+            if (entries.Any(e => e.FileSize < 0 || (long)e.Offset + e.FileSize > len)) return (null, R("Can't read this package: {0}", "a resource points past the end"));
             return (entries, null);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or IndexOutOfRangeException or OverflowException)
         {
-            return (null, R("Not a readable package: {0}", e.Message));
+            return (null, R("Can't read this package: {0}", e.Message));
         }
     }
     static uint U32(byte[] b, int p) => BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(p));
@@ -245,7 +245,7 @@ public static partial class ModMerge
     // ---------- run ----------
     public static MergeResult Run(MergePlan plan, IProgress<MergeProgress>? progress, CancellationToken ct)
     {
-        if (!plan.CanRun) throw new SetupException("This merge can't run: {0}", plan.Refusals[0].Text);
+        if (!plan.CanRun) throw new SetupException("Can't merge: {0}", plan.Refusals[0].Text);
         var sw = Stopwatch.StartNew();
         using var log = OpenLog("merge", out var logPath);
         plan.LogPath = logPath;
@@ -504,8 +504,9 @@ public static partial class ModMerge
             if (Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any(f => !Path.GetFileName(f).Equals("merge.json", StringComparison.OrdinalIgnoreCase)
                 || !Path.GetDirectoryName(f)!.Equals(dir, StringComparison.OrdinalIgnoreCase))) return;
             Fs.Retry(() => Directory.Delete(dir, true));
+            Fs.Gone(dir);
             var parent = Path.GetDirectoryName(dir)!;
-            if (!Directory.EnumerateFileSystemEntries(parent).Any()) Fs.Retry(() => Directory.Delete(parent));
+            if (!Directory.EnumerateFileSystemEntries(parent).Any()) { Fs.Retry(() => Directory.Delete(parent)); Fs.Gone(parent); }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }
@@ -594,7 +595,7 @@ public static partial class ModMerge
             if (File.Exists(to) && !same) taken.Add(o.Rel);
             todo.Add((o, from, to, same));
         }
-        if (taken.Count > 0) throw new SetupException("A different file now sits where an original goes: {0}", string.Join(", ", taken));
+        if (taken.Count > 0) throw new SetupException("A different file is now where an original should be: {0}", string.Join(", ", taken));
 
         var moved = new List<(string From, string To)>();
         try

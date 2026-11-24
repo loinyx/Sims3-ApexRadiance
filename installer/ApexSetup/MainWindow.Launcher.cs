@@ -255,9 +255,9 @@ public sealed partial class MainWindow
         if (Session.ShouldOffer(info, _state?.RestartHost ?? false))
         {
             var low = info.End == SessionEnd.LowMemory;
-            var again = await Confirm(low ? T("You quit after saving low on memory") : T("The game closed unexpectedly"),
-                low ? T("A fresh start clears the memory. Pick up right where you saved.") : T("Your last save is safe. Start again where you left off."),
-                T("Start again into this save"));
+            var again = await Confirm(low ? T("You saved and quit with memory running low") : T("The game closed unexpectedly"),
+                low ? T("Starting again frees the memory. The game opens where you saved.") : T("Your last save is safe. Start again where you left off."),
+                T("Open this save again"));
             if (again && Saves.Newest(Docs) is { } last) await StartGameAsync(g, last.Name);
         }
     }
@@ -267,7 +267,7 @@ public sealed partial class MainWindow
         _tray ??= new Tray(Path.Combine(AppContext.BaseDirectory, "Assets", "apex.ico"), () => DispatcherQueue.TryEnqueue(() => { AppWindow.Show(); Activate(); }),
             () => [(T("Open Apex Launcher"), () => DispatcherQueue.TryEnqueue(() => { AppWindow.Show(); Activate(); })),
                    // (never in the middle of an install: the same refusal as closing the window)
-                   (T("Quit"), () => DispatcherQueue.TryEnqueue(() => { if (!QuitForNewerCopy()) _ = Message(T("The launcher is applying changes"), T("Wait until it finishes before closing.")); }))]);
+                   (T("Quit"), () => DispatcherQueue.TryEnqueue(() => { if (!QuitForNewerCopy()) _ = Message(T("The launcher is applying changes"), T("Don't close the launcher until it finishes.")); }))]);
         _tray.Show(tip);
     }
 
@@ -286,8 +286,8 @@ public sealed partial class MainWindow
         if (Environment.ProcessPath is not { } exe) return true;
         var carry = screen == "components";
         if (!await Confirm(T("Administrator permission needed"), carry
-                ? T("Windows will ask for permission, then your changes are applied in their own window.")
-                : T("Windows will ask for permission, then this screen opens in its own window to make the change."), T("Continue"))) return false;
+                ? T("Windows asks for permission, then your changes apply in a separate window.")
+                : T("Windows asks for permission, then this screen opens in a separate window."), T("Continue"))) return false;
         string? choices = null;
         try { if (carry) choices = Elevation.SaveChoices(ChoicesNow()); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
@@ -412,7 +412,7 @@ public sealed partial class MainWindow
         var docs = Docs;
         var cards = Saves.List(docs).Select(s => new SaveCard(s)).ToList();
         SaveGrid.ItemsSource = cards;
-        SavesEmpty.Text = T("No saves yet: they show here once you save a game.");
+        SavesEmpty.Text = T("No saves yet. They show here after you save a game.");
         SavesEmpty.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SavesBackupAll.IsEnabled = cards.Count > 0;
         SaveCard.Play = c => _ = PlayAsync(c.Save.Name);
@@ -525,7 +525,7 @@ public sealed partial class MainWindow
                 var info = Lucide.Icon("info", 16, Res("ApexMutedBrush"));
                 info.VerticalAlignment = VerticalAlignment.Center;
                 strip.Children.Add(info);
-                var what = new TextBlock { Text = notes.Count == 1 ? T("1 note that needs nothing from you") : T("{0} notes that need nothing from you", notes.Count), FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
+                var what = new TextBlock { Text = notes.Count == 1 ? T("1 note, nothing to do") : T("{0} notes, nothing to do", notes.Count), FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
                 Grid.SetColumn(what, 1);
                 strip.Children.Add(what);
                 var lines = new StackPanel { Spacing = 6, Padding = new Thickness(46, 0, 18, 4), Visibility = _showNotes ? Visibility.Visible : Visibility.Collapsed };
@@ -612,8 +612,8 @@ public sealed partial class MainWindow
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
             Child = new FontIcon { Glyph = "\uE90F", FontSize = 18, Foreground = Res("ApexAccentBrush") } });
-        var text = Col(new TextBlock { Text = T("Something not right in the game?"), FontSize = 14, FontWeight = FontWeights.SemiBold },
-            Muted(T("Repair copies every file the launcher installed again and fixes the game's settings. Your saves, mods and Apex Radiance settings stay.")));
+        var text = Col(new TextBlock { Text = T("Something wrong in the game?"), FontSize = 14, FontWeight = FontWeights.SemiBold },
+            Muted(T("Repair copies again every file the launcher installed and fixes the game's settings. Your saves, mods and Apex Radiance settings aren't touched.")));
         Grid.SetColumn((FrameworkElement)text, 1);
         g.Children.Add(text);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
@@ -727,13 +727,13 @@ public sealed partial class MainWindow
 
     void HealthFixes(StackPanel body)
     {
-        body.Children.Add(Muted(T("Safe fixes run on their own before the game starts. A copy of each file is kept, so every fix can be undone.")));
+        body.Children.Add(Muted(T("Safe fixes run on their own before the game starts. Each file is copied first, so you can undo any fix.")));
         var fixes = _game is { } g ? RestorePoints.List(g.Bin).Where(p => p.Label.StartsWith("Fix", StringComparison.Ordinal)).ToList() : [];
         var waiting = _health.Where(i => i.Finding.CanFix).ToList();
         var list = new StackPanel();
         foreach (var it in waiting) list.Children.Add(FindingRow(it, list.Children.Count > 0));
         foreach (var p in fixes) list.Children.Add(PointRow(p, list.Children.Count > 0, T("Undo")));
-        if (list.Children.Count == 0) list.Children.Add(new TextBlock { Text = T("Nothing was fixed yet."), Margin = new Thickness(18, 14, 18, 14), Foreground = Res("ApexMutedBrush") });
+        if (list.Children.Count == 0) list.Children.Add(new TextBlock { Text = T("No fixes yet."), Margin = new Thickness(18, 14, 18, 14), Foreground = Res("ApexMutedBrush") });
         body.Children.Add(Card(list, pad: false));
     }
 
@@ -797,21 +797,21 @@ public sealed partial class MainWindow
     {
         var host = ScreenNews;
         host.Children.Clear();
-        host.Children.Add(Col(Heading(T("What's new")), Muted(T("Release notes, read from each project's GitHub releases."))));
+        host.Children.Add(Col(Heading(T("What's new")), Muted(T("Release notes from each project's GitHub page."))));
         var tabs = new SelectorBar();
         foreach (var n in new[] { "Apex Radiance", "Sims 3 Modernization" }) tabs.Items.Add(Tab(n, tabs.Items.Count == 0));
         tabs.SelectedItem = tabs.Items[_newsTab];
         tabs.SelectionChanged += (s, _) => { var i = s.Items.IndexOf(s.SelectedItem); if (i < 0 || i == _newsTab) return; _newsTab = i; DispatcherQueue.TryEnqueue(BuildNews); };
         host.Children.Add(tabs);
         var r = _newsTab == 0 ? _latest.GetValueOrDefault(Releases.Apex) : ModRelease() ?? _latest.GetValueOrDefault(Releases.Modernization);
-        if (r is null) { host.Children.Add(Card(Muted(_offline ? T("No internet: the notes show once the launcher can reach GitHub.") : T("Checking the latest versions…")))); return; }
+        if (r is null) { host.Children.Add(Card(Muted(_offline ? T("No internet connection. The notes show once the launcher can reach GitHub.") : T("Checking the latest versions…")))); return; }
         var installed = _newsTab == 0 ? _state?.ApexVersion : Known(Components.Modernization);
         var notes = new StackPanel { Spacing = 8 };
         var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         head.Children.Add(new TextBlock { Text = r.Version, FontSize = 20, FontWeight = FontWeights.SemiBold });
         head.Children.Add(Pill(installed == r.Version ? T("Installed") : installed is null ? T("Latest") : T("Newer than yours"), installed == r.Version ? "ApexSuccessBrush" : "ApexAccentBrush"));
         notes.Children.Add(head);
-        foreach (var raw in (r.Body ?? T("The notes could not be read right now. They show on GitHub.")).Replace("\r", "").Split('\n'))
+        foreach (var raw in (r.Body ?? T("The notes didn't load. You can read them on GitHub.")).Replace("\r", "").Split('\n'))
         {
             var line = raw.TrimEnd();
             if (line.Length == 0) continue;
@@ -839,11 +839,11 @@ public sealed partial class MainWindow
             on => LauncherInstall.SetRunAtStartup(Paths.InstalledExe, on), enabled: installed));
         host.Children.Add(Toggle(T("Hide while playing"), T("The launcher goes to the notification area while the game runs and comes back when it closes."), _settings.HideWhilePlaying,
             on => { _settings.HideWhilePlaying = on; _settings.Save(); }));
-        host.Children.Add(Toggle(T("Fix safe things without asking"), T("Like the Resource.cfg and Edge Smoothing fixes. A copy of each file is always kept."), _settings.FixSafeAutomatically,
+        host.Children.Add(Toggle(T("Apply safe fixes without asking"), T("Like the Resource.cfg and Edge Smoothing fixes. Each file is copied first, so you can undo them."), _settings.FixSafeAutomatically,
             on => { _settings.FixSafeAutomatically = on; _settings.Save(); }));
         host.Children.Add(Section(T("Updates")));
         host.Children.Add(Row(T("Apex Launcher {0}", App.Version), T("Updates itself from each Apex Radiance release."), null));
-        host.Children.Add(Toggle(T("Install updates when I press Play"), T("The ready updates go in first, then the game starts. Off: Play starts the game as it is."), _settings.InstallUpdatesOnPlay,
+        host.Children.Add(Toggle(T("Install updates when I press Play"), T("Ready updates install first, then the game starts. When off, Play starts the game as it is."), _settings.InstallUpdatesOnPlay,
             on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
         host.Children.Add(InstallModeRow());
         host.Children.Add(Section(T("Home")));
@@ -918,7 +918,7 @@ public sealed partial class MainWindow
                 var p = Elevation.StartMaintenance(exe, "*", "uninstall");
                 if (p is null) { _busy = false; await Message(T("Nothing was changed"), T("Windows did not allow the change.")); return; }
                 await p.WaitForExitAsync();
-                if (p.ExitCode != 0) left.Add(T("Some files could not be put back: see the log."));
+                if (p.ExitCode != 0) left.Add(T("Some files weren't restored. See the log for details."));
             }
             left.AddRange(await Task.Run(() =>
             {
@@ -955,7 +955,7 @@ public sealed partial class MainWindow
         var gone = false;
         void RemoveLauncher() { if (gone) return; gone = true; Uninstall.Launcher(keepData: keepSettings); }
         AppWindow.Closing += (_, _) => RemoveLauncher();
-        await Message(T("Apex Launcher was uninstalled"), T("Everything it installed is gone, and the files it replaced are back."));
+        await Message(T("Apex Launcher was uninstalled"), T("Everything it installed was removed. The files it replaced are back."));
         RemoveLauncher();
         Application.Current.Exit();
     }
@@ -1001,7 +1001,7 @@ public sealed partial class MainWindow
         body.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush") });
         var r = await ShowDialog(new ContentDialog
         {
-            Title = ups.Count == 1 ? T("1 update goes in first") : T("{0} updates go in first", ups.Count), Content = body,
+            Title = ups.Count == 1 ? T("1 update installs first") : T("{0} updates install first", ups.Count), Content = body,
             PrimaryButtonText = T("Update and play"), SecondaryButtonText = T("Play without updating"), CloseButtonText = T("Cancel"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         });

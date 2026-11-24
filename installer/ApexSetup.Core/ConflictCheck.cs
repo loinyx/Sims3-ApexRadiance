@@ -93,7 +93,7 @@ public sealed class ConflictCheck : IModCheck
         foreach (var o in r.Overlaps)
             f.Add(new(new Finding(Severity.Info, "{0} may overlap in {1}: {2}", [string.Join(", ", o.Parties), o.Label, o.Risk]), []));
         if (r.NeedsSevenZip)
-            f.Add(new(new Finding(Severity.Info, "Some mod archives could not be read; with 7-Zip installed the conflict check reads them too.", []), []));
+            f.Add(new(new Finding(Severity.Info, "Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too.", []), []));
         return f;
     }
 

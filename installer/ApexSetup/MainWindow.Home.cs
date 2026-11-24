@@ -26,7 +26,7 @@ public sealed partial class MainWindow
         {
             host.Spacing = 12;
             host.Children.Add(Heading(T("Home")));
-            host.Children.Add(Card(Body(T("The launcher found no The Sims 3. Choose the game folder in Settings.")), Button(T("Choose the game"), () => Show(GameStep))));
+            host.Children.Add(Card(Body(T("The launcher can't find The Sims 3. Choose the game folder in Settings.")), Button(T("Choose the game"), () => Show(GameStep))));
             return;
         }
         // (the picture runs to the window's edges; every other screen gets the page margins back in Show)
@@ -42,7 +42,7 @@ public sealed partial class MainWindow
         // the last session shows only when it went wrong: straight back into the newest save
         if (!_running && SessionHistory.List().FirstOrDefault() is { End: SessionEnd.Crash or SessionEnd.LowMemory } last && Saves.Newest(Docs) is { } newest)
             below.Children.Add(Banner(InfoBarSeverity.Warning, last.End == SessionEnd.Crash ? T("The game closed on its own") : T("Ran out of memory"),
-                Played(last.Played) + " · " + T("{0} at its peak", ModRow.SizeText(last.PeakBytes)), T("Start again into this save"), async () => await PlayAsync(newest.Name)));
+                Played(last.Played) + " · " + T("{0} at its peak", ModRow.SizeText(last.PeakBytes)), T("Open this save again"), async () => await PlayAsync(newest.Name)));
         var others = saves.Where(s => s != save).Take(4).ToList();
         if (others.Count > 0) below.Children.Add(HomeOthers(others, saves.Count - 1));
         below.Children.Add(HomePictures());
@@ -144,7 +144,7 @@ public sealed partial class MainWindow
             Text = save?.Name ?? "The Sims 3", FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 48, FontWeight = FontWeights.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 4, 0, 0), Foreground = text,
         });
-        words.Children.Add(new TextBlock { Text = save is null ? T("No saves yet: they show here once you save a game.") : SavedWhen(save.LastPlayed), FontSize = 14, Foreground = soft });
+        words.Children.Add(new TextBlock { Text = save is null ? T("No saves yet. They show here after you save a game.") : SavedWhen(save.LastPlayed), FontSize = 14, Foreground = soft });
         var acts = HomeActions(saves, save);
         acts.Margin = new Thickness(0, 16, 0, 0);
         words.Children.Add(acts);
@@ -226,7 +226,7 @@ public sealed partial class MainWindow
         var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         var title = blocked ? T("Play anyway") : save is null ? T("Play") : T("Continue");
         label.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold });
-        var sub = blocked ? T("The game starts without Apex Radiance") : update ? (ups.Count == 1 ? T("1 update goes in first") : T("{0} updates go in first", ups.Count)) : null;
+        var sub = blocked ? T("The game starts without Apex Radiance") : update ? (ups.Count == 1 ? T("1 update installs first") : T("{0} updates install first", ups.Count)) : null;
         if (sub is not null) label.Children.Add(new TextBlock { Text = sub, FontSize = 12, Opacity = 0.75 });
         pc.Children.Add(label);
         play.Content = pc;

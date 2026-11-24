@@ -328,7 +328,7 @@ public static class Engine
     public sealed record Check(string Key, string[] Args, bool Blocks);
     public static Func<string, long> FreeBytes = dir => new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace;
     public const string CloseGameText = "Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again.";
-    public const string CannotWriteText = "The launcher cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexLauncher.exe there; or move the game out of a protected folder.";
+    public const string CannotWriteText = "The launcher can't save files in {0}. If Controlled folder access is on in Windows Security, allow ApexLauncher.exe there. Or move the game out of the protected folder.";
     public static List<Check> Preflight(Game g, State s, string? docs, long downloadBytes, bool replacesD3d9, bool downloads = true)
     {
         var l = new List<Check>();
@@ -355,12 +355,12 @@ public static class Engine
                 }
                 catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { } // (a drive that cannot say: not a no)
             if (docs is null || !Directory.Exists(docs))
-                l.Add(new("The launcher did not find The Sims 3's folder in Documents. Start the game once, then open the launcher again for the settings it writes there.", [], false));
+                l.Add(new("The launcher didn't find The Sims 3 folder in Documents. Start the game once to create it, then open the launcher again.", [], false));
         }
         if (replacesD3d9 && s.Layer == Layer.Other)
-            l.Add(new("{0} (d3d9.dll) is set aside in Game\\Bin\\Apex Radiance backup; removing the renderer in Repair or remove puts it back.", [ForeignD3d9(g.Bin)], false));
+            l.Add(new("{0} (d3d9.dll) is moved to Game\\Bin\\Apex Radiance backup. Removing the renderer in Repair or remove puts it back.", [ForeignD3d9(g.Bin)], false));
         if (Scan.Loaders(g.Bin) is { Count: > 1 } loaders)
-            l.Add(new("Two ASI loaders ({0}): the launcher keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup.", [string.Join(", ", loaders), loaders[0]], false));
+            l.Add(new("Found two ASI loaders ({0}). The launcher keeps {1} and moves the others to Game\\Bin\\Apex Radiance backup.", [string.Join(", ", loaders), loaders[0]], false));
         return l;
     }
 
@@ -409,7 +409,7 @@ public static class Engine
     // a file a scan removed, blocked (ERROR_VIRUS_INFECTED, ERROR_VIRUS_DELETED) or emptied as Setup downloaded or placed it: the
     // player's words, with the file names and the folder it was in (%TEMP%\ApexRadianceSetup for a download, Game\Bin for a copy)
     public static SetupException Antivirus(string? file, string folder) =>
-        new("Your antivirus removed or blocked {0}; add an exception for {1} and open the launcher again.",
+        new("Your antivirus removed or blocked {0}. Add an exception for {1} and open the launcher again.",
             Path.GetFileName(file ?? "") is { Length: > 0 } n && !n.Contains(", ") ? n : file ?? "", folder);
     // a download cut off (the connection dropped mid-file): the network, not a file in use
     public static bool IsNetwork(Exception e) =>
@@ -457,7 +457,7 @@ public static class Engine
     // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
     public static void CheckWritable()
     {
-        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Dry run: Setup changes nothing.");
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Test run: the launcher changes nothing.");
         if (Games.IsRunning()) throw new SetupException(CloseGameText);
     }
 
@@ -494,7 +494,7 @@ public static class Engine
             try { fetched.Add(await src.FetchAsync(list[i], g, docs, ct)); }
             // (downloaded, then gone or blocked: a scan took it; the Performance Patch archive is the player's own file)
             catch (FileNotFoundException e) when (list[i] == Components.S3pp)
-            { throw new SetupException("The launcher could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again.", Path.GetFileName(e.FileName ?? "")); }
+            { throw new SetupException("The launcher can't find {0}. Download the Sims 3 Performance Patch again, or choose the file you downloaded.", Path.GetFileName(e.FileName ?? "")); }
             catch (FileNotFoundException e) { throw Antivirus(e.FileName, GitHubSource.TempRoot); }
             catch (IOException e) when (IsVirusBlock(e)) { throw Antivirus(Components.Name(list[i]), GitHubSource.TempRoot); }
         }
@@ -900,7 +900,7 @@ public static class Engine
     // settings; anything else, a change the driver did not keep included, says it did not accept it and how to do it by hand,
     // turning on or off as the change was.
     public static string FriendlyFrameGenError(string error, bool amd, bool on = true) =>
-        error == "Dry run: Setup changes nothing." ? error
+        error == "Test run: the launcher changes nothing." ? error
         : error.EndsWith(" -137") || error.Contains("denied", StringComparison.OrdinalIgnoreCase) || error.Contains("privilege", StringComparison.OrdinalIgnoreCase)
             ? (amd ? "Windows did not let the launcher change the driver settings. Close AMD Software, then try again."
                    : "Windows did not let the launcher change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again.")

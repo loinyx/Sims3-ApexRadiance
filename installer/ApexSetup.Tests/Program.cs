@@ -603,7 +603,7 @@ try
         Check(Named(Aa) is null, "edge smoothing: no suggestion with every affected Apex effect off");
         File.WriteAllText(apexToml, "[patches.EdgeSmoothing]\nenabled = yes\n");
         var bad = Compat.Check(g6, Scan.Run(g6, docs6), docs6);
-        Check(bad.Any(x => x.Text.Contains("cannot read") && x.Args[0] == "ApexRadiance.toml" && !x.CanFix && !x.CanApply), "edge smoothing: an unreadable ApexRadiance.toml value is reported");
+        Check(bad.Any(x => x.Text.Contains("can't read") && x.Args[0] == "ApexRadiance.toml" && !x.CanFix && !x.CanApply), "edge smoothing: an unreadable ApexRadiance.toml value is reported");
         File.Delete(apexToml);
         File.WriteAllText(opt6, "[Options]\r\nedgesmoothing = high\r\n");
         bad = Compat.Check(g6, Scan.Run(g6, docs6), docs6);
@@ -726,7 +726,7 @@ try
             Check(gone, "antivirus: a downloaded file gone before its copy is named in the player's words");
             var s3pp = false;
             try { await Engine.InstallAsync(g, new[] { Components.S3pp }, new VanishingSource(root), null, docs); }
-            catch (SetupException e) { s3pp = e.Key.StartsWith("The launcher could not find"); }
+            catch (SetupException e) { s3pp = e.Key.StartsWith("The launcher can't find"); }
             Check(s3pp, "antivirus: a Performance Patch archive the player moved is not called an antivirus");
         }
 
@@ -975,7 +975,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Check(SmoothMotion.Read() is { Card: "NVIDIA GeForce RTX 4080", Driver: 57186, On: true, Owner: null }, "smooth motion: the fake stands in for the driver");
     Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", null);
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
-    Check(SmoothMotion.Set(true) == "Dry run: Setup changes nothing.", "smooth motion: the dry run writes nothing");
+    Check(SmoothMotion.Set(true) == "Test run: the launcher changes nothing.", "smooth motion: the dry run writes nothing");
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
     Check(Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 0\nvsync = 1\n") == ("[screen]\nfps_limit = 60\nvsync = 1\n", 0)
           && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 144\n") == ("[screen]\nfps_limit = 144\n", 144)
@@ -1001,19 +1001,19 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
           && Afmf.Blocked(new(true, false, true, null)) is null && Afmf.Blocked(new(true, false, false, "ADLXInitialize 3")) is { Arg: "ADLXInitialize 3" },
           "afmf: on only where ADLX says it is supported; off always; an ADLX error reads as a reason");
     Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", "1|1");
-    Check(Afmf.Read() == new Afmf.Status(true, true, true, null) && Afmf.Set(false) == "Dry run: Setup changes nothing.", "afmf: the fake stands in for ADLX and writes nothing");
+    Check(Afmf.Read() == new Afmf.Status(true, true, true, null) && Afmf.Set(false) == "Test run: the launcher changes nothing.", "afmf: the fake stands in for ADLX and writes nothing");
     Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", "none");
     Check(Afmf.Read() is { Present: false }, "afmf: no AMD card, no row");
     var marker = Afmf.Marker;
     Afmf.Marker = Path.Combine(Path.GetTempPath(), "ApexSetupTest-afmf-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
     Check(Afmf.OffIfSetupTurnedOn() is null, "afmf: a setting the player turned on is never turned off by a removal");
     File.WriteAllText(Afmf.Marker, "on");
-    Check(Afmf.OffIfSetupTurnedOn() == "Dry run: Setup changes nothing." && File.Exists(Afmf.Marker), "afmf: one Setup turned on is turned off (the fake writes nothing)");
+    Check(Afmf.OffIfSetupTurnedOn() == "Test run: the launcher changes nothing." && File.Exists(Afmf.Marker), "afmf: one Setup turned on is turned off (the fake writes nothing)");
     File.Delete(Afmf.Marker);
     Afmf.Marker = marker;
     Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", null);
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
-    Check(Afmf.Set(true) == "Dry run: Setup changes nothing.", "afmf: the dry run writes nothing");
+    Check(Afmf.Set(true) == "Test run: the launcher changes nothing.", "afmf: the dry run writes nothing");
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
     Check(SmoothMotion.Failed(new DllNotFoundException()) is { Card: null, Error: null } && SmoothMotion.Failed(new EntryPointNotFoundException()).Error is null
           && SmoothMotion.Failed(new InvalidOperationException("DRS_LoadSettings -1")).Error == "DRS_LoadSettings -1" && SmoothMotion.NoCard(-6) && !SmoothMotion.NoCard(-1),
@@ -1057,7 +1057,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
           && Engine.FriendlyFrameGenError("DRS_SetSetting -160", false, on: false).Contains("turn it off by hand")
           && Engine.FriendlyFrameGenError("DRS_SetSetting 0xB0D384C0 = 1 on \"NvRemixBridge\" (NVIDIA's) -160", false).StartsWith("The NVIDIA driver")
           && Engine.FriendlyFrameGenError(SmoothMotion.DidNotTake, true).Contains("AMD Software")
-          && Engine.FriendlyFrameGenError("Dry run: Setup changes nothing.", false) == "Dry run: Setup changes nothing.", "errors: plain words, a refusal names the programs that lock the driver settings, the off direction says off");
+          && Engine.FriendlyFrameGenError("Test run: the launcher changes nothing.", false) == "Test run: the launcher changes nothing.", "errors: plain words, a refusal names the programs that lock the driver settings, the off direction says off");
     Check(SmoothMotion.Blocked(new("NVIDIA GeForce RTX 4070", 62124, false, null, null), true, false) is null,
           "smooth motion: an RTX 40 card with the bridge and no profile of the player's may turn it on (the profile itself is checked on a real driver only)");
     var amd = Afmf.Read(); // read only
@@ -1163,7 +1163,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Games.IsRunning = () => false;
         Engine.FreeBytes = _ => long.MaxValue;
         Check(pre.Count(p => p.Blocks) >= 2 && pre.Any(p => p.Key.StartsWith("Close The Sims 3")) && pre.Any(p => p.Key.Contains("MB free"))
-              && pre.Any(p => p.Key.Contains("(d3d9.dll) is set aside") && !p.Blocks) && pre.Any(p => p.Key.Contains("Documents") && !p.Blocks),
+              && pre.Any(p => p.Key.Contains("(d3d9.dll) is moved to") && !p.Blocks) && pre.Any(p => p.Key.Contains("Documents") && !p.Blocks),
               "before a change: the game running and too little space stop it; a foreign d3d9.dll and missing Documents are told");
         // a change that downloads nothing (a removal, the fixes) is not stopped by free space, nor told about Documents
         Engine.FreeBytes = _ => 10L << 20;
@@ -1431,7 +1431,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
             && Health.StateOf([new Health.Item(new Finding(Severity.Info, "x", []), HealthArea.Mods, [])]) == HealthState.Ready,
             "Health: ready, needs you, blocked");
         Check(Health.AreaOf(new Finding(Severity.Error, "{0} is missing: the RTX Remix bridge does not start.", [])) == HealthArea.Graphics
-            && Health.AreaOf(new Finding(Severity.Error, "Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}.", [])) == HealthArea.Loaders
+            && Health.AreaOf(new Finding(Severity.Error, "Two ASI loaders ({0}) load every mod twice. The launcher keeps {1} and moves the others to the backup folder.", [])) == HealthArea.Loaders
             && Health.AreaOf(new Finding(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it.", [])) == HealthArea.GameSettings
             && Health.AreaOf(new Finding(Severity.Error, "Apex Radiance is not installed in this game.", [])) == HealthArea.ApexRadiance,
             "Health: findings fall in their area");

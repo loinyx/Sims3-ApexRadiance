@@ -195,12 +195,12 @@ public sealed partial class MainWindow
 
             // empty: say what to do here
             ModsEmpty.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            (ModsEmptyIcon.Kind, ModsEmptyText.Text) = inPlace.Count > 0 ? ("search", T("No mod matches the search and filters. Clear them to see all {0}.", inPlace.Count))
+            (ModsEmptyIcon.Kind, ModsEmptyText.Text) = inPlace.Count > 0 ? ("search", T("No mod matches your search and filters. Clear them to see all {0}.", inPlace.Count))
                 : _modPlace switch
                 {
                     NewMods => ("sparkles", T("Nothing new since you last played.")),
                     LookMods => ("circle-check", T("Nothing needs a look.")),
-                    DupMods => ("circle-check", T("No mod is here twice.")),
+                    DupMods => ("circle-check", T("No duplicate mods.")),
                     OffMods => ("power", T("Every mod is on.")),
                     _ when _modPlace.StartsWith('#') => ("tag", T("No mod has this tag yet. Drag mods onto it, or add it in a mod's details.")),
                     _ => ("folder-open", T("Nothing here yet. Drag mods here, drop files from Explorer, or use Add mods.")),
@@ -367,7 +367,7 @@ public sealed partial class MainWindow
             foreach (var p in places) items.Add(PlaceItem(p));
             if (key == "tags" && q.Length == 0) items.Add(PlaceItem(new Place(NewTag, T("New tag"), "plus", -1)));
         }
-        if (q.Length > 0 && items.Count == 0) items.Add(new TextBlock { Text = T("No folder or tag has \"{0}\".", q), Style = (Style)Application.Current.Resources["ApexMuted"], Margin = new Thickness(10, 4, 10, 0) });
+        if (q.Length > 0 && items.Count == 0) items.Add(new TextBlock { Text = T("No folders or tags match \"{0}\".", q), Style = (Style)Application.Current.Resources["ApexMuted"], Margin = new Thickness(10, 4, 10, 0) });
         ModFolders.ItemsSource = items;
         SelectPlace();
     }
@@ -455,8 +455,8 @@ public sealed partial class MainWindow
             var menu = new MenuFlyout();
             menu.Items.Add(MenuItem(T("Rename"), () => BeginRename(g, name, dir), "pencil", Windows.System.VirtualKey.F2));
             menu.Items.Add(MenuItem(T("New folder inside"), () => Safe(NewFolderAsync(dir)), "folder-plus"));
-            menu.Items.Add(MenuItem(T("Turn every mod in it on"), () => SetMods(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), true), "power"));
-            menu.Items.Add(MenuItem(T("Turn every mod in it off"), () => SetMods(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), false), "power-off"));
+            menu.Items.Add(MenuItem(T("Turn on all mods inside"), () => SetMods(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), true), "power"));
+            menu.Items.Add(MenuItem(T("Turn off all mods inside"), () => SetMods(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), false), "power-off"));
             menu.Items.Add(MenuItem(T("Merge this folder…"), () => Safe(MergeAsync(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), Path.GetFileName(dir), dir)), "merge"));
             menu.Items.Add(MenuItem(T("Open in Explorer"), () => OpenFolder(Path.Combine(Docs, "Mods", dir)), "folder-search"));
             menu.Items.Add(new MenuFlyoutSeparator());
@@ -670,7 +670,7 @@ public sealed partial class MainWindow
 
     async Task DeleteFolderAsync(string dir)
     {
-        if (!await Confirm(T("Delete this folder?"), T("{0} is deleted. Only an empty folder can be deleted; your mods are never deleted with it.", Path.GetFileName(dir)), T("Delete"), danger: true)) return;
+        if (!await Confirm(T("Delete this folder?"), T("This deletes {0}. Only empty folders can be deleted, so no mod is lost.", Path.GetFileName(dir)), T("Delete"), danger: true)) return;
         await ModsChange(() => { ModLibrary.DeleteFolder(Docs, dir); _modPlace = Path.GetDirectoryName(dir) is { Length: > 0 } up ? up : AllMods; }, T("Folder deleted"));
     }
 
@@ -720,13 +720,13 @@ public sealed partial class MainWindow
         {
             string? failed = null;
             foreach (var (r, d) in back) try { Replace(r, ModLibrary.Move(r.File, Docs, d)); } catch (Exception e) { App.Log(e); failed ??= ErrorText(e); }
-            if (failed is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), failed);
+            if (failed is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods couldn't be moved"), failed);
             _folderSig = "";
             FillMods();
         }
         // (some moved, some not: the ones that moved can still be undone)
-        if (error is not null && back.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), error);
-        else if (error is not null) ModsResult(T("Some mods were not moved"), Undo, error, InfoBarSeverity.Warning);
+        if (error is not null && back.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods couldn't be moved"), error);
+        else if (error is not null) ModsResult(T("Some mods couldn't be moved"), Undo, error, InfoBarSeverity.Warning);
         else if (back.Count > 0) ModsResult(back.Count == 1 ? T("Mod moved to {0}", where) : T("{0} mods moved to {1}", back.Count, where), Undo);
         _folderSig = "";
         FillMods();
@@ -795,7 +795,7 @@ public sealed partial class MainWindow
         _folderSig = "";
         FillMods();
         // (some moved, some not: the ones that moved can still be undone)
-        if (error is not null && changed.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), ErrorText(error));
+        if (error is not null && changed.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods couldn't be moved"), ErrorText(error));
         else if (error is not null) ModsResult(on ? T("{0} of {1} mods turned on", changed.Count, todo.Count) : T("{0} of {1} mods turned off", changed.Count, todo.Count), () => SetMods(changed, !on), ErrorText(error), InfoBarSeverity.Warning);
         else if (changed.Count > 1) ModsResult(on ? T("{0} mods turned on", changed.Count) : T("{0} mods turned off", changed.Count), () => SetMods(changed, !on));
     }
@@ -940,8 +940,8 @@ public sealed partial class MainWindow
     };
     static string AddedLabel(int d) => d switch
     {
-        1 => T("Added today"), 7 => T("Added this week"), 30 => T("Added this month"), 90 => T("Added in 3 months"),
-        182 => T("Added in 6 months"), 365 => T("Added this year"), _ => T("Added over a year ago"),
+        1 => T("Added today"), 7 => T("Added this week"), 30 => T("Added this month"), 90 => T("Added in the last 3 months"),
+        182 => T("Added in the last 6 months"), 365 => T("Added this year"), _ => T("Added over a year ago"),
     };
 
     int FilterCount => _fFiles.Count + _fKinds.Count + _fStates.Count + _fTags.Count + _fCreators.Count + (_fAddedDays != 0 ? 1 : 0) + (_fSizeMb > 0 ? 1 : 0);
@@ -1050,7 +1050,7 @@ public sealed partial class MainWindow
             case 3:
                 foreach (var t in ModNotes.Tags) Opt(t.Name, null, t.Color, inPlace.Count(r => ModNotes.TagsOf(r.File.Rel).Contains(t.Name, StringComparer.OrdinalIgnoreCase)), _fTags.Contains(t.Name), on => Flip(_fTags, t.Name, on));
                 Opt(T("Untagged"), "tag", null, inPlace.Count(r => ModNotes.TagsOf(r.File.Rel).Count == 0), _fTags.Contains(""), on => Flip(_fTags, "", on));
-                if (ModNotes.Tags.Count == 0) list.Children.Add(new TextBlock { Text = T("No tags yet: make one from a mod's details or the side pane."), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(8) });
+                if (ModNotes.Tags.Count == 0) list.Children.Add(new TextBlock { Text = T("No tags yet. Create one in a mod's details or the side pane."), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(8) });
                 break;
             case 4:
                 foreach (var c in inPlace.GroupBy(r => CreatorOf(r.File) ?? "").OrderBy(g => g.Key == "" ? 1 : 0).ThenByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
@@ -1539,8 +1539,8 @@ public sealed partial class MainWindow
         var merged = rows.Count(r => ModMerge.IsMerged(r.File));
         var text = (rows.Count == 1 ? T("{0} goes to the Recycle Bin. You can restore it from there.", rows[0].Name)
             : T("{0} mods go to the Recycle Bin. You can restore them from there.", rows.Count))
-            + (merged > 0 ? "\n\n" + T("A merged mod's originals stay kept in Mods\\{0}; use Split instead to get them back.", ModMerge.FolderName) : "")
-            + (rows.Any(HasItems) ? "\n\n" + T("Lots and Sims that use its objects or outfits lose them the next time a game is saved without it.") : "");
+            + (merged > 0 ? "\n\n" + T("A merged mod's originals stay in Mods\\{0}. Use Split to get them back.", ModMerge.FolderName) : "")
+            + (rows.Any(HasItems) ? "\n\n" + T("Lots and Sims that use its objects or outfits lose them the next time you save without it.") : "");
         if (!await Confirm(rows.Count == 1 ? T("Remove this mod?") : T("Remove these mods?"), text, T("Remove"), danger: true)) return;
         await ModsChange(() => { foreach (var r in rows) ModLibrary.Remove(r.File); }, rows.Count == 1 ? T("Mod moved to the Recycle Bin") : T("{0} mods moved to the Recycle Bin", rows.Count));
     }
@@ -1629,7 +1629,7 @@ public sealed partial class MainWindow
                 {
                     // (no picture of its own: the game keeps showing its own for it)
                     mod.Child = new TextBlock { Text = T("same"), FontSize = 10, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                    ToolTipService.SetToolTip(mod, T("The mod brings no picture of its own for it: the game shows its own."));
+                    ToolTipService.SetToolTip(mod, T("This mod has no picture for it, so the game shows its own."));
                 }
             }
             catch (Exception e) { App.Log(e); }
@@ -1737,7 +1737,7 @@ public sealed partial class MainWindow
         ("Accessory", true) => T("1 accessory"), ("Accessory", _) => T("{0} accessories", n),
         ("Facial hair", true) => T("1 facial hair"), ("Facial hair", _) => T("{0} facial hair", n),
         ("Makeup", true) => T("1 makeup"), ("Makeup", _) => T("{0} makeup", n),
-        ("Eyebrows", true) => T("1 eyebrows"), ("Eyebrows", _) => T("{0} eyebrows", n),
+        ("Eyebrows", true) => T("1 set of eyebrows"), ("Eyebrows", _) => T("{0} eyebrows", n),
         ("Eye colour", true) => T("1 eye colour"), ("Eye colour", _) => T("{0} eye colours", n),
         ("Skin detail", true) => T("1 skin detail"), ("Skin detail", _) => T("{0} skin details", n),
         ("Tattoo", true) => T("1 tattoo"), ("Tattoo", _) => T("{0} tattoos", n),
@@ -1860,7 +1860,7 @@ public sealed partial class MainWindow
 
     async Task DeleteTagAsync(string name)
     {
-        if (!await Confirm(T("Delete this tag?"), T("{0} is taken off every mod. The mods stay as they are.", name), T("Delete"), danger: true)) return;
+        if (!await Confirm(T("Delete this tag?"), T("{0} is removed from every mod. The mods themselves aren't changed.", name), T("Delete"), danger: true)) return;
         try { ModNotes.DeleteTag(name); _fTags.Remove(name); } catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         foreach (var r in _modRows) r.Refresh();
         _folderSig = "";

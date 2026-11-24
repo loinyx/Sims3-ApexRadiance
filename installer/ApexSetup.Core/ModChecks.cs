@@ -62,7 +62,7 @@ public sealed class MissingAssembly : IModCheck
         // one finding per package: a mod with several assemblies (Seasons Expanded has seven) is named once
         foreach (var mod in found.GroupBy(a => a.Mod))
             if (mod.SelectMany(a => a.Refs).Where(r => !Game.IsMatch(r) && !provided.Contains(r)).Distinct(StringComparer.OrdinalIgnoreCase).ToList() is { Count: > 0 } missing)
-                yield return new(new(Severity.Warning, "{0} needs {1}, which no installed mod provides. Until it is there, script mods loaded after it may not start.",
+                yield return new(new(Severity.Warning, "{0} needs {1}, and no installed mod has it. Until you add it, script mods loaded after {0} may not start.",
                     [mod.Key.Name, string.Join(", ", missing)]), [mod.Key.Path]);
     }
 }

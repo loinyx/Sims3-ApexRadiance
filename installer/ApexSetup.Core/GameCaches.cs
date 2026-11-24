@@ -92,13 +92,22 @@ public static class GameCaches
     // drops the backups (the game started and closed normally since the clean)
     public static void Forget()
     {
+        // what an earlier Forget renamed but could not delete
+        foreach (var old in Directory.Exists(Paths.Data) ? Directory.EnumerateDirectories(Paths.Data, "cache-backup.old-*") : [])
+            try { Directory.Delete(old, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         if (!Directory.Exists(BackupRoot)) return;
-        try { Fs.Retry(() => Directory.Delete(BackupRoot, true)); }
+        // renamed first, so the backup is gone at once even while Windows finishes deleting files an antivirus or indexer
+        // still holds (deleting in place could leave the folder half there, or vanishing under the dropped mark)
+        var gone = BackupRoot + ".old-" + DateTime.Now.Ticks;
+        try { Fs.Retry(() => Directory.Move(BackupRoot, gone)); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            // an antivirus or indexer holding a file: marked dropped now, deleted by the next Clean or Forget
+            // the folder itself held: marked dropped now, deleted by the next Clean or Forget
             Engine.Log(e);
             try { Directory.CreateDirectory(BackupRoot); File.WriteAllText(DroppedMark, ""); } catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) { Engine.Log(e2); }
+            return;
         }
+        try { Fs.Retry(() => Directory.Delete(gone, true)); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }
 }

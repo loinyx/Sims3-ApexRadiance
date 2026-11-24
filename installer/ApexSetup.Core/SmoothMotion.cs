@@ -98,7 +98,7 @@ public static class SmoothMotion
     public static string? Set(bool on)
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1" || Environment.GetEnvironmentVariable("APEX_SETUP_FAKE_NV") is { Length: > 0 })
-            return "Dry run: Setup changes nothing.";
+            return "Test run: the launcher changes nothing.";
         if (!on && !SetupTurnedOn) return null;
         return SetDriver(on);
     }

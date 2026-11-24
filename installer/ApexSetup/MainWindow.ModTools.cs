@@ -24,7 +24,7 @@ public sealed partial class MainWindow
         while (true)
         {
             try { plan = await Task.Run(() => ModMerge.Plan(docs, mods, name, folder, include)); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merge can't be planned"), ErrorText(e)); return; }
+            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("These mods can't be merged"), ErrorText(e)); return; }
             var answer = await MergePlanDialog(plan, name, folder, include);
             if (answer is null) return;
             // (a changed name or script choice, or a plan that could not run, is planned again)
@@ -46,10 +46,10 @@ public sealed partial class MainWindow
         body.Children.Add(Muted(T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, plan.Inputs.Count, plan.Resources, ModRow.SizeText(plan.OutputBytes))));
         if (plan.Duplicates.Count > 0)
             body.Children.Add(Warn(plan.Duplicates.Count == 1 ? T("1 resource is in more than one of these mods") : T("{0} resources are in more than one of these mods", plan.Duplicates.Count),
-                T("The merged package keeps the copy the game loads today (Resource.cfg order); the others are listed in the log.")));
+                T("The merged package keeps the copy the game loads now. The others are listed in the log.")));
         if (plan.Shifts.Count > 0)
             body.Children.Add(Warn(T("{0} resources would change which mod the game uses", plan.Shifts.Count),
-                T("A mod outside this merge has them too, and the merged package loads at another place: {0}", string.Join(", ", plan.Shifts.Select(x => Path.GetFileNameWithoutExtension(x.Other)).Distinct().Take(3)))));
+                T("A mod outside this merge has them too, and the merged package loads in a different order: {0}", string.Join(", ", plan.Shifts.Select(x => Path.GetFileNameWithoutExtension(x.Other)).Distinct().Take(3)))));
         if (plan.Skipped.Count > 0)
         {
             var sk = new StackPanel { Spacing = 4 };
@@ -62,7 +62,7 @@ public sealed partial class MainWindow
         var scriptBox = new CheckBox { Content = T("Include script mods (their makers usually ask not to merge them)"), IsChecked = scripts };
         if (scripts || plan.Skipped.Any(s => s.Reason.Key.StartsWith("A script mod"))) body.Children.Add(scriptBox);
         foreach (var r in plan.Refusals) body.Children.Add(Warn(T(r.Key, r.Args), null));
-        body.Children.Add(Muted(T("The originals are kept in Mods\\{0} and Split puts them back exactly.", ModMerge.FolderName)));
+        body.Children.Add(Muted(T("The originals are kept in Mods\\{0}. Split puts them back as they were.", ModMerge.FolderName)));
         var d = new ContentDialog
         {
             Title = plan.Inputs.Count == plan.Inputs.Count + plan.Skipped.Count ? T("Merge {0} mods", plan.Inputs.Count) : T("Merge {0} of the {1} mods chosen", plan.Inputs.Count, plan.Inputs.Count + plan.Skipped.Count), Content = new ScrollViewer { Content = body, MaxHeight = 460 },
@@ -77,7 +77,7 @@ public sealed partial class MainWindow
     // the run: a step list with a bar and the time, the log as it is written, Cancel until the originals start moving
     async Task MergeRunDialog(MergePlan plan)
     {
-        var steps = new[] { (MergeStep.Check, T("Check the files")), (MergeStep.Write, T("Write the merged package")), (MergeStep.Verify, T("Read every resource back and compare")),
+        var steps = new[] { (MergeStep.Check, T("Check the files")), (MergeStep.Write, T("Write the merged package")), (MergeStep.Verify, T("Check every resource against the originals")),
             (MergeStep.Move, T("Keep the originals aside")), (MergeStep.Finish, T("Put the merged package in place")) };
         var rows = new Dictionary<MergeStep, (FrameworkElement Icon, TextBlock Text, TextBlock Detail)>();
         var list = new StackPanel { Spacing = 8 };
@@ -195,7 +195,7 @@ public sealed partial class MainWindow
     async Task SplitAsync(ModRow r)
     {
         var info = ModMerge.Info(r.File);
-        if (!await Confirm(T("Split {0}?", r.Name), T("Its {0} original mods go back where they were, checked against the copies kept at the merge; the merged package goes to the Recycle Bin.", info?.Originals.Count ?? 0), T("Split"))) return;
+        if (!await Confirm(T("Split {0}?", r.Name), T("Its {0} original mods go back where they were, checked against the saved copies. The merged package goes to the Recycle Bin.", info?.Originals.Count ?? 0), T("Split"))) return;
         List<ModFile>? back = null;
         try { back = await Task.Run(() => ModMerge.Split(Docs, r.File)); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The split did not finish"), ErrorText(e)); }
@@ -215,8 +215,8 @@ public sealed partial class MainWindow
         var suspects = _mods.Count(m => m.FileType == "package" && !m.Locked && m.Enabled);
         var rounds = (int)Math.Ceiling(Math.Log2(Math.Max(2, suspects)));
         if (!await Confirm(T("Find a problem mod"),
-                T("Each round the launcher turns off half of your {0} mods that are on. You play, then say whether the problem is still there. About {1} rounds find the one behind it. Stop puts every mod back exactly as it was, at any time.", suspects, rounds)
-                + "\n\n" + T("While you hunt, do not save over your game: objects and outfits of the mods that are off would be taken out of it. Use Save As, or quit without saving."),
+                T("Each round, the launcher turns off half of your {0} active mods. You play, then say if the problem is still there. About {1} rounds find the mod causing it. You can stop at any time, and every mod goes back as it was.", suspects, rounds)
+                + "\n\n" + T("While you hunt, don't overwrite your save. It would lose objects and outfits from the mods that are off. Use Save As, or quit without saving."),
                 T("Start"))) return;
         try { ModHunt.Start(Mods.List(_game!, Docs, kinds: false), Docs, _modLooks.Select(p => _mods.FirstOrDefault(m => m.Path == p)?.Rel).OfType<string>()); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The hunt did not start"), ErrorText(e)); return; }
@@ -260,7 +260,7 @@ public sealed partial class MainWindow
         if (done)
         {
             var found = ModHunt.Found(st);
-            host.Children.Add(Body(found is null ? T("The answers did not point at one mod: the problem may come from two mods together, or from the game itself. Every mod is back as it was.")
+            host.Children.Add(Body(found is null ? T("The answers didn't point to a single mod. The problem may come from two mods together, or from the game itself. Every mod is back as it was.")
                 : T("The problem comes from {0}. Every other mod is back as it was.", Path.GetFileNameWithoutExtension(found))));
             var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             if (found is not null && _modRows.FirstOrDefault(r => r.File.Rel.Equals(found, StringComparison.OrdinalIgnoreCase)) is { } row)
@@ -274,8 +274,8 @@ public sealed partial class MainWindow
         }
         var left = ModHunt.RoundsLeft(st);
         host.Children.Add(new ProgressBar { Maximum = st.Round + left - 1, Value = st.Round - 1 });
-        host.Children.Add(Body(T("{0} of the {1} mods still suspected are off for this round. Play until the problem would show, then come back.", st.Off.Count, st.Suspects.Count)));
-        host.Children.Add(Warn(T("Do not save over your game while hunting"), T("Objects and outfits of the mods that are off would be taken out of it. Use Save As, or quit without saving.")));
+        host.Children.Add(Body(T("{0} of the {1} suspect mods are off this round. Play until the problem usually shows up, then come back.", st.Off.Count, st.Suspects.Count)));
+        host.Children.Add(Warn(T("Don't overwrite your save while hunting"), T("It would lose objects and outfits from the mods that are off. Use Save As, or quit without saving.")));
         var a = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         // (one answer per round: the buttons stay off until the list is read again and the banner rebuilt)
         void Once(Func<Task> act) { foreach (var b in a.Children.OfType<Control>()) b.IsEnabled = false; _ = act(); }

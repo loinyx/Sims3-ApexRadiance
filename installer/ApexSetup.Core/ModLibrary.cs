@@ -78,7 +78,7 @@ public static class ModNotes
         string? name = null;
         if (source is not null)
         {
-            if (new FileInfo(source).Length > 20 << 20) throw new SetupException("That picture is too big (over 20 MB).");
+            if (new FileInfo(source).Length > 20 << 20) throw new SetupException("That picture is too big. Use one under 20 MB.");
             Directory.CreateDirectory(PictureDir);
             name = Guid.NewGuid().ToString("N") + Path.GetExtension(source).ToLowerInvariant();
             File.Copy(source, Path.Combine(PictureDir, name));
@@ -91,7 +91,7 @@ public static class ModNotes
     public static void SetCreator(string rel, string? creator)
     {
         creator = string.IsNullOrWhiteSpace(creator) ? null : creator.Trim();
-        if (creator is { Length: > 60 }) throw new SetupException("A creator's name is at most 60 characters.");
+        if (creator is { Length: > 60 }) throw new SetupException("A creator's name can be up to 60 characters.");
         if (Get(rel)?.Creator == creator) return;
         Edit(rel, n => n.Creator = creator);
     }
@@ -154,7 +154,7 @@ public static class ModNotes
     static string TagName(string name)
     {
         name = name.Trim();
-        if (name.Length is 0 or > 40) throw new SetupException("A tag's name is 1 to 40 characters.");
+        if (name.Length is 0 or > 40) throw new SetupException("A tag name must be 1 to 40 characters.");
         return name;
     }
 
@@ -251,7 +251,7 @@ public static partial class ModLibrary
         if (name.Length == 0 || name.Length > 120 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name is "." or ".."
             || Regex.IsMatch(name, @"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", RegexOptions.IgnoreCase))
             throw new SetupException("That name can't be used for a file or folder.");
-        if (name.Equals(Mods.DisabledName, StringComparison.OrdinalIgnoreCase) || name.Equals(ModMerge.FolderName, StringComparison.OrdinalIgnoreCase)) throw new SetupException("That name is the launcher's own folder.");
+        if (name.Equals(Mods.DisabledName, StringComparison.OrdinalIgnoreCase) || name.Equals(ModMerge.FolderName, StringComparison.OrdinalIgnoreCase)) throw new SetupException("That name is taken by the launcher's own folder.");
         return name;
     }
 
@@ -269,7 +269,7 @@ public static partial class ModLibrary
         Engine.CheckWritable();
         var rel = Path.Combine(parentRel, CleanName(name));
         var full = Under(docs, rel);
-        if (Directory.Exists(full)) throw new SetupException("A folder with that name is already there.");
+        if (Directory.Exists(full)) throw new SetupException("A folder with that name already exists here.");
         Directory.CreateDirectory(full);
         return rel;
     }
@@ -293,7 +293,7 @@ public static partial class ModLibrary
         var offFrom = Path.Combine(Mods.Disabled(docs), rel);
         var offTo = Path.Combine(Mods.Disabled(docs), to);
         var off = Directory.Exists(offFrom);
-        if (!caseOnly && (Directory.Exists(target) || off && Directory.Exists(offTo))) throw new SetupException("A folder with that name is already there.");
+        if (!caseOnly && (Directory.Exists(target) || off && Directory.Exists(offTo))) throw new SetupException("A folder with that name already exists here.");
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         Directory.Move(from, target);
         if (off)
@@ -356,7 +356,7 @@ public static partial class ModLibrary
         var docs = ModMerge.DocsOf(m);
         var other = docs is null ? null : m.Enabled ? Path.Combine(Mods.Disabled(docs), Path.GetRelativePath("Mods", rel)) : Path.Combine(docs, rel);
         if ((File.Exists(target) || other is not null && File.Exists(other)) && !name.Equals(m.Name, StringComparison.OrdinalIgnoreCase))
-            throw new SetupException("A file with that name is already there.");
+            throw new SetupException("A file with that name already exists here.");
         File.Move(m.Path, target);
         var moved = m with { Path = target, Rel = rel };
         ModNotes.Move(m.Rel, moved.Rel);
@@ -394,7 +394,7 @@ public static partial class ModLibrary
         // (Windows asks before it deletes for good a file the Recycle Bin can't take: a network folder, a file too big)
         var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = Path.GetFullPath(path) + "\0\0", fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_WANTNUKEWARNING };
         var r = SHFileOperation(ref op);
-        if (r != 0 || op.fAnyOperationsAborted || File.Exists(path)) throw new SetupException("Windows did not move the file to the Recycle Bin.");
+        if (r != 0 || op.fAnyOperationsAborted || File.Exists(path)) throw new SetupException("Windows couldn't move the file to the Recycle Bin.");
     }
 
     const uint FO_DELETE = 3;

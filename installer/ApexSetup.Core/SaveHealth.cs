@@ -77,9 +77,9 @@ public static class SaveHealth
         {
             var mb = (r.Bytes >> 20).ToString();
             if (r.Incomplete is { } why)
-                f.Add(new(Severity.Warning, "The save {0} looks incomplete ({1}). Load a backup copy of it if the game cannot open it.", [r.Save.Name, why]));
+                f.Add(new(Severity.Warning, "The save {0} looks incomplete ({1}). If the game can't open it, load a backup of it.", [r.Save.Name, why]));
             if (r.Bytes >= LargeBytes)
-                f.Add(new(Severity.Info, "The save {0} is {1} MB. Saves this large load and save slowly; NRaas Overwatch or moving out unused households keeps it smaller.", [r.Save.Name, mb]));
+                f.Add(new(Severity.Info, "The save {0} is {1} MB. Saves this large load and save slowly. NRaas Overwatch or moving out unused households makes it smaller.", [r.Save.Name, mb]));
             if (r.History.FirstOrDefault(p => p.When >= DateTime.Now.AddDays(-GrowthDays)) is { Bytes: > 0 } first && r.Bytes > first.Bytes * (1 + FastGrowth) && r.Bytes - first.Bytes > 20L << 20)
                 f.Add(new(Severity.Info, "The save {0} grew from {1} MB to {2} MB in {3} days.", [r.Save.Name, (first.Bytes >> 20).ToString(), mb, Math.Max(1, (int)(DateTime.Now - first.When).TotalDays).ToString()]));
             // a save played since its last backup, more than BackupDays ago (or never backed up)

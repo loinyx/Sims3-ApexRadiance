@@ -92,7 +92,7 @@ public static class Mods
     // exception the UI shows (a locked mod, the game running, a dry run).
     public static string SetEnabled(ModFile m, bool on, string docs)
     {
-        if (m.Locked) throw new SetupException("This mod is part of what the launcher installs: switch it in Components.");
+        if (m.Locked) throw new SetupException("This mod comes with the launcher. Turn it on or off in Components.");
         Engine.CheckWritable(); // (dry run, or the game running: the game holds its packages open)
         if (m.Enabled == on) return m.Path;
         var under = Path.GetRelativePath("Mods", m.Rel);

@@ -228,7 +228,7 @@ public static partial class ScriptErrors
             if (m.Count - m.Crashes is var n and > 0)
                 f.Add(new(new(sev, r.Unread > 0
                         ? m.Mod is null ? "At least {0} script errors in the game's own code since {1} ({2})." : "At least {0} script errors went through {1} since {2} ({3}). If it misbehaves, update or remove it."
-                        : m.Mod is null ? "{0} script errors in the game's own code since {1} ({2})." : "{0} script errors went through {1} since {2} ({3}). If it misbehaves, update or remove it.",
+                        : m.Mod is null ? "{0} script errors in the game's own code since {1} ({2})." : "{0} script errors involved {1} since {2} ({3}). If it causes problems, update or remove it.",
                     m.Mod is null ? [n.ToString(), r.Since.ToString("g"), m.Exception] : [n.ToString(), m.Mod, r.Since.ToString("g"), m.Exception]), m.Files));
         }
         return f;

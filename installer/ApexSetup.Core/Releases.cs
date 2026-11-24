@@ -85,7 +85,7 @@ public static class Releases
     {
         if (status is not (System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.TooManyRequests) || remaining != "0") return null;
         var minutes = long.TryParse(reset, out var r) ? Math.Max(1, (long)Math.Ceiling((DateTimeOffset.FromUnixTimeSeconds(r) - now).TotalMinutes)) : 60;
-        return new SetupException("GitHub's download limit was reached; try again in {0} minutes.", minutes.ToString());
+        return new SetupException("GitHub's download limit was reached. Try again in {0} minutes.", minutes.ToString());
     }
 
     // a GET that is tried again on a server error (5xx) or a timeout: 3 tries, 1 s then 2 s apart; a refusal (4xx) fails at once
@@ -223,7 +223,7 @@ public static class Releases
             }
         }
         if (a.Sha256 is { } want && !Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).Equals(want, StringComparison.OrdinalIgnoreCase))
-            throw new SetupException("The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads.", a.Name);
+            throw new SetupException("The download of {0} is damaged. Try again. If it happens again, an antivirus web shield or a proxy may be changing downloads.", a.Name);
         return file;
     }
 

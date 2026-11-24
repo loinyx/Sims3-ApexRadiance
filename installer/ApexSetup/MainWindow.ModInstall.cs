@@ -44,7 +44,7 @@ public sealed partial class MainWindow
         catch (Exception e)
         {
             App.Log(e);
-            try { SetInfo(ModsInfo, InfoBarSeverity.Error, T("Something went wrong"), ErrorText(e)); } catch (Exception e2) { App.Log(e2); }
+            try { SetInfo(ModsInfo, InfoBarSeverity.Error, T("The mods were not added"), ErrorText(e)); } catch (Exception e2) { App.Log(e2); }
         }
     }
 
@@ -97,7 +97,7 @@ public sealed partial class MainWindow
         }
         var again = new CheckBox { Content = T("Add the ones already installed again (as a copy)"), Visibility = dup > 0 ? Visibility.Visible : Visibility.Collapsed };
         var body = new StackPanel { Spacing = 14, Width = 480 };
-        body.Children.Add(Muted(T("Into Mods › {0}. Every file was checked: only what the game can read goes in.", PlaceTitle(dir).Title)));
+        body.Children.Add(Muted(T("Into Mods › {0}. Only files the game can read are added.", PlaceTitle(dir).Title)));
         body.Children.Add(new ScrollViewer { Content = list, MaxHeight = 320 });
         body.Children.Add(again);
         var installable = ok.Count - dup;

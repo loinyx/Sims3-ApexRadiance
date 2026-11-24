@@ -157,7 +157,7 @@ public static class RestorePoints
         }
         // the backup folder Setup made goes too, once nothing is left in it
         foreach (var d in new[] { RootOf(bin), Manifest.DirOf(bin) })
-            try { Fs.Retry(() => { if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d); }); }
+            try { Fs.Retry(() => { if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d); }); Fs.Gone(d); }
             catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
         return failed;
     }
@@ -167,7 +167,7 @@ public static class RestorePoints
         if (e.Dir)
         {
             if (e.Existed) Directory.CreateDirectory(e.Path);
-            else Fs.Retry(() => { if (Directory.Exists(e.Path) && !Directory.EnumerateFileSystemEntries(e.Path).Any()) Directory.Delete(e.Path); });
+            else { Fs.Retry(() => { if (Directory.Exists(e.Path) && !Directory.EnumerateFileSystemEntries(e.Path).Any()) Directory.Delete(e.Path); }); Fs.Gone(e.Path); }
             return;
         }
         if (File.Exists(e.Path)) File.SetAttributes(e.Path, File.GetAttributes(e.Path) & ~FileAttributes.ReadOnly);
@@ -219,6 +219,7 @@ public static class RestorePoints
                 foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
                 Directory.Delete(dir, true);
             });
+            Fs.Gone(dir);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // (pruned the next time)
     }
@@ -250,6 +251,12 @@ public static class Fs
             try { io(); return; }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not FileNotFoundException && e is not DirectoryNotFoundException && i < RetryTimes)
             { Thread.Sleep(RetryDelay * (1 << i)); }
+    }
+    // a deleted folder an antivirus or indexer still holds stays listed until Windows lets go: waits up to 2 s for it, so the
+    // folder above it can be seen empty and removed too
+    public static void Gone(string dir)
+    {
+        for (var i = 0; i < 40 && Directory.Exists(dir); i++) Thread.Sleep(50);
     }
     // ApexRadiance.toml with [ui] restart_host changed from keyWas: a restore point puts back only that key
     public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); Retry(() => WriteAtomic(path, text)); }

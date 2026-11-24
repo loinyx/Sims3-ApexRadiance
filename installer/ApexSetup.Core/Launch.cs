@@ -20,7 +20,7 @@ public static class Launch
     public static Process Start(Game g, string? save = null)
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Dry run: the game is not started.");
-        if (Elevation.IsElevated) throw new SetupException("The game is not started from the administrator window. Close it and press Play in Apex Launcher.");
+        if (Elevation.IsElevated) throw new SetupException("This window can't start the game. Close it and press Play in Apex Launcher.");
         if (Games.IsRunning()) throw new SetupException("The Sims 3 is already running.");
         var psi = new ProcessStartInfo(g.ExePath, Args(save)) { WorkingDirectory = g.Bin, UseShellExecute = false };
         // (a Steam copy started by its exe asks Steam to start it otherwise; the app id lets it run in place)
