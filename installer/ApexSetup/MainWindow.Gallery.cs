@@ -3225,12 +3225,16 @@ public sealed partial class MainWindow
         void Fly(Picture pic, Windows.Foundation.Rect big, Windows.Foundation.Rect small, double turn, bool open, int ms, Action? done, BitmapImage? sharp = null)
         {
             var copy = CardFor(pic);
+            // (its photo is found once it is in the window: before that it has no visual children to look in)
             if (sharp is { PixelWidth: > 0 })
-                switch (PhotoOf(copy))
+                copy.Loaded += (_, _) =>
                 {
-                    case Image i: i.Source = sharp; break;
-                    case Border { Background: ImageBrush ib }: ib.ImageSource = sharp; break;
-                }
+                    switch (PhotoOf(copy))
+                    {
+                        case Image i: i.Source = sharp; break;
+                        case Border { Background: ImageBrush ib }: ib.ImageSource = sharp; break;
+                    }
+                };
             // (the copy carries no empty caption: that only shows under the pointer)
             void Hush(DependencyObject d)
             {
@@ -3342,11 +3346,16 @@ public sealed partial class MainWindow
             {
                 stage.Children.Remove(loader);
                 if (shown != card) return;
-                switch (PhotoOf(card))
+                void Apply()
                 {
-                    case Image i: i.Source = sharpCopy; break;
-                    case Border { Background: ImageBrush ib }: ib.ImageSource = sharpCopy; break;
+                    switch (PhotoOf(card))
+                    {
+                        case Image i: i.Source = sharpCopy; break;
+                        case Border { Background: ImageBrush ib }: ib.ImageSource = sharpCopy; break;
+                    }
                 }
+                // (a card not in the window yet has no photo to find: it takes the sharp one as it arrives)
+                if (card.IsLoaded) Apply(); else card.Loaded += (_, _) => Apply();
             }
             if (sharpCopy.PixelWidth > 0) Sharpen();
             else { stage.Children.Add(loader); loader.ImageOpened += (_, _) => Sharpen(); }
