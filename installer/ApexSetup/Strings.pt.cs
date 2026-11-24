@@ -2233,5 +2233,8 @@ public static partial class Strings
         ["No portraits in this save. The game makes them as you play."] = "Este save não tem retratos. O jogo faz enquanto você joga.",
         ["Some of the Sims this save knows. The game makes these portraits again by itself."] = "Alguns dos Sims que este save conhece. O jogo refaz estes retratos sozinho.",
         ["Portrait of a Sim"] = "Retrato de Sim",
+        ["The game takes these pictures by itself, and the save grows with them."] = "O jogo tira estas fotos sozinho, e o save cresce com elas.",
+        ["Turn that off in Game settings"] = "Desligar em Configurações do jogo",
+        ["Open Game settings"] = "Abrir Configurações do jogo",
     };
 }

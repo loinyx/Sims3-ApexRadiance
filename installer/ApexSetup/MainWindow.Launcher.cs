@@ -369,7 +369,12 @@ public sealed partial class MainWindow
     void OnNavInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
         if (args.InvokedItemContainer?.Tag is not string tag || !int.TryParse(tag, out var to)) return;
-        DispatcherQueue.TryEnqueue(() => { if (_step != to && !_busy && to >= Home) Show(to); });
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_step != to && !_busy && to >= Home) Show(to);
+            // (Saves again, from a save's page or the households out of the game: its home)
+            else if (to == SavesScreen && !_busy && _dialog is null && (_sp is not null || _savesPage.Length > 0)) { HideSavePage(); SavesGo(""); }
+        });
     }
 
     // ---------- Worlds ----------

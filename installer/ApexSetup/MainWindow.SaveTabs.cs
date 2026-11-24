@@ -40,12 +40,12 @@ public sealed partial class MainWindow
     }
 
     // a picture that fades in once it is read
-    Image SpPicture(SavePageState p, SaveItem item, int side, Func<bool>? wanted = null)
+    Image SpPicture(SavePageState p, SaveItem item, int side, Func<bool>? wanted = null, bool grey = false)
     {
         var img = new Image { Stretch = Stretch.UniformToFill, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Opacity = 0 };
         if (AnimationsOn) img.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) };
         _ = Fill();
-        async Task Fill() { if (await SpImage(item, side, p.Stop.Token, wanted) is { } src) { img.Source = src; img.Opacity = 1; } }
+        async Task Fill() { if (await SpImage(item, side, p.Stop.Token, wanted, grey) is { } src) { img.Source = src; img.Opacity = 1; } }
         return img;
     }
 
@@ -69,6 +69,11 @@ public sealed partial class MainWindow
         var say = Muted(T("The starred ones never leave in a clean."));
         say.Margin = new Thickness(0, 8, 0, 0);
         top.Children.Add(say);
+        // (why a save grows, and where that stops)
+        var why = new WrapPanel { Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
+        why.Children.Add(Muted(T("The game takes these pictures by itself, and the save grows with them.")));
+        why.Children.Add(Link(T("Turn that off in Game settings"), () => Show(GameSettingsScreen)));
+        top.Children.Add(why);
         var page = new StackPanel { Spacing = 14 };
         page.Children.Add(top);
         var place = new Grid();
@@ -262,7 +267,7 @@ public sealed partial class MainWindow
         if (keys.Count == 0) { SpSay(InfoBarSeverity.Informational, T("The starred ones stay"), T("Take the star off a memory to take it out of the save.")); return; }
         if (await SpClean(p, CleanParts.None, keys, T("Taking the memories out")) is not { } r) return;
         OpenSave(r.Save, p.Tab);
-        SpSay(InfoBarSeverity.Success, r.Removed == 1 ? T("Memory taken out. The copy from before is kept.") : T("Memories taken out. The copy from before is kept."), "", T("Undo"), () => _ = SpUndo(r));
+        SpSay(InfoBarSeverity.Success, r.Removed == 1 ? T("Memory taken out. The copy from before is kept.") : T("Memories taken out. The copy from before is kept."), "", T("Undo"), () => _ = SpUndo(r), stays: true);
     }
 
     // ---------- Space ----------
@@ -363,7 +368,13 @@ public sealed partial class MainWindow
             else
             {
                 notes.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Tap what you want to take out. Nothing changes until you clean.")));
-                if (mem.Count + rep.Count > 0) notes.Children.Add(Note("image", "ApexAccentTextBrush", T("The game takes the memories by itself. You can turn that off in Game settings.")));
+                if (mem.Count + rep.Count > 0)
+                {
+                    notes.Children.Add(Note("image", "ApexAccentTextBrush", T("The game takes the memories by itself. You can turn that off in Game settings.")));
+                    var open = Link(T("Open Game settings"), () => Show(GameSettingsScreen));
+                    (open.FontSize, open.Margin) = (12, new Thickness(23, -8, 0, 0));
+                    notes.Children.Add(open);
+                }
             }
             if (p.Blocked is { } why) notes.Children.Add(Note("info", "ApexWarningBrush", why));
             else if (plan.Refusal is { } no) notes.Children.Add(Note("info", "ApexWarningBrush", T(no.Key, TArgs(no.Args))));
@@ -392,17 +403,23 @@ public sealed partial class MainWindow
     {
         var white = new SolidColorBrush(Microsoft.UI.Colors.White);
         var g = new Grid { Background = new SolidColorBrush(Rgb(0x16, 0x16, 0x16)) };
-        var mosaic = new Grid { ColumnSpacing = 2, RowSpacing = 2 };
-        if (AnimationsOn) mosaic.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) };
-        for (var c = 0; c < cols; c++) mosaic.ColumnDefinitions.Add(new ColumnDefinition());
-        for (var r = 0; r < rows; r++) mosaic.RowDefinitions.Add(new RowDefinition());
-        for (var i = 0; pics.Count > 0 && i < cols * rows; i++)
+        Grid Pictures(bool grey)
         {
-            var img = SpPicture(p, pics[i % pics.Count], (int)(128 * SpScale));
-            Grid.SetColumn(img, i % cols);
-            Grid.SetRow(img, i / cols);
-            mosaic.Children.Add(img);
+            var m = new Grid { ColumnSpacing = 2, RowSpacing = 2 };
+            if (AnimationsOn) m.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(260) };
+            for (var c = 0; c < cols; c++) m.ColumnDefinitions.Add(new ColumnDefinition());
+            for (var r = 0; r < rows; r++) m.RowDefinitions.Add(new RowDefinition());
+            for (var i = 0; pics.Count > 0 && i < cols * rows; i++)
+            {
+                var img = SpPicture(p, pics[i % pics.Count], (int)(128 * SpScale), grey: grey);
+                Grid.SetColumn(img, i % cols);
+                Grid.SetRow(img, i / cols);
+                m.Children.Add(img);
+            }
+            return m;
         }
+        // (marked to go, the pictures lose their colour: the same ones in grey, made the first time it is marked)
+        var (mosaic, faded) = (Pictures(false), (Grid?)null);
         g.Children.Add(mosaic);
         g.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(Windows.UI.Color.FromArgb(255, 8, 9, 10), [(0.04, 0xF2), (0.4, 0x80), (0.72, 0)]) });
         var label = new TextBlock { Text = name, FontWeight = FontWeights.SemiBold, Foreground = white, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -436,7 +453,9 @@ public sealed partial class MainWindow
             var on = p.Marked.HasFlag(part);
             b.IsChecked = on;
             edge.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
-            mosaic.Opacity = on ? 0.2 : 1;
+            if (on && faded is null) g.Children.Insert(1, faded = Pictures(true));
+            mosaic.Opacity = on ? 0 : 1;
+            if (faded is not null) faded.Opacity = on ? 0.5 : 0;
             label.TextDecorations = on ? Windows.UI.Text.TextDecorations.Strikethrough : Windows.UI.Text.TextDecorations.None;
             dot.BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0xC0, 255, 255, 255));
             dot.Background = on ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(0x73, 10, 11, 12));
@@ -599,6 +618,7 @@ public sealed partial class MainWindow
             var xs = SaveLayout.Spread(times.Select(t => span > 0 ? (t - start) / span * width : width).ToList(), width, 30).Select(x => x + edge).ToArray();
             double[] from = [start, .. times], to = [Math.Min(edge, xs[0]), .. xs];
             var nodes = history.Select(x => (X: SaveLayout.Between(from, to, x.When.Ticks), x.Bytes)).Concat(points.Select((x, i) => (X: xs[i], x.Bytes))).OrderBy(n => n.X).ToList();
+            if (nodes.Count == 1) nodes.Insert(0, (edge, nodes[0].Bytes)); // (no copy yet: a level line up to today)
             long lo = nodes.Min(n => n.Bytes), hi = nodes.Max(n => n.Bytes);
             double Y(long bytes) => hi > lo ? bottom - (bytes - lo) / (double)(hi - lo) * (bottom - top) : (top + bottom) / 2;
             PathFigure Curve()
