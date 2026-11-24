@@ -696,12 +696,16 @@
                     <Grid x:Name="ModSide" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,0,1,0" Padding="0,16,0,10">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
+                        <!-- which mods are on, under a name (MainWindow.ModProfiles.cs) -->
+                        <Button x:Name="ModsProfile" Tag="dyn" Margin="20,0,20,12" Padding="12,8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                CornerRadius="8" Background="{ThemeResource ApexCardBrush}" BorderBrush="{ThemeResource ApexCardBorderBrush}" Click="OnModsProfile" />
                         <!-- the places, narrowed as you type (like the gallery's albums) -->
-                        <TextBox x:Name="ModSideSearch" PlaceholderText="Search folders and tags" Margin="20,0,20,12" TextChanged="OnModSideSearch" KeyDown="OnModSideSearchKey"
+                        <TextBox x:Name="ModSideSearch" Grid.Row="1" PlaceholderText="Search folders and tags" Margin="20,0,20,12" TextChanged="OnModSideSearch" KeyDown="OnModSideSearchKey"
                                  AutomationProperties.Name="Search folders and tags" />
-                        <ListView x:Name="ModFolders" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnModFolderPicked" AutomationProperties.Name="Folders" Padding="10,0,10,0"
+                        <ListView x:Name="ModFolders" Grid.Row="2" SelectionMode="Single" SelectionChanged="OnModFolderPicked" AutomationProperties.Name="Folders" Padding="10,0,10,0"
                                   CanDragItems="True" DragItemsStarting="OnFolderDragStart" DragItemsCompleted="OnFolderDragDone">
                             <!-- a place is a row that lights up and can be picked; a group heading (LIBRARY, FOLDERS...) is plain -->
                             <ListView.ItemContainerStyleSelector>
@@ -755,14 +759,11 @@
                                 <TextBlock x:Name="ModsSummary" Tag="dyn" Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
-                                <Button x:Name="ModsHunt" Click="OnModsHunt" AutomationProperties.Name="Find a problem mod" ToolTipService.ToolTip="Find a problem mod">
-                                    <StackPanel Orientation="Horizontal" Spacing="8"><local:LucideIcon Kind="bug" Size="15" /><TextBlock x:Name="ModsHuntText" Text="Find a problem mod" /></StackPanel>
-                                </Button>
-                                <Button x:Name="ModsOpenFolder" Click="OnModsOpenFolder" AutomationProperties.Name="Open folder" ToolTipService.ToolTip="Open folder">
-                                    <local:LucideIcon Kind="folder-search" Size="16" />
+                                <Button x:Name="ModsTools" Click="OnModsTools" AutomationProperties.Name="Tools" ToolTipService.ToolTip="Tools">
+                                    <StackPanel Orientation="Horizontal" Spacing="8"><local:LucideIcon Kind="wrench" Size="15" /><TextBlock x:Name="ModsToolsText" Text="Tools" /></StackPanel>
                                 </Button>
                                 <Button x:Name="ModsAdd" Click="OnModsAdd" Style="{StaticResource AccentButtonStyle}" AutomationProperties.Name="Add mods">
-                                    <StackPanel Orientation="Horizontal" Spacing="8"><local:LucideIcon Kind="plus" Size="15" Stroke="{ThemeResource TextOnAccentFillColorPrimaryBrush}" /><TextBlock Text="Add mods" /></StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="8"><local:LucideIcon Kind="plus" Size="15" Stroke="{ThemeResource TextOnAccentFillColorPrimaryBrush}" /><TextBlock Text="Add" /></StackPanel>
                                 </Button>
                             </StackPanel>
                         </Grid>

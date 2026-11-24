@@ -9,6 +9,7 @@ namespace ApexSetup;
 [JsonSerializable(typeof(RestorePoint))]
 [JsonSerializable(typeof(LauncherSettings))]
 [JsonSerializable(typeof(ModNotesFile))]
+[JsonSerializable(typeof(ModProfilesFile))]
 [JsonSerializable(typeof(MergeRecord))]
 [JsonSerializable(typeof(List<SessionInfo>))]
 [JsonSerializable(typeof(Dictionary<string, List<SizePoint>>))]

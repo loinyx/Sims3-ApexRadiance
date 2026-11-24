@@ -245,6 +245,8 @@ public sealed partial class MainWindow
         if (!m.Enabled && !m.Locked && HasItems(r))
             host.Children.Add(Warn(T("Off: saving now removes its items"), T("Lots and Sims that use its objects or outfits lose them the next time you save without it.")));
 
+        if (mine) host.Children.Add(LinkSection(r));
+
         // what it is
         var what = Section(T("What it is"), mine ? T("Change") : null, out var change);
         var kinds = new WrapPanel { Spacing = 6 };
@@ -273,6 +275,11 @@ public sealed partial class MainWindow
         if (move is not null) move.Click += (_, _) => MoveMenu([r]).ShowAt(move);
         where.Children.Add(new TextBlock { Text = ModRow.Place(m) + " › " + m.Name, FontSize = 13, TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush") });
         host.Children.Add(where);
+
+        var actions = new StackPanel { Spacing = 8 };
+        if (CanOpenInS3pe(r)) actions.Children.Add(ActionRow("package", T("Open in s3pe"), null, () => Safe(OpenInS3peAsync(r))));
+        actions.Children.Add(ActionRow("folder-search", T("Show file"), null, () => ShowFile(r.File.Path)));
+        host.Children.Add(actions);
     }
 
     // a small heading with an optional link on its right
@@ -556,9 +563,6 @@ public sealed partial class MainWindow
             power.Click += (_, _) => SetMods([r], !r.File.Enabled);
             Icon(power);
         }
-        var show = IconButton("folder-search", T("Show file"));
-        show.Click += (_, _) => ShowFile(m.Path);
-        Icon(show);
         if (mine)
         {
             var remove = IconButton("trash-2", T("Move to the Recycle Bin"), "ApexErrorBrush");
