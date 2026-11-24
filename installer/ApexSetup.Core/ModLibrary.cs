@@ -268,18 +268,21 @@ public static partial class ModLibrary
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
     }
 
+    // (names Windows keeps for devices)
+    static bool ReservedName(string name) => Regex.IsMatch(name, @"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", RegexOptions.IgnoreCase);
+
     // a folder or file name the player typed: one name, no path, nothing Windows refuses
     public static string CleanName(string name)
     {
         name = name.Trim().TrimEnd('.');
         if (name.Length == 0 || name.Length > 120 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name is "." or ".."
-            || Regex.IsMatch(name, @"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", RegexOptions.IgnoreCase))
+            || ReservedName(name))
             throw new SetupException("That name can't be used for a file or folder.");
         if (name.Equals(Mods.DisabledName, StringComparison.OrdinalIgnoreCase) || name.Equals(ModMerge.FolderName, StringComparison.OrdinalIgnoreCase)) throw new SetupException("That name is taken by the launcher's own folder.");
         return name;
     }
 
-    static string Under(string docs, string rel) // rel relative to Mods, never outside it
+    internal static string Under(string docs, string rel) // rel relative to Mods, never outside it
     {
         var mods = Path.GetFullPath(Path.Combine(docs, "Mods"));
         var full = Path.GetFullPath(Path.Combine(mods, rel));
