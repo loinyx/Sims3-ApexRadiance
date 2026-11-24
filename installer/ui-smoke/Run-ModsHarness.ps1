@@ -107,7 +107,7 @@ Step "merge three mods, verified, with a log" {
 Step "split the merge back" {
   $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split into mods'; Dialog 'PrimaryButton'; Start-Sleep 4 } {
   (Get-ChildItem $set -Filter '*merged*.package').Count -eq 0 -and (Test-Path (Join-Path $set "$($names[4]).package")) }
-Step "start a problem-mod hunt" { Click 'Find a problem mod'; Dialog 'PrimaryButton'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -ge 2 }
+Step "start a problem-mod hunt" { Click 'Tools'; Start-Sleep 1; Click 'Find a problem mod'; Dialog 'PrimaryButton'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -ge 2 }
 Step "stop it: every mod back" { Click 'Stop and put every mod back'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -eq 0 -and (Get-ChildItem $set -Filter *.package).Count -eq $src.Count }
 Step "make a folder" { Click 'New folder'; Type-Into 'New folder' 'Harness folder'; Dialog 'PrimaryButton' } { Test-Path (Join-Path $pk 'Set\Harness folder') }
 $drop = Join-Path $Out 'drop'; New-Item -ItemType Directory -Force $drop | Out-Null

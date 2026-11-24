@@ -792,6 +792,7 @@ public static partial class ModMerge
         DeleteStore(rec.Dir);
         Forget(docs);
         ModNotes.Forget(merged.Rel);
+        ModProfiles.Split(merged.Rel, rec.Originals.Select(o => o.Rel));
         foreach (var o in rec.Originals.Where(o => o.Note is not null && ModNotes.Get(o.Rel) is null)) ModNotes.Put(o.Rel, o.Note!);
         return todo.Select(t => new ModFile(t.To, t.O.Rel, t.O.Size, Mods.KindOf(t.To), merged.Enabled, false)).ToList();
     }

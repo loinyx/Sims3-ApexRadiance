@@ -100,6 +100,11 @@ Repeat until the tester stops you or a round finds nothing new three times in a 
   says why.
 - Merge: the plan, the run with its log, the check of the result, splitting back, taking one mod out of a merge; the
   originals come back identical (compare file hashes).
+- Profiles (the button on top of the side pane): save what is on, switch, Undo, rename, copy, update, delete; a mod added
+  later stays as it is, a mod moved or renamed in the launcher follows, a mod held open by another program leaves every
+  mod as it was; refused while the game or a hunt runs.
+- Tools: each entry, the folder buttons, and an entry that can't be used says why.
+- A mod's page: add, open, copy, edit, remove; anything but a web address is refused.
 - Add mods: the picker, drag and drop from Explorer, and "Open with" on `.package` and `.zip`; every file is checked
   first; damaged and duplicate files are refused or offered as a copy; a `.sims3pack` is refused (not a mod file).
 - The problem-mod hunt: start, answer rounds, stop; every mod is back where it was.

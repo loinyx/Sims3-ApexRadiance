@@ -171,6 +171,7 @@ public sealed partial class MainWindow
 
     void FillMods()
     {
+        FillProfileButton();
         if (_game is null) { ModsSummary.Text = T("Choose the game first."); return; }
         if (!_modsLoaded) { if (!_modsLoading) Safe(LoadModsAsync()); return; }
         _fillingMods = true;
@@ -205,7 +206,7 @@ public sealed partial class MainWindow
                     DupMods => ("circle-check", T("No duplicate mods.")),
                     OffMods => ("power", T("Every mod is on.")),
                     _ when _modPlace.StartsWith('#') => ("tag", T("No mod has this tag yet. Drag mods onto it, or add it in a mod's details.")),
-                    _ => ("folder-open", T("Nothing here yet. Drag mods here, drop files from Explorer, or use Add mods.")),
+                    _ => ("folder-open", T("Nothing here yet. Drag mods here, drop files from Explorer, or use Add.")),
                 };
 
             // the header: where this is, what it holds
@@ -584,6 +585,8 @@ public sealed partial class MainWindow
     void OnModsPlaces(object sender, RoutedEventArgs e)
     {
         var menu = new MenuFlyout();
+        menu.Items.Add(MenuItem(T("Profile: {0}", ProfileName()), () => DispatcherQueue.TryEnqueue(() => ShowProfiles(ModsPlaces)), "layers"));
+        menu.Items.Add(new MenuFlyoutSeparator());
         void Add(string key, string label, string icon)
         {
             var i = new ToggleMenuFlyoutItem { Text = label, IsChecked = key == _modPlace, Icon = MenuIcon(icon) };
@@ -908,12 +911,6 @@ public sealed partial class MainWindow
     }
     void OnModsSelectAll(object sender, RoutedEventArgs e) { if (_modsGrid) ModGrid.SelectAll(); else ModList.SelectAll(); }
     void OnModsSelectNone(object sender, RoutedEventArgs e) => CloseModDetails();
-    void OnModsOpenFolder(object sender, RoutedEventArgs e) => OpenFolder(_modPlace switch
-    {
-        AsiMods => _game?.Bin ?? "", OffMods => Mods.Disabled(Docs),
-        _ when IsFolder(_modPlace) => Path.Combine(Docs, "Mods", _modPlace), _ => Path.Combine(Docs, "Mods"),
-    });
-
     void FillFooter()
     {
         var picked = Picked();
@@ -1263,6 +1260,7 @@ public sealed partial class MainWindow
         if (mine.Count > 1) menu.Items.Add(MenuItem(T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null)), "merge"));
         if (picked.Count == 1 && ModMerge.IsMerged(picked[0].File)) menu.Items.Add(MenuItem(T("Split back into its mods…"), () => Safe(SplitAsync(picked[0])), "merge"));
         if (picked.Count == 1) menu.Items.Add(MenuItem(T("Show in Explorer"), () => ShowFile(picked[0].File.Path), "folder-search"));
+        if (picked.Count == 1 && CanOpenInS3pe(picked[0])) menu.Items.Add(MenuItem(T("Open in s3pe"), () => Safe(OpenInS3peAsync(picked[0])), "package"));
         menu.Items.Add(MenuItem(picked.Count == 1 ? T("Copy name") : T("Copy names"), () => CopyText(string.Join(Environment.NewLine, picked.Select(r => r.File.Name))), "copy"));
         if (mine.Count > 0)
         {
@@ -1325,7 +1323,7 @@ public sealed partial class MainWindow
         var narrow = w < 1100;
         var compact = w < 780;
         DispatcherQueue.TryEnqueue(PlaceSelectionBar);
-        ModsHuntText.Visibility = w < 1280 ? Visibility.Collapsed : Visibility.Visible; // (the title keeps its line: the button goes to its icon first)
+        ModsToolsText.Visibility = compact ? Visibility.Collapsed : Visibility.Visible; // (the title keeps its line: the button goes to its icon first)
         if (narrow == _modsNarrow && compact == _modsCompact && e.PreviousSize.Width > 0) return;
         _modsNarrow = narrow;
         _modsCompact = compact;

@@ -261,7 +261,7 @@ static class ModToolsTests
     }
 
     // a small DBPF 2.0 package with n resources, as the game writes it (header, data, index with no constant fields)
-    static byte[] Dbpf20(int n)
+    internal static byte[] Dbpf20(int n)
     {
         using var ms = new MemoryStream();
         var w = new BinaryWriter(ms);

@@ -225,7 +225,6 @@ public sealed partial class MainWindow
     {
         var st = ModHunt.Current();
         ModHuntBar.Visibility = st is null ? Visibility.Collapsed : Visibility.Visible;
-        ModsHunt.IsEnabled = st is null;
         if (st is null) return;
         var host = ModHuntContent;
         host.Children.Clear();
