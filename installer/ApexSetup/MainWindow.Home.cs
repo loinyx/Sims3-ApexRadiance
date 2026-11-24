@@ -398,77 +398,74 @@ public sealed partial class MainWindow
 
     const double PlaySize = 44;
 
-    // a save's round Play in its card's corner, filled with the accent. Under the pointer anywhere on the card, or with the
-    // keyboard on it, it opens to the left into a pill that says Play; leaving, it closes back into the circle. Without a wait
-    // when Windows' animation effects are off.
+    // a save's round Play in its card's corner: an outline in the accent. Under the pointer anywhere on the card, or with the
+    // keyboard on it, the accent opens from the middle until it fills the circle and the triangle turns dark; leaving, it
+    // closes back. Without a wait when Windows' animation effects are off.
     static (FrameworkElement Corner, Action<bool> Over) PlayCorner(Button play)
     {
         const float size = (float)PlaySize;
-        var ink = Res("TextOnAccentFillColorPrimaryBrush");
         var none = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         foreach (var state in new[] { "", "PointerOver", "Pressed", "Disabled" }) play.Resources["ButtonBackground" + state] = none;
         play.Background = none;
-        var word = new TextBlock { Text = T("Play"), FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = ink, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(24, 0, 0, 0) };
-        word.Measure(new(double.PositiveInfinity, double.PositiveInfinity));
-        // (a longer word in another language widens the pill)
-        var wide = (float)Math.Max(104, Math.Ceiling(word.DesiredSize.Width) + 8 + 31);
-        var tri = new Microsoft.UI.Xaml.Shapes.Path
+        Microsoft.UI.Xaml.Shapes.Ellipse Disc() => new() { Width = size, Height = size };
+        FrameworkElement Tri(Brush fill)
         {
-            Data = (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), "M3.5 2.2c0-0.9 1-1.5 1.8-1l8 5c0.8 0.5 0.8 1.6 0 2.1l-8 5c-0.8 0.5-1.8-0.1-1.8-1z"),
-            Fill = ink, Width = 16, Height = 16,
-        };
-        var pill = new Grid { Width = wide, Height = size, Background = Res("ApexAccentBrush"), IsHitTestVisible = false, Opacity = play.IsEnabled ? 1 : 0.45 };
-        pill.Children.Add(word);
-        pill.Children.Add(new Canvas { Width = 16, Height = 16, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 14, 15, 0), Children = { tri } });
-        (play.Width, play.Content) = (wide, pill);
+            var path = new Microsoft.UI.Xaml.Shapes.Path
+            {
+                Data = (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), "M3.5 2.2c0-0.9 1-1.5 1.8-1l8 5c0.8 0.5 0.8 1.6 0 2.1l-8 5c-0.8 0.5-1.8-0.1-1.8-1z"),
+                Fill = fill, Width = 16, Height = 16,
+            };
+            return new Canvas { Width = 16, Height = 16, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(13, 14, 0, 0), Children = { path } };
+        }
+        var (glass, fill, ring) = (Disc(), Disc(), Disc());
+        glass.Fill = Res("ApexCardBrush");
+        fill.Fill = ring.Stroke = Res("ApexAccentBrush");
+        ring.StrokeThickness = 2;
+        var (light, dark) = (Tri(Res("ApexAccentBrush")), Tri(Res("TextOnAccentFillColorPrimaryBrush")));
+        var inside = new Grid { Width = size, Height = size, IsHitTestVisible = false, Opacity = play.IsEnabled ? 1 : 0.45 };
+        foreach (var e in new UIElement[] { glass, fill, ring, light, dark }) inside.Children.Add(e);
+        (play.Width, play.Content) = (size, inside);
         (play.HorizontalAlignment, play.VerticalAlignment, play.Margin) = (HorizontalAlignment.Right, VerticalAlignment.Bottom, new Thickness(0, 0, 14, 14));
 
-        var (pv, iv, wv) = (ElementCompositionPreview.GetElementVisual(play), ElementCompositionPreview.GetElementVisual(pill), ElementCompositionPreview.GetElementVisual(word));
-        ElementCompositionPreview.SetIsTranslationEnabled(word, true);
+        Microsoft.UI.Composition.Visual V(UIElement e) => ElementCompositionPreview.GetElementVisual(e);
+        var (pv, fv, lv, dv) = (V(play), V(fill), V(light), V(dark));
         var c = pv.Compositor;
-        pv.CenterPoint = new(wide / 2, size / 2, 0);
-        var shape = c.CreateRoundedRectangleGeometry();
-        (shape.Offset, shape.Size, shape.CornerRadius) = (new(wide - size, 0), new(size, size), new(size / 2, size / 2));
-        iv.Clip = c.CreateGeometricClip(shape);
-        wv.Opacity = 0;
-        wv.Properties.InsertVector3("Translation", new(14, 0, 0));
+        pv.CenterPoint = fv.CenterPoint = new(size / 2, size / 2, 0);
+        fv.Scale = new(0.01f, 0.01f, 1);
+        fv.Opacity = dv.Opacity = 0; // (at that size the middle would still show as a dot)
 
         var moves = AnimationsOn;
         var ease = c.CreateCubicBezierEasingFunction(new(0.22f, 1f), new(0.36f, 1f));
+        var soft = c.CreateCubicBezierEasingFunction(new(0.25f, 0.1f), new(0.25f, 1f));
         TimeSpan Ms(int ms) => TimeSpan.FromMilliseconds(moves ? ms : 1);
-        void To2(string what, System.Numerics.Vector2 to)
+        void Scale(Microsoft.UI.Composition.Visual v, float to, int ms)
         {
-            var a = c.CreateVector2KeyFrameAnimation();
-            a.InsertKeyFrame(1, to, ease);
-            a.Duration = Ms(340);
-            shape.StartAnimation(what, a);
+            var a = c.CreateVector3KeyFrameAnimation();
+            a.InsertKeyFrame(1, new(to, to, 1), ease);
+            a.Duration = Ms(ms);
+            v.StartAnimation("Scale", a);
         }
-        void To(string what, float to, int ms, bool late)
+        void Fade(Microsoft.UI.Composition.Visual v, float to, int ms, int wait = 0)
         {
             var a = c.CreateScalarKeyFrameAnimation();
-            a.InsertKeyFrame(1, to, ease);
-            (a.Duration, a.DelayTime) = (Ms(ms), TimeSpan.FromMilliseconds(late && moves ? 60 : 0));
-            wv.StartAnimation(what, a);
+            a.InsertKeyFrame(1, to, soft);
+            (a.Duration, a.DelayTime) = (Ms(ms), TimeSpan.FromMilliseconds(moves ? wait : 0));
+            v.StartAnimation("Opacity", a);
         }
         var (over, focus, shown) = (false, false, false);
+        void Press() => Scale(pv, play.IsPressed ? 0.9f : shown ? 1.08f : 1f, play.IsPressed ? 100 : 320);
         void Open()
         {
             var on = play.IsEnabled && (over || focus);
             if (on == shown) return;
             shown = on;
-            To2("Offset", new(on ? 0 : wide - size, 0));
-            To2("Size", new(on ? wide : size, size));
-            To("Opacity", on ? 1 : 0, 160, on);
-            To("Translation.X", on ? 0 : 14, 300, on);
+            Scale(fv, on ? 1 : 0.01f, 340);
+            Fade(fv, on ? 1 : 0, on ? 1 : 60, on ? 0 : 260);
+            Fade(dv, on ? 1 : 0, 180);
+            Fade(lv, on ? 0 : 1, 180);
+            Press();
         }
-        play.RegisterPropertyChangedCallback(Microsoft.UI.Xaml.Controls.Primitives.ButtonBase.IsPressedProperty, (_, _) =>
-        {
-            var to = play.IsPressed ? 0.9f : 1f;
-            var a = c.CreateVector3KeyFrameAnimation();
-            a.InsertKeyFrame(1, new(to, to, 1), ease);
-            a.Duration = Ms(play.IsPressed ? 100 : 320);
-            pv.StartAnimation("Scale", a);
-        });
+        play.RegisterPropertyChangedCallback(Microsoft.UI.Xaml.Controls.Primitives.ButtonBase.IsPressedProperty, (_, _) => Press());
         play.GotFocus += (_, _) => { focus = play.FocusState == FocusState.Keyboard; Open(); };
         play.LostFocus += (_, _) => { focus = false; Open(); };
         return (play, on => { over = on; Open(); });
