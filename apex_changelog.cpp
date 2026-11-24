@@ -19,6 +19,10 @@ constexpr const char* k407Improved[] = {
     "RTX Remix bridge: the game keeps its graphics settings on every start",
     nullptr};
 
+constexpr const char* k410Added[] = {
+    "Apex Launcher: replaces Apex Radiance Setup, to play, check the game and sort mods, saves and pictures",
+    nullptr};
+
 constexpr const char* k4014Improved[] = {
     "Performance: Faster text lookups names the mod that keeps it off, and Setup warns about it",
     nullptr};
@@ -806,6 +810,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.1.0", "2026-11-24", k410Added, nullptr, nullptr, "Apex Radiance Setup becomes Apex Launcher, your home for playing The Sims 3"},
     {"4.0.14", "2026-11-23", nullptr, k4014Improved, k4014Fixed},
     {"4.0.13", "2026-11-20", k4013Added, k4013Improved, k4013Fixed, "4K videos, and ReShade looks that leave Sims' hair alone"},
     {"4.0.12", "2026-11-20", nullptr, k4012Improved, k4012Fixed},

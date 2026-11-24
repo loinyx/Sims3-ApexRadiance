@@ -171,6 +171,8 @@ const I18n::Pair kPairs[] = {
     {"Pie menus and names show faster with a lot of custom content", "自訂內容很多時，圓形選單和名稱顯示得更快"},
     {"Every name and text the game shows (pie menus, tooltips, catalog names) is looked up in each of its string tables in turn, one table per package with text, so thousands of custom content packages make every lookup slower. This keeps one index of the tables already loaded and goes straight to the table that answers, with the same text. Part of Apex Radiance. Credits: @loinyx", "遊戲顯示的每個名稱和文字（圓形選單、提示、目錄名稱）都會依序在它的每個字串表中查詢，每個含文字的套件一張表，因此成千上萬個自訂內容套件會讓每次查詢都變慢。此功能為已載入的表保留一個索引，直接找到給出答案的那張表，文字完全相同。Apex Radiance 的一部分。Credits: @loinyx"},
     {"4K videos, and ReShade looks that leave Sims' hair alone", "4K 影片，以及不影響模擬市民頭髮的 ReShade 風格"},
+    {"Apex Radiance Setup becomes Apex Launcher, your home for playing The Sims 3", "Apex Radiance Setup 現已成為 Apex Launcher，你玩模擬市民 3 的起點"},
+    {"Apex Launcher: replaces Apex Radiance Setup, to play, check the game and sort mods, saves and pictures", "Apex Launcher：取代 Apex Radiance Setup，可開始遊戲、檢查遊戲，並整理模組、存檔和照片"},
     {"Performance: Faster text lookups names the mod that keeps it off, and Setup warns about it", "效能：「更快的文字查詢」會說出讓它保持關閉的模組，安裝程式也會提示"},
     {"Night Lights: the game no longer freezes at the loading screen in rare starts", "夜間燈光：在少數啟動中遊戲不再卡在載入畫面"},
     {"Shaders: ReShade Effect Shader Toggler .ini files choose where each shader runs", "著色器：ReShade Effect Shader Toggler 的 .ini 檔案可選擇每個著色器的作用位置"},
