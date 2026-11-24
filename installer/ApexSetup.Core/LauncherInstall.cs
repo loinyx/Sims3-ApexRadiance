@@ -81,7 +81,8 @@ public static partial class LauncherInstall
             File.Copy(exe, target, true);
         }
         File.WriteAllText(MarkerOf(target), "Apex Launcher runs from this folder without installing. Delete this file to be asked again.\r\n");
-        RemoveTraces();
+        // (the shortcuts and Installed apps entry are the installed copy's: they go only when this is that copy, or there is none)
+        if (installed || !File.Exists(Paths.InstalledExe)) RemoveTraces();
         if (!moved) return target;
         Handover(target, args, start);
         if (installed) RemoveNowOrAfterExit(Paths.InstallDir);

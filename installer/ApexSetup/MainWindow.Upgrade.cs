@@ -288,7 +288,9 @@ public sealed partial class MainWindow
         top.Children.Add(chips);
         card.Children.Add(top);
         // the copy it came from (Downloads, usually): deleted on Open, ticked by default
-        var old = _upgradeFrom is { } f && File.Exists(f) && !LauncherInstall.IsInstalledCopy(f) ? f : null;
+        // (only a launcher exe is offered for deleting, whatever the command line names)
+        var old = _upgradeFrom is { } f && File.Exists(f) && !LauncherInstall.IsInstalledCopy(f) && f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            && SelfUpdate.Products.Contains(System.Diagnostics.FileVersionInfo.GetVersionInfo(f).ProductName) ? f : null;
         if (old is not null)
         {
             var box = new CheckBox { IsChecked = _upgradeDelete, MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch };

@@ -21,11 +21,29 @@ public static class Paths
     public static bool MovedFromSetup { get; private set; }
     public static void MigrateOldData()
     {
+        var old = Path.Combine(LocalAppData, "Apex Radiance Setup");
+        if (!Directory.Exists(old)) return;
         try
         {
-            var old = Path.Combine(LocalAppData, "Apex Radiance Setup");
-            if (Directory.Exists(old) && !Directory.Exists(Data)) { Directory.Move(old, Data); MovedFromSetup = true; }
+            if (!Directory.Exists(Data)) { Directory.Move(old, Data); MovedFromSetup = true; return; }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // (in use: the old files stay where they are)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // (in use: copied below instead)
+        // an old folder still there (in use when the move was tried, or left by an earlier start): what the new folder lacks
+        // is copied once, so the remembered games and the language are never stranded; the old files stay for the old Setup
+        var done = Path.Combine(old, ".copied-to-apex-launcher");
+        if (File.Exists(done)) return;
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(old, "*", SearchOption.AllDirectories))
+            {
+                var to = Path.Combine(Data, Path.GetRelativePath(old, f));
+                if (File.Exists(to)) continue;
+                Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                File.Copy(f, to);
+            }
+            File.WriteAllText(done, "");
+            MovedFromSetup = true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // (next start tries again)
     }
 }

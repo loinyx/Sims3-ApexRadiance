@@ -20,6 +20,39 @@ public static class Elevation
         }
     }
 
+    // Raised by a UAC prompt (a full token split from the player's limited one), not merely an administrator: with UAC off, or
+    // on the built-in Administrator account, every process holds admin rights and is the player's own, so the restart as the
+    // player and the refusal to start the game must not apply (they looped and refused Play forever there)
+    public static bool IsUacElevated
+    {
+        get
+        {
+            try
+            {
+                using var id = WindowsIdentity.GetCurrent();
+                return GetTokenInformation(id.Token, 18 /* TokenElevationType */, out var type, sizeof(int), out _) && type == 2 /* TokenElevationTypeFull */;
+            }
+            catch (Exception) { return false; }
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
+
+    // (a restart as the player that lands elevated again, within half a minute, runs here instead of restarting once more)
+    public static bool RestartedRecently()
+    {
+        var stamp = Path.Combine(Paths.Ops, "restart-as-player.stamp");
+        try
+        {
+            if (File.Exists(stamp) && DateTime.Now - File.GetLastWriteTime(stamp) < TimeSpan.FromSeconds(30)) return true;
+            Directory.CreateDirectory(Paths.Ops);
+            File.WriteAllText(stamp, "");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return false;
+    }
+
     // a file created and deleted in Game\Bin and its backup folder: Program Files says no to a player without admin rights.
     // The manifest turns UAC's file virtualisation off, so the answer is the real one.
     public static bool CanWrite(string bin)

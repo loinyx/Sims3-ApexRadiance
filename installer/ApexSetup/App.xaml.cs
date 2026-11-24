@@ -106,7 +106,7 @@ public partial class App : Application
             try
             {
                 // never installs by itself: a first start (NotChosen) opens here and the window asks installed or portable
-                switch (LauncherInstall.FirstStep(self, Elevation.IsElevated))
+                switch (LauncherInstall.FirstStep(self, Elevation.IsUacElevated && !Elevation.RestartedRecently()))
                 {
                     // started as administrator and not installed (the update an old Setup started): again as the player
                     case StartStep.RestartAsPlayer: if (Elevation.RestartAsPlayer(self)) { Exit(); return; } break;

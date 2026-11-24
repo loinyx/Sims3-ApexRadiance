@@ -6,14 +6,14 @@ namespace ApexSetup;
 public static partial class ModLibrary
 {
     // a folder moved into another (never into itself or below itself), its switched-off copy, notes and merges along
-    public static string MoveFolder(string docs, string rel, string intoRel)
+    public static string MoveFolder(string docs, string rel, string intoRel, IReadOnlyCollection<string>? locked = null)
     {
         Engine.CheckWritable();
         var to = Path.Combine(intoRel, Path.GetFileName(rel));
         if (to.Equals(rel, StringComparison.OrdinalIgnoreCase)) return rel;
         if (intoRel.Equals(rel, StringComparison.OrdinalIgnoreCase) || intoRel.StartsWith(rel + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new SetupException("A folder can't be moved into itself.");
-        MoveWithOffCopy(docs, rel, to);
+        MoveWithOffCopy(docs, rel, to, locked: locked);
         return to;
     }
 

@@ -96,6 +96,9 @@ public static class Mods
         Engine.CheckWritable(); // (dry run, or the game running: the game holds its packages open)
         if (m.Enabled == on) return m.Path;
         var under = Path.GetRelativePath("Mods", m.Rel);
+        // (a Resource.cfg that also reads the switched-off folder would keep loading the mod: said, not pretended)
+        if (!on && ModLibrary.LoadedBy(docs) is { } loaded && loaded(Path.Combine(DisabledName, under)))
+            throw new SetupException(@"Mods\Resource.cfg also loads the folder for switched-off mods, so the game would still load it. Narrow Resource.cfg's PackedFile lines first.");
         var target = Free(Path.Combine(on ? Path.Combine(docs, "Mods") : Disabled(docs), under));
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         Fs.Retry(() => File.Move(m.Path, target)); // (an antivirus or OneDrive scan holds a file a moment)

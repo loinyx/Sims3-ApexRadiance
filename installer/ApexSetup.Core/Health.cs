@@ -34,11 +34,13 @@ public static class Health
         // the script errors since the last game start, at most a week back (a game started without the launcher records no
         // start, so the last recorded one can be long ago); Read takes the crash logs of the whole week either way
         var week = DateTime.Now.AddDays(-7);
-        Add("script errors", () => ScriptErrors.Findings(ScriptErrors.Read(docs, SessionHistory.List().FirstOrDefault()?.Started is { } s && s > week ? s : week, mods))
+        // (one read for both: the crash logs of the week come with it, which is what the timeline needs)
+        ScriptErrors.Report? report = null;
+        Add("script errors", () => ScriptErrors.Findings(report = ScriptErrors.Read(docs, SessionHistory.List().FirstOrDefault()?.Started is { } s && s > week ? s : week, mods))
             .Select(m => new Item(m.Finding, HealthArea.Stability, m.Files)));
         try
         {
-            var report = ScriptErrors.Read(docs, week, mods);
+            report ??= ScriptErrors.Read(docs, week, mods);
             Timeline = CrashTimeline.Build(SessionHistory.List(), report.Errors, CrashEvidence.Windows(week), ScriptErrors.ApexReport(docs), docs, g.Bin);
         }
         catch (Exception e) { Engine.Log(new InvalidOperationException("Health check timeline failed", e)); }

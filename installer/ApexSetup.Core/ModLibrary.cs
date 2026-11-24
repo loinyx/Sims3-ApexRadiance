@@ -275,24 +275,40 @@ public static partial class ModLibrary
     }
 
     // the folder renamed, and its switched-off copy with it; the new relative path
-    public static string RenameFolder(string docs, string rel, string name)
+    public static string RenameFolder(string docs, string rel, string name, IReadOnlyCollection<string>? locked = null)
     {
         Engine.CheckWritable();
         var to = Path.Combine(Path.GetDirectoryName(rel) ?? "", CleanName(name));
         if (to.Equals(rel, StringComparison.Ordinal)) return rel;
-        MoveWithOffCopy(docs, rel, to, caseOnly: to.Equals(rel, StringComparison.OrdinalIgnoreCase));
+        MoveWithOffCopy(docs, rel, to, caseOnly: to.Equals(rel, StringComparison.OrdinalIgnoreCase), locked: locked);
         return to;
     }
 
     // a folder and its switched-off copy to another place under Mods, both or neither (else the mods in the copy left behind
     // come back under the old name when turned on); its notes and merges follow
-    static void MoveWithOffCopy(string docs, string rel, string to, bool caseOnly = false)
+    static void MoveWithOffCopy(string docs, string rel, string to, bool caseOnly = false, IReadOnlyCollection<string>? locked = null)
     {
         var from = Under(docs, rel);
         var target = Under(docs, to);
         var offFrom = Path.Combine(Mods.Disabled(docs), rel);
         var offTo = Path.Combine(Mods.Disabled(docs), to);
         var off = Directory.Exists(offFrom);
+        // (files the launcher installed stay where its install record says: moved, an uninstall misses them and a repair
+        // puts a second copy that loads twice)
+        bool Inside(string f, string dir) => f.StartsWith(dir.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        if (locked is not null && locked.Any(f => Inside(f, from) || off && Inside(f, offFrom)))
+            throw new SetupException("This folder holds files the launcher installed. Turn them on or off in Components instead.");
+        // (a folder Resource.cfg loads, moved where it doesn't: the game would stop loading every mod in it)
+        if (!caseOnly && LoadedBy(docs) is { } loaded && Directory.Exists(from))
+        {
+            var mods = Path.Combine(docs, "Mods");
+            foreach (var f in Directory.EnumerateFiles(from, "*.package", SearchOption.AllDirectories))
+            {
+                var now = Path.GetRelativePath(mods, f);
+                var then = Path.GetRelativePath(mods, Path.Combine(target, Path.GetRelativePath(from, f)));
+                if (loaded(now) && !loaded(then)) throw new SetupException("The game wouldn't load the mods in this folder there: Mods\\Resource.cfg doesn't read that place.");
+            }
+        }
         if (!caseOnly && (Directory.Exists(target) || off && Directory.Exists(offTo))) throw new SetupException("A folder with that name already exists here.");
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         Directory.Move(from, target);

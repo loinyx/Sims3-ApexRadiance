@@ -153,7 +153,7 @@ public sealed partial class MainWindow
         var shown = ShowDialog(d);
         MergeResult? result = null;
         Exception? error = null;
-        try { result = await Task.Run(() => ModMerge.Run(plan, progress, cts.Token)); }
+        try { result = await ModWork(() => ModMerge.Run(plan, progress, cts.Token)); }
         catch (Exception e) { error = e; App.Log(e); }
         running = false;
         timer.Stop();
@@ -197,7 +197,7 @@ public sealed partial class MainWindow
         var info = ModMerge.Info(r.File);
         if (!await Confirm(T("Split {0}?", r.Name), T("Its {0} original mods go back where they were, checked against the saved copies. The merged package goes to the Recycle Bin.", info?.Originals.Count ?? 0), T("Split"))) return;
         List<ModFile>? back = null;
-        try { back = await Task.Run(() => ModMerge.Split(Docs, r.File)); }
+        try { back = await ModWork(() => ModMerge.Split(Docs, r.File)); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The split did not finish"), ErrorText(e)); }
         if (back is not null) ModsResult(T("{0} mods put back", back.Count), null);
         _modsLoaded = false;

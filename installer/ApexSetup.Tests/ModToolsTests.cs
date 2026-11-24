@@ -138,6 +138,21 @@ static class ModToolsTests
                 "folders: a rename onto a turned-off folder's name is refused; a move whose turned-off copy can't follow is undone");
             foreach (var d in new[] { Path.Combine(mods, "Packages", "E"), Path.Combine(Mods.Disabled(docs), "Packages", "E"), Path.Combine(Mods.Disabled(docs), "Packages", "F") }) Directory.Delete(d, true);
 
+            // a folder holding a file the launcher installed stays; one Resource.cfg loads stays where it loads; and turning a
+            // mod off is refused when Resource.cfg also reads the switched-off folder
+            Write(Path.Combine(mods, "Packages", "G", "managed.package"), "g");
+            var lockedRefused = Refused(() => ModLibrary.RenameFolder(docs, Path.Combine("Packages", "G"), "H", [Path.Combine(mods, "Packages", "G", "managed.package")]));
+            var cfg = Path.Combine(mods, "Resource.cfg");
+            var cfgBefore = File.Exists(cfg) ? File.ReadAllText(cfg) : null;
+            File.WriteAllText(cfg, "PackedFile Packages/*.package\r\nPackedFile Packages/*/*.package\r\n");
+            var deepRefused = Refused(() => ModLibrary.MoveFolder(docs, Path.Combine("Packages", "G"), Path.Combine("Packages", "B")));
+            File.WriteAllText(cfg, "PackedFile */*.package\r\nPackedFile */*/*.package\r\nPackedFile */*/*/*.package\r\n");
+            var offRefused = Refused(() => Mods.SetEnabled(list().Single(m => m.Name == "managed.package"), false, docs));
+            if (cfgBefore is null) File.Delete(cfg); else File.WriteAllText(cfg, cfgBefore);
+            check(lockedRefused && deepRefused && offRefused && File.Exists(Path.Combine(mods, "Packages", "G", "managed.package")),
+                "folders: a launcher file's folder, a move out of Resource.cfg's reach and a switch-off it would still load are refused");
+            Directory.Delete(Path.Combine(mods, "Packages", "G"), true);
+
             // files added, every one checked first: real packages go in, a zip's by name only; a Sims 4 package, a protected
             // one, a cut-short one, an empty one, text named .package, a Sims3Pack and a file already installed are not added,
             // each with its reason

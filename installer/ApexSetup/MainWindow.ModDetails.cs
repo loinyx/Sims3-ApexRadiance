@@ -472,7 +472,7 @@ public sealed partial class MainWindow
             ModsInfo.Title = addFiles.Count > 0 ? T("Merging again with the new mods…") : T("Merging the rest again…");
             ModsInfo.Message = "";
             ModMerge.TakeOutResult? res = null;
-            try { res = await Task.Run(() => ModMerge.Edit(Docs, r.File, outRels, addFiles)); }
+            try { res = await ModWork(() => ModMerge.Edit(Docs, r.File, outRels, addFiles)); }
             catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merged package couldn't be changed"), ErrorText(e)); }
             if (res is not null) ModsResult(res.Remerged is { } m ? T("{0} now holds {1} mods", m.Merged.Name, m.Mods) : T("Every mod is separate again"), null);
             // (read again after a failure too: the split may be done, with the merged file already in the Recycle Bin)
@@ -513,7 +513,7 @@ public sealed partial class MainWindow
         ModsInfo.Title = T("Taking {0} out of the merge…", name);
         ModsInfo.Message = "";
         ModMerge.TakeOutResult? res = null;
-        try { res = await Task.Run(() => ModMerge.TakeOut(Docs, r.File, rels)); }
+        try { res = await ModWork(() => ModMerge.TakeOut(Docs, r.File, rels)); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merged package couldn't be changed"), ErrorText(e)); }
         _modsLoaded = false;
         _folderSig = "";

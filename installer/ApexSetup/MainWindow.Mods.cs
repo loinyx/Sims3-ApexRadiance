@@ -663,7 +663,7 @@ public sealed partial class MainWindow
         string? to = null;
         await ModsChange(() =>
         {
-            to = ModLibrary.RenameFolder(Docs, dir, name);
+            to = ModLibrary.RenameFolder(Docs, dir, name, LockedFiles());
             if (_modPlace.Equals(dir, StringComparison.OrdinalIgnoreCase) || _modPlace.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 _modPlace = to + _modPlace[dir.Length..];
         }, T("Folder renamed"), () => { if (to is not null) Safe(RenameFolderAsync(to, Path.GetFileName(dir))); });
@@ -675,7 +675,7 @@ public sealed partial class MainWindow
         var from = Path.GetDirectoryName(dir) ?? "";
         await ModsChange(() =>
         {
-            to = ModLibrary.MoveFolder(Docs, dir, into);
+            to = ModLibrary.MoveFolder(Docs, dir, into, LockedFiles());
             if (_modPlace.Equals(dir, StringComparison.OrdinalIgnoreCase)) _modPlace = to;
         }, T("{0} moved into {1}", Path.GetFileName(dir), Path.GetFileName(into)), () => { if (to is not null) Safe(MoveFolderAsync(to, from)); });
     }
@@ -715,6 +715,9 @@ public sealed partial class MainWindow
 
     // (a drag let go outside a target or cancelled with Esc: a later drop from Explorer must not act on these rows)
     void OnModDragDone(ListViewBase sender, DragItemsCompletedEventArgs e) { _dragRows = null; DragEnded?.Invoke(); }
+
+    // the files the launcher installed (Components turns them on and off): a folder holding one stays where it is
+    List<string> LockedFiles() => _mods.Where(m => m.Locked).Select(m => m.Path).ToList();
 
     void MoveMods(List<ModRow> rows, string dir)
     {
@@ -777,12 +780,8 @@ public sealed partial class MainWindow
     {
         var todo = rows.Where(r => !r.File.Locked && r.File.Enabled != on).ToList();
         _dragRows = null;
-        if (todo.Count <= 1)
-        {
-            foreach (var r in todo) if (ToggleMod(r, on) is { } one) r.Update(one);
-            return;
-        }
-        // many at once: the moves off the UI thread, then the rows and the list once (a refresh per mod froze it for minutes)
+        if (todo.Count == 0) return;
+        // (one or many: the moves off the UI thread, which a file held by an antivirus could otherwise freeze for seconds): the moves off the UI thread, then the rows and the list once (a refresh per mod froze it for minutes)
         var docs = Docs;
         var done = await Task.Run(() =>
         {

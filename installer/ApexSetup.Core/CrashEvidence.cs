@@ -64,9 +64,17 @@ public static class CrashEvidence
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or System.Xml.XmlException or IOException) { Engine.Log(e); return []; }
     }
 
-    static Dictionary<string, string> Data(XElement ev) =>
-        ev.Descendants().Where(e => e.Name.LocalName == "Data" && e.Attribute("Name") is not null)
-            .GroupBy(e => (string)e.Attribute("Name")!).ToDictionary(g => g.Key, g => g.First().Value);
+    // the event's named fields; older Windows 10 builds write Application Error's fields unnamed, in a fixed order
+    static readonly string[] AppErrorOrder = ["AppName", "AppVersion", "AppTimeStamp", "ModuleName", "ModuleVersion", "ModuleTimeStamp", "ExceptionCode", "FaultingOffset"];
+    static Dictionary<string, string> Data(XElement ev)
+    {
+        var all = ev.Descendants().Where(e => e.Name.LocalName == "Data").ToList();
+        if (all.Any(e => e.Attribute("Name") is not null))
+            return all.Where(e => e.Attribute("Name") is not null).GroupBy(e => (string)e.Attribute("Name")!).ToDictionary(g => g.Key, g => g.First().Value);
+        var d = new Dictionary<string, string>();
+        for (int i = 0; i < Math.Min(all.Count, AppErrorOrder.Length); i++) d[AppErrorOrder[i]] = all[i].Value;
+        return d;
+    }
 
     static DateTime TimeOf(XElement ev) =>
         DateTime.TryParse((string?)ev.Descendants().FirstOrDefault(e => e.Name.LocalName == "TimeCreated")?.Attribute("SystemTime"), CultureInfo.InvariantCulture,
@@ -195,7 +203,18 @@ public static class CrashEvidence
         }
     }
 
+    // (one read per file and version: the timeline asks for the same Apex Radiance logs once per session)
+    static readonly Dictionary<string, (DateTime Written, List<string> Lines)> Read = new(StringComparer.OrdinalIgnoreCase);
     static List<string> ReadShared(string path)
+    {
+        var written = File.GetLastWriteTimeUtc(path);
+        lock (Read) if (Read.TryGetValue(path, out var c) && c.Written == written) return c.Lines;
+        var lines = ReadLines(path);
+        lock (Read) Read[path] = (written, lines);
+        return lines;
+    }
+
+    static List<string> ReadLines(string path)
     {
         using var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var r = new StreamReader(s);

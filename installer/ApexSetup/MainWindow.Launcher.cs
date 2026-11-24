@@ -77,6 +77,8 @@ public sealed partial class MainWindow
         {
             try
             {
+                // (a merge cut off during its move, by a closed window or a crash: its originals go back before anything reads the mods or the game starts)
+                try { ModMerge.Recover(docs); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { App.Log(e); }
                 if (mods is null) try { mods = read = Mods.List(g, docs, kinds: false); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
                 return Health.Gather(g, s, docs, apex, mods, mods is null ? null : conflicts);
             }
@@ -1193,6 +1195,14 @@ public sealed partial class MainWindow
 
     // a newer copy was installed while this one runs: this one closes so the new one opens in its place (never in the
     // middle of a change: the new one then shows this window and closes)
+    // mod work (merge, split, take out, edit) off the UI thread, with the window and Quit held until it ends
+    async Task<TR> ModWork<TR>(Func<TR> work)
+    {
+        _busy = true;
+        try { return await Task.Run(work); }
+        finally { _busy = false; }
+    }
+
     public bool QuitForNewerCopy()
     {
         if (_busy) return false;
