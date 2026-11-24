@@ -87,6 +87,7 @@ public sealed partial class MainWindow : Window
         // closing in the middle of an install or a removal would leave the game half changed
         AppWindow.Closing += (w, a) =>
         {
+            if (!_busy && AskLeaveMerge(() => QuitForNewerCopy())) { a.Cancel = true; return; }
             if (!_busy) { _tray?.Dispose(); return; }
             a.Cancel = true;
             _ = Message(T("The launcher is applying changes"), T("Don't close the launcher until it finishes."));
@@ -367,8 +368,9 @@ public sealed partial class MainWindow : Window
         // steps open in order; Install and Done only through the buttons; nothing moves while Setup works
         bool ok = !_busy && (to is Welcome or About or >= Home || to == GameStep || (to == ComponentsStep && CanLeaveGame()) || to == Manage);
         if (!ok) { DispatcherQueue.TryEnqueue(SyncNav); return; }
-        _backTo = -1;
-        Show(to == Manage && _game is null ? GameStep : to);
+        void Go() { _backTo = -1; Show(to == Manage && _game is null ? GameStep : to); }
+        if (_step == ModsScreen && to != ModsScreen && AskLeaveMerge(Go, SyncNav)) return;
+        Go();
     }
 
     bool CanLeaveGame() => _game is not null && !_running;

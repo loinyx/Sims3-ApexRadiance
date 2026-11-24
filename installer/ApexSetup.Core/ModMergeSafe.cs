@@ -18,8 +18,9 @@ public static partial class ModMerge
     // The packages of the merge that change the same game data in different ways, in groups, and those whose order against a
     // loaded package outside it would change. One package holds one copy of a resource, and which copy the game uses is not
     // verified in game, so any choice made here could take a mod's part out: it is the player's.
-    static List<(List<int> Group, SortedSet<string> Outside, int Resources)> Clashes(string docs, string modsDir, List<ModConflicts.Directive> dirs, (int, int, string) target,
-        IReadOnlyList<(MergeSource Src, (int, int, string) Key)> ok)
+    // Keys: what clashes, by package. exclude: the merged file of the merge being changed, which holds copies of its own mods.
+    static List<(List<int> Group, SortedSet<string> Outside, int Resources, Dictionary<int, HashSet<(uint, uint, ulong)>> Keys)> Clashes(string docs, string modsDir, List<ModConflicts.Directive> dirs, (int, int, string) target,
+        IReadOnlyList<(MergeSource Src, (int, int, string) Key)> ok, string? exclude)
     {
         using var read = new Contents();
         var of = Enumerable.Range(0, ok.Count).ToArray(); // (each package's group, by its first one)
@@ -45,6 +46,7 @@ public static partial class ModMerge
         }
 
         var skip = ok.Select(o => Path.GetFullPath(o.Src.Mod.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (exclude is not null) skip.Add(Path.GetFullPath(exclude));
         var off = Path.GetFullPath(Mods.Disabled(docs)) + Path.DirectorySeparatorChar;
         List<string> files = [];
         try { files = Directory.EnumerateFiles(modsDir, "*.package", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true }).ToList(); }
@@ -68,7 +70,7 @@ public static partial class ModMerge
             }
         }
         return keys.Keys.GroupBy(Top).OrderBy(g => g.Key).Select(g => (g.Order().ToList(),
-            new SortedSet<string>(g.SelectMany(i => outside.GetValueOrDefault(i) ?? []), StringComparer.OrdinalIgnoreCase), g.SelectMany(i => keys[i]).Distinct().Count())).ToList();
+            new SortedSet<string>(g.SelectMany(i => outside.GetValueOrDefault(i) ?? []), StringComparer.OrdinalIgnoreCase), g.SelectMany(i => keys[i]).Distinct().Count(), keys)).ToList();
     }
 
     // resources compared by content, each file opened once
@@ -114,8 +116,8 @@ public static partial class ModMerge
 
     // ---------- the names ----------
 
-    // The name maps several packages hold under one key, as one with every name in it (the first one's where two differ), as
-    // s3pe's import does. Null when any can't be read: the first copy is kept then.
+    // The name maps several packages hold under one key, as one with every name in it (the first one's where two differ).
+    // Null when any can't be read: the first copy is kept then.
     static byte[]? JoinNames(IEnumerable<(string Path, ModConflicts.Entry E)> maps)
     {
         var names = new Dictionary<ulong, byte[]>();

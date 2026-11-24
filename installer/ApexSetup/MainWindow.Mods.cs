@@ -44,7 +44,6 @@ public sealed partial class MainWindow
     bool _fillingMods, _modsAgain;
     List<ModRow>? _dragRows;
     string? _dragFolder;
-    readonly Dictionary<string, ModContents> _modContents = new(StringComparer.OrdinalIgnoreCase);
     Action? _modUndo;
     GameIndex? _gameIndex;
 
@@ -103,7 +102,7 @@ public sealed partial class MainWindow
             _modsLoaded = true;
             OfferPutBack(gone);
             Safe(LoadModPicturesAsync(_modRows));
-            Safe(LoadDefaultsAsync(g, _modRows));
+            Safe(LoadMergeUpdatesAsync(LoadDefaultsAsync(g, _modRows), _modRows));
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not read your mods"), ErrorText(e)); }
         finally { _modsLoading = false; }
@@ -294,7 +293,7 @@ public sealed partial class MainWindow
             || ModNotes.TagsOf(m.Rel).Any(t => t.Contains(q, StringComparison.OrdinalIgnoreCase))
             || (CreatorOf(m)?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
             || r.Kinds.Any(k => KindLabel(k).Contains(q, StringComparison.OrdinalIgnoreCase))
-            || _modContents.TryGetValue(m.Path, out var c) && c.Names.Concat(c.PartNames).Any(n => n.Contains(q, StringComparison.OrdinalIgnoreCase))))
+            || _contentNames.TryGetValue(m.Path, out var c) && c.Any(n => n.Contains(q, StringComparison.OrdinalIgnoreCase))))
             return false;
         if (_fFiles.Count > 0 && !_fFiles.Contains(m.FileType)) return false;
         if (_fKinds.Count > 0 && !r.Kinds.Any(_fKinds.Contains)) return false;
@@ -893,7 +892,9 @@ public sealed partial class MainWindow
     {
         foreach (var r in e.AddedItems.OfType<ModRow>()) r.Picked = true;
         foreach (var r in e.RemovedItems.OfType<ModRow>()) r.Picked = false;
-        if (!_fillingMods) { FillModDetails(); FillFooter(); }
+        if (_fillingMods || AskPickedElsewhere()) return;
+        FillModDetails();
+        FillFooter();
     }
 
     // a row's checkbox: in or out of the selection, the rest stays picked
@@ -1363,7 +1364,14 @@ public sealed partial class MainWindow
         panel.ItemHeight = cell + 52;
     }
 
-    void CloseModDetails() { ModList.SelectedItems.Clear(); ModGrid.SelectedItems.Clear(); FillModDetails(); FillFooter(); }
+    void CloseModDetails()
+    {
+        if (AskLeaveMerge(CloseModDetails)) return;
+        ModList.SelectedItems.Clear();
+        ModGrid.SelectedItems.Clear();
+        FillModDetails();
+        FillFooter();
+    }
 
     // the player's choice of type, else the package's own
     static void ApplyKinds(ModRow r)
@@ -1375,7 +1383,8 @@ public sealed partial class MainWindow
     }
 
     // every type, by group, ticked as the mod is now; Done saves it, Back to detected forgets the choice
-    void PickKinds(ModRow r, FrameworkElement anchor)
+    // (inside: a mod inside a merge, whose choice is kept with the merge)
+    void PickKinds(ModRow r, FrameworkElement anchor, Action<List<string>?>? inside = null)
     {
         var picked = r.Kinds.ToHashSet();
         var list = new StackPanel { Spacing = 2 };
@@ -1402,6 +1411,7 @@ public sealed partial class MainWindow
             {
                 // (ticking exactly what the package says is no choice: it stays automatic)
                 var same = kinds is not null && kinds.ToHashSet().SetEquals(r.DetectedKinds);
+                if (inside is not null) { flyout.Hide(); inside(same ? null : kinds?.ToList()); return; }
                 ModNotes.SetKinds(r.File.Rel, same ? null : kinds?.OrderBy(k => r.Kinds.Contains(k) ? r.Kinds.ToList().IndexOf(k) : int.MaxValue));
                 ApplyKinds(r);
                 r.Refresh();
@@ -1412,7 +1422,7 @@ public sealed partial class MainWindow
             catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         }
         var back = new HyperlinkButton { Content = T("Back to detected"), FontSize = 12, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
-            IsEnabled = ModNotes.Get(r.File.Rel)?.Kinds is not null };
+            IsEnabled = inside is not null || ModNotes.Get(r.File.Rel)?.Kinds is not null };
         back.Click += (_, _) => Save(null);
         var done = new Button { Content = T("Done"), Style = (Style)Application.Current.Resources["AccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Right };
         done.Click += (_, _) => { if (picked.Count == 0) Save(null); else Save(picked); };
@@ -1442,7 +1452,8 @@ public sealed partial class MainWindow
         ModDetailsFoot.Children.Clear();
         ModDetailsFoot.ColumnDefinitions.Clear();
         ModDetailsFoot.Visibility = Visibility.Collapsed;
-        var picked = Picked();
+        _mergePaint = null;
+        var picked = DraftRow() is { } open ? [open] : Picked(); // (a merge with changes not saved stays open whatever the list shows)
         ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         // (over the grid the pane would hide whole columns of tiles: the grid makes room for it instead)
         var room = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
@@ -1741,40 +1752,6 @@ public sealed partial class MainWindow
     }
 
     // ---------- what a package holds ----------
-
-    UIElement InsidePanel(ModRow r)
-    {
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(new TextBlock { Text = T("INSIDE"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush") });
-        var path = r.File.Path;
-        void Fill(ModContents c)
-        {
-            while (panel.Children.Count > 1) panel.Children.RemoveAt(1);
-            if (c.Parts.Count == 0 && c.Names.Count == 0)
-            {
-                panel.Children.Add(Muted(r.File.Kind == ModKind.Script ? T("Game code and settings: no objects or Create a Sim parts.") : T("No objects or Create a Sim parts: it changes what the game already has.")));
-                return;
-            }
-            var wrap = new WrapPanel { Spacing = 6 };
-            foreach (var (kind, n) in c.Parts) wrap.Children.Add(Pill(PartsText(kind, n), "ApexSoftTextBrush"));
-            panel.Children.Add(wrap);
-            var names = c.Names.Count > 0 ? c.Names : c.PartNames;
-            const int shown = 8;
-            foreach (var n in names.Take(shown))
-                panel.Children.Add(new TextBlock { Text = "•  " + n, FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
-            var more = c.Parts.Sum(x => x.Count) - Math.Min(shown, names.Count);
-            if (names.Count > 0 && more > 0) panel.Children.Add(Muted(T("and {0} more", more)));
-        }
-        if (_modContents.TryGetValue(path, out var known)) Fill(known);
-        else
-        {
-            panel.Children.Add(Muted(T("Reading what it holds…")));
-            // (a damaged package of any kind reads as empty, never an error box)
-            _ = Task.Run(() => { try { return ModContent.Read(path); } catch (Exception e) { App.Log(e); return new ModContents([], [], []); } })
-                .ContinueWith(t => DispatcherQueue.TryEnqueue(() => { _modContents[path] = t.Result; Fill(t.Result); }));
-        }
-        return panel;
-    }
 
     // "12 objects", "1 hairstyle"
     static string PartsText(string kind, int n) => (kind, n == 1) switch

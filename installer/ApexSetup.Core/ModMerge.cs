@@ -17,6 +17,9 @@ public sealed record MergeDuplicate(string Key, string Kept, IReadOnlyList<strin
 // mods that change the same game data in different ways (Resources of them), and the loaded ones outside the merge whose
 // order against them it would change. They stay out unless the player gives one of them priority.
 public sealed record MergeClash(IReadOnlyList<ModFile> Mods, IReadOnlyList<string> Outside, int Resources);
+// of the resources a mod in the merge holds differently from another one in it: how many are its own copy, and how many
+// another mod's copy replaces (the rest of the mod goes in whole)
+public sealed record MergeShare(int Kept, int Replaced);
 
 public sealed class MergePlan
 {
@@ -25,11 +28,17 @@ public sealed class MergePlan
     public required string TargetPath { get; init; }   // Mods\<folder>\<name>.package
     public required string TargetRel { get; init; }    // as ModFile.Rel
     public required string StoreDir { get; init; }     // Merged (Apex Launcher)\<name> next to Mods, where the originals go
-    public List<ModFile> Inputs { get; } = new();      // in the game's load order (the first one wins a shared key)
-    public List<MergeSkip> Skipped { get; } = new();
+    public List<ModFile> Inputs { get; } = new();      // in the merge's order (the first one wins a shared key)
+    public List<MergeSkip> Skipped { get; } = new();   // (of a merge in parts: on the first part)
     public List<MergeDuplicate> Duplicates { get; } = new();
-    public List<MergeClash> Clashes { get; } = new();
-    public IReadOnlyList<string> Priority { get; init; } = []; // the mods that go in though they clash, as Rels, the first one's copy kept
+    public List<MergeClash> Clashes { get; } = new();  // (of a merge in parts: on the first part)
+    // The player's order, as Rels, the first one's copy kept. A mod that clashes goes in only when it is listed here; the
+    // mods that clash with nothing follow the listed ones in the game's load order.
+    public IReadOnlyList<string> Order { get; init; } = [];
+    public IReadOnlyList<string> Priority => Order;    // (the name the plan dialog reads)
+    public Dictionary<string, MergeShare> Shares { get; } = new(StringComparer.OrdinalIgnoreCase); // by Rel, the mods that clash and go in
+    // the script mods set aside: they can be merged on their own, as a second merge
+    public IEnumerable<ModFile> Scripts => Skipped.Where(s => s.Reason.Key == ModMerge.ScriptReason).Select(s => s.Mod);
     public List<MergeReason> Refusals { get; } = new();
     public int Resources { get; internal set; }
     public long OutputBytes { get; internal set; }      // exact: header, stored resource bytes, index
@@ -38,9 +47,13 @@ public sealed class MergePlan
     internal List<MergeSource> Sources { get; } = new();
     internal long Data => Sources.Sum(s => s.Keep.Sum(e => (long)e.FileSize)) + Made.Sum(m => (long)m.Data.Length);
     internal List<(ModConflicts.Entry E, byte[] Data)> Made { get; } = new(); // written by the merge itself: joined name maps
+    internal EditOf? Of { get; init; }                  // the merge this plan changes, when it is not a new one
 }
 
 internal sealed record MergeSource(ModFile Mod, long Size, DateTime Written, List<ModConflicts.Entry> Keep);
+// A plan for a merge that exists: its file and record, and the files it takes as they are (its own kept originals and files
+// from outside Mods, which are no mods of the list)
+internal sealed record EditOf(MergeRecord Rec, ModFile Merged, HashSet<string> Held);
 
 public enum MergeStep { Check, Write, Verify, Move, Finish }
 // Done / Total: bytes in Check, Write and Verify, files in Move
@@ -64,9 +77,17 @@ public sealed class MergeRecord
     public long Size { get; set; }
     public int Resources { get; set; }
     public DateTime Created { get; set; }
-    public List<MergeOriginal> Originals { get; set; } = new();
-    public List<string> Priority { get; set; } = new(); // the player's choice between mods that clash (MergePlan.Priority)
+    public List<MergeOriginal> Originals { get; set; } = new(); // in the merge's order (the first one wins a shared key)
+    public List<string> Priority { get; set; } = new(); // the player's choice between mods that clash (MergePlan.Order)
+    public MergePending? Pending { get; set; }          // a change being made (ModMergeTakeOut): undone when found at the next start
     [System.Text.Json.Serialization.JsonIgnore] public string Dir { get; set; } = "";
+}
+// Paths relative to Documents\...\The Sims 3. Copy: To is a copy the change made (undone by removing it).
+public sealed record MergeMove(string From, string To, bool Copy = false);
+public sealed class MergePending
+{
+    public List<MergeMove> Moves { get; set; } = new();
+    public string? Tmp { get; set; }                    // the new merged file while it is not in place
 }
 
 // Merge packages into one: the plan says what goes in (mods that change the same game data in different ways stay out, see
@@ -98,120 +119,184 @@ public static partial class ModMerge
     static string UnderMods(string rel) => Path.GetRelativePath("Mods", rel);
 
     public const string ClashReason = "Changes the same game data as {0}. A merge keeps only one version.";
+    public const string ScriptReason = "A script mod: left out unless you include scripts.";
+    public const string LeftOutReason = "You left it out.";
+    public const long PartBytes = 1L << 30; // (the size asked of one part of a merge in parts: the game is a 32-bit program)
 
     // ---------- plan ----------
-    public static MergePlan Plan(string docs, IReadOnlyList<ModFile> mods, string name, string folderRel, bool includeScripts, IReadOnlyList<string>? priority = null)
+    // order: the player's order, as Rels, the first one's copy kept where two mods hold a resource differently. A mod that
+    // clashes goes in only when it is in the order, so one the player has not decided on stays out. leaveOut: the mods the
+    // player leaves out (they stay in the plan, skipped, so the choice can be shown and taken back).
+    public static MergePlan Plan(string docs, IReadOnlyList<ModFile> mods, string name, string folderRel, bool includeScripts, IReadOnlyList<string>? order = null, IReadOnlyCollection<string>? leaveOut = null)
+        => Plans(docs, mods, name, folderRel, includeScripts, order, leaveOut, long.MaxValue, null)[0];
+
+    // The same merge as several packages of about partBytes at most, "Name 1", "Name 2": each one a merge of its own, to
+    // run, split and edit on its own. Mods that clash share a part, so whose copy counts does not depend on the order the
+    // game loads the parts in. One plan, under the plain name, when everything fits in one part.
+    public static List<MergePlan> PlanParts(string docs, IReadOnlyList<ModFile> mods, string name, string folderRel, bool includeScripts, IReadOnlyList<string>? order = null, IReadOnlyCollection<string>? leaveOut = null, long partBytes = PartBytes)
+        => Plans(docs, mods, name, folderRel, includeScripts, order, leaveOut, partBytes, null);
+
+    static List<MergePlan> Plans(string docs, IReadOnlyList<ModFile> mods, string name, string folderRel, bool includeScripts, IReadOnlyList<string>? order, IReadOnlyCollection<string>? leaveOut, long partBytes, EditOf? of)
     {
+        order ??= [];
         var modsDir = Path.GetFullPath(Path.Combine(docs, "Mods"));
         if (name.EndsWith(".package", StringComparison.OrdinalIgnoreCase)) name = name[..^8];
-        var refusals = new List<MergeReason>();
-        try { name = ModLibrary.CleanName(name); }
-        catch (SetupException e) { refusals.Add(new(e.Key, e.Args)); }
-        if (name.Equals(FolderName, StringComparison.OrdinalIgnoreCase)) refusals.Add(R("That name is taken by the launcher's own folder."));
+        var common = new List<MergeReason>();
         var folderFull = Path.GetFullPath(Path.Combine(modsDir, folderRel));
         bool Inside(string full, string dir) => full.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || full.Equals(dir, StringComparison.OrdinalIgnoreCase);
         if (!Inside(folderFull, modsDir) || Inside(folderFull, Path.GetFullPath(Mods.Disabled(docs))) || Inside(folderFull, Path.GetFullPath(OldFolder(docs))))
         {
-            refusals.Add(R("That folder is outside Mods."));
+            common.Add(R("That folder is outside Mods."));
             folderFull = modsDir;
         }
-        var targetRel = Path.Combine("Mods", Path.GetRelativePath(modsDir, Path.Combine(folderFull, name + ".package")));
-        var plan = new MergePlan
-        {
-            Docs = docs, Name = name, TargetPath = Path.Combine(folderFull, name + ".package"), TargetRel = targetRel,
-            StoreDir = Path.Combine(Folder(docs), name), Priority = priority ?? [],
-        };
-        plan.Refusals.AddRange(refusals);
         try { Engine.CheckWritable(); }
-        catch (SetupException e) { plan.Refusals.Add(new(e.Key, e.Args)); }
-        catch (InvalidOperationException e) { plan.Refusals.Add(R(e.Message)); } // (dry run)
-        // (a store left holding only merge.json is what an earlier split could not delete: cleaned first, it holds no original)
-        if (!File.Exists(plan.TargetPath)) DeleteStore(plan.StoreDir);
-        if (File.Exists(plan.TargetPath) || File.Exists(Path.Combine(Mods.Disabled(docs), UnderMods(targetRel))) || Directory.Exists(plan.StoreDir))
-            plan.Refusals.Add(R("A file or merge named {0} already exists here.", name));
-
+        catch (SetupException e) { common.Add(new(e.Key, e.Args)); }
+        catch (InvalidOperationException e) { common.Add(R(e.Message)); } // (dry run)
         var cfg = Path.Combine(modsDir, "Resource.cfg");
-        if (!File.Exists(cfg)) { plan.Refusals.Add(R("There is no Resource.cfg in Mods, so the game loads no packages from there.")); return plan; }
-        var dirs = ModConflicts.ParseResourceCfg(File.ReadAllText(cfg));
-        if (ModConflicts.LoadKey(dirs, Slash(UnderMods(targetRel))) is null)
-            plan.Refusals.Add(R("The game does not load packages from {0} (Resource.cfg).", Path.GetDirectoryName(targetRel) ?? "Mods"));
+        var dirs = File.Exists(cfg) ? ModConflicts.ParseResourceCfg(File.ReadAllText(cfg)) : null;
+        var skipped = new List<MergeSkip>();
+        var clashes = new List<MergeClash>();
+        var clashKeys = new Dictionary<string, HashSet<(uint, uint, ulong)>>(StringComparer.OrdinalIgnoreCase); // (by Rel)
+        var groupOf = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        // one package of the merge: the name and place checked, then what each mod puts in it
+        MergePlan Make(string n, List<(MergeSource Src, (int, int, string) Key)> part)
+        {
+            var refusals = new List<MergeReason>();
+            try { n = ModLibrary.CleanName(n); }
+            catch (SetupException e) { refusals.Add(new(e.Key, e.Args)); }
+            // (a merge that is off is written where it is, under the folder for switched-off mods)
+            var targetPath = Path.Combine(of is null ? folderFull : Path.GetDirectoryName(of.Merged.Path)!, n + ".package");
+            var targetRel = Path.Combine("Mods", Path.GetRelativePath(modsDir, Path.Combine(folderFull, n + ".package")));
+            var plan = new MergePlan { Docs = docs, Name = n, TargetPath = targetPath, TargetRel = targetRel, StoreDir = of?.Rec.Dir ?? Path.Combine(Folder(docs), n), Order = order, Of = of };
+            plan.Refusals.AddRange(refusals);
+            plan.Refusals.AddRange(common);
+            var (on, off) = (Path.Combine(docs, targetRel), Path.Combine(Mods.Disabled(docs), UnderMods(targetRel)));
+            // (a store left holding only merge.json is what an earlier split could not delete: cleaned first, it holds no original)
+            if (of is null && !File.Exists(on)) DeleteStore(plan.StoreDir);
+            if (of is null ? File.Exists(on) || File.Exists(off) || Directory.Exists(plan.StoreDir) : !targetRel.Equals(of.Merged.Rel, StringComparison.OrdinalIgnoreCase) && (File.Exists(on) || File.Exists(off)))
+                plan.Refusals.Add(R("A file or merge named {0} already exists here.", n));
+            if (targetPath.Length >= ModLibrary.MaxGamePath) plan.Refusals.Add(R("That name is too long for the game to read. Use a shorter one."));
+            if (dirs is null) { plan.Refusals.Add(R("There is no Resource.cfg in Mods, so the game loads no packages from there.")); return plan; }
+            if (ModConflicts.LoadKey(dirs, Slash(UnderMods(targetRel))) is null)
+                plan.Refusals.Add(R("The game does not load packages from {0} (Resource.cfg).", Path.GetDirectoryName(targetRel) ?? "Mods"));
+            if (part.Count < 2) plan.Refusals.Add(R("Pick at least two packages that can be merged."));
+
+            // a resource several packages hold alike goes in once; a package's own repeats of one stay
+            var owner = new Dictionary<(uint, uint, ulong), int>();
+            var dropped = new Dictionary<(uint, uint, ulong), List<string>>();
+            var names = new Dictionary<(uint, uint, ulong), List<(int I, ModConflicts.Entry E)>>();
+            for (var i = 0; i < part.Count; i++)
+            {
+                var (src, _) = part[i];
+                var all = src.Keep.ToList();
+                src.Keep.Clear();
+                foreach (var e in all)
+                {
+                    var k = (e.Type, e.Group, e.Instance);
+                    if (e.Type == NameMap) (names.TryGetValue(k, out var m) ? m : names[k] = new()).Add((i, e));
+                    if (owner.TryAdd(k, i) || owner[k] == i) { src.Keep.Add(e); continue; }
+                    if (!dropped.TryGetValue(k, out var l)) dropped[k] = l = new();
+                    if (!l.Contains(src.Mod.Rel)) l.Add(src.Mod.Rel);
+                }
+                plan.Inputs.Add(src.Mod);
+                plan.Sources.Add(src);
+            }
+            foreach (var (k, l) in dropped)
+                plan.Duplicates.Add(new($"{k.Item1:x8}:{k.Item2:x8}:{k.Item3:x16}", part[owner[k]].Src.Mod.Rel, l));
+            for (var i = 0; i < part.Count; i++)
+                if (clashKeys.TryGetValue(part[i].Src.Mod.Rel, out var mine))
+                    plan.Shares[part[i].Src.Mod.Rel] = new(mine.Count(k => owner.GetValueOrDefault(k, -1) == i && dropped.ContainsKey(k)), mine.Count(k => owner.TryGetValue(k, out var o) && o != i));
+            foreach (var (k, l) in names.Where(x => x.Value.Any(y => y.I != x.Value[0].I)))
+                if (JoinNames(l.Select(x => (part[x.I].Src.Mod.Path, x.E))) is { } joined)
+                {
+                    part[owner[k]].Src.Keep.RemoveAll(e => (e.Type, e.Group, e.Instance) == k);
+                    plan.Made.Add((new(k.Item1, k.Item2, k.Item3, 0, joined.Length, (uint)joined.Length, 0), joined));
+                }
+            plan.Resources = plan.Sources.Sum(s => s.Keep.Count) + plan.Made.Count;
+            plan.OutputBytes = 96 + plan.Data + 4 + 32L * plan.Resources;
+            if (plan.OutputBytes > MaxBytes) plan.Refusals.Add(R("The merged package would be over 2 GB."));
+            if (plan.Resources > MaxEntries) plan.Refusals.Add(R("The merged package would hold too many resources."));
+            return plan;
+        }
+        if (dirs is null) return [Make(name, [])];
 
         var ok = new List<(MergeSource Src, (int, int, string) Key)>();
         foreach (var m in mods)
         {
             MergeReason? why = null;
             List<ModConflicts.Entry>? entries = null;
-            var relMods = Slash(UnderMods(m.Rel));
-            var key = ModConflicts.LoadKey(dirs, relMods);
+            var held = of?.Held.Contains(m.Path) == true;
+            var key = ModConflicts.LoadKey(dirs, Slash(UnderMods(m.Rel)));
             if (m.FileType != "package" || !m.Rel.StartsWith("Mods" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) why = R("Not a package in Mods.");
             else if (m.Locked) why = R("Part of what the launcher installs.");
-            else if (!m.Enabled) why = R("Turned off.");
-            else if (Keeps(docs, m.Path)) why = R("Kept by an earlier merge.");
+            else if (!held && !m.Enabled) why = R("Turned off.");
+            else if (!held && Keeps(docs, m.Path)) why = R("Kept by an earlier merge.");
             else if (m.Name.StartsWith('~') || m.Name.Contains(".tmp", StringComparison.OrdinalIgnoreCase)) why = R("A temporary file.");
             else if (key is null) why = R("The game does not load it (Resource.cfg).");
             else
             {
                 (entries, why) = Probe(m.Path);
-                if (entries is not null && !includeScripts && entries.Any(e => e.Type == ModConflicts.TypeS3sa)) why = R("A script mod: left out unless you include scripts.");
+                if (entries is not null && !includeScripts && entries.Any(e => e.Type == ModConflicts.TypeS3sa)) why = R(ScriptReason);
             }
-            if (why is not null) { plan.Skipped.Add(new(m, why)); continue; }
+            if (why is not null) { skipped.Add(new(m, why)); continue; }
             var fi = new FileInfo(m.Path);
             ok.Add((new MergeSource(m, fi.Length, fi.LastWriteTimeUtc, entries!), key!.Value));
         }
         ok.Sort((a, b) => ModConflicts.CompareKey(a.Key, b.Key));
 
-        // (mods that clash stay out, unless the player said whose copy to keep: that one comes first)
-        if (ModConflicts.LoadKey(dirs, Slash(UnderMods(targetRel))) is { } tk)
+        // (mods that clash stay out, unless the player's order says whose copy to keep: the first one's)
         {
-            int Rank(int i) => plan.Priority.ToList().FindIndex(r => r.Equals(ok[i].Src.Mod.Rel, StringComparison.OrdinalIgnoreCase));
+            var ranks = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < order.Count; i++) ranks.TryAdd(order[i], i);
+            int Rank(int i) => ranks.GetValueOrDefault(ok[i].Src.Mod.Rel, -1);
+            bool Out(int i) => leaveOut?.Contains(ok[i].Src.Mod.Rel, StringComparer.OrdinalIgnoreCase) == true;
             var left = new HashSet<int>();
-            foreach (var (group, outside, count) in Clashes(docs, modsDir, dirs, tk, ok))
-            {
-                plan.Clashes.Add(new(group.Select(i => ok[i].Src.Mod).ToList(), outside.ToList(), count));
-                foreach (var i in group.Where(i => Rank(i) < 0))
+            // (against the first part's name: shortcut: a loaded package named between two parts of one merge is judged by the first part's place, upgrade if parts ever clash with one)
+            if (ModConflicts.LoadKey(dirs, Slash(UnderMods(Path.Combine("Mods", Path.GetRelativePath(modsDir, Path.Combine(folderFull, name + ".package")))))) is { } tk)
+                foreach (var (group, outside, count, keys) in Clashes(docs, modsDir, dirs, tk, ok, of?.Merged.Path))
                 {
-                    left.Add(i);
-                    var with = group.Where(x => x != i).Select(x => Path.GetFileNameWithoutExtension(ok[x].Src.Mod.Name)).Concat(outside).Take(3);
-                    plan.Skipped.Add(new(ok[i].Src.Mod, R(ClashReason, string.Join(", ", with))));
+                    clashes.Add(new(group.Select(i => ok[i].Src.Mod).ToList(), outside.ToList(), count));
+                    foreach (var i in group)
+                    {
+                        groupOf[ok[i].Src.Mod.Rel] = clashes.Count;
+                        clashKeys[ok[i].Src.Mod.Rel] = keys[i];
+                        if (Rank(i) >= 0 && !Out(i)) continue;
+                        left.Add(i);
+                        var with = group.Where(x => x != i).Select(x => Path.GetFileNameWithoutExtension(ok[x].Src.Mod.Name)).Concat(outside).Take(3);
+                        skipped.Add(new(ok[i].Src.Mod, Out(i) ? R(LeftOutReason) : R(ClashReason, string.Join(", ", with))));
+                    }
                 }
-            }
+            for (var i = 0; i < ok.Count; i++)
+                if (Out(i) && left.Add(i)) skipped.Add(new(ok[i].Src.Mod, R(LeftOutReason)));
             ok = ok.Select((o, i) => (o, i)).Where(x => !left.Contains(x.i)).OrderBy(x => Rank(x.i) is var r and >= 0 ? r : int.MaxValue).Select(x => x.o).ToList();
         }
-        if (ok.Count < 2) plan.Refusals.Add(R("Pick at least two packages that can be merged."));
 
-        // a resource several packages hold alike goes in once; a package's own repeats of one stay
-        var owner = new Dictionary<(uint, uint, ulong), int>();
-        var dropped = new Dictionary<(uint, uint, ulong), List<string>>();
-        var names = new Dictionary<(uint, uint, ulong), List<(int I, ModConflicts.Entry E)>>();
-        for (var i = 0; i < ok.Count; i++)
+        // in parts: the mods in their order, those of one clash together, a new part where the next ones would not fit
+        var parts = new List<List<(MergeSource Src, (int, int, string) Key)>> { ok };
+        if (ok.Sum(o => o.Src.Size) > partBytes)
         {
-            var (src, _) = ok[i];
-            var all = src.Keep.ToList();
-            src.Keep.Clear();
-            foreach (var e in all)
+            parts.Clear();
+            long size = 0;
+            foreach (var unit in ok.GroupBy(o => groupOf.TryGetValue(o.Src.Mod.Rel, out var g) ? g.ToString() : o.Src.Mod.Rel, StringComparer.OrdinalIgnoreCase))
             {
-                var k = (e.Type, e.Group, e.Instance);
-                if (e.Type == NameMap) (names.TryGetValue(k, out var m) ? m : names[k] = new()).Add((i, e));
-                if (owner.TryAdd(k, i) || owner[k] == i) { src.Keep.Add(e); continue; }
-                if (!dropped.TryGetValue(k, out var l)) dropped[k] = l = new();
-                if (!l.Contains(src.Mod.Rel)) l.Add(src.Mod.Rel);
+                var bytes = unit.Sum(o => o.Src.Size);
+                if (parts.Count == 0 || size + bytes > partBytes) { parts.Add(new()); size = 0; }
+                parts[^1].AddRange(unit);
+                size += bytes;
             }
-            plan.Inputs.Add(src.Mod);
-            plan.Sources.Add(src);
+            // (a mod alone in a part is no merge: it stays the plain mod it is)
+            foreach (var alone in parts.Where(p => p.Count == 1).ToList())
+            {
+                skipped.Add(new(alone[0].Src.Mod, R("Too big to share a package. It stays as it is.")));
+                parts.Remove(alone);
+            }
+            if (parts.Count == 0) parts.Add(new());
         }
-        foreach (var (k, l) in dropped)
-            plan.Duplicates.Add(new($"{k.Item1:x8}:{k.Item2:x8}:{k.Item3:x16}", ok[owner[k]].Src.Mod.Rel, l));
-        foreach (var (k, l) in names.Where(n => n.Value.Any(x => x.I != n.Value[0].I)))
-            if (JoinNames(l.Select(x => (ok[x.I].Src.Mod.Path, x.E))) is { } joined)
-            {
-                ok[owner[k]].Src.Keep.RemoveAll(e => (e.Type, e.Group, e.Instance) == k);
-                plan.Made.Add((new(k.Item1, k.Item2, k.Item3, 0, joined.Length, (uint)joined.Length, 0), joined));
-            }
-        plan.Resources = plan.Sources.Sum(s => s.Keep.Count) + plan.Made.Count;
-        plan.OutputBytes = 96 + plan.Data + 4 + 32L * plan.Resources;
-        if (plan.OutputBytes > MaxBytes) plan.Refusals.Add(R("The merged package would be over 2 GB."));
-        if (plan.Resources > MaxEntries) plan.Refusals.Add(R("The merged package would hold too many resources."));
-        return plan;
+        var plans = parts.Select((p, i) => Make(parts.Count == 1 ? name : $"{name} {i + 1}", p)).ToList();
+        plans[0].Skipped.AddRange(skipped);
+        plans[0].Clashes.AddRange(clashes);
+        return plans;
     }
 
     // a package's index, checked against the file before anything trusts it (untrusted input), or why not
@@ -250,6 +335,7 @@ public static partial class ModMerge
     public static MergeResult Run(MergePlan plan, IProgress<MergeProgress>? progress, CancellationToken ct)
     {
         if (!plan.CanRun) throw new SetupException("Can't merge: {0}", plan.Refusals[0].Text);
+        if (plan.Of is not null) throw new InvalidOperationException("the plan of a change to a merge runs as that change");
         lock (Gate) return RunNow(plan, progress, ct);
     }
 
@@ -301,11 +387,12 @@ public static partial class ModMerge
             log.WriteLine("step move");
             var record = new MergeRecord
             {
-                Version = 2, Priority = plan.Priority.ToList(), Name = plan.Name, Merged = plan.TargetRel, Sha256 = sha, Size = new FileInfo(tmp).Length, Resources = written.Count, Created = DateTime.UtcNow,
+                Version = 2, Priority = plan.Order.ToList(), Name = plan.Name, Merged = plan.TargetRel, Sha256 = sha, Size = new FileInfo(tmp).Length, Resources = written.Count, Created = DateTime.UtcNow,
                 Originals = plan.Sources.Select((s, i) => new MergeOriginal { Rel = s.Mod.Rel, Size = s.Size, Sha256 = hashes[i], Note = ModNotes.Get(s.Mod.Rel) }).ToList(),
             };
             Directory.CreateDirectory(plan.StoreDir);
-            Fs.WriteAtomic(json, JsonSerializer.Serialize(record, SetupJson.Default.MergeRecord));
+            record.Dir = plan.StoreDir;
+            Save(record);
             foreach (var s in plan.Sources)
             {
                 var to = Path.Combine(plan.StoreDir, UnderMods(s.Mod.Rel));
@@ -480,7 +567,17 @@ public static partial class ModMerge
     static void RecoverNow(string docs)
     {
         MoveOut(docs);
-        foreach (var r in Records(docs).ToList())
+        // (a change to a merge that did not finish is undone first: the merge as it was)
+        foreach (var r in Records(docs).Where(r => r.Pending is not null).ToList())
+            try { Undo(docs, r, null); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); }
+        try
+        {
+            var busy = Records(docs).Where(r => r.Pending is not null).Select(r => Path.GetFullPath(r.Dir)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var d in Stores(docs).Where(d => !busy.Contains(Path.GetFullPath(d))).ToList()) SetAside(docs, d);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        foreach (var r in Records(docs).Where(r => r.Pending is null).ToList())
             try
             {
                 var dir = Path.GetDirectoryName(Path.Combine(docs, r.Merged))!;
@@ -509,7 +606,9 @@ public static partial class ModMerge
         {
             var mods = Path.Combine(docs, "Mods");
             var started = System.Diagnostics.Process.GetCurrentProcess().StartTime;
-            var waiting = Records(docs).Select(r => Path.Combine(Path.GetDirectoryName(Path.Combine(docs, r.Merged))!, r.Name + ".package.tmp-")).ToList();
+            // (a merge still waiting for its file keeps its temporary files, and so does a change that could not be undone yet)
+            var waiting = Records(docs).Where(r => !Present(docs, r)).SelectMany(r => new[] { Path.Combine(Path.GetDirectoryName(Path.Combine(docs, r.Merged))!, r.Name + ".package.tmp-"), Path.Combine(docs, r.Merged) + ".tmp-" })
+                .Concat(Records(docs).Where(r => r.Pending is not null).SelectMany(r => r.Pending!.Moves.SelectMany(m => new[] { m.From, m.To }).Append(r.Pending.Tmp ?? "").Where(x => x.Length > 0).Select(x => Path.GetFullPath(Path.Combine(docs, x))))).ToList();
             if (Directory.Exists(mods))
                 foreach (var t in Directory.EnumerateFiles(mods, "*.package.tmp-*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }).ToList())
                     if (File.GetLastWriteTime(t) < started && !waiting.Any(w => t.StartsWith(w, StringComparison.OrdinalIgnoreCase)))
@@ -573,6 +672,7 @@ public static partial class ModMerge
     // ---------- what a merged file is made of ----------
     static readonly Dictionary<string, List<MergeRecord>> _records = new(StringComparer.OrdinalIgnoreCase);
     static void Forget(string docs) { lock (_records) _records.Remove(Path.GetFullPath(docs)); }
+    static void Save(MergeRecord r) => Fs.WriteAtomic(Path.Combine(r.Dir, "merge.json"), JsonSerializer.Serialize(r, SetupJson.Default.MergeRecord));
 
     static List<MergeRecord> Records(string docs)
     {
