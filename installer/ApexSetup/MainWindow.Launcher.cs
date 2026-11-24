@@ -22,7 +22,7 @@ public sealed partial class MainWindow
     List<ModFile> _mods = [];
     HashSet<string> _modLooks = new(StringComparer.OrdinalIgnoreCase);
     bool _modsLoaded, _modsLoading;
-    int _healthTab, _newsTab;
+    int _healthTab;
     Session? _session;
     bool _starting;
     Process? _maintenance;
@@ -923,37 +923,87 @@ public sealed partial class MainWindow
 
     // ---------- What's new ----------
 
+    // What's new: one page, a card per project with its newest notes (the current one's layout), Apex Radiance and Sims 3
+    // Modernization first, then the optional parts that are installed; the install steps each release repeats are left out
     void BuildNews()
     {
         var host = ScreenNews;
         host.Children.Clear();
         host.Children.Add(Col(Heading(T("What's new")), Muted(T("Release notes from each project's GitHub page."))));
-        var tabs = new SelectorBar();
-        foreach (var n in new[] { "Apex Radiance", "Sims 3 Modernization" }) tabs.Items.Add(Tab(n, tabs.Items.Count == 0));
-        tabs.SelectedItem = tabs.Items[_newsTab];
-        tabs.SelectionChanged += (s, _) => { var i = s.Items.IndexOf(s.SelectedItem); if (i < 0 || i == _newsTab) return; _newsTab = i; DispatcherQueue.TryEnqueue(BuildNews); };
-        host.Children.Add(tabs);
-        var r = _newsTab == 0 ? _latest.GetValueOrDefault(Releases.Apex) : ModRelease() ?? _latest.GetValueOrDefault(Releases.Modernization);
-        if (r is null) { host.Children.Add(Card(Muted(_offline ? T("No internet connection. The notes show once the launcher can reach GitHub.") : T("Checking the latest versions…")))); return; }
-        var installed = _newsTab == 0 ? _state?.ApexVersion : Known(Components.Modernization);
-        var notes = new StackPanel { Spacing = 8 };
-        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        head.Children.Add(new TextBlock { Text = r.Version, FontSize = 20, FontWeight = FontWeights.SemiBold });
-        head.Children.Add(Pill(installed == r.Version ? T("Installed") : installed is null ? T("Latest") : T("Newer than yours"), installed == r.Version ? "ApexSuccessBrush" : "ApexAccentBrush"));
-        notes.Children.Add(head);
-        foreach (var raw in (r.Body ?? T("The notes didn't load. You can read them on GitHub.")).Replace("\r", "").Split('\n'))
+        var s = _state;
+        var shown = new List<(string Name, Release? Release, string? Installed)>
         {
-            var line = raw.TrimEnd();
-            if (line.Length == 0) continue;
-            if (line.StartsWith('#')) notes.Children.Add(new TextBlock { Text = line.TrimStart('#', ' '), FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap });
-            else if (line.TrimStart().StartsWith("- ") || line.TrimStart().StartsWith("* ")) notes.Children.Add(Body("• " + Plain(line.TrimStart()[2..])));
-            else notes.Children.Add(Body(Plain(line)));
+            ("Apex Radiance", _latest.GetValueOrDefault(Releases.Apex), s?.ApexVersion),
+            ("Sims 3 Modernization", ModRelease() ?? _latest.GetValueOrDefault(Releases.Modernization), Known(Components.Modernization)),
+        };
+        // (an optional part shows when it is installed: its notes concern the player then)
+        if (s?.Loader is not null) shown.Add(("Ultimate ASI Loader", _latest.GetValueOrDefault(Releases.AsiLoader), s.Installed(Components.Loader)));
+        if (s?.MonoPatcher == true) shown.Add(("MonoPatcher", _latest.GetValueOrDefault(Releases.MonoPatcher), s.Installed(Components.MonoPatcher)));
+        if (s?.Layer == Layer.Dxvk) shown.Add(("DXVK", _latest.GetValueOrDefault(Releases.Dxvk), s.Installed(Components.Dxvk)));
+        if (shown.All(x => x.Release is null))
+        {
+            host.Children.Add(Card(Muted(_offline ? T("No internet connection. The notes show once the launcher can reach GitHub.") : T("Checking the latest versions…"))));
+            return;
         }
-        host.Children.Add(Card(notes));
-        host.Children.Add(Link(T("Open on GitHub"), () => Process.Start(new ProcessStartInfo($"https://github.com/{r.Repo}/releases/tag/{r.Tag}") { UseShellExecute = true })));
+        foreach (var (name, r, installed) in shown)
+        {
+            if (r is null) continue;
+            host.Children.Add(Section(name));
+            var notes = new StackPanel { Spacing = 8 };
+            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            head.Children.Add(new TextBlock { Text = r.Version, FontSize = 20, FontWeight = FontWeights.SemiBold });
+            var same = installed is { Length: > 0 } && installed.TrimStart('v', 'V') == r.Version.TrimStart('v', 'V');
+            head.Children.Add(Pill(same ? T("Installed") : installed is not { Length: > 0 } ? T("Latest") : T("Newer than yours"), same ? "ApexSuccessBrush" : "ApexAccentBrush"));
+            notes.Children.Add(head);
+            var lines = NotesLines(r.Body ?? T("The notes didn't load. You can read them on GitHub."), r.Version).ToList();
+            // (long notes show about their first screen; the rest opens in place)
+            const int Budget = 1400;
+            var more = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
+            var used = 0;
+            foreach (var l in lines)
+            {
+                (used < Budget ? notes : more).Children.Add(l);
+                used += (l as TextBlock)?.Text.Length ?? 0;
+            }
+            if (more.Children.Count > 0)
+            {
+                notes.Children.Add(more);
+                var toggle = new HyperlinkButton { Content = T("Show all"), Padding = new Thickness(0), FontSize = 13 };
+                toggle.Click += (_, _) => { var open = more.Visibility != Visibility.Visible; more.Visibility = open ? Visibility.Visible : Visibility.Collapsed; toggle.Content = open ? T("Show less") : T("Show all"); };
+                notes.Children.Add(toggle);
+            }
+            var repo = r.Repo;
+            var tag = r.Tag;
+            notes.Children.Add(Link(T("Open on GitHub"), () => Process.Start(new ProcessStartInfo($"https://github.com/{repo}/releases/tag/{Uri.EscapeDataString(tag)}") { UseShellExecute = true })));
+            host.Children.Add(Card(notes));
+        }
     }
 
-    static string Plain(string md) => md.Replace("**", "").Replace("`", "");
+    // a release body's lines as the page shows them: headings, bullets and paragraphs, without the install or download steps,
+    // tables and pictures
+    IEnumerable<FrameworkElement> NotesLines(string body, string? version = null)
+    {
+        var skip = false;
+        foreach (var raw in body.Replace("\r", "").Split('\n'))
+        {
+            var line = System.Net.WebUtility.HtmlDecode(raw).TrimEnd(); // (&nbsp; and the like, as GitHub shows them)
+            if (line.Length == 0) continue;
+            if (line.StartsWith('#'))
+            {
+                var title = line.TrimStart('#', ' ');
+                // (a heading that only repeats the version shown above it)
+                if (version is not null && title.TrimStart('v', 'V').StartsWith(version.TrimStart('v', 'V'), StringComparison.OrdinalIgnoreCase)) continue;
+                skip = System.Text.RegularExpressions.Regex.IsMatch(title, @"\b(install|installation|download|downloads)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (!skip) yield return new TextBlock { Text = Plain(title), FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap };
+                continue;
+            }
+            if (skip || line.Trim().Trim('-', '*', '_').Length == 0 || line.TrimStart().StartsWith('|') || line.TrimStart().StartsWith("![") || line.TrimStart().StartsWith("<")) continue;
+            var t = line.TrimStart();
+            yield return Body(t.StartsWith("- ") || t.StartsWith("* ") ? "• " + Plain(t[2..]) : Plain(t));
+        }
+    }
+
+    static string Plain(string md) => System.Text.RegularExpressions.Regex.Replace(md.Replace("**", "").Replace("`", ""), @"\[([^\]]+)\]\([^)]+\)", "$1"); // ([text](link) reads as text)
     static string? FirstLine(string? md) => md?.Replace("\r", "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0 && !l.StartsWith('#')) is { } l ? Plain(l) : null;
 
     // ---------- Settings ----------

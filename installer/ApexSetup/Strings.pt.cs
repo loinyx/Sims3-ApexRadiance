@@ -1076,6 +1076,8 @@ public static partial class Strings
         ["Installed apps"] = "Aplicativos instalados",
         ["Delete the old copy in {0}"] = "Apagar a cópia antiga em {0}",
         ["Everything else stays where it was."] = "O resto fica onde estava.",
+        ["Show all"] = "Mostrar tudo",
+        ["Show less"] = "Mostrar menos",
         ["{0} of the last {1} game sessions crashed."] = "{0} das últimas {1} sessões de jogo fecharam com erro.",
         ["The game crashed once with its memory nearly full (peak {1} MB of 4096), on {2}. Fewer mods, less CC or a smaller world lowers it."] = "O jogo fechou com erro uma vez com a memória quase cheia (pico de {1} MB de 4096), em {2}. Menos mods, menos CC ou um mundo menor ajudam.",
         ["The game crashed {0} times with its memory nearly full (peak {1} MB of 4096), last on {2}. Fewer mods, less CC or a smaller world lowers it."] = "O jogo fechou com erro {0} vezes com a memória quase cheia (pico de {1} MB de 4096), a última em {2}. Menos mods, menos CC ou um mundo menor ajudam.",
