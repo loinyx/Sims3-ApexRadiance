@@ -32,6 +32,12 @@ public static class Health
         if (beforePlay) return items;
         if (mods is not null) Add("mods", () => ModChecks.Run(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
         if (mods is not null && conflicts is not null) Add("conflicts", () => conflicts.Check(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
+        Add("merges", () => ModMerge.Lost(docs).Select(x => new Item(new Finding(Severity.Warning,
+            "The merge {0} left out a part of {1}. Split it to have every mod whole again.", [Path.GetFileNameWithoutExtension(x.Merged.Name), string.Join(", ", x.Mods.Take(4)) + (x.Mods.Count > 4 ? "…" : "")],
+            () => ModMerge.Split(docs, x.Merged), Suggest: "Split"), HealthArea.Mods, [x.Merged.Path])));
+        Add("kept mods", () => ModMerge.Orphans(docs).Select(o => new Item(new Finding(Severity.Warning,
+            o.Files.Count == 1 ? "1 mod is not in the game: the merge {1} that held it is gone. It is kept, and can go back." : "{0} mods are not in the game: the merge {1} that held them is gone. They are kept, and can go back.",
+            [o.Files.Count.ToString(), o.Name], () => ModMerge.PutBack(docs, o), Suggest: "Put them back"), HealthArea.Mods, [])));
         Add("saves", () => SaveHealth.Findings(SaveHealth.Check(docs), docs).Select(f => new Item(f, HealthArea.Saves, [])));
         Add("places", () => PlaceChecks.Check(g, docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("caches", () => CacheFindings(docs).Select(f => new Item(f, HealthArea.Disk, [])));

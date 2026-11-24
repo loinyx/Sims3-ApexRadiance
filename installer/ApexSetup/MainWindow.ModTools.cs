@@ -44,19 +44,13 @@ public sealed partial class MainWindow
         var box = new TextBox { Header = T("Name of the merged package"), Text = name };
         body.Children.Add(box);
         body.Children.Add(Muted(T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, plan.Inputs.Count, plan.Resources, ModRow.SizeText(plan.OutputBytes))));
-        if (plan.Duplicates.Count > 0)
-            body.Children.Add(Warn(plan.Duplicates.Count == 1 ? T("1 resource is in more than one of these mods") : T("{0} resources are in more than one of these mods", plan.Duplicates.Count),
-                T("The merged package keeps the copy the game loads now. The others are listed in the log.")));
-        if (plan.Shifts.Count > 0)
-            body.Children.Add(Warn(T("{0} resources would change which mod the game uses", plan.Shifts.Count),
-                T("A mod outside this merge has them too, and the merged package loads in a different order: {0}", string.Join(", ", plan.Shifts.Select(x => Path.GetFileNameWithoutExtension(x.Other)).Distinct().Take(3)))));
         if (plan.Skipped.Count > 0)
         {
             var sk = new StackPanel { Spacing = 4 };
             sk.Children.Add(new TextBlock { Text = T("Left out"), FontSize = 13, FontWeight = FontWeights.SemiBold });
-            foreach (var s in plan.Skipped.Take(8))
+            foreach (var s in plan.Skipped.Take(30))
                 sk.Children.Add(new TextBlock { Text = $"{Path.GetFileNameWithoutExtension(s.Mod.Name)}: {T(s.Reason.Key, s.Reason.Args)}", FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
-            if (plan.Skipped.Count > 8) sk.Children.Add(Muted(T("and {0} more", plan.Skipped.Count - 8)));
+            if (plan.Skipped.Count > 30) sk.Children.Add(Muted(T("and {0} more", plan.Skipped.Count - 30)));
             body.Children.Add(sk);
         }
         var scriptBox = new CheckBox { Content = T("Include script mods (their makers usually ask not to merge them)"), IsChecked = scripts };
@@ -179,10 +173,35 @@ public sealed partial class MainWindow
             if (plan.LogPath is { } lp) { d.PrimaryButtonText = T("Open log"); d.PrimaryButtonClick += (_, e) => { e.Cancel = true; OpenLog(lp); }; }
         }
         await shown;
-        if (result is not null) ModsResult(T("{0} mods merged into {1}", result.Mods, result.Merged.Name), null);
+        // (the game's caches point at the files as they were: cleared, a mod that looks missing in the game shows again)
+        if (result is not null)
+            SetInfo(ModsInfo, InfoBarSeverity.Success, T("{0} mods merged into {1}", result.Mods, result.Merged.Name),
+                (plan.Skipped.Count == 0 ? "" : plan.Skipped.Count == 1 ? T("1 mod was left out and stays as it was.") + " " : T("{0} mods were left out and stay as they were.", plan.Skipped.Count) + " ")
+                + T("If something looks missing in the game, clear its caches."), T("Clear the game caches"), async () => await ClearCachesAfterMerge());
         _modsLoaded = false;
         _folderSig = "";
         await LoadModsAsync();
+    }
+
+    async Task ClearCachesAfterMerge()
+    {
+        try { await ModWork(() => GameCaches.Clean(Docs)); ModsResult(T("Game caches cleared. The game rebuilds them at its next start."), null); }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
+    }
+
+    // mods a merge that is gone still keeps: said on the Mods screen, with the way back
+    void OfferPutBack(List<ModMerge.Orphan> gone)
+    {
+        if (gone.Count == 0 || ModsInfo.IsOpen) return;
+        var n = gone.Sum(o => o.Files.Count);
+        SetInfo(ModsInfo, InfoBarSeverity.Warning, n == 1 ? T("1 mod is kept by a merge that is gone") : T("{0} mods are kept by a merge that is gone", n), T("The game does not load them."), T("Put them back"), async () =>
+        {
+            try { var back = await ModWork(() => gone.Sum(o => ModMerge.PutBack(Docs, o))); ModsResult(T("{0} mods put back", back), null); }
+            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not put back"), ErrorText(e)); }
+            _modsLoaded = false;
+            _folderSig = "";
+            await LoadModsAsync();
+        });
     }
 
     static void OpenLog(string? path)

@@ -26,6 +26,11 @@ public static partial class ModMerge
             if (check.Skipped.FirstOrDefault() is { } skip) throw new SetupException("Nothing was changed: {0} can't go in. {1}", skip.Mod.Name, skip.Reason.Text);
             if (check.Refusals.Count > 0) throw new SetupException("Nothing was changed: {0}", string.Join(" ", check.Refusals.Select(r => r.Text)));
         }
+        lock (Gate) return EditNow(docs, merged, outRels, add, name, folder, progress, ct);
+    }
+
+    static TakeOutResult EditNow(string docs, ModFile merged, IReadOnlyCollection<string> outRels, IReadOnlyList<ModFile> add, string name, string folder, IProgress<MergeProgress>? progress, CancellationToken ct)
+    {
         var back = Split(docs, merged);
         var stay = back.Where(m => !outRels.Contains(m.Rel, StringComparer.OrdinalIgnoreCase)).Concat(add).ToList();
         if (stay.Count < 2) return new(back, null);

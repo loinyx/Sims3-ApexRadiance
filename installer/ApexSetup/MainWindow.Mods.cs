@@ -75,13 +75,13 @@ public sealed partial class MainWindow
         try
         {
             var since = ModViewPrefs.LastPlay;
-            var (mods, found, dirs, loaded, dups, kinds) = await Task.Run(() =>
+            var (mods, found, dirs, loaded, dups, kinds, gone) = await Task.Run(() =>
             {
                 if (recover) ModMerge.Recover(docs); // (a merge stopped during the move: its originals back first)
                 var m = Mods.List(g, docs);
                 // every kind each package holds (read once per file; ModKinds never throws)
                 var k = m.Where(x => x.FileType == "package").ToDictionary(x => x.Path, x => ModKinds.Read(x.Path), StringComparer.OrdinalIgnoreCase);
-                return (m, ModChecks.Run(m, g, docs), ModLibrary.Folders(docs), ModLibrary.LoadedBy(docs), ModLibrary.Duplicates(m), k);
+                return (m, ModChecks.Run(m, g, docs), ModLibrary.Folders(docs), ModLibrary.LoadedBy(docs), ModLibrary.Duplicates(m), k, ModMerge.Orphans(docs));
             });
             _mods = mods;
             _modFindings = new(StringComparer.OrdinalIgnoreCase);
@@ -101,6 +101,7 @@ public sealed partial class MainWindow
             }).ToList();
             foreach (var r in _modRows) ApplyKinds(r);
             _modsLoaded = true;
+            OfferPutBack(gone);
             Safe(LoadModPicturesAsync(_modRows));
             Safe(LoadDefaultsAsync(g, _modRows));
         }
@@ -1547,13 +1548,26 @@ public sealed partial class MainWindow
     {
         rows = rows.Where(Mine).ToList();
         if (rows.Count == 0) return;
-        var merged = rows.Count(r => ModMerge.IsMerged(r.File));
+        var merged = rows.Where(r => ModMerge.IsMerged(r.File)).ToList();
         var text = (rows.Count == 1 ? T("{0} goes to the Recycle Bin. You can restore it from there.", rows[0].Name)
             : T("{0} mods go to the Recycle Bin. You can restore them from there.", rows.Count))
-            + (merged > 0 ? "\n\n" + T("A merged mod's originals stay in {0}. Use Split to get them back.", ModMerge.ShownFolder) : "")
             + (rows.Any(HasItems) ? "\n\n" + T("Lots and Sims that use its objects or outfits lose them the next time you save without it.") : "");
-        if (!await Confirm(rows.Count == 1 ? T("Remove this mod?") : T("Remove these mods?"), text, T("Remove"), danger: true)) return;
-        await ModsChange(() => { foreach (var r in rows) ModLibrary.Remove(r.File); }, rows.Count == 1 ? T("Mod moved to the Recycle Bin") : T("{0} mods moved to the Recycle Bin", rows.Count));
+        // (a merged mod's originals go back unless the player says otherwise: none is left kept where nothing shows it)
+        var body = new StackPanel { Spacing = 14, MaxWidth = 460 };
+        body.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
+        var keep = new CheckBox { IsChecked = true, Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = T("Put the {0} mods inside it back as they were", merged.Sum(r => ModMerge.Info(r.File)?.Originals.Count ?? 0)) } };
+        if (merged.Count > 0) body.Children.Add(keep);
+        var d = new ContentDialog { Title = rows.Count == 1 ? T("Remove this mod?") : T("Remove these mods?"), Content = body, PrimaryButtonText = T("Remove"), CloseButtonText = T("Cancel"),
+            XamlRoot = Content.XamlRoot, DefaultButton = ContentDialogButton.None, PrimaryButtonStyle = DangerButton };
+        if (await ShowDialog(d) != ContentDialogResult.Primary) return;
+        var back = keep.IsChecked == true;
+        await ModsChange(() =>
+        {
+            foreach (var r in rows)
+                if (!merged.Contains(r)) ModLibrary.Remove(r.File);
+                else if (back) ModMerge.Split(Docs, r.File);
+                else ModMerge.RemoveAll(Docs, r.File);
+        }, rows.Count == 1 ? T("Mod moved to the Recycle Bin") : T("{0} mods moved to the Recycle Bin", rows.Count));
     }
 
     static void ShowFile(string path)
