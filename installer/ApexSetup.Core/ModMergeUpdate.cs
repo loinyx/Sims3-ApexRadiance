@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ApexSetup;
@@ -30,7 +31,9 @@ public static partial class ModMerge
         {
             var rec = Info(docs, merged) ?? throw new SetupException("This file is not a merge made by the launcher.");
             var o = rec.Originals.FirstOrDefault(x => x.Rel.Equals(rel, StringComparison.OrdinalIgnoreCase)) ?? throw new SetupException("That mod is no longer in this merge.");
-            var n = new ModNote { Notes = o.Note?.Notes, Picture = o.Note?.Picture, Creator = o.Note?.Creator, Tags = o.Note?.Tags?.ToList(), Kinds = o.Note?.Kinds?.ToList() };
+            // (the whole note copied, whatever it holds: what is not changed here is kept)
+            static string Json(ModNote n) => JsonSerializer.Serialize(n, SetupJson.Default.ModNote);
+            var n = o.Note is null ? new ModNote() : JsonSerializer.Deserialize(Json(o.Note), SetupJson.Default.ModNote)!;
             change(n);
             n.Notes = string.IsNullOrWhiteSpace(n.Notes) ? null : n.Notes.Trim();
             n.Creator = string.IsNullOrWhiteSpace(n.Creator) ? null : n.Creator.Trim();
@@ -38,7 +41,7 @@ public static partial class ModMerge
             if (n.Tags is { Count: 0 }) n.Tags = null;
             if (n.Kinds is { Count: 0 }) n.Kinds = null;
             var was = o.Note;
-            o.Note = n.Notes is null && n.Picture is null && n.Tags is null && n.Creator is null && n.Kinds is null ? null : n;
+            o.Note = Json(n) == Json(new ModNote()) ? null : n;
             try { Save(rec); }
             catch { o.Note = was; throw; }
         }
