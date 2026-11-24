@@ -307,6 +307,7 @@ public sealed partial class MainWindow : Window
         if (step == GameSettingsScreen && _step != step) FreshGameSettings();
         if (step == HealthScreen && _step != step) (_healthPage, _healthNote) = ("", null); // (Health opens on its overview)
         _step = step;
+        HideSavePage();
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
         if (step != GalleryScreen) FullBleed(false);
         if (step == GameStep && FirstInstall) _wizardFlow = true;
