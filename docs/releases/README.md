@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [4.1.0](4.1.0.md): Apex Radiance Setup becomes Apex Launcher, with Play, Health, Mods, Saves, a Gallery of pictures and videos, light and dark that follow Windows.
 - [4.0.14](4.0.14.md): no rare freeze at the loading screen (lock order at start-up); Faster text lookups names the mod that keeps it off, in the log and in Setup.
 - [4.0.13](4.0.13.md): Video up to 4K with NV12 made on the GPU and an even frame rate; Shaders: ReShade Effect Shader Toggler files and On Sims' hair; Faster text lookups; a frozen session explained at the next start.
 - [4.0.12](4.0.12.md): Shaders: big looks in full under the RTX Remix bridge, loop shaders such as SlowSharp and MicrocontrastReducer run, an effect left out for memory starts again.

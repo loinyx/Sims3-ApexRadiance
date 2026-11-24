@@ -92,6 +92,12 @@ public static partial class ModConflicts
 
     // ---------- DBPF packages ----------
     public const uint TypeS3sa = 0x073faa07, TypeKey = 0x0166038c, TypeXml = 0x0333406c, TypeStbl = 0x220557da;
+    // a package's own manifest (one per package, instance 0): about the package, not the game's data
+    public const uint TypeManifest = 0x73e93eeb;
+    // a resource this small in every copy is a placeholder (an empty video or image): mods that blank the same thing agree
+    public const uint TinyBytes = 256;
+    // (media only: a video, an image or a sound this small is blanked out; a small tuning file is still a real change)
+    static readonly HashSet<uint> Blankable = [0xB1CC1AF6, 0x00B2D882, 0x2F7D0004, 0x01A527DB, 0x01EEF63A, 0x8070223D];
     static readonly Dictionary<uint, string> TypeNames = new()
     {
         [0x0333406c] = "_XML", [0x03b33ddf] = "ITUN", [0x034aeecb] = "CASP", [0x319e4f1d] = "OBJD", [0x073faa07] = "S3SA", [0x0166038c] = "_KEY", [0x00b2d882] = "_IMG",
@@ -807,7 +813,7 @@ public static partial class ModConflicts
                 // ModFolders: every first-level folder is one mod (a collection of versions); else every file
                 var p = new Party(Path.GetFileNameWithoutExtension(f), file, o.ModFolders && relRoot.Contains('/') ? $"{rootName}/{relRoot.Split('/')[0]}" : file);
                 parties.Add(p);
-                if (ext == ".dbc") { p.Unknown.Add("DCCache .dbc (installed .sims3pack content): not scanned"); continue; }
+                if (ext == ".dbc") { p.Unknown.Add("DCCache .dbc (the game's installed store content): not scanned"); continue; }
                 if (ext == ".asi") { DoAsi(p, File.ReadAllBytes(f), f, f); continue; }
                 if (ext == ".package") { DoPackage(p, () => Package.Open(f), p.File, rel, dirs); continue; }
                 // as if unpacked into a folder named after the archive (unverified: players unpack that way or flatten)
@@ -878,10 +884,12 @@ public static partial class ModConflicts
         foreach (var rec in recs)
             foreach (var e in rec.Pkg.Entries)
             {
-                if (e.Type == TypeKey) continue;
+                if (e.Type is TypeKey or TypeManifest) continue;
                 if (!byKey.TryGetValue(e.Key, out var l)) byKey[e.Key] = l = new();
                 l.Add((rec, e));
             }
+        // Dup[1]: differing keys where some copy is more than a placeholder (TinyBytes or less in every copy: blank intro
+        // videos and the like, the same fix whichever wins)
         var pairs = new Dictionary<string, (List<Party> Parties, string Winner, Dictionary<string, int> Types, List<string> Keys, int[] Dup, bool Alt, List<string> NotLoaded)>();
         foreach (var (k, l) in byKey)
         {
@@ -893,11 +901,15 @@ public static partial class ModConflicts
             var ps = l.Select(x => x.Rec.Party).Distinct().ToList();
             var id = string.Join(" | ", l.Select(x => x.Rec.Label).OrderBy(x => x, StringComparer.Ordinal));
             if (!pairs.TryGetValue(id, out var g))
-                pairs[id] = g = (ps, sorted.FirstOrDefault().Rec?.Label ?? "-", new(), new(), new int[1], OneMod(ps), l.Where(x => x.Rec.Key is null).Select(x => x.Rec.Label).ToList());
+                pairs[id] = g = (ps, sorted.FirstOrDefault().Rec?.Label ?? "-", new(), new(), new int[2], OneMod(ps), l.Where(x => x.Rec.Key is null).Select(x => x.Rec.Label).ToList());
             var tn = TypeName(l[0].E.Type);
             g.Types[tn] = g.Types.GetValueOrDefault(tn) + 1;
             if (same) g.Dup[0]++;
-            else if (g.Keys.Count < 5) g.Keys.Add($"{tn} {k}");
+            else
+            {
+                if (!Blankable.Contains(l[0].E.Type) || l.Any(x => x.E.MemSize > TinyBytes)) g.Dup[1]++;
+                if (g.Keys.Count < 5) g.Keys.Add($"{tn} {k}");
+            }
         }
         foreach (var (id, g) in pairs)
         {
@@ -906,6 +918,7 @@ public static partial class ModConflicts
             var nl = g.NotLoaded.Count > 0 ? $"; not loaded by Resource.cfg: {string.Join(", ", g.NotLoaded)}" : "";
             if (g.Alt) report.Info.Add(new(g.Parties[0].Name, $"{total} keys in several packages of one {(g.Parties.Count == 1 ? "archive" : "mod")} (versions or alternatives: install one): {id}{nl}"));
             else if (g.Dup[0] == total) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"duplicate copy: {total} identical resources ({types}) in {id}"));
+            else if (g.Dup[1] == 0) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"the same fix twice: {total - g.Dup[0]} keys replaced by small placeholders in each ({types}) in {id}"));
             else report.Conflicts.Add(new("resource key", $"{total - g.Dup[0]} shared keys with different content ({types}{(g.Dup[0] > 0 ? $"; {g.Dup[0]} identical" : "")}): {id}; likely winner: {g.Winner}{nl}",
                 g.Parties.Select(p => p.Name).ToArray(), g.Keys.ToArray()));
         }

@@ -18,7 +18,7 @@ public sealed record State(
     bool MonoPatcher,
     bool Ts3Native,
     bool Ts3Fixes,
-    bool Ts3NativeWrongBuild,     // ts3native.log says it skipped itself: the other edition's build
+    bool Ts3NativeWrongBuild,     // ts3native.asi is the other edition's build, or the game version has none
     bool RestartHost,             // ts3wrap.exe next to the ASI and [ui] restart_host = true (Engine.RestartHostOn)
     Manifest Manifest)
 {
@@ -129,8 +129,14 @@ public static class Scan
         var loader = LoaderNames.FirstOrDefault(n => File.Exists(F(n)) && IsLoader(F(n)));
 
         var ts3native = FindAsi(bin, "ts3native.asi");
-        var log = Path.ChangeExtension(ts3native ?? "", ".log"); // (written next to the ASI)
-        var wrong = ts3native is not null && File.Exists(log) && ReadShared(log).Contains("SKIP all: host is not");
+        // the ASI names the host it was built for (sims3-modernization keeps these literals stable). Its log is no
+        // signal: since ts3native 0.36.240 a non-matching host logs to ts3native.launcher.log, which the Steam
+        // launcher also writes on a correct install
+        var built = ts3native is null ? (Edition?)null
+            : Contains(ts3native, "SKIP all: host is not EA app") ? Edition.EA
+            : Contains(ts3native, "SKIP all: host is not TS3W.exe") ? Edition.Steam
+            : null;
+        var wrong = ts3native is not null && (!g.ModernizationSupported || built is not null && built != g.Edition);
 
         return new State(apex, layer, loader, loader == "d3d9.dll", FindAsi(bin, "Sims3SettingsSetter.asi") is not null, FindAsi(bin, "MonoPatcher.asi") is not null,
             ts3native is not null, File.Exists(Path.Combine(Packages(docs), "ts3fixes.package")), wrong,
@@ -151,16 +157,22 @@ public static class Scan
     }
 
     // DXVK has no version resource; its name is in the binary (case-insensitive ASCII search)
-    public static bool Contains(string file, string text)
+    public static bool Contains(string file, string text) => ContainsEach(file, text)[0];
+
+    // several strings in one read of the file (an ASI is megabytes): one answer per text, in order
+    public static bool[] ContainsEach(string file, params string[] texts)
     {
         var data = File.ReadAllBytes(file);
-        var needle = Encoding.ASCII.GetBytes(text.ToLowerInvariant());
-        for (int i = 0, n = data.Length - needle.Length; i <= n; i++)
+        return texts.Select(text =>
         {
-            int j = 0;
-            while (j < needle.Length && (data[i + j] | 0x20) == (needle[j] | 0x20)) j++; // (both sides: '_' | 0x20 is not '_')
-            if (j == needle.Length) return true;
-        }
-        return false;
+            var needle = Encoding.ASCII.GetBytes(text.ToLowerInvariant());
+            for (int i = 0, n = data.Length - needle.Length; i <= n; i++)
+            {
+                int j = 0;
+                while (j < needle.Length && (data[i + j] | 0x20) == (needle[j] | 0x20)) j++; // (both sides: '_' | 0x20 is not '_')
+                if (j == needle.Length) return true;
+            }
+            return false;
+        }).ToArray();
     }
 }

@@ -61,9 +61,9 @@ public static partial class Strings
     // and zh_hant
     public static string Bcp47(string code) => code switch { "zh_hans" => "zh-Hans", "zh_hant" => "zh-Hant", "no" => "nb", _ => code };
 
-    // the player's choice, kept next to games.txt: %LOCALAPPDATA%\Apex Radiance Setup\language.txt holds a code; no file
+    // the player's choice, kept next to games.txt: %LOCALAPPDATA%\Apex Launcher\language.txt holds a code; no file
     // (or an unknown code) is automatic
-    static string ChoiceFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Apex Radiance Setup", "language.txt");
+    static string ChoiceFile => Path.Combine(Paths.Data, "language.txt");
 
     public static string? SavedChoice()
     {

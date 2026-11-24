@@ -27,9 +27,9 @@ public static class Games
     };
 
     // The folders the player picked with Browse, and the game used last, so the next run (an Apex update) opens on it:
-    // %LOCALAPPDATA%\Apex Radiance Setup\games.txt, one Game\Bin per line, the last used first. A folder that no longer holds
+    // %LOCALAPPDATA%\Apex Launcher\games.txt, one Game\Bin per line, the last used first. A folder that no longer holds
     // the game is left out when read.
-    static string RememberedFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Apex Radiance Setup", "games.txt");
+    static string RememberedFile => Path.Combine(Paths.Data, "games.txt");
 
     public static List<Game> Remembered()
     {
@@ -61,6 +61,8 @@ public static class Games
 
     public static List<Game> Detect()
     {
+        // (a test run on a real PC: only the games it was given, so an uninstall there never reaches the player's own)
+        if (Environment.GetEnvironmentVariable("APEX_LAUNCHER_NO_DETECT") == "1") return [];
         var roots = new List<string>();
         foreach (var lib in SteamLibraries())
             roots.Add(Path.Combine(lib, "steamapps", "common", "The Sims 3"));
@@ -120,7 +122,13 @@ public static class Games
     // the game, its launchers (they hold the game's files) and the restart host that starts it again
     // (and the RTX Remix bridge's server, which holds Game\Bin\.trex while it runs; another Remix game's counts too)
     public static readonly string[] Processes = { "TS3W", "TS3", "Sims3Launcher", "Sims3LauncherW", "ts3wrap", "NvRemixBridge" };
-    static bool DefaultIsRunning() => Processes.Any(n => Process.GetProcessesByName(n).Length > 0);
+    // one process snapshot for all the names (each GetProcessesByName takes a whole snapshot), every handle closed
+    static bool DefaultIsRunning()
+    {
+        var all = Process.GetProcesses();
+        try { return all.Any(p => Processes.Contains(p.ProcessName, StringComparer.OrdinalIgnoreCase)); }
+        finally { foreach (var p in all) p.Dispose(); }
+    }
 
     static IEnumerable<string> SteamLibraries()
     {

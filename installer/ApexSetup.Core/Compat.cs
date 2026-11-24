@@ -17,6 +17,7 @@ public sealed record Finding(Severity Severity, string Text, string[] Args, Acti
 // mistakes the mods' own guides describe.
 public static class Compat
 {
+    public const string S3ppWaitSuggest = "Turn off ShortWaitSpin";
     const string ModernizationPlayers = "https://github.com/rodneypantonial/sims3-modernization/blob/main/docs/PLAYERS.md";
     const string ModernizationCompat = "https://github.com/rodneypantonial/sims3-modernization/blob/main/docs/COMPATIBILITY.md";
 
@@ -45,18 +46,19 @@ public static class Compat
             var rel = Path.GetRelativePath(bin, asi);
             // the old standalone (S3SSApex.asi under another name): the Apex Edition name without S3SS's two strings, as
             // s3ss_detect.cpp tells them apart; S3SS stays recommended
-            if (Scan.Contains(asi, "Apex Edition") && !(Scan.Contains(asi, "S3SS Log - Started at ") && Scan.Contains(asi, "###S3SSWindow")))
+            var has = Scan.ContainsEach(asi, "Apex Edition", "S3SS Log - Started at ", "###S3SSWindow", "Another copy of ApexRadiance.asi is already running");
+            if (has[0] && !(has[1] && has[2]))
                 f.Add(new(Severity.Error, "{0} in Game\\Bin loads a second copy of Apex Radiance.", new[] { rel }, () => MoveAside(bin, rel)));
-            else if (Scan.Contains(asi, "Apex Edition"))
+            else if (has[0])
             {
                 combined = true;
-                f.Add(new(Severity.Error, "{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it).",
+                f.Add(new(Severity.Error, "{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. The launcher moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it).",
                     new[] { rel }, () => MoveAside(bin, rel)));
             }
             // a renamed ApexRadiance.asi: the copy loaded second stays idle (apex_main.cpp DllMain; its debugger line is in
             // every release since 1.0.0 and not in the combined build); without ApexRadiance.asi it is the copy that runs
-            else if (File.Exists(B("ApexRadiance.asi")) && Scan.Contains(asi, "Another copy of ApexRadiance.asi is already running"))
-                f.Add(new(Severity.Warning, "{0} in Game\\Bin is another copy of Apex Radiance; only one copy runs. Apply moves it to the backup folder.",
+            else if (File.Exists(B("ApexRadiance.asi")) && has[3])
+                f.Add(new(Severity.Warning, "{0} in Game\\Bin is a second copy of Apex Radiance. Only one copy can run. Apply moves it to the backup folder.",
                     new[] { rel }, () => MoveAside(bin, rel), Suggest: "Two copies of the mod"));
         }
 
@@ -64,12 +66,12 @@ public static class Compat
         foreach (var name in new[] { "Sims3SettingsSetter.asi", "MonoPatcher.asi", "ts3native.asi", "Sims3Performance.asi", "TS3Patch.asi" })
             foreach (var rel in new[] { $@"scripts\{name}", $@"plugins\{name}" })
                 if (File.Exists(B(name)) && File.Exists(B(rel)))
-                    f.Add(new(Severity.Error, "{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder.", new[] { rel, name }, () => MoveAside(bin, rel)));
+                    f.Add(new(Severity.Error, "{0} in Game\\Bin is a second copy of {1}; both load. The launcher moves it to the backup folder.", new[] { rel, name }, () => MoveAside(bin, rel)));
 
         // two loaders load every mod twice: keep the first (wininet.dll, as the mods' guides name it)
         var loaders = Scan.Loaders(bin);
         if (loaders.Count > 1)
-            f.Add(new(Severity.Error, "Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}.", new[] { string.Join(", ", loaders), loaders[0] },
+            f.Add(new(Severity.Error, "Two ASI loaders ({0}) load every mod twice. The launcher keeps {1} and moves the others to the backup folder.", new[] { string.Join(", ", loaders), loaders[0] },
                 () => { foreach (var l in loaders.Skip(1)) MoveAside(bin, l); }));
 
         if (s.Ts3NativeWrongBuild && !g.ModernizationSupported)
@@ -84,12 +86,18 @@ public static class Compat
         if (!File.Exists(cfg) && packages.Count(p => CfgReads(Engine.ResourceCfg, p)) is var reads and > 0)
             f.Add(new(Severity.Error, "Mods has {0} .package files but no Resource.cfg, so the game loads none of them.", new[] { reads.ToString() },
                 () => Engine.EnsureResourceCfg(docs)));
-        // Setup's own packages (ts3fixes, MonoPatcher's subfolder) under a Resource.cfg that does not reach them
+        // Setup's own packages (ts3fixes, MonoPatcher's subfolder) under a Resource.cfg that does not reach them. The Packages
+        // lines go in under their own Priority (else they take the one the player's file ends with); a package they would
+        // not reach either (4 folders deep, loose in Mods) is told to move: a fix that changes nothing would stay forever
+        static string WithPackages(string t) => Engine.ResourceCfg.Split("\r\n").Skip(1).Where(l => l != "" && !t.Contains(l, StringComparison.OrdinalIgnoreCase)).ToList() is { Count: > 0 } add
+            ? t.TrimEnd() + "\r\n" + string.Concat(add.Prepend(Engine.ResourceCfg.Split("\r\n")[0]).Select(l => l + "\r\n")) : t;
         if (File.Exists(cfg) && File.ReadAllText(cfg) is var cfgText)
             foreach (var p in packages.Where(p => (Path.GetFileName(p).Equals("ts3fixes.package", StringComparison.OrdinalIgnoreCase)
                                                    || Path.GetFileName(p).StartsWith("ld_MonoPatcher", StringComparison.OrdinalIgnoreCase)) && !CfgReads(cfgText, p)))
-                f.Add(new(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup).",
-                    new[] { p }, () => Rewrite(cfg, t => t.TrimEnd() + "\r\n" + string.Concat(Engine.ResourceCfg.Split("\r\n").Skip(1).Where(l => l != "" && !t.Contains(l, StringComparison.OrdinalIgnoreCase)).Select(l => l + "\r\n")))));
+                f.Add(CfgReads(WithPackages(cfgText), p)
+                    ? new(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it. The launcher adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup).",
+                        new[] { p }, () => Rewrite(cfg, WithPackages))
+                    : new(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it. Move it to Mods\\Packages.", new[] { p }));
 
         // script mods built for the other edition (sims3-modernization's EA app notes)
         // by version, not edition: Origin 1.69.43 takes the 1.69 builds too
@@ -112,7 +120,7 @@ public static class Compat
         {
             var rel = Path.GetRelativePath(bin, ts3patch);
             var txt = Path.ChangeExtension(rel, ".txt");
-            f.Add(new(Severity.Error, "Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. Setup moves it to the backup folder (S3SS does the same job).",
+            f.Add(new(Severity.Error, "Smooth Patch's TS3Patch.asi changes the same game code as Sims3SettingsSetter's Smooth Patch. The launcher moves it to the backup folder, since Sims3SettingsSetter does the same job.",
                 Array.Empty<string>(), () => { MoveAside(bin, rel); if (File.Exists(B(txt))) MoveAside(bin, txt); }));
         }
         // two core mods that replace the same game module
@@ -124,13 +132,15 @@ public static class Compat
             f.Add(new(Severity.Warning, "MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed.", Array.Empty<string>(),
                 Link: "https://aka.ms/vs/17/release/vc_redist.x86.exe"));
 
-        // Sims3Performance next to sims3-modernization: the two thread patches clash (framework/s3pp_settings.cpp)
+        // Sims3Performance's ShortWaitSpin patches the same wait imports as S3SS's AdaptiveWait (sims3-modernization docs/69);
+        // its ThreadStackDiet composes with ts3native's [ThreadStack]. Another mod's file: changed on Apply, or by Install when
+        // it installs Sims3Performance (Engine.InstallAsync), never by Play's automatic fixes
         var s3pp = Scan.FindAsi(bin, "Sims3Performance.asi");
         var s3ppIni = Path.ChangeExtension(s3pp ?? "", ".ini");
-        if (s3pp is not null && s.Ts3Native && File.Exists(s3ppIni)
-            && Values(File.ReadAllText(s3ppIni), "Patches", "ShortWaitSpin", "ThreadStackDiet").Any(v => int.TryParse(v, out var n) && n > 0))
-            f.Add(new(Severity.Warning, "Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup).",
-                Array.Empty<string>(), () => Rewrite(s3ppIni, t => Set(t, "Patches", new[] { "ShortWaitSpin", "ThreadStackDiet" }, v => v != "0", "0"))));
+        if (s3pp is not null && s.S3ss && File.Exists(s3ppIni)
+            && Values(File.ReadAllText(s3ppIni), "Patches", "ShortWaitSpin").Any(v => int.TryParse(v, out var n) && n > 0))
+            f.Add(new(Severity.Warning, "ShortWaitSpin in Sims3Performance and AdaptiveWait in Sims3SettingsSetter change the same game calls. Apply sets ShortWaitSpin to 0 and keeps a copy as Sims3Performance.ini.apex-backup.",
+                Array.Empty<string>(), () => Rewrite(s3ppIni, t => Set(t, "Patches", new[] { "ShortWaitSpin" }, v => v != "0", "0")), Suggest: S3ppWaitSuggest));
         TextLookupsConflict(f, s, bin, docs, packages, s3pp, s3ppIni);
 
         var bridge = s.Layer == Layer.Bridge;
@@ -138,7 +148,7 @@ public static class Compat
         var toml = Path.Combine(docs, "S3SS", "S3SS.toml");
         string[] texSections = { "patches.UncompressedLotTexturesPatch", "patches.UncompressedSimTexturesPatch" };
         if (bridge && s.S3ss && File.Exists(toml) && texSections.Any(sec => Values(File.ReadAllText(toml), sec, "enabled").Contains("true")))
-            f.Add(new(Severity.Warning, "Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup).",
+            f.Add(new(Severity.Warning, "Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. The launcher turns them off (a copy is kept as S3SS.toml.apex-backup).",
                 Array.Empty<string>(), () => Rewrite(toml, t => texSections.Aggregate(t, (x, sec) => Set(x, sec, new[] { "enabled" }, v => v == "true", "false")))));
 
         if (bridge)
@@ -221,13 +231,13 @@ public static class Compat
         {
             if (!int.TryParse(aa, out var level)) f.Add(Unreadable("Options.ini", "edgesmoothing", aa));
             else if (level != 0 && ApexEffectsBlockedByMsaa(f, Path.Combine(docs, "Apex Radiance", "ApexRadiance.toml")) is { Count: > 0 } effects)
-                f.Add(new(Severity.Warning, "Options.ini has edgesmoothing = {0}. The Sims 3's Edge Smoothing prevents these enabled Apex effects from working: {1}. Apply sets it to 0 (a copy is kept as Options.ini.apex-backup).",
+                f.Add(new(Severity.Warning, "Options.ini has edgesmoothing = {0}. The game's Edge Smoothing stops these Apex effects you turned on: {1}. Apply sets it to 0 and keeps a copy as Options.ini.apex-backup.",
                     new[] { aa, string.Join(", ", effects) }, () => Rewrite(options, t => Set(t, "options", new[] { "edgesmoothing" }, v => v != "0", "0")),
                     Suggest: "Turn off the game's Edge Smoothing"));
         }
         // the renderer and S3SS Apex recommends (apex_gui.cpp kRecommend*): components, so a pointer to Components only
         if (s.Layer is Layer.Native or Layer.Other)
-            f.Add(new(Severity.Info, "Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK.",
+            f.Add(new(Severity.Info, "Runs the game on Vulkan through the RTX Remix bridge. You get fewer stutters and about 600 MB more free memory for big worlds. If the game has problems with it, or your graphics card can't run it, use DXVK.",
                 Array.Empty<string>(), Suggest: "RTX Remix bridge"));
         if (!s.S3ss && !combined)
             f.Add(new(Severity.Info, "Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings.",
@@ -263,7 +273,7 @@ public static class Compat
     }
 
     static Finding Unreadable(string file, string key, string value) =>
-        new(Severity.Warning, "{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is.", new[] { file, key, value });
+        new(Severity.Warning, "{0} has {1} = {2}, which the launcher can't read, so it leaves the file as it is.", new[] { file, key, value });
 
     // native/remix-bridge/conf/dxvk.conf
     static readonly Dictionary<string, string> BridgeDxvk = new()

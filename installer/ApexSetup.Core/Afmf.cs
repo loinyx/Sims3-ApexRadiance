@@ -15,7 +15,7 @@ public static class Afmf
     {
         if (s.Error is not null) return ("Could not read the AMD driver settings: {0}", s.Error);
         if (s.On) return null;
-        if (!s.Supported) return ("Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver.", "");
+        if (!s.Supported) return ("Not available on this PC. AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver.", "");
         return null;
     }
 
@@ -41,7 +41,7 @@ public static class Afmf
     public static string? Set(bool on)
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1" || Environment.GetEnvironmentVariable("APEX_SETUP_FAKE_AMD") is not null)
-            return "Dry run: Setup changes nothing.";
+            return "Test run: the launcher changes nothing.";
         try
         {
             // the record first: a crash after the driver call still leaves it, so maintenance can turn AFMF off again

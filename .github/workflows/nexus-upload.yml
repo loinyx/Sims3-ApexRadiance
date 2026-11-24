@@ -1,4 +1,4 @@
-# Publishes each GitHub release to Nexus Mods: the release's ApexRadiance.asi (with ApexRadianceSetup.exe and a
+# Publishes each GitHub release to Nexus Mods: the release's ApexRadiance.asi (with the installer and a
 # "Manual install" folder from 3.1.1 on), zipped, becomes a new version of the
 # existing file on the Nexus mod page (official action Nexus-Mods/upload-action, Nexus upload API v3).
 #
@@ -48,9 +48,12 @@ jobs:
           fi
           [ -f dist/ApexRadiance.asi ] || gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadiance.asi --dir dist
           [ -f dist/ts3wrap.exe ] || gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ts3wrap.exe --dir dist || true
-          # Apex Radiance Setup, when the release has it (3.1.1 on): the zip then holds the installer and a manual-install folder
-          if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadianceSetup.exe --dir setup; then
-            echo "SETUP=1" >> "$GITHUB_ENV"
+          # the installer, when the release has it: Apex Launcher (4.1.0 on, ApexLauncher.exe), else Apex Radiance Setup
+          # (3.1.1 on); the zip then holds it and a manual-install folder
+          if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexLauncher.exe --dir setup; then
+            echo "SETUP=1" >> "$GITHUB_ENV"; echo "SETUP_EXE=ApexLauncher.exe" >> "$GITHUB_ENV"
+          elif gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadianceSetup.exe --dir setup; then
+            echo "SETUP=1" >> "$GITHUB_ENV"; echo "SETUP_EXE=ApexRadianceSetup.exe" >> "$GITHUB_ENV"
           fi
           # the RTX Remix bridge, when the release has it (a separate file on the Nexus page)
           if [ -n "${{ vars.NEXUS_BRIDGE_FILE_ID }}" ] &&
@@ -70,8 +73,8 @@ jobs:
           # the bold headline on the notes' first line ("**...**"), else the first section title
           HEAD=$(grep -m1 '^\*\*.*\*\*$' notes.md | sed -e 's/[*`]//g' || true)
           [ -n "$HEAD" ] || HEAD=$(grep -m1 '^## ' notes.md | sed -e 's/^## //' -e 's/[*`]//g' || true)
-          if [ -f setup/ApexRadianceSetup.exe ]; then
-            TAIL=" Full list: Changelogs tab. Install: see READ ME.txt in the zip (Setup or by hand). More free memory: the optional RTX Remix bridge file."
+          if [ -n "$(ls setup/*.exe 2>/dev/null)" ]; then
+            TAIL=" Full list: Changelogs tab. Install: see READ ME.txt in the zip (Apex Launcher or by hand). More free memory: the optional RTX Remix bridge file."
           else
             TAIL=" Full list: Changelogs tab. Install: copy ApexRadiance.asi into The Sims 3 > Game > Bin. More free memory: the optional RTX Remix bridge file."
           fi
@@ -83,18 +86,19 @@ jobs:
       - name: Zip
         run: |
           if [ "${SETUP:-}" = 1 ]; then
-            # ApexRadianceSetup.exe and READ ME.txt at the top, the ASI and the steps by hand in "Manual install"
+            # the installer and READ ME.txt at the top, the ASI and the steps by hand in "Manual install"
             # (the texts get the version and Windows line endings, for Notepad)
             mkdir -p pack/"Manual install"
-            cp setup/ApexRadianceSetup.exe pack/
+            cp "setup/$SETUP_EXE" pack/
             cp dist/ApexRadiance.asi pack/"Manual install"/
             [ -f dist/ts3wrap.exe ] && cp dist/ts3wrap.exe pack/"Manual install"/
             # the RTX Remix bridge folder of the release's manual-install zip (3.1.6 on), as in the GitHub download
             BR=$(find manual/x -maxdepth 2 -type d -name 'RTX Remix bridge' 2>/dev/null | head -1)
             [ -n "$BR" ] && cp -r "$BR" pack/"Manual install"/
-            sed -e "s/{VERSION}/$VERSION/" -e 's/$/\r/' .github/scripts/nexus-readme.txt > pack/"READ ME.txt"
+            # (the READ ME names the launcher; a release still shipping Setup keeps its own exe name in it)
+            sed -e "s/{VERSION}/$VERSION/" -e "s/ApexLauncher\.exe/$SETUP_EXE/g" -e 's/$/\r/' .github/scripts/nexus-readme.txt > pack/"READ ME.txt"
             sed -e "s/{VERSION}/$VERSION/" -e 's/$/\r/' .github/scripts/manual-install.txt > pack/"Manual install"/"How to install.txt"
-            (cd pack && zip -9 -r "../ApexRadiance-$VERSION.zip" "READ ME.txt" ApexRadianceSetup.exe "Manual install")
+            (cd pack && zip -9 -r "../ApexRadiance-$VERSION.zip" "READ ME.txt" "$SETUP_EXE" "Manual install")
           else
             cd dist
             zip -9 "../ApexRadiance-$VERSION.zip" ApexRadiance.asi

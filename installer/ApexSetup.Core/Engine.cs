@@ -13,7 +13,7 @@ public static class Components
     public static string Name(string c) => c switch
     {
         Apex => "Apex Radiance", Bridge => "RTX Remix bridge", Loader => "Ultimate ASI Loader", Dxvk => "DXVK", S3ss => "Sims3SettingsSetter",
-        MonoPatcher => "MonoPatcher", S3pp => "Sims 3 Performance Patch", RestartHost => "Restart host", _ => "Sims 3 Modernization",
+        MonoPatcher => "MonoPatcher", S3pp => "Sims 3 Performance Patch", RestartHost => "TS3Wrap", _ => "Sims 3 Modernization",
     };
 }
 
@@ -328,7 +328,7 @@ public static class Engine
     public sealed record Check(string Key, string[] Args, bool Blocks);
     public static Func<string, long> FreeBytes = dir => new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace;
     public const string CloseGameText = "Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again.";
-    public const string CannotWriteText = "Setup cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; or move the game out of a protected folder.";
+    public const string CannotWriteText = "The launcher can't save files in {0}. If Controlled folder access is on in Windows Security, allow ApexLauncher.exe there. Or move the game out of the protected folder.";
     public static List<Check> Preflight(Game g, State s, string? docs, long downloadBytes, bool replacesD3d9, bool downloads = true)
     {
         var l = new List<Check>();
@@ -351,16 +351,16 @@ public static class Engine
                 try
                 {
                     if (FreeBytes(dir) < need)
-                        l.Add(new("Setup needs {0} MB free on drive {1}. Free some space, then try again.", [(need >> 20).ToString(), Path.GetPathRoot(Path.GetFullPath(dir))!], true));
+                        l.Add(new("The launcher needs {0} MB free on drive {1}. Free some space, then try again.", [(need >> 20).ToString(), Path.GetPathRoot(Path.GetFullPath(dir))!], true));
                 }
                 catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { } // (a drive that cannot say: not a no)
             if (docs is null || !Directory.Exists(docs))
-                l.Add(new("Setup did not find The Sims 3's folder in Documents. Start the game once, then run Setup again for the settings it writes there.", [], false));
+                l.Add(new("The launcher didn't find The Sims 3 folder in Documents. Start the game once to create it, then open the launcher again.", [], false));
         }
         if (replacesD3d9 && s.Layer == Layer.Other)
-            l.Add(new("{0} (d3d9.dll) is set aside in Game\\Bin\\Apex Radiance backup; removing the renderer in Repair or remove puts it back.", [ForeignD3d9(g.Bin)], false));
+            l.Add(new("{0} (d3d9.dll) is moved to Game\\Bin\\Apex Radiance backup. Removing the renderer in Repair or remove puts it back.", [ForeignD3d9(g.Bin)], false));
         if (Scan.Loaders(g.Bin) is { Count: > 1 } loaders)
-            l.Add(new("Two ASI loaders ({0}): Setup keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup.", [string.Join(", ", loaders), loaders[0]], false));
+            l.Add(new("Found two ASI loaders ({0}). The launcher keeps {1} and moves the others to Game\\Bin\\Apex Radiance backup.", [string.Join(", ", loaders), loaders[0]], false));
         return l;
     }
 
@@ -409,7 +409,7 @@ public static class Engine
     // a file a scan removed, blocked (ERROR_VIRUS_INFECTED, ERROR_VIRUS_DELETED) or emptied as Setup downloaded or placed it: the
     // player's words, with the file names and the folder it was in (%TEMP%\ApexRadianceSetup for a download, Game\Bin for a copy)
     public static SetupException Antivirus(string? file, string folder) =>
-        new("Your antivirus removed or blocked {0}; add an exception for {1} and run Setup again.",
+        new("Your antivirus removed or blocked {0}. Add an exception for {1} and open the launcher again.",
             Path.GetFileName(file ?? "") is { Length: > 0 } n && !n.Contains(", ") ? n : file ?? "", folder);
     // a download cut off (the connection dropped mid-file): the network, not a file in use
     public static bool IsNetwork(Exception e) =>
@@ -457,7 +457,7 @@ public static class Engine
     // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
     public static void CheckWritable()
     {
-        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Dry run: Setup changes nothing.");
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Test run: the launcher changes nothing.");
         if (Games.IsRunning()) throw new SetupException(CloseGameText);
     }
 
@@ -494,7 +494,7 @@ public static class Engine
             try { fetched.Add(await src.FetchAsync(list[i], g, docs, ct)); }
             // (downloaded, then gone or blocked: a scan took it; the Performance Patch archive is the player's own file)
             catch (FileNotFoundException e) when (list[i] == Components.S3pp)
-            { throw new SetupException("Setup could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again.", Path.GetFileName(e.FileName ?? "")); }
+            { throw new SetupException("The launcher can't find {0}. Download the Sims 3 Performance Patch again, or choose the file you downloaded.", Path.GetFileName(e.FileName ?? "")); }
             catch (FileNotFoundException e) { throw Antivirus(e.FileName, GitHubSource.TempRoot); }
             catch (IOException e) when (IsVirusBlock(e)) { throw Antivirus(Components.Name(list[i]), GitHubSource.TempRoot); }
         }
@@ -556,7 +556,8 @@ public static class Engine
         }
         // the install leaves nothing known broken (checks after the copies: the bridge, Sims3Performance and S3SS rules depend on them)
         p?.Report(new(0.98, "Fixing incompatible settings"));
-        foreach (var fix in Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.CanFix))
+        // (Sims3Performance's ini is the player's: set only when this install brings Sims3Performance)
+        foreach (var fix in Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.CanFix || x.Suggest == Compat.S3ppWaitSuggest && components.Contains(Components.S3pp)))
             try { fix.Fix!(); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // the files are in place; Check installation still shows this one
         p?.Report(new(1, "Done"));
@@ -575,45 +576,69 @@ public static class Engine
         if (c == Components.RestartHost)
             foreach (var f in m.Files.Where(f => Path.GetFileName(f.Path).Equals("ts3wrap.exe", StringComparison.OrdinalIgnoreCase))) f.Component = c;
         var layerBefore = Scan.Run(g, docs).Layer;
-        // hand-installed files first, so a backup restored below is never taken for one
-        foreach (var rel in Known[c])
+        // setup.json is saved even when a file fails: an entry whose original is already back must not be read again on a retry
+        try
         {
-            var p = Path.Combine(g.Bin, rel);
-            // only the d3d9.dll of the layer being removed
-            if (rel == "d3d9.dll" && layerBefore != (c == Components.Dxvk ? Layer.Dxvk : Layer.Bridge)) continue;
-            if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) Fs.Delete(p);
+            // hand-installed files first, so a backup restored below is never taken for one
+            foreach (var rel in Known[c])
+            {
+                var p = Path.Combine(g.Bin, rel);
+                // only the d3d9.dll of the layer being removed
+                if (rel == "d3d9.dll" && layerBefore != (c == Components.Dxvk ? Layer.Dxvk : Layer.Bridge)) continue;
+                if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) Fs.Delete(p);
+            }
+            var docsRoot = docs ?? Scan.DocumentsFor(g);
+            foreach (var f in m.Files.Where(f => f.Component == c).ToList())
+            {
+                // (a file already gone with nothing to put back needs no work wherever it was, as after Documents moved)
+                if (f.Backup is null && !File.Exists(f.Path)) { m.Files.Remove(f); continue; }
+                if (!Within(f.Path, g.Bin, docsRoot) || f.Backup is not null && !Within(f.Backup, Manifest.DirOf(g.Bin)))
+                {
+                    Engine.Log(new InvalidOperationException("Manifest entry outside the game left alone: " + f.Path + " <- " + f.Backup));
+                    continue;
+                }
+                // (a backup already gone: the file there is the original an earlier, failed removal put back)
+                if (f.Backup is null || File.Exists(f.Backup)) Fs.Delete(f.Path);
+                if (f.Backup is not null && File.Exists(f.Backup)) Fs.Move(f.Backup, f.Path);
+                m.Files.Remove(f);
+            }
+            if (c == Components.MonoPatcher && Directory.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher")))
+                foreach (var f in Directory.EnumerateFiles(Path.Combine(Scan.Packages(docs), "MonoPatcher"), "ld_MonoPatcher*.package")) Fs.Delete(f);
+            if (c == Components.Modernization)
+            {
+                var pkg = Path.Combine(Scan.Packages(docs), "ts3fixes.package");
+                Fs.Delete(pkg);
+            }
+            if (c is Components.Bridge or Components.Dxvk)
+            {
+                foreach (var d in new[] { Path.Combine(g.Bin, ".trex"), Path.Combine(g.Bin, "licenses") })
+                    if (Directory.Exists(d) && Fs.Emptied(d)) Fs.DeleteDir(d);
+                // the game is back on its own D3D9 (a restored loader or wrapper included): the copy taken then matches the card it sees again
+                if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup) && Scan.Run(g, docs).Layer is Layer.Native or Layer.Other)
+                    Fs.Copy(m.OptionsBackup, OptionsIni(docs));
+                if (m.OptionsBackup is not null) Fs.Delete(m.OptionsBackup);
+                m.OptionsBackup = null;
+            }
+            if (c == Components.RestartHost) SetRestartHost(docs, false);
+            m.Versions.Remove(c);
         }
-        foreach (var f in m.Files.Where(f => f.Component == c).ToList())
-        {
-            Fs.Delete(f.Path);
-            if (f.Backup is not null && File.Exists(f.Backup)) Fs.Move(f.Backup, f.Path);
-            m.Files.Remove(f);
-        }
-        if (c == Components.MonoPatcher && Directory.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher")))
-            foreach (var f in Directory.EnumerateFiles(Path.Combine(Scan.Packages(docs), "MonoPatcher"), "ld_MonoPatcher*.package")) Fs.Delete(f);
-        if (c == Components.Modernization)
-        {
-            var pkg = Path.Combine(Scan.Packages(docs), "ts3fixes.package");
-            Fs.Delete(pkg);
-        }
-        if (c is Components.Bridge or Components.Dxvk)
-        {
-            foreach (var d in new[] { Path.Combine(g.Bin, ".trex"), Path.Combine(g.Bin, "licenses") })
-                if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Fs.DeleteDir(d);
-            // the game is back on its own D3D9 (a restored loader or wrapper included): the copy taken then matches the card it sees again
-            if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup) && Scan.Run(g, docs).Layer is Layer.Native or Layer.Other)
-                Fs.Copy(m.OptionsBackup, OptionsIni(docs));
-            if (m.OptionsBackup is not null) Fs.Delete(m.OptionsBackup);
-            m.OptionsBackup = null;
-        }
-        if (c == Components.RestartHost) SetRestartHost(docs, false);
-        m.Versions.Remove(c);
-        m.Save();
+        finally { m.Save(); }
         // after the files are gone (a failed removal leaves frame generation as it was); never fails the removal: the UI logs it and shows it on the row
         if (TurnsFrameGenOff(c)) { var (nv, amd) = FrameGenOff(g); FrameGenOffError = (nv ?? FrameGenOffError.Nv, amd ?? FrameGenOffError.Amd); }
         // the restored d3d9.dll is a loader again: the one Setup added for the bridge would load every mod twice
         if (c is Components.Bridge or Components.Dxvk && m.Versions.ContainsKey(Components.Loader) && Scan.Run(g, docs).LoaderIsD3d9)
             Remove(g, Components.Loader, docs);
+    }
+
+    // a path inside one of the folders (after .. and the like are resolved)
+    public static bool Within(string path, params string[] roots)
+    {
+        try
+        {
+            var p = Path.GetFullPath(path);
+            return roots.Any(r => p.StartsWith(Path.GetFullPath(r).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
     }
 
     public static void RemoveAll(Game g, string? docs = null)
@@ -875,10 +900,10 @@ public static class Engine
     // settings; anything else, a change the driver did not keep included, says it did not accept it and how to do it by hand,
     // turning on or off as the change was.
     public static string FriendlyFrameGenError(string error, bool amd, bool on = true) =>
-        error == "Dry run: Setup changes nothing." ? error
+        error == "Test run: the launcher changes nothing." ? error
         : error.EndsWith(" -137") || error.Contains("denied", StringComparison.OrdinalIgnoreCase) || error.Contains("privilege", StringComparison.OrdinalIgnoreCase)
-            ? (amd ? "Windows did not let Setup change the driver settings. Close AMD Software, then try again."
-                   : "Windows did not let Setup change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again.")
+            ? (amd ? "Windows did not let the launcher change the driver settings. Close AMD Software, then try again."
+                   : "Windows did not let the launcher change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again.")
         : amd ? (on ? "The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."
                     : "The AMD driver did not accept the change. You can turn it off by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames.")
         : on ? "The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector."

@@ -3,29 +3,32 @@ using System.Security.Cryptography;
 
 namespace ApexSetup;
 
-// Setup updates itself from the latest Apex Radiance release: its ApexRadianceSetup.exe, checked against GitHub's SHA-256
-// digest and found to be Apex Radiance Setup of a higher version, replaces the running exe (renamed to .old, deleted at
+// The launcher updates itself from the latest Apex Radiance release: its ApexLauncher.exe (or, as Setups before the launcher
+// look for it, the same exe as ApexRadianceSetup.exe), checked against GitHub's SHA-256 digest and found to be Apex Launcher
+// or Apex Radiance Setup of a higher version, replaces the running exe (renamed to .old, deleted at
 // the next start) and starts in its place. Setups before 1.1.0 (Apex Radiance 3.1.3 and earlier) have no such check.
 public static class SelfUpdate
 {
-    public const string AssetName = "ApexRadianceSetup.exe", Product = "Apex Radiance Setup";
+    // the launcher's 2.0.x builds still say Product "Apex Radiance Setup": Setups before it accept only that name
+    public static readonly string[] AssetNames = ["ApexLauncher.exe", "ApexRadianceSetup.exe"], Products = ["Apex Launcher", "Apex Radiance Setup"];
+    public static string AssetName => AssetNames[0];
 
     // The newer Setup, downloaded and checked, or null when this one is the latest (or the release has none).
     public static async Task<string?> DownloadIfNewerAsync(Release apex, string self, CancellationToken ct = default)
     {
-        if (apex.Assets.FirstOrDefault(a => a.Name == AssetName) is not { } asset) return null;
+        if (AssetNames.Select(n => apex.Assets.FirstOrDefault(a => a.Name == n)).FirstOrDefault(a => a is not null) is not { } asset) return null;
         if (asset.Sha256 is null) return null; // never run an exe that cannot be checked
         if (Hash(self).Equals(asset.Sha256, StringComparison.OrdinalIgnoreCase)) return null; // this very exe
         // (a folder of its own: an install empties %TEMP%\ApexRadianceSetup when it finishes)
-        var file = await Releases.DownloadAsync(asset, Path.Combine(Path.GetTempPath(), "ApexRadianceSetup-update", Guid.NewGuid().ToString("N")), ct);
+        var file = await Releases.DownloadAsync(asset, Path.Combine(Path.GetTempPath(), "ApexLauncher-update", Guid.NewGuid().ToString("N")), ct);
         return IsNewer(file, self) ? file : null;
     }
 
-    // Apex Radiance Setup with a higher version than self: a different digest alone could be an older or a test build.
+    // Apex Launcher (or Setup) with a higher version than self: a different digest alone could be an older or a test build.
     public static bool IsNewer(string file, string self)
     {
         var n = FileVersionInfo.GetVersionInfo(file);
-        return n.ProductName == Product && Version.TryParse(n.FileVersion, out var nv)
+        return Products.Contains(n.ProductName) && Version.TryParse(n.FileVersion, out var nv)
                && Version.TryParse(FileVersionInfo.GetVersionInfo(self).FileVersion, out var sv) && nv > sv;
     }
 
@@ -73,7 +76,8 @@ public static class SelfUpdate
     // the folder the update was downloaded to, no longer needed once Setup starts (about 40 MB each time otherwise)
     public static void CleanTemp()
     {
-        try { var d = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup-update"); if (Directory.Exists(d)) Directory.Delete(d, true); }
+        foreach (var name in new[] { "ApexLauncher-update", "ApexRadianceSetup-update" })
+            try { var d = Path.Combine(Path.GetTempPath(), name); if (Directory.Exists(d)) Directory.Delete(d, true); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 

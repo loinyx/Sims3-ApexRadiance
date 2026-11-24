@@ -4,7 +4,7 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>ApexSetup</RootNamespace>
-    <AssemblyName>ApexRadianceSetup</AssemblyName>
+    <AssemblyName>ApexLauncher</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWinUI>true</UseWinUI>
@@ -28,11 +28,12 @@
     <!-- the XAML resources as resources.pri, the name an unpackaged app finds whatever its exe is called: as ApexRadianceSetup.pri,
          a renamed download ("ApexRadianceSetup (1).exe") looked for its own name and failed its XAML parse at start -->
     <ProjectPriFileName>resources.pri</ProjectPriFileName>
-    <Version>1.2.8</Version>
+    <Version>2.0.30</Version>
+    <!-- stays "Apex Radiance Setup" in 2.0.x: Setups before the launcher take an update only with this product name -->
     <Product>Apex Radiance Setup</Product>
     <Company>loinyx</Company>
     <!-- the file's description and copyright as Windows and antivirus heuristics read them (an empty description shows the exe name) -->
-    <AssemblyTitle>Apex Radiance Setup</AssemblyTitle>
+    <AssemblyTitle>Apex Launcher</AssemblyTitle>
     <Copyright>Copyright © loinyx</Copyright>
   </PropertyGroup>
   <ItemGroup>
