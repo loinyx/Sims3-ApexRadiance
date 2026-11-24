@@ -69,10 +69,17 @@ static class GameSettingsTests
 
             File.Delete(options);
             check(GameSettings.Now(bin, docs)["memories"] == "0" && !GameSettings.ApplyOptions(g, docs, want), "game settings: without Options.ini the game's defaults show and nothing is written");
-            GameSettings.CreateOptions(docs, new Dictionary<string, string> { ["memories"] = "1", ["store"] = "0", ["shadow"] = "8192" });
-            check(Get(options) == "[options]\r\nenablememories = 3\r\n", "game settings: the first Play makes Options.ini with the choices alone");
-            GameSettings.CreateOptions(docs, want);
-            check(Get(options) == "[options]\r\nenablememories = 3\r\n", "game settings: an Options.ini that is there is never replaced");
+            check(!File.Exists(options), "game settings: Options.ini is never made by the launcher");
+            // a file edited since the launcher wrote it keeps the edit, and gets only the launcher's own values back
+            GameSettings.ApplyBin(g, docs, new Dictionary<string, string> { ["walk.radius"] = "0.1", ["reads"] = "40000000" });
+            Put(ini, Get(ini) + "; mine\r\n");
+            GameSettings.RestoreBin(g);
+            check(Get(ini) == Ini + "; mine\r\n" && !GameSettings.CanRestore(bin, docs), "game settings: Restore keeps an edit made since");
+            Put(options, "[options]\r\nenableingamestore =\r\n");
+            GameSettings.ApplyOptions(g, docs, new Dictionary<string, string> { ["store"] = "1" });
+            check(Get(options) == "[options]\r\nenableingamestore =0\r\n", "game settings: an empty value is filled on its own line");
+            GameSettings.RestoreDocs(docs);
+            File.Delete(options);
 
             // Sims3SettingsSetter's settings
             const string toml = "[meta]\nversion = 1\n\n[patches.LightingQualityPatch]\nenabled = true\nshadowRadius = 1\n\n[patches.Mimalloc]\nenabled = false\n\n[qol.ui]\ntoggle_key = 45\n";

@@ -708,7 +708,6 @@ public static partial class Strings
         ["Select all"] = "Seleccionar todo",
         ["Clear"] = "Borrar",
         ["{0} conflict: {1}"] = "Conflicto de {0}: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} pueden solaparse en {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "No se pudieron leer algunos archivos comprimidos de mods. Instala 7-Zip para que la comprobación de conflictos también los lea.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "Se guarda una copia de las cachés borradas hasta que el juego se inicie y se cierre con normalidad.",
         ["Clear the game caches"] = "Borrar las cachés del juego",

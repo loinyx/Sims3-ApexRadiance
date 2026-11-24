@@ -713,7 +713,6 @@ public static partial class Strings
         ["Select all"] = "Összes kijelölése",
         ["Clear"] = "Törlés",
         ["{0} conflict: {1}"] = "{0} ütközés: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} átfedhet itt: {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Néhány modarchívumot nem sikerült beolvasni. Telepítsd a 7-Zipet, hogy az ütközésellenőrzés azokat is beolvassa.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "A törölt játék-gyorsítótárakról másolat marad, amíg a játék rendben el nem indul és be nem zárul.",
         ["Clear the game caches"] = "Játék-gyorsítótárak törlése",

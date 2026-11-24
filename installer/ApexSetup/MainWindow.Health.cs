@@ -30,7 +30,7 @@ public sealed partial class MainWindow
     string AreaDetail(HealthArea a) => a switch
     {
         HealthArea.ApexRadiance => T("files, settings, one copy"), HealthArea.Loaders => T("ASI loader, Sims 3 Modernization"), HealthArea.Graphics => _state?.Layer.ToString() ?? "",
-        HealthArea.GameSettings => "Options.ini, Resource.cfg", HealthArea.Mods => T("Only what changes something in the game."), HealthArea.Stability => T("Your last times in the game."),
+        HealthArea.GameSettings => "Options.ini, Resource.cfg", HealthArea.Mods => T("Conflicts that change something in the game."), HealthArea.Stability => T("Your latest sessions."),
         HealthArea.Saves => T("size, backups, complete"), _ => T("free space, OneDrive, game caches"),
     };
 
@@ -135,7 +135,7 @@ public sealed partial class MainWindow
         {
             HealthState.Blocked => T("The game still starts, but without Apex Radiance until this is fixed."),
             HealthState.NeedsYou => T("The game starts fine. Have a look when you have a minute."),
-            _ when _healthAll.Count(i => i.Finding.Severity != Severity.Info) > 0 => T("Nothing to look at besides what you ignored."),
+            _ when _healthAll.Count(i => i.Finding.Severity != Severity.Info) > 0 => T("Nothing else needs your attention."),
             _ => T("Every check passed. The launcher checks again each time you press Play."),
         }, 14, Res("ApexSoftTextBrush")));
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0) };
@@ -155,18 +155,17 @@ public sealed partial class MainWindow
 
         // what asks for the player: the mod conflicts as one line, then each other finding
         var mine = ConflictsNow().Where(c => c.Level != ConflictLevel.Small).ToList();
-        var ofConflicts = (_conflicts?.Found ?? []).Select(c => c.Finding).OfType<Finding>().ToHashSet();
-        var needs = _health.Where(i => i.Finding.Severity != Severity.Info && !ofConflicts.Contains(i.Finding)).ToList();
+        var needs = _health.Where(i => i.Finding.Severity != Severity.Info && !i.Conflict).ToList();
         if (mine.Count + needs.Count > 0)
         {
             var list = new StackPanel { Spacing = 8 };
-            list.Children.Add(SectionTitle(T("For you to look at")));
+            list.Children.Add(SectionTitle(T("Needs your attention")));
             if (mine.Count > 0)
             {
                 var see = Button(T("See"), () => HealthGo(nameof(HealthArea.Mods)), accent: true);
                 see.MinWidth = 84;
                 list.Children.Add(Glass(Line(IconTile(AreaIcon(HealthArea.Mods), ((SolidColorBrush)Res("ApexWarningBrush")).Color),
-                    mine.Count == 1 ? T(mine[0].Title) : T("{0} conflicts between mods", mine.Count), mine.Count == 1 ? string.Join(", ", mine[0].Parties) : T("Some change the same thing in the game."), see)));
+                    mine.Count == 1 ? T(mine[0].Title) : T("{0} conflicts between mods", mine.Count), mine.Count == 1 ? string.Join(", ", mine[0].Parties) : T("They change the same things in the game."), see)));
             }
             foreach (var it in needs)
             {
@@ -298,9 +297,9 @@ public sealed partial class MainWindow
         var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var off = IsIgnored(it);
         if (!off && FindingAction(it) is { } act) { act.MinWidth = 88; s.Children.Add(act); }
-        var b = Button(off ? T("Warn again") : T("Ignore"), () => IgnoreFinding(it, !off));
+        var b = Button(off ? T("Show again") : T("Ignore"), () => IgnoreFinding(it, !off));
         b.MinWidth = 88;
-        AutomationProperties.SetName(b, (off ? T("Warn again") : T("Ignore")) + ", " + Sentences(T(it.Finding.Text, it.Finding.Args)).Item1);
+        AutomationProperties.SetName(b, (off ? T("Show again") : T("Ignore")) + ", " + Sentences(T(it.Finding.Text, it.Finding.Args)).Item1);
         s.Children.Add(b);
         return s;
     }
@@ -320,7 +319,7 @@ public sealed partial class MainWindow
     void IgnoreDone(bool on, bool note, Action undo)
     {
         HealthBadge.Visibility = _healthState != HealthState.Ready ? Visibility.Visible : Visibility.Collapsed;
-        _healthNote = !note ? null : on ? (T("Ignored. It won't show again."), T("Undo"), undo) : (T("It warns again."), null, null);
+        _healthNote = !note ? null : on ? (T("Ignored. It won't show again."), T("Undo"), undo) : (T("Showing again."), null, null);
         BuildHealth();
     }
 
@@ -355,11 +354,10 @@ public sealed partial class MainWindow
         var small = live.Where(c => c.Level == ConflictLevel.Small).ToList();
         var gone = ConflictsNow(ignored: true);
         var goneToo = IgnoredIn(HealthArea.Mods);
-        var ofConflicts = (_conflicts?.Found ?? []).Select(c => c.Finding).OfType<Finding>().ToHashSet();
-        var other = _health.Where(i => i.Area == HealthArea.Mods && !ofConflicts.Contains(i.Finding)).ToList();
+        var other = _health.Where(i => i.Area == HealthArea.Mods && !i.Conflict).ToList();
 
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-        (string Name, int Count)[] tabs = [(T("To look at"), look.Count + other.Count(i => i.Finding.Severity != Severity.Info)), (T("Small ones"), small.Count), (T("Ignored"), gone.Count + goneToo.Count)];
+        (string Name, int Count)[] tabs = [(T("To look at"), look.Count + other.Count(i => i.Finding.Severity != Severity.Info)), (T("Minor"), small.Count), (T("Ignored"), gone.Count + goneToo.Count)];
         for (int i = 0; i < tabs.Length; i++)
         {
             var at = i;
@@ -396,10 +394,10 @@ public sealed partial class MainWindow
         else if (shown.Count == 0)
             page.Children.Add(_conflictTab switch
             {
-                1 => Empty(T("No small conflicts"), T("None of your mods share a command, a picture or a text.")),
-                2 => Empty(T("Nothing ignored"), T("What you ignore shows here.")),
-                _ when small.Count + gone.Count + goneToo.Count > 0 => Empty(T("Nothing to look at"), T("What is left is small or ignored.")),
-                _ => Empty(T("No conflicts"), T("Your mods don't get in each other's way.")),
+                1 => Empty(T("No minor conflicts"), T("None of your mods share a command, a picture or text.")),
+                2 => Empty(T("Nothing ignored"), T("Anything you ignore appears here.")),
+                _ when small.Count + gone.Count + goneToo.Count > 0 => Empty(T("Nothing needs your attention"), T("Everything left is minor or ignored.")),
+                _ => Empty(T("No conflicts"), T("Your mods don't conflict with each other.")),
             });
     }
 
@@ -410,9 +408,9 @@ public sealed partial class MainWindow
         var all = new StackPanel();
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var more = Button(open ? T("Close") : T("Details"), () => { (_conflictOpen, _conflictTech) = (open ? "" : c.Id, false); BuildHealth(); });
-        var ignore = Button(ignored ? T("Warn again") : T("Ignore"), () => IgnoreConflict(c, !ignored));
+        var ignore = Button(ignored ? T("Show again") : T("Ignore"), () => IgnoreConflict(c, !ignored));
         AutomationProperties.SetName(more, (open ? T("Close") : T("Details")) + ", " + string.Join(", ", c.Parties));
-        AutomationProperties.SetName(ignore, (ignored ? T("Warn again") : T("Ignore")) + ", " + string.Join(", ", c.Parties));
+        AutomationProperties.SetName(ignore, (ignored ? T("Show again") : T("Ignore")) + ", " + string.Join(", ", c.Parties));
         more.MinWidth = ignore.MinWidth = 88;
         buttons.Children.Add(more);
         buttons.Children.Add(ignore);
@@ -448,21 +446,32 @@ public sealed partial class MainWindow
         for (int i = 0; i < files.Count; i++)
         {
             var (party, file) = files[i];
-            var info = c.Winner is { } w ? (w.Equals(party, StringComparison.OrdinalIgnoreCase) ? T("This one applies") : T("Loses this part"))
-                : c.Title == "Versions of the same mod" && dates[i] is { } d ? (d == newest ? T("Newest, from {0}", d.ToString("d MMM yyyy", LangCulture())) : T("From {0}", d.ToString("d MMM yyyy", LangCulture()))) : "";
+            var info = c.Winner is { } w ? (w.Equals(party, StringComparison.OrdinalIgnoreCase) ? T("In use") : T("Replaced by the other"))
+                : c.Title == "Two versions of the same mod" && dates[i] is { } d ? (d == newest ? T("Newest, from {0}", d.ToString("d MMM yyyy", LangCulture())) : T("From {0}", d.ToString("d MMM yyyy", LangCulture()))) : "";
             var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(14, 8, 8, 8), MinHeight = 48, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var words = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
             words.Children.Add(new TextBlock { Text = party, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
             if (info.Length > 0) words.Children.Add(new TextBlock { Text = info, FontSize = 12, Foreground = Res("ApexMutedBrush") });
             g.Children.Add(words);
+            var others = files.Where((_, n) => n != i).Select(f => f.File).OfType<ModFile>().ToList();
+            if (c.CanOrder && file is not null && others.Count == files.Count - 1 && ModPriority.Moves(Docs, file, others) is { Count: > 0 } moves)
+            {
+                var up = Button(T("Give priority"), async () => await GivePriority(c, party, moves));
+                (up.Background, up.BorderThickness, up.VerticalAlignment, up.IsEnabled) = (new SolidColorBrush(Microsoft.UI.Colors.Transparent), new Thickness(0), VerticalAlignment.Center, !_running && !_busy);
+                AutomationProperties.SetName(up, T("Give priority") + ", " + party);
+                ToolTipService.SetToolTip(up, string.Join("\n", moves.Select(x => T("Moves {0} to {1}", Path.GetFileNameWithoutExtension(x.Mod.Name), "Mods\\" + x.Folder))));
+                Grid.SetColumn(up, 1);
+                g.Children.Add(up);
+            }
             if (file is { Locked: false, FileType: "package" } m)
             {
                 var off = Button(T("Turn off"), async () => await TurnOffMod(m));
                 (off.Background, off.BorderThickness, off.VerticalAlignment, off.IsEnabled) = (new SolidColorBrush(Microsoft.UI.Colors.Transparent), new Thickness(0), VerticalAlignment.Center, !_running && !_busy);
                 AutomationProperties.SetName(off, T("Turn off {0}", party));
-                Grid.SetColumn(off, 1);
+                Grid.SetColumn(off, 2);
                 g.Children.Add(off);
             }
             rows.Children.Add(g);
@@ -480,10 +489,30 @@ public sealed partial class MainWindow
         if (c.Finding is { } f)
         {
             var rest = _healthAll.Where(i => !ReferenceEquals(i.Finding, f)).ToList();
-            SetHealth(on ? rest : [.. rest, new(f, HealthArea.Mods, c.Files)]);
+            SetHealth(on ? rest : [.. rest, new(f, HealthArea.Mods, c.Files) { Conflict = true }]);
         }
         _conflictOpen = "";
         IgnoreDone(on, note, () => IgnoreConflict(c, false, note: false));
+    }
+
+    // one mod of a conflict first: its file (or the others') moves to the folder that comes first (or after). The next
+    // check no longer finds a conflict there.
+    async Task GivePriority(ModConflict c, string party, List<(ModFile Mod, string Folder)> moves)
+    {
+        var docs = Docs;
+        void Again() { _conflictOpen = ""; _modsLoaded = false; RefreshGame(); BuildHealth(); }
+        try
+        {
+            var done = await ModWork(() => ModPriority.Apply(docs, moves));
+            _healthNote = (T("{0} has priority now.", party), T("Undo"), async () =>
+            {
+                try { await ModWork(() => { ModPriority.Back(docs, done); return 0; }); _healthNote = null; }
+                catch (Exception e) { App.Log(e); await Message(T("The mod was not moved"), ErrorText(e)); }
+                Again();
+            });
+            Again();
+        }
+        catch (Exception e) { App.Log(e); await Message(T("The mod was not moved"), ErrorText(e)); }
     }
 
     async Task TurnOffMod(ModFile m)
@@ -493,7 +522,7 @@ public sealed partial class MainWindow
         {
             var path = await ModWork(() => Mods.SetEnabled(m, false, docs));
             var off = m with { Path = path, Enabled = false };
-            _healthNote = (T("{0} is off. Its file is kept.", Path.GetFileNameWithoutExtension(m.Name)), T("Undo"), async () =>
+            _healthNote = (T("{0} is off. Nothing was deleted.", Path.GetFileNameWithoutExtension(m.Name)), T("Undo"), async () =>
             {
                 try { await ModWork(() => Mods.SetEnabled(off, true, docs)); _healthNote = null; }
                 catch (Exception e) { App.Log(e); await Message(T("The mod was not moved"), ErrorText(e)); }
@@ -516,7 +545,7 @@ public sealed partial class MainWindow
         var waiting = _health.Where(i => i.Finding.CanFix).ToList();
         if (waiting.Count > 0) body.Children.Add(Rows(waiting.Select(FindingLine)));
         var points = _game is { } g ? RestorePoints.List(g.Bin) : [];
-        if (points.Count == 0) { body.Children.Add(Empty(T("Nothing yet"), T("What the launcher changes shows here."))); return; }
+        if (points.Count == 0) { body.Children.Add(Empty(T("Nothing yet"), T("Changes made by the launcher appear here."))); return; }
         body.Children.Add(Rows(points.Select(p =>
         {
             var fix = p.Label.StartsWith("Fix", StringComparison.Ordinal);

@@ -29,7 +29,7 @@
          a renamed download ("ApexRadianceSetup (1).exe") looked for its own name and failed its XAML parse at start -->
     <ProjectPriFileName>resources.pri</ProjectPriFileName>
     <Version>2.2.0</Version>
-    <!-- stays "Apex Radiance Setup" in 2.0.x: Setups before the launcher take an update only with this product name -->
+    <!-- stays "Apex Radiance Setup": Setups before the launcher take an update only with this product name -->
     <Product>Apex Radiance Setup</Product>
     <Company>loinyx</Company>
     <!-- the file's description and copyright as Windows and antivirus heuristics read them (an empty description shows the exe name) -->

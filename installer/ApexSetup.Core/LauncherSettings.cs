@@ -17,7 +17,7 @@ public sealed class LauncherSettings
     public string Backdrop { get; set; } = "mica";        // the window's background: "mica", "micaalt", "acrylic" or "solid"
     public bool NavCompact { get; set; }                  // the side pane kept to its icons (the toggle at its top)
 
-    // the game options chosen before the game ever wrote Options.ini, by its Documents folder: set at the first Play
+    // the game options chosen before the game ever wrote Options.ini, by its Documents folder: set once the game has made it
     public Dictionary<string, Dictionary<string, string>> PendingOptions { get; set; } = new();
 
     public List<string> IgnoredConflicts { get; set; } = new(); // mod conflicts the player does not want to see again (ModConflict.Id)

@@ -698,7 +698,6 @@ public static partial class Strings
         ["Select all"] = "모두 선택",
         ["Clear"] = "지우기",
         ["{0} conflict: {1}"] = "{0} 충돌: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0}이(가) {1}에서 겹칠 수 있어요: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "일부 모드 압축 파일을 읽을 수 없었어요. 7-Zip을 설치하면 충돌 검사에서 이것도 읽을 수 있어요.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "지운 게임 캐시의 사본은 게임이 정상적으로 시작하고 종료될 때까지 보관돼요.",
         ["Clear the game caches"] = "게임 캐시 지우기",

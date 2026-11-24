@@ -350,8 +350,8 @@ public static partial class ScriptErrors
             }
             if (m.Count - m.Crashes is var n and > 0)
                 f.Add(new(new(sev, r.Unread > 0
-                        ? m.Mod is null ? "Script errors in the game's own code: at least {0} since {1}. No mod shows as their cause." : "Script errors in {1}: at least {0} since {2}. If something it does goes wrong in the game, update it or turn it off."
-                        : m.Mod is null ? "Script errors in the game's own code: {0} since {1}. No mod shows as their cause." : "Script errors in {1}: {0} since {2}. If something it does goes wrong in the game, update it or turn it off.",
+                        ? m.Mod is null ? "Script errors in the game's own code: at least {0} since {1}. No mod appears as the cause." : "Script errors in {1}: at least {0} since {2}. If it causes problems, update it or turn it off."
+                        : m.Mod is null ? "Script errors in the game's own code: {0} since {1}. No mod appears as the cause." : "Script errors in {1}: {0} since {2}. If it causes problems, update it or turn it off.",
                     m.Mod is null ? [n.ToString(), r.Since.ToString("d")] : [n.ToString(), m.Mod, r.Since.ToString("d")]), m.Files));
         }
         return f;

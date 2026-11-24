@@ -137,8 +137,9 @@ static class HealthTests
         string Crashes(int n) => ScriptErrors.Findings(r with { ByMod = [r.ByMod.First(m => m.Mod == "Crashy.asi") with { Count = n, Crashes = n }] }).Single().Finding.Severity.ToString();
         // one the player ignored stays ignored whatever its count and date, and no other finding goes with it
         Health.Item Stab(string text, params string[] args) => new(new Finding(Severity.Warning, text, args), HealthArea.Stability, []);
-        check(Stab("{0} in {1} since {2}", "3", "Mod v1", "11/17/2026 3:58 PM").Id == Stab("{0} in {1} since {2}", "12", "Mod v2", "11/18/2026 9:01 AM").Id
-              && Stab("{0} in {1}", "3", "ModA").Id != Stab("{0} in {1}", "3", "ModB").Id, "health: what an ignored finding is known by does not change with counts, dates and versions");
+        check(Stab("{0} in {1} since {2}", "3", "Mod", DateTime.Now.ToString("d")).Id == Stab("{0} in {1} since {2}", "12", "Mod", DateTime.Now.AddDays(-3).ToString("g")).Id
+              && Stab("{0} in {1}", "3", "Save1").Id != Stab("{0} in {1}", "3", "Save2").Id && (Stab("x") with { Files = ["a1.package"] }).Id != (Stab("x") with { Files = ["a2.package"] }).Id,
+              "health: what an ignored finding is known by does not change with counts and dates, and no other goes with it");
         check(Crashes(1) == "Info" && Crashes(2) == "Info" && Crashes(ScriptErrors.CrashPattern) == "Warning",
             $"script errors: one or two crashes in a place are a note, {ScriptErrors.CrashPattern} a warning ({Crashes(1)}, {Crashes(2)}, {Crashes(3)})");
         // a mod that only started the action (a hook over the game's own method, or one far up the stack) is not the cause; the

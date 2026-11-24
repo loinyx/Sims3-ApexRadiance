@@ -703,7 +703,6 @@ public static partial class Strings
         ["Select all"] = "Vybrat vše",
         ["Clear"] = "Vymazat",
         ["{0} conflict: {1}"] = "Konflikt {0}: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} se mohou překrývat v {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Některé archivy modů nelze přečíst. Nainstalujte 7-Zip, aby je kontrola konfliktů mohla přečíst také.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "Kopie vymazaných mezipamětí hry se uchová, dokud se hra normálně nespustí a nezavře.",
         ["Clear the game caches"] = "Vymazat mezipaměti hry",

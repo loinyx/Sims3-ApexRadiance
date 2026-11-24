@@ -711,7 +711,6 @@ public static partial class Strings
         ["Select all"] = "Επιλογή όλων",
         ["Clear"] = "Καθαρισμός",
         ["{0} conflict: {1}"] = "Σύγκρουση {0}: {1}",
-        ["{0} may overlap in {1}: {2}"] = "Τα {0} μπορεί να επικαλύπτονται στο {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Κάποια αρχεία mods δεν ήταν δυνατό να διαβαστούν. Εγκατάστησε το 7-Zip για να τα διαβάζει κι ο έλεγχος συγκρούσεων.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "Ένα αντίγραφο της cache του παιχνιδιού που καθαρίστηκε κρατιέται μέχρι το παιχνίδι να ξεκινήσει και να κλείσει κανονικά.",
         ["Clear the game caches"] = "Καθαρισμός της cache του παιχνιδιού",

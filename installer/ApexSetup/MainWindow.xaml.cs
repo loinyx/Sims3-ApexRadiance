@@ -304,6 +304,7 @@ public sealed partial class MainWindow : Window
 
     void Show(int step)
     {
+        if (step == GameSettingsScreen && _step != step) FreshGameSettings();
         if (step == HealthScreen && _step != step) (_healthPage, _healthNote) = ("", null); // (Health opens on its overview)
         _step = step;
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
@@ -398,6 +399,7 @@ public sealed partial class MainWindow : Window
                 break;
             case RendererStep: Show(ComponentsStep); break;
             case GameSettingsScreen: await ApplyGameSettings(); break;
+            case WizardSettings when _offline: await LoadReleasesAsync(); break;
             case WizardSettings: { var (add, del) = Plan(); await InstallAsync(add, del); break; }
             case GameStep: if (CanLeaveGame()) Show(ComponentsStep); break;
             case ComponentsStep:
@@ -452,7 +454,7 @@ public sealed partial class MainWindow : Window
                 : _state?.ApexVersion is not null ? T("Next") : T("Get started"),
             RendererStep => T("Use {0}", RendererShort(_renderer)),
             ComponentsStep when _offline && wa.Count > 0 => T("Try again"),
-            WizardSettings => T("Install"),
+            WizardSettings => _offline ? T("Try again") : T("Install"),
             GameSettingsScreen => GameSettingsCount() switch { 0 => T("Nothing to apply"), 1 => T("Apply 1 change"), var n => T("Apply {0} changes", n) },
             ComponentsStep when Wizard && FirstInstall && !Maintenance && wa.Count > 0 => T("Next"),
             ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Nothing to apply")) : _state?.ApexVersion is null ? T("Install")
@@ -464,7 +466,7 @@ public sealed partial class MainWindow : Window
         NextButton.IsEnabled = !_busy && _step switch
         {
             GameStep => CanLeaveGame(),
-            WizardSettings => !_running && !_offline,
+            WizardSettings => !_running,
             // (a value being typed counts once its box is left, which the click on the button itself does)
             GameSettingsScreen => !_running && _game is not null && (_gsTyping || GameSettingsCount() > 0),
             // removals and fixes need no download; installs wait for the release check (offline: the button retries it)

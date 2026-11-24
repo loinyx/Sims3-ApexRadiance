@@ -698,7 +698,6 @@ public static partial class Strings
         ["Select all"] = "Vælg alle",
         ["Clear"] = "Ryd",
         ["{0} conflict: {1}"] = "Konflikt mellem {0}: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} kan overlappe i {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Nogle modarkiver kunne ikke læses. Installer 7-Zip, så konfliktkontrollen også kan læse dem.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "En kopi af den ryddede spilcache gemmes, indtil spillet starter og lukker normalt.",
         ["Clear the game caches"] = "Ryd spillets cache",

@@ -708,7 +708,6 @@ public static partial class Strings
         ["Select all"] = "Markera alla",
         ["Clear"] = "Rensa",
         ["{0} conflict: {1}"] = "Konflikt mellan {0}: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} kan överlappa i {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Vissa modarkiv kunde inte läsas. Installera 7-Zip så att konfliktkontrollen kan läsa dem också.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "En kopia av de rensade cacheminnena sparas tills spelet har startat och stängts normalt.",
         ["Clear the game caches"] = "Rensa spelets cacheminnen",

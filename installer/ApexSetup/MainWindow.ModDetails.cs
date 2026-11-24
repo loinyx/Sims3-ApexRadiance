@@ -474,11 +474,9 @@ public sealed partial class MainWindow
             ModMerge.TakeOutResult? res = null;
             try { res = await ModWork(() => ModMerge.Edit(Docs, r.File, outRels, addFiles)); }
             catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merged package couldn't be changed"), ErrorText(e)); }
-            if (res is not null) ModsResult(res.Remerged is { } m ? T("{0} now holds {1} mods", m.Merged.Name, m.Mods) : T("Every mod is separate again"), null);
+            if (res is not null) ModsResult(res.Remerged is { } m ? T("{0} now holds {1} mods", m.Merged.Name, m.Mods) : T("Every mod is separate again"), null, LeftText(res));
             // (read again after a failure too: the split may be done, with the merged file already in the Recycle Bin)
-            _modsLoaded = false;
-            _folderSig = "";
-            await LoadModsAsync();
+            await ModsAgain();
             if (res is null) return;
         }
         if (newName.Length > 0 && newName != r.Name && _modRows.FirstOrDefault(x => x.File.Rel.Equals(r.File.Rel, StringComparison.OrdinalIgnoreCase)) is { } now)
@@ -515,15 +513,16 @@ public sealed partial class MainWindow
         ModMerge.TakeOutResult? res = null;
         try { res = await ModWork(() => ModMerge.TakeOut(Docs, r.File, rels)); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merged package couldn't be changed"), ErrorText(e)); }
-        _modsLoaded = false;
-        _folderSig = "";
-        await LoadModsAsync();
+        await ModsAgain();
         if (res is null) return;
         var back = _modRows.FirstOrDefault(x => x.File.Rel.Equals(rels[0], StringComparison.OrdinalIgnoreCase));
         if (back is not null && then == 1) SetMods([back], false);
         else if (back is not null && then == 2) await ModsChange(() => ModLibrary.Remove(back.File), T("{0} moved to the Recycle Bin", name));
-        else ModsResult(res.Remerged is { } m ? T("{0} is on its own again; {1} now has {2} mods", name, m.Merged.Name, m.Mods) : T("{0} and the other mod are on their own again", name), null);
+        else ModsResult(res.Remerged is { } m ? T("{0} is on its own again; {1} now has {2} mods", name, m.Merged.Name, m.Mods) : T("{0} and the other mod are on their own again", name), null, LeftText(res));
     }
+
+    // the ones that should have stayed in a merge and could not go in again
+    static string LeftText(ModMerge.TakeOutResult r) => r.Left.Count == 0 ? "" : T("Left out: {0}", string.Join(" ", r.Left.Select(s => $"{Path.GetFileNameWithoutExtension(s.Mod.Name)}. {T(s.Reason.Key, s.Reason.Args)}")));
 
     // ---------- the footer ----------
 

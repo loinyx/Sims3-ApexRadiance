@@ -697,7 +697,6 @@ public static partial class Strings
         ["Select all"] = "Alles selecteren",
         ["Clear"] = "Wissen",
         ["{0} conflict: {1}"] = "{0} conflict: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} kunnen overlappen in {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Sommige modarchieven konden niet worden gelezen. Installeer 7-Zip, dan kan de conflictcontrole ze ook lezen.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "Een kopie van de gewiste spelcaches blijft bewaard tot het spel normaal start en sluit.",
         ["Clear the game caches"] = "Spelcaches wissen",

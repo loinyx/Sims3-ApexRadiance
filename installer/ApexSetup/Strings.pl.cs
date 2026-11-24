@@ -667,7 +667,6 @@ public static partial class Strings
         ["Select all"] = "Zaznacz wszystko",
         ["Clear"] = "Wyczyść",
         ["{0} conflict: {1}"] = "Konflikt {0}: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} mogą się nakładać w {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Nie udało się odczytać niektórych archiwów modów. Zainstaluj 7-Zip, aby sprawdzanie konfliktów mogło je też odczytać.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "Kopia wyczyszczonej pamięci podręcznej gry jest przechowywana, dopóki gra nie uruchomi się i nie zamknie normalnie.",
         ["Clear the game caches"] = "Wyczyść pamięć podręczną gry",

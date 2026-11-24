@@ -11,9 +11,12 @@ public static class Health
 {
     public sealed record Item(Finding Finding, HealthArea Area, IReadOnlyList<string> Files)
     {
-        // the same finding at the next check, whatever its counts, dates and versions: one the player ignored stays ignored
-        public string Id => string.Join("|", Finding.Args.Select(a => System.Text.RegularExpressions.Regex.Replace(a, @"\d+|\b[AP]M\b", "#"))
-            .Prepend(Finding.Text.Replace("at least ", "", StringComparison.Ordinal)).Prepend(Area.ToString()));
+        // a mod conflict (it has its own cards and its own Ignore)
+        public bool Conflict { get; init; }
+        // the same finding at the next check, whatever its counts and dates: one the player ignored stays ignored. Its files
+        // count: the same words about another file are another finding.
+        public string Id => string.Join("|", Finding.Args.Select(a => int.TryParse(a, out _) || DateTime.TryParse(a, out _) ? "#" : a)
+            .Prepend(Finding.Text.Replace("at least ", "", StringComparison.Ordinal)).Prepend(Area.ToString()).Concat(Files.Select(f => Path.GetFileName(f)).Order(StringComparer.OrdinalIgnoreCase)));
     }
 
     // conflicts: ModConflicts' scan (seconds on a cold cache: call Gather off the UI thread when passing it).
@@ -31,13 +34,13 @@ public static class Health
         Add("compatibility", () => Compat.Check(g, s, docs).Select(f => new Item(f, AreaOf(f), [])));
         if (beforePlay) return items;
         if (mods is not null) Add("mods", () => ModChecks.Run(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
-        if (mods is not null && conflicts is not null) Add("conflicts", () => conflicts.Check(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
+        if (mods is not null && conflicts is not null) Add("conflicts", () => conflicts.Check(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files) { Conflict = m.Files.Count > 0 }));
         Add("merges", () => ModMerge.Lost(docs).Select(x => new Item(new Finding(Severity.Warning,
-            "The merge {0} left out a part of {1}. Split it to have every mod whole again.", [Path.GetFileNameWithoutExtension(x.Merged.Name), string.Join(", ", x.Mods.Take(4)) + (x.Mods.Count > 4 ? "…" : "")],
+            "Part of {1} is missing from the merge {0}. Split it to get every mod back.", [Path.GetFileNameWithoutExtension(x.Merged.Name), string.Join(", ", x.Mods.Take(4)) + (x.Mods.Count > 4 ? "…" : "")],
             () => ModMerge.Split(docs, x.Merged), Suggest: "Split"), HealthArea.Mods, [x.Merged.Path])));
         Add("kept mods", () => ModMerge.Orphans(docs).Select(o => new Item(new Finding(Severity.Warning,
-            o.Files.Count == 1 ? "1 mod is not in the game: the merge {1} that held it is gone. It is kept, and can go back." : "{0} mods are not in the game: the merge {1} that held them is gone. They are kept, and can go back.",
-            [o.Files.Count.ToString(), o.Name], () => ModMerge.PutBack(docs, o), Suggest: "Put them back"), HealthArea.Mods, [])));
+            o.Files.Count == 1 ? "1 mod is out of the game because the merge {1} is gone. Put it back to use it again." : "{0} mods are out of the game because the merge {1} is gone. Put them back to use them again.",
+            [o.Files.Count.ToString(), o.Name], () => ModMerge.PutBack(docs, o), Suggest: "Put back"), HealthArea.Mods, [])));
         Add("saves", () => SaveHealth.Findings(SaveHealth.Check(docs), docs).Select(f => new Item(f, HealthArea.Saves, [])));
         Add("places", () => PlaceChecks.Check(g, docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("caches", () => CacheFindings(docs).Select(f => new Item(f, HealthArea.Disk, [])));

@@ -694,7 +694,6 @@ public static partial class Strings
         ["Select all"] = "全选",
         ["Clear"] = "清除",
         ["{0} conflict: {1}"] = "{0} 冲突：{1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} 可能在 {1} 中重叠：{2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "部分模组压缩包无法读取。请安装 7-Zip，让冲突检查也能读取它们。",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "已清除的游戏缓存会保留一份副本，直到游戏正常启动并关闭。",
         ["Clear the game caches"] = "清除游戏缓存",

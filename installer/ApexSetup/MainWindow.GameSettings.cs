@@ -33,6 +33,14 @@ public sealed partial class MainWindow
 
     Dictionary<string, string> GameSettingsChanges() => GameSettings.Changes(_gsWant, _gsNow);
 
+    // the files again, unless a choice waits to be applied: the game, a restore point or another tool may have changed them
+    void FreshGameSettings()
+    {
+        if (_gsFor is not null && GameSettingsChanges().Count > 0) return;
+        _gsFor = null;
+        _gsBuilt = null;
+    }
+
     // built again only when what it shows changed: a refresh of the window must not close an open list
     void BuildGameSettings(bool force = false)
     {
@@ -71,7 +79,7 @@ public sealed partial class MainWindow
         GraphicsRows(list);
         Label(T("In-game options"), Link(T("Turn all off"), () => { foreach (var i in InGame) _gsWant[i.Id] = "1"; SyncGameSettings(); }));
         InGameRows(list);
-        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set the first time you press Play.")));
+        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set after its first session.")));
         Label(T("Loading and walking"));
         LoadingRows(list);
         WalkingValues(host);
@@ -377,7 +385,7 @@ public sealed partial class MainWindow
         });
     }
 
-    // Options.ini now, or kept for the first Play
+    // Options.ini now, or kept until the game has made it
     void SaveOptions(Game g, string docs, IReadOnlyDictionary<string, string> want)
     {
         var mine = want.Where(w => !GameSettings.InBin(w.Key)).ToDictionary(w => w.Key, w => w.Value);
@@ -456,17 +464,13 @@ public sealed partial class MainWindow
 
     // ---------- Play ----------
 
-    // before the game starts: the choices go in, making Options.ini when the game never ran. After that first session the game
-    // has written its own file: they go in again if it dropped them, and wait no more.
-    void PlayPendingOptions(Game g, bool ended)
+    // the choices made before the game ever ran go in once it has written its own Options.ini: before a start, and after one
+    // (never a file of the launcher's making, which the game could take for its own and skip setting itself up)
+    void PlayPendingOptions(Game g)
     {
         var docs = Docs;
-        if (PendingOptions is not { } want) return;
-        try
-        {
-            if (File.Exists(Engine.OptionsIni(docs))) { GameSettings.ApplyOptions(g, docs, want); _settings.PendingOptions.Remove(docs); _settings.Save(); }
-            else if (!ended) GameSettings.CreateOptions(docs, want);
-        }
+        if (PendingOptions is not { } want || !File.Exists(Engine.OptionsIni(docs))) return;
+        try { GameSettings.ApplyOptions(g, docs, want); _settings.PendingOptions.Remove(docs); _settings.Save(); }
         catch (Exception e) { App.Log(e); } // (never in the way of the game: tried again at the next Play)
         _gsFor = null;
     }
@@ -499,7 +503,7 @@ public sealed partial class MainWindow
         }
         GraphicsRows(Label(T("Graphics")));
         InGameRows(Label(T("In-game options")));
-        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set the first time you press Play.")));
+        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set after its first session.")));
         LoadingRows(Label(T("Loading and walking")));
         // (only with the mod chosen in Components, and something to change)
         if (S3ssToggle.IsOn && SetterSettings.Differences(SetterSettings.Read(Docs)) is var d && d.TurnOn.Count + d.TurnOff.Count > 0)

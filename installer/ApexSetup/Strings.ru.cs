@@ -696,7 +696,6 @@ public static partial class Strings
         ["Select all"] = "Выбрать все",
         ["Clear"] = "Сбросить",
         ["{0} conflict: {1}"] = "Конфликт {0}: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} могут пересекаться в {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Некоторые архивы модов не удалось прочитать. Установите 7-Zip, чтобы проверка конфликтов прочитала и их.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "Копия очищенных кэшей игры хранится, пока игра не запустится и не закроется нормально.",
         ["Clear the game caches"] = "Очистить кэши игры",

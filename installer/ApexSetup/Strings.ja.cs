@@ -700,7 +700,6 @@ public static partial class Strings
         ["Select all"] = "すべて選択",
         ["Clear"] = "クリア",
         ["{0} conflict: {1}"] = "{0} の競合: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} は {1} で重複する可能性があります: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "一部の Mod アーカイブを読み取れませんでした。7-Zip をインストールすると、競合チェックでそれらも読み取れます。",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "クリアしたゲーム キャッシュのコピーは、ゲームが正常に起動して終了するまで保管されます。",
         ["Clear the game caches"] = "ゲームのキャッシュをクリア",

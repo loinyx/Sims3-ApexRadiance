@@ -63,7 +63,11 @@ public static class SetterSettings
         var next = With(text, smoothHz);
         if (next == text) return;
         if (there) GameSettings.KeepDocs(f, docs);
-        else Directory.CreateDirectory(Path.GetDirectoryName(f)!);
+        else
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(f)!);
+            GameSettings.KeepNone(f, docs); // (Restore my files switches off what it turned on)
+        }
         GameSettings.WriteText(f, next);
     }
 

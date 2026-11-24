@@ -667,7 +667,6 @@ public static partial class Strings
         ["Select all"] = "เลือกทั้งหมด",
         ["Clear"] = "ล้าง",
         ["{0} conflict: {1}"] = "{0} ขัดกัน: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} อาจทับซ้อนกันใน {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "อ่านไฟล์บีบอัดของม็อดบางตัวไม่ได้ ติดตั้ง 7-Zip เพื่อให้การตรวจสอบความขัดแย้งอ่านไฟล์เหล่านั้นได้ด้วย",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "สำเนาของแคชเกมที่ล้างไปจะถูกเก็บไว้จนกว่าเกมจะเริ่มและปิดตามปกติ",
         ["Clear the game caches"] = "ล้างแคชของเกม",

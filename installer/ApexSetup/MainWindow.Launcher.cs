@@ -241,7 +241,7 @@ public sealed partial class MainWindow
     async Task StartGameAsync(Game g, string? save)
     {
         Process p;
-        PlayPendingOptions(g, ended: false);
+        PlayPendingOptions(g);
         try { p = Launch.Start(g, save); }
         catch (Exception e) { App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
         var session = _session = new Session(p, Docs);
@@ -257,7 +257,7 @@ public sealed partial class MainWindow
         try { SessionHistory.Add(info); ModViewPrefs.LastPlay = info.Started + info.Played; } catch (Exception e) { App.Log(e); }
         _session = null;
         _running = Games.IsRunning();
-        PlayPendingOptions(g, ended: true);
+        PlayPendingOptions(g);
         AppWindow.Show();
         Activate();
         _tray?.Hide();
@@ -588,6 +588,14 @@ public sealed partial class MainWindow
     {
         var f = it.Finding;
         // a suggestion (clear the caches, back up a save): offered under its own name, never run by Fix or Repair
+        if (f.CanApply && it.Area == HealthArea.Mods) return Button(T(f.Suggest!), async () =>
+        {
+            try { await ModWork(() => { f.Fix!(); return 0; }); _healthNote = (T("Applied."), null, null); }
+            catch (Exception e) { App.Log(e); await Message(T("The launcher could not finish"), ErrorText(e)); }
+            _modsLoaded = false;
+            RefreshGame();
+            BuildHealth();
+        });
         if (f.CanApply) return Button(T(f.Suggest!), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Applied."), null, "Apply suggestion: {0}", args: f.Suggest!)) { _modsLoaded = false; RefreshGame(); BuildHealth(); } });
         if (f.CanFix) return Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); BuildHealth(); } }, accent: true);
         if (ModsFor(it.Files) is { Count: > 0 } hits) return Button(T("Show in Mods"), () => ShowInMods(hits));

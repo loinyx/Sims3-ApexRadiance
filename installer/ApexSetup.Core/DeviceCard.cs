@@ -58,7 +58,7 @@ public sealed record DeviceCard(string Name, int Vendor, int Device, bool Found,
         foreach (var (path, text) in Fixes(g.Bin).ToList())
         {
             GameSettings.KeepBin(path, g.Bin);
-            GameSettings.WriteText(path, text);
+            GameSettings.WriteBin(path, text, g.Bin);
         }
     }
 

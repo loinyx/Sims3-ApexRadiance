@@ -698,7 +698,6 @@ public static partial class Strings
         ["Select all"] = "Valitse kaikki",
         ["Clear"] = "Tyhjennä",
         ["{0} conflict: {1}"] = "{0} ristiriita: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} voivat mennä päällekkäin kohdassa {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Joitakin modiarkistoja ei voitu lukea. Asenna 7-Zip, niin ristiriitatarkistus voi lukea myös ne.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "Tyhjennettyjen pelin välimuistien kopio säilytetään, kunnes peli käynnistyy ja sulkeutuu normaalisti.",
         ["Clear the game caches"] = "Tyhjennä pelin välimuistit",

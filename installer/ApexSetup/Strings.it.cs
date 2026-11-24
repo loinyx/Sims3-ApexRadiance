@@ -708,7 +708,6 @@ public static partial class Strings
         ["Select all"] = "Seleziona tutto",
         ["Clear"] = "Cancella",
         ["{0} conflict: {1}"] = "Conflitto {0}: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} possono sovrapporsi in {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Non è stato possibile leggere alcuni archivi di mod. Installa 7-Zip perché il controllo dei conflitti legga anche quelli.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "Una copia delle cache cancellate viene tenuta finché il gioco non si avvia e chiude normalmente.",
         ["Clear the game caches"] = "Cancella le cache del gioco",

@@ -20,52 +20,119 @@ public sealed partial class MainWindow
         var mods = rows.Select(r => r.File).ToList();
         folder ??= rows.Select(r => DirOf(r.File)).GroupBy(d => d).OrderByDescending(g => g.Count()).First().Key;
         name ??= (Path.GetFileName(folder) is { Length: > 0 } f ? f : "Mods") + "-merged";
+        IReadOnlyList<string> priority = [];
         MergePlan plan;
         while (true)
         {
-            try { plan = await Task.Run(() => ModMerge.Plan(docs, mods, name, folder, include)); }
+            try { plan = await Task.Run(() => ModMerge.Plan(docs, mods, name, folder, include, priority)); }
             catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("These mods can't be merged"), ErrorText(e)); return; }
-            var answer = await MergePlanDialog(plan, name, folder, include);
+            var answer = await MergePlanDialog(plan, name, folder, include, p => Task.Run(() => ModMerge.Plan(docs, mods, name, folder, include, p)));
             if (answer is null) return;
             // (a changed name or script choice, or a plan that could not run, is planned again)
             var changed = answer.Value.Name != name || answer.Value.Scripts != include;
             name = answer.Value.Name;
             include = answer.Value.Scripts;
+            plan = answer.Value.Plan;
+            priority = plan.Priority;
             if (!changed && plan.CanRun) break;
         }
         if (!plan.CanRun) return;
         await MergeRunDialog(plan);
     }
 
-    // the plan, before anything is written: what goes in, what is left out and why, the keys in more than one mod
-    async Task<(string Name, bool Scripts)?> MergePlanDialog(MergePlan plan, string name, string folder, bool scripts)
+    // the plan, before anything is written: what goes in, the mods that clash and whose part is kept, what is left out and why.
+    // A choice is planned at once (again), so the numbers and the buttons are always the merge that would run.
+    async Task<(string Name, bool Scripts, MergePlan Plan)?> MergePlanDialog(MergePlan plan, string name, string folder, bool scripts, Func<IReadOnlyList<string>, Task<MergePlan>> again)
     {
-        var body = new StackPanel { Spacing = 12, MinWidth = 440, MaxWidth = 520 };
+        var body = new StackPanel { Spacing = 14, MinWidth = 440, MaxWidth = 520 };
         var box = new TextBox { Header = T("Name of the merged package"), Text = name };
         body.Children.Add(box);
-        body.Children.Add(Muted(T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, plan.Inputs.Count, plan.Resources, ModRow.SizeText(plan.OutputBytes))));
-        if (plan.Skipped.Count > 0)
+        var line = Muted("");
+        body.Children.Add(line);
+        var d = new ContentDialog { CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var refused = new StackPanel { Spacing = 8 };
+        var leftOut = new StackPanel { Spacing = 4 };
+
+        void Fill()
         {
-            var sk = new StackPanel { Spacing = 4 };
-            sk.Children.Add(new TextBlock { Text = T("Left out"), FontSize = 13, FontWeight = FontWeights.SemiBold });
-            foreach (var s in plan.Skipped.Take(30))
-                sk.Children.Add(new TextBlock { Text = $"{Path.GetFileNameWithoutExtension(s.Mod.Name)}: {T(s.Reason.Key, s.Reason.Args)}", FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
-            if (plan.Skipped.Count > 30) sk.Children.Add(Muted(T("and {0} more", plan.Skipped.Count - 30)));
-            body.Children.Add(sk);
+            var all = plan.Inputs.Count + plan.Skipped.Count;
+            d.Title = plan.Skipped.Count == 0 ? T("Merge {0} mods", all) : T("Merge {0} of the {1} mods chosen", plan.Inputs.Count, all);
+            line.Text = T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, plan.Inputs.Count, plan.Resources, ModRow.SizeText(plan.OutputBytes));
+            d.PrimaryButtonText = plan.CanRun ? T("Merge") : T("Check again");
+            leftOut.Children.Clear();
+            var gone = plan.Skipped.Where(s => s.Reason.Key != ModMerge.ClashReason).ToList(); // (the ones that clash say so above)
+            if (gone.Count > 0) leftOut.Children.Add(new TextBlock { Text = T("Left out"), FontSize = 13, FontWeight = FontWeights.SemiBold });
+            foreach (var s in gone.Take(30))
+                leftOut.Children.Add(new TextBlock { Text = $"{Path.GetFileNameWithoutExtension(s.Mod.Name)}: {T(s.Reason.Key, s.Reason.Args)}", FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+            if (gone.Count > 30) leftOut.Children.Add(Muted(T("and {0} more", gone.Count - 30)));
+            leftOut.Visibility = gone.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            refused.Children.Clear();
+            foreach (var r in plan.Refusals) refused.Children.Add(Warn(T(r.Key, r.Args), null));
+            refused.Visibility = plan.Refusals.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
+
+        if (plan.Clashes.Count > 0)
+        {
+            var picks = new List<(MergeClash Clash, ComboBox Box)>();
+            var run = 0;
+            async void Choose()
+            {
+                var mine = ++run;
+                var order = new List<string>();
+                foreach (var (clash, pick) in picks.Where(p => p.Box.SelectedIndex > 0))
+                {
+                    var first = clash.Mods[pick.SelectedIndex - 1].Rel;
+                    order.Add(first);
+                    order.AddRange(clash.Mods.Select(m => m.Rel).Where(r => r != first));
+                }
+                d.IsPrimaryButtonEnabled = false;
+                try
+                {
+                    var next = await again(order);
+                    if (mine != run) return; // (chosen again meanwhile)
+                    plan = next;
+                    Fill();
+                }
+                catch (Exception e) { App.Log(e); }
+                if (mine == run) d.IsPrimaryButtonEnabled = true;
+            }
+            var list = new StackPanel { Spacing = 8 };
+            list.Children.Add(new TextBlock { Text = plan.Clashes.Count == 1 ? T("Conflict") : T("{0} conflicts", plan.Clashes.Count), FontSize = 13, FontWeight = FontWeights.SemiBold });
+            list.Children.Add(Muted(T("Where they change the same thing, one package keeps one copy. Leave them out, or choose whose copy counts.")));
+            foreach (var clash in plan.Clashes)
+            {
+                string Name(ModFile m) => Path.GetFileNameWithoutExtension(m.Name);
+                var card = new StackPanel { Spacing = 8, Padding = new Thickness(14, 12, 14, 14) };
+                card.Children.Add(new TextBlock { Text = string.Join(", ", clash.Mods.Select(Name)), FontSize = 13, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+                card.Children.Add(new TextBlock
+                {
+                    FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap,
+                    Text = (clash.Resources == 1 ? T("1 resource with different content.") : T("{0} resources with different content.", clash.Resources))
+                        + (clash.Outside.Count > 0 ? " " + T("Outside the merge, it also meets {0}: which of them the game uses could change.", string.Join(", ", clash.Outside.Take(3))) : ""),
+                });
+                var pick = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+                pick.Items.Add(T("Leave out"));
+                foreach (var m in clash.Mods) pick.Items.Add(clash.Mods.Count == 1 ? T("Merge it anyway") : T("Merge, {0} has priority", Name(m)));
+                var first = plan.Priority.FirstOrDefault(r => clash.Mods.Any(m => m.Rel.Equals(r, StringComparison.OrdinalIgnoreCase)));
+                pick.SelectedIndex = first is null ? 0 : clash.Mods.ToList().FindIndex(m => m.Rel.Equals(first, StringComparison.OrdinalIgnoreCase)) + 1;
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(pick, string.Join(", ", clash.Mods.Select(Name)));
+                pick.SelectionChanged += (_, _) => Choose();
+                picks.Add((clash, pick));
+                card.Children.Add(pick);
+                list.Children.Add(new Border { Child = card, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = new SolidColorBrush(Pick(0x0AFFFFFF, 0x06000000)) });
+            }
+            body.Children.Add(list);
+        }
+        body.Children.Add(leftOut);
         var scriptBox = new CheckBox { Content = T("Include script mods (their makers usually ask not to merge them)"), IsChecked = scripts };
         if (scripts || plan.Skipped.Any(s => s.Reason.Key.StartsWith("A script mod"))) body.Children.Add(scriptBox);
-        foreach (var r in plan.Refusals) body.Children.Add(Warn(T(r.Key, r.Args), null));
+        body.Children.Add(refused);
         body.Children.Add(Muted(T("The originals are kept in {0}. Split puts them back as they were.", ModMerge.ShownFolder)));
-        var d = new ContentDialog
-        {
-            Title = plan.Inputs.Count == plan.Inputs.Count + plan.Skipped.Count ? T("Merge {0} mods", plan.Inputs.Count) : T("Merge {0} of the {1} mods chosen", plan.Inputs.Count, plan.Inputs.Count + plan.Skipped.Count), Content = new ScrollViewer { Content = body, MaxHeight = 460 },
-            PrimaryButtonText = plan.CanRun ? T("Merge") : T("Check again"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
-        };
+        Fill();
+        d.Content = new ScrollViewer { Content = body, MaxHeight = 460, Padding = new Thickness(0, 0, 14, 0) };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return null;
         var n = box.Text.Trim();
-        var s2 = scriptBox.IsChecked == true;
-        return (n.Length > 0 ? n : name, s2);
+        return (n.Length > 0 ? n : name, scriptBox.IsChecked == true, plan);
     }
 
     // the run: a step list with a bar and the time, the log as it is written, Cancel until the originals start moving
@@ -176,16 +243,14 @@ public sealed partial class MainWindow
         // (the game's caches point at the files as they were: cleared, a mod that looks missing in the game shows again)
         if (result is not null)
             SetInfo(ModsInfo, InfoBarSeverity.Success, T("{0} mods merged into {1}", result.Mods, result.Merged.Name),
-                (plan.Skipped.Count == 0 ? "" : plan.Skipped.Count == 1 ? T("1 mod was left out and stays as it was.") + " " : T("{0} mods were left out and stay as they were.", plan.Skipped.Count) + " ")
-                + T("If something looks missing in the game, clear its caches."), T("Clear the game caches"), async () => await ClearCachesAfterMerge());
-        _modsLoaded = false;
-        _folderSig = "";
-        await LoadModsAsync();
+                (plan.Skipped.Count == 0 ? "" : plan.Skipped.Count == 1 ? T("1 mod was left out.") + " " : T("{0} mods were left out.", plan.Skipped.Count) + " ")
+                + T("Something missing in the game? Clear its caches."), T("Clear the game caches"), async () => await ClearCachesAfterMerge());
+        await ModsAgain();
     }
 
     async Task ClearCachesAfterMerge()
     {
-        try { await ModWork(() => GameCaches.Clean(Docs)); ModsResult(T("Game caches cleared. The game rebuilds them at its next start."), null); }
+        try { await ModWork(() => GameCaches.Clean(Docs)); ModsResult(T("Caches cleared. The game rebuilds them when it starts."), null); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
     }
 
@@ -194,13 +259,11 @@ public sealed partial class MainWindow
     {
         if (gone.Count == 0 || ModsInfo.IsOpen) return;
         var n = gone.Sum(o => o.Files.Count);
-        SetInfo(ModsInfo, InfoBarSeverity.Warning, n == 1 ? T("1 mod is kept by a merge that is gone") : T("{0} mods are kept by a merge that is gone", n), T("The game does not load them."), T("Put them back"), async () =>
+        SetInfo(ModsInfo, InfoBarSeverity.Warning, n == 1 ? T("1 mod is out of the game") : T("{0} mods are out of the game", n), T("The merge they were in is gone."), T("Put back"), async () =>
         {
             try { var back = await ModWork(() => gone.Sum(o => ModMerge.PutBack(Docs, o))); ModsResult(T("{0} mods put back", back), null); }
             catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not put back"), ErrorText(e)); }
-            _modsLoaded = false;
-            _folderSig = "";
-            await LoadModsAsync();
+            await ModsAgain();
         });
     }
 
@@ -219,9 +282,7 @@ public sealed partial class MainWindow
         try { back = await ModWork(() => ModMerge.Split(Docs, r.File)); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The split did not finish"), ErrorText(e)); }
         if (back is not null) ModsResult(T("{0} mods put back", back.Count), null);
-        _modsLoaded = false;
-        _folderSig = "";
-        await LoadModsAsync();
+        await ModsAgain();
     }
 
     // ---------- find a problem mod ----------

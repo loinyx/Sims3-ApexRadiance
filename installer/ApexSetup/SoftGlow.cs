@@ -21,6 +21,15 @@ public sealed class SoftGlow : Grid
     {
         IsHitTestVisible = false;
         VerticalAlignment = VerticalAlignment.Top;
+        Children.Add(new Image { Source = Light(color, strength, at), Stretch = Stretch.Fill });
+        Loaded += (_, _) => Breathe();
+    }
+
+    // (a screen built again shows the same picture)
+    static readonly Dictionary<(Color, double, double), WriteableBitmap> Made = new();
+    static WriteableBitmap Light(Color color, double strength, double at)
+    {
+        if (Made.TryGetValue((color, strength, at), out var made)) return made;
         var px = new byte[W * H * 4];
         var noise = new Random(7); // (the same grain each time: a rebuilt screen does not flicker)
         for (int y = 0; y < H; y++)
@@ -44,8 +53,7 @@ public sealed class SoftGlow : Grid
         var bmp = new WriteableBitmap(W, H);
         using (var s = bmp.PixelBuffer.AsStream()) s.Write(px);
         bmp.Invalidate();
-        Children.Add(new Image { Source = bmp, Stretch = Stretch.Fill });
-        Loaded += (_, _) => Breathe();
+        return Made[(color, strength, at)] = bmp;
     }
 
     // 1 in the middle to 0 at the edge, flat at both ends

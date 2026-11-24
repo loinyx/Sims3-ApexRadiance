@@ -710,7 +710,6 @@ public static partial class Strings
         ["Select all"] = "Tout sélectionner",
         ["Clear"] = "Effacer",
         ["{0} conflict: {1}"] = "Conflit {0} : {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} peuvent se chevaucher dans {1} : {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Certaines archives de mods n'ont pas pu être lues. Installez 7-Zip pour que la vérification des conflits les lise aussi.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "Une copie des caches du jeu effacés est gardée jusqu'à ce que le jeu démarre et se ferme normalement.",
         ["Clear the game caches"] = "Effacer les caches du jeu",

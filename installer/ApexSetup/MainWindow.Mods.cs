@@ -697,6 +697,23 @@ public sealed partial class MainWindow
         await LoadModsAsync();
     }
 
+    // the same for a change that takes a while, off the window's thread
+    async Task ModsWork(Action work, string done)
+    {
+        try { await ModWork(() => { work(); return 0; }); ModsResult(done, null); }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not finish"), ErrorText(e)); }
+        await ModsAgain();
+    }
+
+    // read again, with the health check: what it said may be about files that are no longer there
+    async Task ModsAgain()
+    {
+        _modsLoaded = false;
+        _folderSig = "";
+        await LoadModsAsync();
+        RefreshGame();
+    }
+
     void ModsResult(string done, Action? undo, string detail = "", InfoBarSeverity severity = InfoBarSeverity.Success)
     {
         _modUndo = undo;
@@ -1555,18 +1572,27 @@ public sealed partial class MainWindow
         // (a merged mod's originals go back unless the player says otherwise: none is left kept where nothing shows it)
         var body = new StackPanel { Spacing = 14, MaxWidth = 460 };
         body.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
-        var keep = new CheckBox { IsChecked = true, Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = T("Put the {0} mods inside it back as they were", merged.Sum(r => ModMerge.Info(r.File)?.Originals.Count ?? 0)) } };
-        if (merged.Count > 0) body.Children.Add(keep);
+        var keep = new CheckBox { IsChecked = true, Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = T("Keep the {0} mods inside it", merged.Sum(r => ModMerge.Info(r.File)?.Originals.Count ?? 0)) } };
+        if (merged.Count > 0)
+        {
+            body.Children.Add(keep);
+            var gone = Muted(T("The mods inside it also go to the Recycle Bin."));
+            gone.Visibility = Visibility.Collapsed;
+            keep.Checked += (_, _) => gone.Visibility = Visibility.Collapsed;
+            keep.Unchecked += (_, _) => gone.Visibility = Visibility.Visible;
+            body.Children.Add(gone);
+        }
         var d = new ContentDialog { Title = rows.Count == 1 ? T("Remove this mod?") : T("Remove these mods?"), Content = body, PrimaryButtonText = T("Remove"), CloseButtonText = T("Cancel"),
             XamlRoot = Content.XamlRoot, DefaultButton = ContentDialogButton.None, PrimaryButtonStyle = DangerButton };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;
         var back = keep.IsChecked == true;
-        await ModsChange(() =>
+        var docs = Docs;
+        await ModsWork(() =>
         {
             foreach (var r in rows)
                 if (!merged.Contains(r)) ModLibrary.Remove(r.File);
-                else if (back) ModMerge.Split(Docs, r.File);
-                else ModMerge.RemoveAll(Docs, r.File);
+                else if (back) ModMerge.Split(docs, r.File);
+                else ModMerge.RemoveAll(docs, r.File);
         }, rows.Count == 1 ? T("Mod moved to the Recycle Bin") : T("{0} mods moved to the Recycle Bin", rows.Count));
     }
 

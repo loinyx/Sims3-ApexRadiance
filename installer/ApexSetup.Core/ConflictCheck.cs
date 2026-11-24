@@ -93,8 +93,14 @@ public sealed class ConflictCheck : IModCheck
         foreach (var c in r.Conflicts.Where(c => !c.Parties.Any(Ccmerged)))
         {
             var m = ModConflict.Of(c, FilesOf(c.Parties));
-            if (found.Any(x => x.Id == m.Id)) continue;
-            found.Add(m);
+            // (the same mods again: the worse of the two stays)
+            if (found.FindIndex(x => x.Id == m.Id) is >= 0 and var at)
+            {
+                if (m.Level >= found[at].Level) continue;
+                if (found[at].Finding is { } milder) f.RemoveAll(x => ReferenceEquals(x.Finding, milder));
+                found[at] = m;
+            }
+            else found.Add(m);
             if (m.Finding is { } warn && !Ignored.Contains(m.Id)) f.Add(new(warn, m.Files));
         }
         Found = found.OrderBy(x => x.Level).ToList();

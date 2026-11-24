@@ -103,26 +103,13 @@ public static class GameSettings
         Write(g.Bin, docs, Changes(want, Now(g.Bin, docs)).Where(c => InBin(c.Key)));
     }
 
-    // Options.ini, as the player. False without the file: the choice waits for the first Play (CreateOptions)
+    // Options.ini, as the player. False without the file: the choice waits until the game has made it
     public static bool ApplyOptions(Game g, string docs, IReadOnlyDictionary<string, string> want)
     {
         Engine.CheckWritable();
         if (!File.Exists(Engine.OptionsIni(docs))) return false;
         Write(g.Bin, docs, Changes(want, Now(g.Bin, docs)).Where(c => !InBin(c.Key)));
         return true;
-    }
-
-    // the first Play, before the game ever wrote Options.ini: a file with only the player's choices, the game adds the rest
-    public static void CreateOptions(string docs, IReadOnlyDictionary<string, string> want)
-    {
-        var f = Engine.OptionsIni(docs);
-        if (File.Exists(f)) return;
-        Engine.CheckWritable();
-        const string empty = "[options]\r\n";
-        var text = All.Where(s => s.File == SettingFile.Options && want.TryGetValue(s.Id, out var v) && s.Valid(v) && v != s.Default).Aggregate(empty, (t, s) => s.With(t, want[s.Id]));
-        if (text == empty) return;
-        Directory.CreateDirectory(docs);
-        WriteText(f, text);
     }
 
     static void Write(string bin, string docs, IEnumerable<KeyValuePair<string, string>> changes)
@@ -133,8 +120,8 @@ public static class GameSettings
             var was = ReadText(path);
             var text = file.Aggregate(was, (t, c) => Of(c.Key).With(t, c.Value));
             if (text == was) continue;
-            Keep(path, file.Key == SettingFile.Options ? DocsCopies(docs) : BinCopies(bin));
-            WriteText(path, text);
+            if (file.Key == SettingFile.Options) { Keep(path, DocsCopies(docs)); WriteText(path, text); }
+            else { KeepBin(path, bin); WriteBin(path, text, bin); }
         }
     }
 
@@ -143,7 +130,23 @@ public static class GameSettings
     static string BinCopies(string bin) => Path.Combine(Manifest.DirOf(bin), "game settings");
     static string DocsCopies(string docs) => Path.Combine(docs, "Apex Radiance", "game settings");
     internal static void KeepBin(string path, string bin) => Keep(path, BinCopies(bin));
+    // a file of Game\Bin, and what was written: one that is something else at the restore was edited since
+    internal static void WriteBin(string path, string text, string bin)
+    {
+        WriteText(path, text);
+        File.WriteAllText(Path.Combine(BinCopies(bin), Path.GetFileName(path) + Last), Hash(path));
+    }
+    const string Last = ".last";
+    static string Hash(string path) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)));
     internal static void KeepDocs(string path, string docs) => Keep(path, DocsCopies(docs));
+
+    // a file that was not there: an empty copy
+    internal static void KeepNone(string path, string docs)
+    {
+        var copy = Path.Combine(DocsCopies(docs), Path.GetFileName(path));
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        if (!File.Exists(copy)) File.WriteAllText(copy, "");
+    }
 
     // the file as it was before the launcher's first change; a later change keeps that first copy
     static void Keep(string path, string dir)
@@ -156,12 +159,12 @@ public static class GameSettings
         File.Move(copy + ".tmp", copy);
     }
 
-    static string[] Copies(string dir) => Directory.Exists(dir) ? Directory.GetFiles(dir).Where(f => !f.EndsWith(".tmp", StringComparison.Ordinal)).ToArray() : [];
+    static string[] Copies(string dir) => Directory.Exists(dir) ? Directory.GetFiles(dir).Where(f => !f.EndsWith(".tmp", StringComparison.Ordinal) && !f.EndsWith(Last, StringComparison.Ordinal)).ToArray() : [];
     public static bool BinHasCopies(string bin) => Copies(BinCopies(bin)).Length > 0;
     public static bool CanRestore(string bin, string docs) => BinHasCopies(bin) || Copies(DocsCopies(docs)).Length > 0;
 
-    // Game\Bin's files whole: only the launcher and the player write them.
-    // shortcut: a game update between the copy and the restore would be undone; The Sims 3 gets none
+    // Game\Bin's files: whole while they are what the launcher wrote; one edited since (by hand, another tool, a restore
+    // point) keeps the edit and gets only the launcher's own values back
     public static void RestoreBin(Game g)
     {
         if (!BinHasCopies(g.Bin)) return;
@@ -169,8 +172,11 @@ public static class GameSettings
         using var point = RestorePoints.Begin(g.Bin, "Game settings");
         foreach (var copy in Copies(BinCopies(g.Bin)))
         {
-            Fs.Copy(copy, Path.Combine(g.Bin, Path.GetFileName(copy)));
+            var f = Path.Combine(g.Bin, Path.GetFileName(copy));
+            if (!File.Exists(f) || File.Exists(copy + Last) && File.ReadAllText(copy + Last) == Hash(f)) Fs.Copy(copy, f);
+            else if (ReadText(f) is var text && BinBack(Path.GetFileName(f), text, ReadText(copy)) is var back && back != text) WriteText(f, back);
             File.Delete(copy);
+            File.Delete(copy + Last);
         }
         Drop(BinCopies(g.Bin));
     }
@@ -190,10 +196,17 @@ public static class GameSettings
         Drop(DocsCopies(docs));
     }
 
-    // (the exact values: memories has three, so not through on and off)
+    // (the exact values: memories has three, so not through on and off; a key the launcher added goes)
     static string OptionsBack(string text, string was) =>
         new[] { "enableingamestore", "enableinteractiveloading", "enablememories", "receiveconnecttns", "requireloginbeforeload" }
-            .Aggregate(text, (t, k) => IniValue(was, "options", k) is { } v ? WithIni(t, "options", k, v) : t);
+            .Aggregate(text, (t, k) => IniValue(was, "options", k) is { } v ? WithIni(t, "options", k, v) : WithoutIni(t, "options", k));
+
+    static string BinBack(string name, string text, string was)
+    {
+        foreach (var s in All.Where(s => Path.GetFileName(PathOf(s.File, "x", "x")).Equals(name, StringComparison.OrdinalIgnoreCase)))
+            if (s.Read(was) is { } v && s.Read(text) is { } n && !Same(v, n)) text = s.With(text, v);
+        return text;
+    }
 
     static void Drop(string dir)
     {
@@ -252,12 +265,19 @@ public static class GameSettings
         var end = at < 0 ? -1 : lines.FindIndex(at + 1, l => l.TrimStart().StartsWith('['));
         return (lines, at, end < 0 ? lines.Count : end);
     }
-    static Regex KeyLine(string key) => new(@"^(\s*" + Regex.Escape(key) + @"\s*=\s*)([^;#\r]*?)(\s*([;#].*)?)$", RegexOptions.IgnoreCase);
+    static Regex KeyLine(string key) => new(@"^([ \t]*" + Regex.Escape(key) + @"[ \t]*=[ \t]*)([^;#\r]*?)(\s*([;#].*)?)$", RegexOptions.IgnoreCase);
 
     internal static string? IniValue(string text, string section, string key)
     {
         var (lines, at, end) = Section(text, section);
         return at >= 0 && lines.FindIndex(at + 1, end - at - 1, l => KeyLine(key).IsMatch(l)) is >= 0 and var i ? KeyLine(key).Match(lines[i]).Groups[2].Value : null;
+    }
+
+    static string WithoutIni(string text, string section, string key)
+    {
+        var (lines, at, end) = Section(text, section);
+        if (at >= 0) for (var i = end - 1; i > at; i--) if (KeyLine(key).IsMatch(lines[i])) lines.RemoveAt(i);
+        return string.Join('\n', lines);
     }
 
     // the value in place, or the key added after the section's last line; a file without the section stays as it is

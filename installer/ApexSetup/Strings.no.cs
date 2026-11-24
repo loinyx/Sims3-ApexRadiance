@@ -706,7 +706,6 @@ public static partial class Strings
         ["Select all"] = "Velg alle",
         ["Clear"] = "Fjern",
         ["{0} conflict: {1}"] = "{0}-konflikt: {1}",
-        ["{0} may overlap in {1}: {2}"] = "{0} kan overlappe i {1}: {2}",
         ["Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too."] = "Noen modarkiver kunne ikke leses. Installer 7-Zip, så kan konfliktsjekken lese dem også.",
         ["A copy of the cleared game caches is kept until the game starts and closes normally."] = "En kopi av de tømte hurtigbufferne beholdes til spillet starter og lukkes normalt.",
         ["Clear the game caches"] = "Tøm spillets hurtigbuffere",

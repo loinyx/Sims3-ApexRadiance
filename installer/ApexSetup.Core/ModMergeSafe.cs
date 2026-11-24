@@ -4,8 +4,8 @@ using System.Text.Json;
 
 namespace ApexSetup;
 
-// What keeps a mod from disappearing in a merge: mods whose content would be lost in one are left out of it, and originals
-// whose merged file is gone are found and put back.
+// What keeps a mod from disappearing in a merge: mods whose content would be lost in one stay out of it unless the player
+// chooses which comes first, and originals whose merged file is gone are found and put back.
 public static partial class ModMerge
 {
     // One merge, split or put back at a time. Recover runs with every health check: it must not touch a merge being made.
@@ -15,15 +15,18 @@ public static partial class ModMerge
     const uint NameMap = 0x0166038C, Manifest = 0x73E93EEB; // (a package's list of names and its store receipt: not content)
     static bool Content((uint Type, uint Group, ulong Instance) k) => k.Type is not (NameMap or Manifest);
 
-    // The packages of the merge that change the same game data in different ways, and those whose order against a loaded
-    // package outside it would change, each with who it meets. One package holds one copy of a resource, and which copy the
-    // game uses is not verified in game, so any choice here could take a mod's part out: they stay as they are.
-    static Dictionary<int, SortedSet<string>> Clashes(string docs, string modsDir, List<ModConflicts.Directive> dirs, (int, int, string) target,
-        IReadOnlyList<(MergeSource Src, (int, int, string) Key)> ok, CancellationToken ct = default)
+    // The packages of the merge that change the same game data in different ways, in groups, and those whose order against a
+    // loaded package outside it would change. One package holds one copy of a resource, and which copy the game uses is not
+    // verified in game, so any choice made here could take a mod's part out: it is the player's.
+    static List<(List<int> Group, SortedSet<string> Outside, int Resources)> Clashes(string docs, string modsDir, List<ModConflicts.Directive> dirs, (int, int, string) target,
+        IReadOnlyList<(MergeSource Src, (int, int, string) Key)> ok)
     {
-        var clash = new Dictionary<int, SortedSet<string>>();
-        void Meet(int i, string other) => (clash.TryGetValue(i, out var l) ? l : clash[i] = new(StringComparer.OrdinalIgnoreCase)).Add(Path.GetFileNameWithoutExtension(other));
         using var read = new Contents();
+        var of = Enumerable.Range(0, ok.Count).ToArray(); // (each package's group, by its first one)
+        int Top(int i) => of[i] == i ? i : of[i] = Top(of[i]);
+        var keys = new Dictionary<int, HashSet<(uint, uint, ulong)>>(); // (what clashes, by package)
+        var outside = new Dictionary<int, SortedSet<string>>();
+        void Add(int i, (uint, uint, ulong) k) => (keys.TryGetValue(i, out var l) ? l : keys[i] = new()).Add(k);
         var owners = new Dictionary<(uint, uint, ulong), List<(int I, ModConflicts.Entry E)>>();
         for (var i = 0; i < ok.Count; i++)
             foreach (var e in ok[i].Src.Keep)
@@ -31,24 +34,21 @@ public static partial class ModMerge
                 var k = (e.Type, e.Group, e.Instance);
                 if (Content(k)) (owners.TryGetValue(k, out var l) ? l : owners[k] = new()).Add((i, e));
             }
-        foreach (var l in owners.Values.Where(l => l.Any(x => x.I != l[0].I)))
-            for (var a = 0; a < l.Count; a++)
-                for (var b = a + 1; b < l.Count; b++)
-                {
-                    if (l[a].I == l[b].I || clash.TryGetValue(l[a].I, out var ca) && clash.TryGetValue(l[b].I, out var cb)
-                        && ca.Contains(Name(l[b].I)) && cb.Contains(Name(l[a].I))) continue;
-                    ct.ThrowIfCancellationRequested();
-                    if (read.Same(ok[l[a].I].Src.Mod.Path, l[a].E, ok[l[b].I].Src.Mod.Path, l[b].E)) continue;
-                    Meet(l[a].I, ok[l[b].I].Src.Mod.Name);
-                    Meet(l[b].I, ok[l[a].I].Src.Mod.Name);
-                }
-        string Name(int i) => Path.GetFileNameWithoutExtension(ok[i].Src.Mod.Name);
+        foreach (var (k, l) in owners.Where(o => o.Value.Any(x => x.I != o.Value[0].I)))
+        {
+            // (the copies by content: one kind is no clash, more put every package that holds one in a group)
+            var kinds = new List<(int I, ModConflicts.Entry E)>();
+            foreach (var x in l)
+                if (!kinds.Any(y => read.Same(ok[y.I].Src.Mod.Path, y.E, ok[x.I].Src.Mod.Path, x.E))) kinds.Add(x);
+            if (kinds.Count < 2) continue;
+            foreach (var x in l) { Add(x.I, k); of[Top(x.I)] = Top(l[0].I); }
+        }
 
         var skip = ok.Select(o => Path.GetFullPath(o.Src.Mod.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var off = Path.GetFullPath(Mods.Disabled(docs)) + Path.DirectorySeparatorChar;
-        List<string> files;
+        List<string> files = [];
         try { files = Directory.EnumerateFiles(modsDir, "*.package", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true }).ToList(); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); return clash; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         foreach (var f in files)
         {
             if (skip.Contains(f) || f.StartsWith(off, StringComparison.OrdinalIgnoreCase) || Keeps(docs, f)) continue;
@@ -57,13 +57,18 @@ public static partial class ModMerge
             if (Probe(f).Item1 is not { } entries) continue;
             foreach (var e in entries)
             {
-                if (!owners.TryGetValue((e.Type, e.Group, e.Instance), out var l)) continue;
+                var k = (e.Type, e.Group, e.Instance);
+                if (!owners.TryGetValue(k, out var l)) continue;
                 foreach (var (i, mine) in l)
                     if (ModConflicts.CompareKey(ok[i].Key, lk) < 0 != ModConflicts.CompareKey(target, lk) < 0 && !read.Same(ok[i].Src.Mod.Path, mine, f, e))
-                        Meet(i, f);
+                    {
+                        Add(i, k);
+                        (outside.TryGetValue(i, out var o) ? o : outside[i] = new(StringComparer.OrdinalIgnoreCase)).Add(Path.GetFileNameWithoutExtension(f));
+                    }
             }
         }
-        return clash;
+        return keys.Keys.GroupBy(Top).OrderBy(g => g.Key).Select(g => (g.Order().ToList(),
+            new SortedSet<string>(g.SelectMany(i => outside.GetValueOrDefault(i) ?? []), StringComparer.OrdinalIgnoreCase), g.SelectMany(i => keys[i]).Distinct().Count())).ToList();
     }
 
     // resources compared by content, each file opened once
@@ -155,26 +160,30 @@ public static partial class ModMerge
                 var (on, off) = (Path.Combine(docs, r.Merged), Path.Combine(Mods.Disabled(docs), UnderMods(r.Merged)));
                 var path = File.Exists(on) ? on : off;
                 if (!File.Exists(path)) continue;
-                if (!_lost.TryGetValue(r.Sha256, out var mods))
+                List<string>? mods;
+                lock (_lost) _lost.TryGetValue(r.Sha256, out mods);
+                if (mods is null)
                 {
-                    using var read = new Contents();
-                    var kept = new Dictionary<(uint, uint, ulong), (string Path, ModConflicts.Entry E)>();
-                    mods = new();
-                    foreach (var e in ModConflicts.Package.Open(path).Entries) kept.TryAdd((e.Type, e.Group, e.Instance), (path, e));
-                    foreach (var o in r.Originals)
-                    {
-                        var own = Path.Combine(r.Dir, UnderMods(o.Rel));
-                        // (a package's own repeats of a resource all went in: only a resource in none of its copies there is lost)
-                        if (File.Exists(own) && ModConflicts.Package.Open(own).Entries.GroupBy(e => (e.Type, e.Group, e.Instance))
-                                .Any(g => Content(g.Key) && (!kept.TryGetValue(g.Key, out var k) || !g.Any(e => read.Same(own, e, k.Path, k.E)))))
-                            mods.Add(Path.GetFileNameWithoutExtension(o.Rel));
-                    }
-                    _lost[r.Sha256] = mods;
+                    mods = LostIn(r, path);
+                    lock (_lost) _lost[r.Sha256] = mods;
                 }
                 if (mods.Count > 0) list.Add((new ModFile(path, r.Merged, r.Size, ModKind.Package, path == on, false), mods));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or IndexOutOfRangeException or OverflowException) { Engine.Log(e); }
         return list;
+    }
+
+    // (only a resource in two originals or more can have lost a copy: the others went in as they are)
+    static List<string> LostIn(MergeRecord r, string merged)
+    {
+        using var read = new Contents();
+        var kept = new Dictionary<(uint, uint, ulong), ModConflicts.Entry>();
+        foreach (var e in ModConflicts.Package.Open(merged).Entries) kept.TryAdd((e.Type, e.Group, e.Instance), e);
+        var own = r.Originals.Select(o => Path.Combine(r.Dir, UnderMods(o.Rel))).Where(File.Exists)
+            .Select(p => (Path: p, Keys: ModConflicts.Package.Open(p).Entries.Where(e => Content((e.Type, e.Group, e.Instance))).ToLookup(e => (e.Type, e.Group, e.Instance)))).ToList();
+        var shared = own.SelectMany(o => o.Keys.Select(k => k.Key)).GroupBy(k => k).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet();
+        return own.Where(o => o.Keys.Any(g => shared.Contains(g.Key) && (!kept.TryGetValue(g.Key, out var k) || !g.Any(e => read.Same(o.Path, e, merged, k)))))
+            .Select(o => Path.GetFileNameWithoutExtension(o.Path)).ToList();
     }
 
     // ---------- originals whose merged file is gone ----------
@@ -187,32 +196,45 @@ public static partial class ModMerge
     static bool Present(string docs, MergeRecord r) => File.Exists(Path.Combine(docs, r.Merged)) || File.Exists(Path.Combine(Mods.Disabled(docs), UnderMods(r.Merged)))
         || Stores(docs).Any(d => File.Exists(Path.Combine(d, UnderMods(r.Merged)))); // (a merge inside another merge)
 
+    // what a store keeps: not its record, nor what Windows leaves in a folder
+    static List<string> Kept(string dir) => Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
+        .Where(f => !f.Equals(Path.Combine(dir, "merge.json"), StringComparison.OrdinalIgnoreCase) && Path.GetFileName(f).ToLowerInvariant() is not ("desktop.ini" or "thumbs.db")).ToList();
+
+    // a merged file of that name anywhere in Mods (a record that can't be read says only its folder's name)
+    static bool Named(string docs, string name) => Directory.EnumerateFiles(Path.Combine(docs, "Mods"), name + ".package", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint })
+        .Any(f => !Keeps(docs, f));
+
     // The merges whose file is no longer there (removed, or its record lost), with what they still keep: those mods are in
-    // neither the game nor the Mods list.
+    // neither the game nor the Mods list. None while a merge is being made, nor with no Mods folder to go back to (a player
+    // trying the game without mods has it renamed).
     public static List<Orphan> Orphans(string docs)
     {
         var list = new List<Orphan>();
+        if (!Monitor.TryEnter(Gate)) return list;
         try
         {
+            if (!File.Exists(Path.Combine(docs, "Mods", "Resource.cfg"))) return list;
+            Forget(docs);
             var known = Records(docs).ToDictionary(r => Path.GetFullPath(r.Dir), StringComparer.OrdinalIgnoreCase);
             foreach (var d in Stores(docs))
             {
-                if (known.TryGetValue(Path.GetFullPath(d), out var r) && Present(docs, r)) continue;
-                var files = Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories).Where(f => !f.Equals(Path.Combine(d, "merge.json"), StringComparison.OrdinalIgnoreCase)).ToList();
-                if (files.Count > 0) list.Add(new(Path.GetFileName(d), d, files));
+                if (known.TryGetValue(Path.GetFullPath(d), out var r) ? Present(docs, r) : Named(docs, Path.GetFileName(d))) continue;
+                if (Kept(d) is { Count: > 0 } files) list.Add(new(Path.GetFileName(d), d, files));
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        finally { Monitor.Exit(Gate); }
         return list;
     }
 
     // The originals of a merge that is gone, back at their places (beside a different file there, under a free name) with
-    // their notes. How many went back.
-    public static int PutBack(string docs, Orphan o)
+    // their notes. How many went back. The merge is looked at again: its file may be back since it was found gone.
+    public static int PutBack(string docs, Orphan found)
     {
         Engine.CheckWritable();
         lock (Gate)
         {
+            var o = Orphans(docs).FirstOrDefault(x => x.Dir.Equals(found.Dir, StringComparison.OrdinalIgnoreCase)) ?? throw new SetupException("That merge is back in Mods. Split it there.");
             using var log = OpenLog("putback", out _);
             var rec = Records(docs).FirstOrDefault(r => Path.GetFullPath(r.Dir).Equals(Path.GetFullPath(o.Dir), StringComparison.OrdinalIgnoreCase));
             var n = 0;
@@ -222,7 +244,7 @@ public static partial class ModMerge
                 var to = Path.Combine(docs, "Mods", rel);
                 Directory.CreateDirectory(Path.GetDirectoryName(to)!);
                 if (File.Exists(to) && Sha(to) == Sha(from)) Fs.Retry(() => File.Delete(from)); // (an identical copy is already in place)
-                else { to = Mods.Free(to); Fs.Retry(() => File.Move(from, to)); }
+                else { to = Mods.Free(to, Path.Combine(Mods.Disabled(docs), Path.GetDirectoryName(rel) ?? "")); Fs.Retry(() => File.Move(from, to)); }
                 log.WriteLine($"put back {rel} as {Path.GetRelativePath(docs, to)}");
                 n++;
                 if (rec?.Originals.FirstOrDefault(x => UnderMods(x.Rel).Equals(rel, StringComparison.OrdinalIgnoreCase))?.Note is { } note && ModNotes.Get(Path.Combine("Mods", rel)) is null) ModNotes.Put(Path.Combine("Mods", rel), note);
@@ -236,13 +258,13 @@ public static partial class ModMerge
     // a merged package and its originals to the Recycle Bin, so none is left kept where nothing shows it
     public static void RemoveAll(string docs, ModFile merged)
     {
-        var rec = Info(docs, merged) ?? throw new SetupException("This file is not a merge made by the launcher.");
         if (merged.Locked) throw new SetupException("The launcher does not move, rename or remove this file.");
         Engine.CheckWritable();
         lock (Gate)
         {
+            var rec = Info(docs, merged) ?? throw new SetupException("This file is not a merge made by the launcher.");
             Recycle(merged.Path);
-            foreach (var f in Directory.EnumerateFiles(rec.Dir, "*", SearchOption.AllDirectories).Where(f => !f.Equals(Path.Combine(rec.Dir, "merge.json"), StringComparison.OrdinalIgnoreCase)).ToList()) Recycle(f);
+            foreach (var f in Kept(rec.Dir)) Recycle(f);
             DeleteStore(rec.Dir);
             Forget(docs);
             ModNotes.Forget(merged.Rel);
@@ -267,7 +289,7 @@ public static partial class ModMerge
                     var rel = Path.Combine("Mods", Path.GetRelativePath(isOff ? off : mods, f.FullName));
                     if (taken.Contains(rel) || Sha(f.FullName) != r.Sha256) continue;
                     r.Merged = rel;
-                    File.WriteAllText(Path.Combine(r.Dir, "merge.json"), JsonSerializer.Serialize(r, SetupJson.Default.MergeRecord));
+                    Fs.WriteAtomic(Path.Combine(r.Dir, "merge.json"), JsonSerializer.Serialize(r, SetupJson.Default.MergeRecord));
                     taken.Add(rel);
                     break;
                 }

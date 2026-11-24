@@ -178,6 +178,29 @@ static class ModMergeTests
             check(mixed.CanRun && mixed.Inputs.Select(m => m.Name).SequenceEqual(["k3.package", "k4.package"]) && mixed.Skipped.Count == 2 && mixed.Resources == 3
                 && mixed.Skipped.Single(s => s.Mod.Name == "k1.package").Reason.Args[0] == "k2" && !ModMerge.Plan(docs, [M(P("k1")), M(P("k2"))], "x", "Packages", false).CanRun,
                 "merge: mods that change the same resource differently stay out, each naming the other; the same content packed and unpacked goes in once");
+            // the player's choice between them: both go in, the first one's copy counts, and it is kept through an edit
+            foreach (var (first, other, text) in new[] { ("k1", "k2", "one"), ("k2", "k1", "two") })
+            {
+                var chosen = ModMerge.Plan(docs, [M(P("k1")), M(P("k2")), M(P("k3"))], "Chosen", "Packages", false, [Path.Combine("Mods", P(first)), Path.Combine("Mods", P(other))]);
+                var done = ModMerge.Run(chosen, null, default).Merged;
+                string Kept(string path) => Encoding.UTF8.GetString(Stored(path, ModConflicts.Package.Open(path).Entries.Single(e => e.Type == 20)));
+                var keptAll = ModConflicts.Package.Open(done.Path).Entries.Count == 5 && Kept(done.Path) == text && chosen.Clashes.Single() is { Resources: 1, Mods.Count: 2 };
+                var more = ModMerge.Edit(docs, done, [], [M(P("k4"))]).Remerged!.Merged;
+                check(keptAll && chosen.Skipped.Count == 0 && Kept(more.Path) == text && ModMerge.Info(more)!.Originals.Count == 4 && ModMerge.Lost(docs).Count == 0,
+                    $"merge: the copy of the mod with priority counts ({first}), the rest of each goes in, also after an edit");
+                ModMerge.Split(docs, more);
+            }
+            // priority without a merge: up to the folder that comes first, else the others down; the undo puts each back
+            var upM = ModPriority.Moves(docs, M(P("k2")), [M(P("k1"))]);
+            check(upM is [var u] && u.Folder == "Overrides" && u.Mod.Name == "k2.package" && ModPriority.Moves(docs, M(B), [M(P("k1"))]) is { Count: 0 }
+                && ModPriority.Moves(docs, M(P("k1")), [M(B)]) is [var up1, var dn] && up1.Folder == "Overrides" && dn.Folder == "Packages" && dn.Mod.Name == "b.package"
+                && ModPriority.Moves(docs, M(P("k1")) with { Locked = true }, [M(P("k2"))]) is null,
+                "priority: the mod goes to the folder Resource.cfg puts first, or the other one down when it is there already");
+            var wasAll = Snap(docs);
+            var put = ModPriority.Apply(docs, upM!);
+            var there = File.Exists(Path.Combine(mods, @"Overrides\k2.package")) && !File.Exists(Path.Combine(mods, P("k2")));
+            ModPriority.Back(docs, put);
+            check(there && Same(wasAll, Snap(docs)), "priority: the file moves and the undo puts it back identical");
             // the packages' name lists become one with every name
             static byte[] Names(params (ulong Id, string N)[] l)
             {
@@ -221,7 +244,7 @@ static class ModMergeTests
             var store1 = Path.Combine(ModMerge.Folder(docs), "Lossy");
             var json1 = File.ReadAllText(Path.Combine(store1, "merge.json"));
             var k4Was = File.ReadAllBytes(Path.Combine(store1, P("k4")));
-            Pkg(Path.Combine(store1, P("k4")), Raw(24, 24, "changed"));
+            Pkg(Path.Combine(store1, P("k4")), Raw(25, 25, "changed"));
             check(ModMerge.Lost(docs).Count == 0, "merge: one made now is not checked for lost parts");
             File.WriteAllText(Path.Combine(store1, "merge.json"), json1.Replace("\"Version\": 2", "\"Version\": 1").Replace("\"Version\":2", "\"Version\":1"));
             ModMerge.Recover(docs);
@@ -232,8 +255,9 @@ static class ModMergeTests
             var lostRec = ModMerge.Run(ModMerge.Plan(docs, [M(P("k5")), M(P("k4"))], "Lost rec", "Packages", false), null, default).Merged;
             File.WriteAllText(Path.Combine(ModMerge.Folder(docs), "Lost rec", "merge.json"), "");
             ModMerge.Recover(docs);
-            check(ModMerge.Orphans(docs).Single().Files.Count == 2 && ModMerge.PutBack(docs, ModMerge.Orphans(docs).Single()) == 2 && File.Exists(Path.Combine(mods, P("k5"))), "merge: mods kept without a readable record go back");
+            check(ModMerge.Orphans(docs).Count == 0, "merge: mods in a merge whose record can't be read are not told gone while its file is there");
             File.Delete(lostRec.Path);
+            check(ModMerge.Orphans(docs).Single().Files.Count == 2 && ModMerge.PutBack(docs, ModMerge.Orphans(docs).Single()) == 2 && File.Exists(Path.Combine(mods, P("k5"))), "merge: mods kept without a readable record go back");
             var whole = ModMerge.Run(ModMerge.Plan(docs, [M(P("k5")), M(P("k4"))], "Whole", "Packages", false), null, default).Merged;
             ModMerge.RemoveAll(docs, whole);
             check(!File.Exists(whole.Path) && !File.Exists(Path.Combine(mods, P("k5"))) && !Directory.Exists(ModMerge.Folder(docs)) && Directory.GetFiles(recycled).Length >= 3, "merge: removed with its mods, all of it goes to the Recycle Bin");
