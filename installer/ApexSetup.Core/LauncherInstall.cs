@@ -205,12 +205,14 @@ public static partial class LauncherInstall
     // everything Register and SetRunAtStartup wrote
     public static void RemoveTraces()
     {
+        // (a key that goes between the look and the delete throws: the second look finds it gone)
+        static void Drop(string key) { try { Registry.CurrentUser.DeleteSubKeyTree(key, false); } catch (IOException) { Registry.CurrentUser.DeleteSubKeyTree(key, false); } }
         foreach (var l in new[] { StartMenuLink, DesktopLink })
             try { if (File.Exists(l)) File.Delete(l); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
+        Drop(UninstallKey);
         using (var k = Registry.CurrentUser.OpenSubKey(RunKey, true)) k?.DeleteValue(Name, false);
-        Registry.CurrentUser.DeleteSubKeyTree(ClassesBase + @"\" + ProgId, false);
-        Registry.CurrentUser.DeleteSubKeyTree(AppKey, false);
+        Drop(ClassesBase + @"\" + ProgId);
+        Drop(AppKey);
         foreach (var t in OpenTypes.Concat(DroppedTypes))
         {
             using var w = Registry.CurrentUser.OpenSubKey(ClassesBase + @"\" + t + @"\OpenWithProgids", true);

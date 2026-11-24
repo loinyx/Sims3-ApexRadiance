@@ -196,8 +196,11 @@ public static partial class ModMerge
     static bool Present(string docs, MergeRecord r) => File.Exists(Path.Combine(docs, r.Merged)) || File.Exists(Path.Combine(Mods.Disabled(docs), UnderMods(r.Merged)))
         || Stores(docs).Any(d => File.Exists(Path.Combine(d, UnderMods(r.Merged)))); // (a merge inside another merge)
 
-    // what a store keeps: not its record, nor what Windows leaves in a folder
-    static List<string> Kept(string dir) => Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
+    // what a store keeps: not what an antivirus adds for a moment beside a package it scans (NAME.PACKAGE.tmp; no mod with .tmp
+    // in its name goes into a merge)
+    static List<string> Kept(string dir) => Files(dir).Where(f => !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)).ToList();
+    // every file in a store but its record and what Windows leaves in a folder
+    static List<string> Files(string dir) => Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
         .Where(f => !f.Equals(Path.Combine(dir, "merge.json"), StringComparison.OrdinalIgnoreCase) && Path.GetFileName(f).ToLowerInvariant() is not ("desktop.ini" or "thumbs.db")).ToList();
 
     // a merged file of that name anywhere in Mods (a record that can't be read says only its folder's name)

@@ -155,9 +155,9 @@ public static class RestorePoints
             if (failed.Count > before) break;
             DeleteTree(p.Dir);
         }
-        // the backup folder Setup made goes too, once nothing is left in it
+        // the backup folder Setup made goes too, once nothing is left in it (an antivirus's own file, NAME.tmp, is waited for)
         foreach (var d in new[] { RootOf(bin), Manifest.DirOf(bin) })
-            try { Fs.Retry(() => { if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d); }); Fs.Gone(d); }
+            try { Fs.Retry(() => { if (Directory.Exists(d) && Directory.EnumerateFileSystemEntries(d).All(f => f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) && Fs.Emptied(d)) { Directory.Delete(d); Fs.Gone(d); } }); }
             catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
         return failed;
     }
@@ -167,7 +167,8 @@ public static class RestorePoints
         if (e.Dir)
         {
             if (e.Existed) Directory.CreateDirectory(e.Path);
-            else { Fs.Retry(() => { if (Directory.Exists(e.Path) && !Directory.EnumerateFileSystemEntries(e.Path).Any()) Directory.Delete(e.Path); }); Fs.Gone(e.Path); }
+            // (an antivirus may still list a file just deleted, or one of its own beside it: waited for)
+            else Fs.Retry(() => { if (Directory.Exists(e.Path) && Fs.Emptied(e.Path)) { Directory.Delete(e.Path); Fs.Gone(e.Path); } });
             return;
         }
         if (File.Exists(e.Path)) File.SetAttributes(e.Path, File.GetAttributes(e.Path) & ~FileAttributes.ReadOnly);
@@ -214,12 +215,11 @@ public static class RestorePoints
     {
         try
         {
-            Fs.Retry(() =>
+            Fs.DeleteClear(dir, () =>
             {
                 foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
-                Directory.Delete(dir, true);
+                return true;
             });
-            Fs.Gone(dir);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // (pruned the next time)
     }
@@ -257,8 +257,28 @@ public static class Fs
     // a folder whose files were just deleted, empty once Windows lets go of them (up to 2 s)
     public static bool Emptied(string dir)
     {
-        for (var i = 0; i < 40 && Directory.EnumerateFileSystemEntries(dir).Any(); i++) Thread.Sleep(50);
-        return !Directory.EnumerateFileSystemEntries(dir).Any();
+        // (one look decides: an antivirus may add a file of its own for a moment between two)
+        for (var i = 0; Directory.EnumerateFileSystemEntries(dir).Any(); i++)
+        {
+            if (i == 40) return false;
+            Thread.Sleep(50);
+        }
+        return true;
+    }
+    // A folder and its subfolders, while clear says they hold nothing to keep. A file just moved that an antivirus still holds
+    // stays listed a moment, and the antivirus puts a file of its own beside it: any look or delete can meet one, and a delete
+    // that meets one in a subfolder says nothing. So both are done again until the folder is gone: 2 s for a file to go, 8 s
+    // for the folder.
+    public static void DeleteClear(string dir, Func<bool>? clear = null)
+    {
+        for (var i = 0; i < 160 && Directory.Exists(dir); i++)
+            try
+            {
+                if (i > 0) Thread.Sleep(50);
+                if (clear is null || clear()) Directory.Delete(dir, true);
+                else if (i >= 40) return;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && i < 159) { }
     }
     public static void Gone(string dir)
     {
