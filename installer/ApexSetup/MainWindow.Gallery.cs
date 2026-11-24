@@ -2364,6 +2364,7 @@ public sealed partial class MainWindow
                     look.Places[c.Key] = new Placed { X = Canvas.GetLeft(cards[0]) - _boardAnchor.GetValueOrDefault(c.Key), Y = Canvas.GetTop(cards[0]), Moved = true };
                     Keep();
                 };
+                HandCursor.On(card);
                 card.Tapped += (_, e) => { e.Handled = true; Spotlight(c, members, cards); };
             }
         }
@@ -2688,7 +2689,9 @@ public sealed partial class MainWindow
                 }
                 CardDropped(p, place, outer, pile);
             }, () => { MarkUnder(outer); LightAlbum(AlbumAt(_dragPoint)); }, shut ? null : () => OpenViewer(pics, pics.IndexOf(p), outer));
+        if (pile is null && !shut) HandCursor.On(outer);
         if (pile is null && !shut) outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
+        HandCursor.On(caption);
         caption.Tapped += (_, e) =>
         {
             e.Handled = true;

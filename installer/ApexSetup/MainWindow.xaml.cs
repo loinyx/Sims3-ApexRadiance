@@ -49,6 +49,7 @@ public sealed partial class MainWindow : Window
         // (a test run can pick the theme; otherwise it is Windows')
         if (Environment.GetEnvironmentVariable("APEX_LAUNCHER_THEME") is { } pick) Root.RequestedTheme = pick == "light" ? ElementTheme.Light : ElementTheme.Dark;
         _light = Root.ActualTheme == ElementTheme.Light;
+        HandCursor.Watch(Root);
         ApplyBackdrop();
         ThemeChrome();
         Root.ActualThemeChanged += (_, _) => ThemeChanged();
@@ -2610,6 +2611,7 @@ public sealed partial class MainWindow : Window
         _dialog = d;
         d.Language = Root.Language; // (a dialog is a popup: it does not inherit the window's language)
         DarkDialog(d);
+        HandCursor.Watch(d);
         _dialogShown = d.ShowAsync().AsTask();
         try { return await _dialogShown; }
         finally { if (_dialog == d) _dialog = null; }
