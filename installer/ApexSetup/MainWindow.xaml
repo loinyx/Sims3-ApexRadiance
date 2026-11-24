@@ -984,5 +984,14 @@
                 </StackPanel>
             </Border>
         </Grid>
+        <!-- the move to Apex Launcher (an old Setup that updated itself, or a copy not installed yet): the install's card over
+             the aurora, filled in code (MainWindow.Upgrade.cs) -->
+        <Grid x:Name="UpgradeRun" Grid.Row="1" Visibility="Collapsed" Background="{ThemeResource ApexPageBrush}">
+            <local:Aurora x:Name="UpgradeAurora" />
+            <Border x:Name="UpgradeCard" Width="780" MaxWidth="780" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" CornerRadius="22" BorderThickness="1"
+                    BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}">
+                <Border.Shadow><ThemeShadow /></Border.Shadow>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
