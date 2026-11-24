@@ -17,6 +17,8 @@ public sealed partial class MainWindow
         var (flyout, rows) = RowsFlyout(318, FlyoutPlacementMode.BottomEdgeAlignedRight);
         void Tool(string icon, string title, string help, Action run, bool enabled = true) =>
             rows.Children.Add(FlyoutRow(Lucide.Icon(icon, 18), title, help, () => { flyout.Hide(); run(); }, enabled));
+        var chosen = Picked().Where(Mine).ToList();
+        Tool("merge", T("Merge mods"), chosen.Count > 1 ? T("The {0} selected, into one package", chosen.Count) : T("Select two or more mods first"), () => Safe(MergeAsync(chosen, null, null)), chosen.Count > 1 && !_busy);
         Tool("scan-search", T("Find custom content"), T("See what a file needs to work"), () => Safe(FindContentAsync()));
         Tool("bug", T("Find a problem mod"), T("Tests your mods in halves"), () => OnModsHunt(sender, e), _modsLoaded && !_busy && ModHunt.Current() is null);
         Tool("brush", T("Clear game caches"), T("For items that are missing or look wrong"), () => Safe(ChooseCachesAsync()));

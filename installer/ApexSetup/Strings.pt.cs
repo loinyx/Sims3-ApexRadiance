@@ -2076,5 +2076,8 @@ public static partial class Strings
         ["Content"] = "Conteúdo",
         ["Conflicts"] = "Conflitos",
         ["None of your other mods change the same thing."] = "Nenhum outro mod seu muda a mesma coisa.",
+        ["Merge mods"] = "Mesclar mods",
+        ["The {0} selected, into one package"] = "Os {0} selecionados, em um pacote só",
+        ["Select two or more mods first"] = "Selecione dois ou mais mods antes",
     };
 }

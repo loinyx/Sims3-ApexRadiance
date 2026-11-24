@@ -232,11 +232,12 @@ public sealed partial class MainWindow
 
     static Border StripBadge(string text, string icon, string color)
     {
-        var brush = TagDot.BrushOf(color);
+        // (the pale ink of the dark theme, and its darker one on the light theme's pale chip)
+        var brush = TagDot.BrushOf(!_light ? color : color switch { "#9CC7EE" => "#2F6FA8", "#E0A84F" => "#8A5A00", _ => "#5A52B5" });
         var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         s.Children.Add(Lucide.Icon(icon, 12, brush, 2.2));
         s.Children.Add(new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = brush, VerticalAlignment = VerticalAlignment.Center });
-        return new Border { Child = s, Height = 26, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(13), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 11, 12, 14)) };
+        return new Border { Child = s, Height = 26, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(13), Background = new SolidColorBrush(Pick(0xB30B0C0E, 0xCCFFFFFF)) };
     }
 
     static Button StripButton(string icon, string tip)
