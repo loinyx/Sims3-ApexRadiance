@@ -501,8 +501,11 @@ public static partial class ModMerge
         try
         {
             if (!Directory.Exists(dir)) return;
-            if (Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any(f => !Path.GetFileName(f).Equals("merge.json", StringComparison.OrdinalIgnoreCase)
-                || !Path.GetDirectoryName(f)!.Equals(dir, StringComparison.OrdinalIgnoreCase))) return;
+            bool Others() => Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any(f => !Path.GetFileName(f).Equals("merge.json", StringComparison.OrdinalIgnoreCase)
+                || !Path.GetDirectoryName(f)!.Equals(dir, StringComparison.OrdinalIgnoreCase));
+            // (a file just moved or deleted that an antivirus still holds stays listed a moment: up to 2 s for it to go)
+            for (var i = 0; i < 40 && Others(); i++) Thread.Sleep(50);
+            if (Others()) return;
             Fs.Retry(() => Directory.Delete(dir, true));
             Fs.Gone(dir);
             var parent = Path.GetDirectoryName(dir)!;

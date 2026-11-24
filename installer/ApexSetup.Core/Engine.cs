@@ -612,7 +612,7 @@ public static class Engine
             if (c is Components.Bridge or Components.Dxvk)
             {
                 foreach (var d in new[] { Path.Combine(g.Bin, ".trex"), Path.Combine(g.Bin, "licenses") })
-                    if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Fs.DeleteDir(d);
+                    if (Directory.Exists(d) && Fs.Emptied(d)) Fs.DeleteDir(d);
                 // the game is back on its own D3D9 (a restored loader or wrapper included): the copy taken then matches the card it sees again
                 if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup) && Scan.Run(g, docs).Layer is Layer.Native or Layer.Other)
                     Fs.Copy(m.OptionsBackup, OptionsIni(docs));

@@ -57,6 +57,11 @@ static class ModMergeTests
             try { o[Path.GetRelativePath(dir, f)] = Sha(f); } catch (FileNotFoundException) { }
         return o;
     }
+    // what differs, for a failed check's message
+    static string Diff(Dictionary<string, string> a, Dictionary<string, string> b, string docs) =>
+        string.Join("; ", a.Keys.Union(b.Keys).Where(k => !a.TryGetValue(k, out var x) || !b.TryGetValue(k, out var y) || x != y)
+            .Select(k => (a.ContainsKey(k) ? "" : "+") + (b.ContainsKey(k) ? "" : "-") + k))
+        + (Directory.Exists(ModMerge.Folder(docs)) ? " [merge folder left: " + string.Join(", ", Directory.EnumerateFileSystemEntries(ModMerge.Folder(docs), "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(docs, f))) + "]" : "");
     static bool Same(Dictionary<string, string> a, Dictionary<string, string> b) => a.Count == b.Count && a.All(x => b.TryGetValue(x.Key, out var v) && v == x.Value);
 
     static byte[] Stored(string path, ModConflicts.Entry e)
@@ -169,7 +174,7 @@ static class ModMergeTests
                 try { ModMerge.Run(ModMerge.Plan(docs, all, "Merged One", "Packages", false), null, default); }
                 catch (IOException) { failed = true; }
                 ModMerge.FailPoint = _ => { };
-                check(failed && Same(before, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), $"merge: a failure at \"{at}\" restores everything");
+                check(failed && Same(before, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), $"merge: a failure at \"{at}\" restores everything " + Diff(before, Snap(docs), docs));
             }
 
             // run: stored bytes equal, compressed stays compressed, originals kept with their notes, the merged file tagged
@@ -230,7 +235,7 @@ static class ModMergeTests
             var renamed = ModLibrary.Rename(m1, "First again");
             check(ModMerge.IsMerged(renamed) && File.Exists(renamed.Path), "split: the inner merge comes back, still a merge after a rename");
             ModMerge.Split(docs, renamed);
-            check(Same(before2, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "split: both splits restore every original identical by hash");
+            check(Same(before2, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "split: both splits restore every original identical by hash " + Diff(before2, Snap(docs), docs));
 
             // one mod taken out: it is back identical, the other two are merged again under the same name; taking one of
             // two out leaves both plain mods
@@ -250,13 +255,13 @@ static class ModMergeTests
             check(added.Remerged is { Mods: 3 } am && am.Merged.Name == "Two.package" && ModMerge.Info(am.Merged)!.Originals.Count == 3 && !File.Exists(Path.Combine(mods, @"Packages\d.package")),
                 "edit: an added mod goes into the merge under the same name");
             ModMerge.Split(docs, added.Remerged!.Merged);
-            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "edit: splitting after an add restores every file identical");
+            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "edit: splitting after an add restores every file identical " + Diff(before3, Snap(docs), docs));
 
             // a split that stopped halfway (the launcher closed with one original back): the next split finishes it
             var half = ModMerge.Run(ModMerge.Plan(docs, [M(A), M(B)], "Half", "Packages", false), null, default).Merged;
             File.Move(Path.Combine(ModMerge.Folder(docs), "Half", A), Path.Combine(mods, A));
             ModMerge.Split(docs, half);
-            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "split: one that stopped halfway is finished by the next, every file identical");
+            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "split: one that stopped halfway is finished by the next, every file identical " + Diff(before3, Snap(docs), docs));
 
             // a merge that is off: taking a mod out is refused before anything moves (its originals would come back off,
             // and a merge leaves out mods that are off)
@@ -275,7 +280,7 @@ static class ModMergeTests
             File.Move(stopped.Path, stopped.Path + ".tmp-" + Guid.NewGuid().ToString("N"));
             File.Move(Path.Combine(ModMerge.Folder(docs), "Stopped", B), Path.Combine(mods, B));
             ModMerge.Recover(docs);
-            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "merge: one stopped during the move is undone at the next read, every file identical");
+            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "merge: one stopped during the move is undone at the next read, every file identical " + Diff(before3, Snap(docs), docs));
             var removed = ModMerge.Run(ModMerge.Plan(docs, [M(A), M(B)], "Removed", "Packages", false), null, default).Merged;
             File.Delete(removed.Path);
             ModMerge.Recover(docs);

@@ -254,6 +254,12 @@ public static class Fs
     }
     // a deleted folder an antivirus or indexer still holds stays listed until Windows lets go: waits up to 2 s for it, so the
     // folder above it can be seen empty and removed too
+    // a folder whose files were just deleted, empty once Windows lets go of them (up to 2 s)
+    public static bool Emptied(string dir)
+    {
+        for (var i = 0; i < 40 && Directory.EnumerateFileSystemEntries(dir).Any(); i++) Thread.Sleep(50);
+        return !Directory.EnumerateFileSystemEntries(dir).Any();
+    }
     public static void Gone(string dir)
     {
         for (var i = 0; i < 40 && Directory.Exists(dir); i++) Thread.Sleep(50);

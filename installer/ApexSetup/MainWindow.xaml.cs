@@ -781,6 +781,7 @@ public sealed partial class MainWindow : Window
                 blocked ? Tip(StateText(BridgeDetail.Text, Res("ApexWarningBrush"))!) : StateText(RendererState.Text, RendererState.Foreground),
                 Changes(Components.Bridge, Components.Dxvk), menu);
         }
+        Row(IconBox("rotate-ccw"), T("TS3Wrap"), Why(RestartToggle, RestartPill, T("Reopens your last save with fresh memory when the game runs low.")), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
         if (SmoothSection.Visibility == Visibility.Visible && SmoothCard.Visibility == Visibility.Visible)
         {
             FrameworkElement? smoothState = State(SmoothPill);
@@ -801,7 +802,6 @@ public sealed partial class MainWindow : Window
             FpsCombo.MinWidth = 0; FpsCombo.Width = 200;
             Row(IconBox("gauge"), T("Apex frame limit"), FpsDesc.Text, null, State(FpsPill), _fpsWant is not null, Adopt(_fpsBox, FpsCard));
         }
-        Row(IconBox("rotate-ccw"), T("TS3Wrap"), Why(RestartToggle, RestartPill, T("Reopens your last save with fresh memory when the game runs low.")), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
         if (!wizard) return;
         // the mods by other modders, offered in the install too (outside it, the Other mods cards below the list)
         Label(T("Optional, from other authors"));
@@ -1329,6 +1329,7 @@ public sealed partial class MainWindow : Window
     bool _fillingSmooth;
     string? _smoothPending; // why a removal could not turn Smooth Motion off, shown once the row reads the driver again
     bool? _smoothWant;
+    bool _smoothDefaulted; // the first install's default (off) already set for this game
     bool _smoothErrorOn = true, _afmfErrorOn = true; // (a failed change's direction: the manual steps say turn it on, or off)
 
     // after a removal or an apply: the rows read the drivers again; a failure is logged and shown on its own row (removals only
@@ -1359,8 +1360,9 @@ public sealed partial class MainWindow : Window
 
     void RefreshSmooth(State s, Game g)
     {
-        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(); _smoothError = _smoothPending; _smoothPending = null; _smoothWant = null; }
+        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(); _smoothError = _smoothPending; _smoothPending = null; _smoothWant = null; _smoothDefaulted = false; }
         var sm = _smooth!;
+        if (FirstInstall && !_smoothDefaulted) { _smoothDefaulted = true; if (sm.On) _smoothWant = false; }
         // no NVIDIA card (or no driver to ask): no row; an NVIDIA card that cannot run it: the row, off, with the reason
         SmoothCard.Visibility = sm.Card is null && sm.Error is null ? Visibility.Collapsed : Visibility.Visible;
         // (the bridge installed and staying: a pending change of renderer away from it blocks a turn-on)
