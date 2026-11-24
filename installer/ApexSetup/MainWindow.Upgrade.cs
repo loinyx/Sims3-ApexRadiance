@@ -17,7 +17,7 @@ public sealed partial class MainWindow
     string? _upgradeFrom; // (Ready: the copy this one was installed from)
 
     string[] UpgradeSteps => Paths.MovedFromSetup || _upgradeWasSetup ? [T("What's new"), T("Where it lives"), T("Ready")] : [T("Where it lives"), T("Ready")];
-    bool _upgradeWasSetup;
+    bool _upgradeWasSetup, _started, _upgradeAsked; // (asked once per run: Ask me later waits for the next start)
 
     // a copy not installed yet: the card instead of the dialog; the installed copy, started from one: Ready
     bool StartUpgrade()
@@ -37,6 +37,7 @@ public sealed partial class MainWindow
 
     void UpgradeShow(int stage)
     {
+        _upgradeAsked = true;
         _upgradeStage = stage;
         var steps = UpgradeSteps;
         var name = steps[Math.Min(stage, steps.Length - 1)];

@@ -16,7 +16,9 @@ public partial class App : Application
 
     public App()
     {
-        Paths.MigrateOldData(); // (before anything writes to the new folder)
+        // (before anything writes to the new folder; not in the administrator copy an old Setup starts, which only opens the
+        // player's: moved there, the player's copy found nothing left and never said that Setup became the launcher)
+        if (!Elevation.IsUacElevated) Paths.MigrateOldData();
         InitializeComponent();
         Engine.Log = Log;
         // logged and kept running: a UI error must not end Setup in the middle of an install. A WinUI error reaches here without
@@ -128,6 +130,7 @@ public partial class App : Application
             }
             catch (Exception e) { Log(e); } // (an install that fails leaves this copy running: the launcher still works from here)
         }
+        Paths.MigrateOldData(); // (an administrator copy that stays; nothing to do in the others)
         // one launcher at a time: a second start brings the first one's window up
         if (maintain is null && !uninstall)
         {
