@@ -205,7 +205,7 @@ function OneRun([int]$run) {
         Step "mods grid" { $g = ByName 'Grid'; if ($g) { Toggle $g; Start-Sleep -Seconds 2; Shot 'mods-grid'; Toggle (ByName 'List') } }
         Nav 'Health'
         Step "health check now" { Invoke (ById 'HealthCheckNow'); Start-Sleep -Seconds 2 }
-        foreach ($t in 'Automatic fixes', 'Restore points', 'Last session', 'Overview') { Step "health tab $t" { $x = ByName $t; if ($x) { Sel $x; Start-Sleep -Milliseconds 800 } } }
+        foreach ($t in 'HealthMods', 'HealthStability', 'HealthSaves') { Step "health page $t" { Invoke (ById $t); Start-Sleep -Milliseconds 800; Invoke (ById 'HealthBack'); Start-Sleep -Milliseconds 800 } }
         # Game: each listed game, then the first again
         Open 'Game'
         $games = (ById 'GameList').FindAll($TS::Descendants, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::ListItem)))

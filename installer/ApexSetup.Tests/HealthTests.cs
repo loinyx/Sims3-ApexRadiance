@@ -135,8 +135,27 @@ static class HealthTests
         check(r.Summary.Args[0] == "5" && r.Summary.Args[2] == "fixturemod" && ScriptErrors.Findings(r).Any(f => f.Finding.Args.Contains("fixturemod") && f.Files.Count > 0) && ScriptErrors.Read(docs, DateTime.Now.AddDays(-60), mods).Total == 6,
             "script errors: summary, findings and the time window");
         string Crashes(int n) => ScriptErrors.Findings(r with { ByMod = [r.ByMod.First(m => m.Mod == "Crashy.asi") with { Count = n, Crashes = n }] }).Single().Finding.Severity.ToString();
+        // one the player ignored stays ignored whatever its count and date, and no other finding goes with it
+        Health.Item Stab(string text, params string[] args) => new(new Finding(Severity.Warning, text, args), HealthArea.Stability, []);
+        check(Stab("{0} in {1} since {2}", "3", "Mod v1", "11/17/2026 3:58 PM").Id == Stab("{0} in {1} since {2}", "12", "Mod v2", "11/18/2026 9:01 AM").Id
+              && Stab("{0} in {1}", "3", "ModA").Id != Stab("{0} in {1}", "3", "ModB").Id, "health: what an ignored finding is known by does not change with counts, dates and versions");
         check(Crashes(1) == "Info" && Crashes(2) == "Info" && Crashes(ScriptErrors.CrashPattern) == "Warning",
             $"script errors: one or two crashes in a place are a note, {ScriptErrors.CrashPattern} a warning ({Crashes(1)}, {Crashes(2)}, {Crashes(3)})");
+        // a mod that only started the action (a hook over the game's own method, or one far up the stack) is not the cause; the
+        // one that called the game code that threw is
+        var far = Path.Combine(docs, "ScriptError_PC__far.xml");
+        string? Blamed(params string[] frames)
+        {
+            File.WriteAllText(far, ErrorTrap(frames));
+            return ScriptErrors.Read(docs, DateTime.Now.AddDays(-1), mods).Errors.Single(e => e.Log == far).Mod;
+        }
+        const string Game = "Sims3.Gameplay.Core.Sims3.Gameplay.Core.";
+        check(Blamed(Game + "Route:Do", Game + "Route:Single", Game + "Sim:Go", Game + "GoHome:Walk", "Fixture.Fixture.Entry:Run") is null
+              && Blamed(Game + "GoHome:RunOrig", "Fixture.Fixture.Entry:Run") is null && Blamed(Game + "GoHome:Run", "Fixture.Fixture.Entry:Run") is null
+              && Blamed("System.Collections.System.Collections.List`1:get_Item", "Fixture.Fixture.Entry:Run") == "fixturemod"
+              && Blamed(Game + "Household:Add", "Fixture.Fixture.Entry:Run") == "fixturemod" && Blamed(Game + "Other.Entry:Add") is null,
+            "script errors: a mod is named when it threw or made the call that threw, not for being further down the stack");
+        File.Delete(far);
         // two older crashes, before the window asked for (the last game start) but within the week
         foreach (var n in new[] { 1, 2 })
         {
@@ -262,6 +281,25 @@ static class HealthTests
               && conflict.Finding.Args.Length == 2, "conflicts: two mods with one key and different bytes are a Warning tied to both files, with the likely winner");
         check(c.Duplicates.Count == 1 && c.Duplicates[0].Parties.OrderBy(x => x).SequenceEqual(["copy1", "copy2"]) && f.All(x => x.Finding.Args.All(a => !a.Contains("copy1"))),
             "conflicts: identical copies go to Duplicates, not to findings");
+
+        var only = c.Found.Single();
+        check(only is { Level: ConflictLevel.Look, Files.Length: 2, SayArgs.Length: 1 } && !new ConflictCheck { Offline = true, Ignored = [only.Id] }.Check(Mods(), g, docs).Any(x => x.Finding.Severity == Severity.Warning),
+            "conflicts: a game data conflict is one to look at, and an ignored one warns no more");
+        ModConflict Kind(string kind, string text, params string[] parties) => ModConflict.Of(new ConflictEntry(kind, text, parties, null), []);
+        var debug = Kind("interaction", "2 mods replace Sims3.Gameplay.Abstracts.GameObject+DEBUG_Clone (store its Singleton): the last one to run wins", "icarusallsorts.Transmogrifier", "S3DecoratingTools_V.1.2");
+        check(debug is { Level: ConflictLevel.Small, Finding: null } && Kind("assembly", "x", "a", "b").Level == ConflictLevel.Fix && Kind("core mod", "x", "a", "b").Level == ConflictLevel.Fix
+              && Kind("resource key", "3 shared keys with different content (STBL 2, _IMG 1; 4 identical): x", "a", "b").Level == ConflictLevel.Small
+              && Kind("resource key", "3 shared keys with different content (STBL 2, _XML 1): x", "a", "b").Level == ConflictLevel.Look, "conflicts: the level follows what is at stake");
+        check(debug.Id == Kind("interaction", "2 mods replace Sims3.Gameplay.Abstracts.GameObject+DEBUG_Clone (store its Singleton): x", "S3DecoratingTools_V.1.3", "icarusallsorts.Transmogrifier").Id
+              && debug.Id != Kind("interaction", "2 mods replace Other+Thing (store its Singleton): x", "icarusallsorts.Transmogrifier", "S3DecoratingTools_V.1.2").Id,
+            "conflicts: an ignored conflict is the same one after a mod's update, and no other");
+        var backup = Path.Combine(Manifest.DirOf(bin), "restore", "p");
+        Directory.CreateDirectory(backup);
+        File.WriteAllBytes(Path.Combine(backup, "0-Old.asi"), [1, 2]);
+        File.WriteAllBytes(Path.Combine(bin, "Real.asi"), [1, 2]);
+        check(ModConflicts.Scan(new ModConflicts.Options { Bin = bin }).Summary["asi"] == 1, "conflicts: the plugins the launcher's restore points keep are not mods");
+        File.Delete(Path.Combine(bin, "Real.asi"));
+        Directory.Delete(Manifest.DirOf(bin), true);
 
         var again = new ConflictCheck { Offline = true };
         again.Check(Mods(), g, docs).ToList();

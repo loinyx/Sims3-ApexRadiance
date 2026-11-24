@@ -16,20 +16,17 @@ public sealed partial class MainWindow
 {
     const int Home = 8, ModsScreen = 9, WorldsScreen = 10, SavesScreen = 11, HealthScreen = 12, NewsScreen = 13, SettingsScreen = 14;
     readonly LauncherSettings _settings = LauncherSettings.Load();
-    List<Health.Item> _health = [];
+    List<Health.Item> _healthAll = [], _health = []; // (all a check found, and without what the player ignored)
     HealthState _healthState;
     DateTime _checked;
     List<ModFile> _mods = [];
     HashSet<string> _modLooks = new(StringComparer.OrdinalIgnoreCase);
     bool _modsLoaded, _modsLoading;
-    int _healthTab;
     Session? _session;
     bool _starting;
     Process? _maintenance;
     Tray? _tray;
     Crystal? _homeCrystal, _healthCrystal;
-    readonly HashSet<int> _openArea = [];
-    bool _showNotes;
 
     string Docs => _game is { } g ? Scan.DocumentsFor(g) : "";
     public static bool Maintenance => Elevation.IsElevated && Elevation.Parse(Environment.GetCommandLineArgs()).Bin is not null;
@@ -65,12 +62,12 @@ public sealed partial class MainWindow
     // (the task ends when this check's result is in _health; Play awaits it, the rest let it run)
     Task CheckHealth()
     {
-        if (_game is not { } g || _state is not { } s) { _health = []; _healthState = HealthState.Ready; return Task.CompletedTask; }
+        if (_game is not { } g || _state is not { } s) { SetHealth([]); return Task.CompletedTask; }
         var run = ++_healthRun;
         var done = new TaskCompletionSource();
         _healthDone = done.Task;
         var (docs, apex, mods) = (Docs, _latest.GetValueOrDefault(Releases.Apex), _modsLoaded ? _mods.ToList() : null);
-        if (_conflicts is null || _conflicts.Offline != _offline) _conflicts = new ConflictCheck { Offline = _offline };
+        if (_conflicts is null || _conflicts.Offline != _offline) _conflicts = new ConflictCheck { Offline = _offline, Ignored = _settings.IgnoredConflicts };
         var conflicts = _conflicts;
         _healthChecking = true;
         // (the mods are read here when the Mods screen has not read them yet: Health checks them either way)
@@ -94,8 +91,7 @@ public sealed partial class MainWindow
                     if (run != _healthRun) return;
                     _healthChecking = false;
                     if (read is not null && !_modsLoaded) _mods = read; // (for Show in Mods; the Mods screen still reads its own)
-                    _health = t.Result ?? _health; // (a check that failed keeps the last findings: an empty list would read "Every check passed")
-                    _healthState = Health.StateOf(_health);
+                    SetHealth(t.Result ?? _healthAll); // (a check that failed keeps the last findings: an empty list would read "Every check passed")
                     _checked = DateTime.Now;
                     // (only the screens that show health are built again: Mods and the Gallery keep what the player is doing)
                     if (_step is Home or HealthScreen or WorldsScreen or SavesScreen or NewsScreen or SettingsScreen) RefreshLauncher();
@@ -105,6 +101,15 @@ public sealed partial class MainWindow
             })) done.TrySetResult();
         });
         return done.Task;
+    }
+
+    bool IsIgnored(Health.Item i) => _settings.IgnoredFindings.Contains(i.Id);
+
+    void SetHealth(List<Health.Item> all)
+    {
+        _healthAll = all;
+        _health = all.Where(i => !IsIgnored(i)).ToList();
+        _healthState = Health.StateOf(_health);
     }
 
     // waits for the newest health check, also one started while waiting
@@ -207,7 +212,7 @@ public sealed partial class MainWindow
         // Play waits only for the checks that decide the start; the full check (mod conflicts, saves, script errors) runs
         // in the background and fills Health when it is done
         var (docs, apex) = (Docs, _latest.GetValueOrDefault(Releases.Apex));
-        Task<List<Health.Item>> BeforePlay() => _state is { } s ? Task.Run(() => Health.Gather(g, s, docs, apex, beforePlay: true)) : Task.FromResult(new List<Health.Item>());
+        Task<List<Health.Item>> BeforePlay() => _state is { } s ? Task.Run(() => Health.Gather(g, s, docs, apex, beforePlay: true).Where(i => !IsIgnored(i)).ToList()) : Task.FromResult(new List<Health.Item>());
         var found = await BeforePlay();
         // the fixes that are safe to make without asking (each keeps a copy of the file it changes). Never an administrator
         // prompt from Play: where the game's folder needs one, they wait on Health. A fix that fails does not stop the start.
@@ -452,177 +457,7 @@ public sealed partial class MainWindow
 
     // ---------- Health ----------
 
-    void BuildHealth()
-    {
-        var host = ScreenHealth;
-        host.Children.Clear();
-        if (_game is null) { host.Children.Add(Heading(T("Health"))); host.Children.Add(Muted(T("Choose the game first."))); return; }
-        if (_checked == default) _ = CheckHealth();
-        var top = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Spacing = 12 };
-        _healthCrystal = new Crystal(170);
-        _healthCrystal.SetLevel(HealthLevel, animate: false);
-        _healthCrystal.HorizontalAlignment = HorizontalAlignment.Center;
-        top.Children.Add(_healthCrystal);
-        top.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 28, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
-        top.Children.Add(new TextBlock
-        {
-            Text = _healthState switch
-            {
-                HealthState.Blocked => T("The game still starts, but without Apex Radiance until this is fixed."),
-                HealthState.NeedsYou => T("The game starts fine. Have a look when you have a minute."),
-                _ => T("Every check passed. The launcher checks again each time you press Play."),
-            },
-            Foreground = Res("ApexSoftTextBrush"), FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 520,
-        });
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
-        var check = new Button { Content = Icon("", T("Check now")), CornerRadius = new CornerRadius(18), Padding = new Thickness(16, 7, 18, 7) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(check, "HealthCheckNow");
-        check.Click += (_, _) => { _modsLoaded = false; RefreshGame(); BuildHealth(); };
-        var copy = new Button { Content = new FontIcon { Glyph = "", FontSize = 14 }, CornerRadius = new CornerRadius(18), Padding = new Thickness(11, 9, 11, 9) };
-        ToolTipService.SetToolTip(copy, T("Copy report"));
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(copy, T("Copy report"));
-        copy.Click += (_, _) => CopyReport();
-        actions.Children.Add(check); actions.Children.Add(copy);
-        top.Children.Add(actions);
-        top.Children.Add(new TextBlock { Text = T("Last checked {0}", _checked.ToString("t")), Style = (Style)Application.Current.Resources["ApexMuted"], HorizontalAlignment = HorizontalAlignment.Center });
-        // a soft glow of the state's colour behind the crystal, fading down the page
-        host.Children.Add(new Border
-        {
-            Child = top, CornerRadius = new CornerRadius(18), Padding = new Thickness(0, 18, 0, 18),
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0.5, 0), EndPoint = new Windows.Foundation.Point(0.5, 1),
-                GradientStops = { new GradientStop { Color = StateTint(12), Offset = 0 }, new GradientStop { Color = StateTint(0), Offset = 0.85 } },
-            },
-        });
-
-        var tabs = new SelectorBar { HorizontalAlignment = HorizontalAlignment.Center };
-        string[] names = [T("Overview"), T("Automatic fixes"), T("Restore points"), T("Last session")];
-        foreach (var n in names) tabs.Items.Add(new SelectorBarItem { Text = n });
-        tabs.SelectedItem = tabs.Items[_healthTab];
-        tabs.SelectionChanged += (s, _) => { var i = s.Items.IndexOf(s.SelectedItem); if (i < 0 || i == _healthTab) return; _healthTab = i; DispatcherQueue.TryEnqueue(BuildHealth); };
-        host.Children.Add(tabs);
-        var body = new StackPanel { Spacing = 14, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Stretch };
-        host.Children.Add(body);
-        switch (_healthTab)
-        {
-            case 0: HealthOverview(body); HealthRepair(body); break;
-            case 1: HealthFixes(body); break;
-            case 2: HealthRestore(body); break;
-            default: HealthSession(body); break;
-        }
-
-    }
-
-    void HealthOverview(StackPanel body)
-    {
-        var needs = _health.Where(i => i.Finding.Severity != Severity.Info).ToList();
-        if (needs.Count > 0)
-        {
-            body.Children.Add(Eyebrow(T("NEEDS YOU")));
-            var list = new StackPanel { Spacing = 10 };
-            foreach (var it in needs) list.Children.Add(IssueCard(it));
-            // the notes that ask nothing (one crash, a save without backup): one quiet line, opened on demand. The possible
-            // overlaps (two mods in one behaviour area, unproven, often a dozen) stay in Checks > Mods only.
-            var notes = _health.Where(i => i.Finding.Severity == Severity.Info && i.Finding.Text != "{0} may overlap in {1}: {2}").ToList();
-            if (notes.Count > 0)
-            {
-                var strip = new Grid { ColumnSpacing = 12, Padding = new Thickness(18, 12, 14, 12), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush") };
-                strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                strip.ColumnDefinitions.Add(new ColumnDefinition());
-                strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var info = Lucide.Icon("info", 16, Res("ApexMutedBrush"));
-                info.VerticalAlignment = VerticalAlignment.Center;
-                strip.Children.Add(info);
-                var what = new TextBlock { Text = notes.Count == 1 ? T("1 note, nothing to do") : T("{0} notes, nothing to do", notes.Count), FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
-                Grid.SetColumn(what, 1);
-                strip.Children.Add(what);
-                var lines = new StackPanel { Spacing = 6, Padding = new Thickness(46, 0, 18, 4), Visibility = _showNotes ? Visibility.Visible : Visibility.Collapsed };
-                foreach (var n in notes) lines.Children.Add(NoteRow(n));
-                var see = new HyperlinkButton { Content = _showNotes ? T("Hide notes") : T("See notes"), FontSize = 13, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
-                see.Click += (_, _) => { _showNotes = !_showNotes; lines.Visibility = _showNotes ? Visibility.Visible : Visibility.Collapsed; see.Content = _showNotes ? T("Hide notes") : T("See notes"); };
-                Grid.SetColumn(see, 2);
-                strip.Children.Add(see);
-                list.Children.Add(Col(strip, lines));
-            }
-            body.Children.Add(list);
-        }
-        body.Children.Add(Eyebrow(T("CHECKS")));
-        // one card, a row per area: its icon, what it covers, how it is; a click opens what it found
-        var areas = new StackPanel();
-        (HealthArea Area, string Name, string Detail, string Icon)[] all =
-        [
-            (HealthArea.ApexRadiance, "Apex Radiance", T("files, settings, one copy"), "sparkles"),
-            (HealthArea.Loaders, T("Loaders"), T("ASI loader, Sims 3 Modernization"), "plug"),
-            (HealthArea.Graphics, T("Graphics"), _state?.Layer.ToString() ?? "", "cpu"),
-            (HealthArea.GameSettings, T("Game settings"), "Options.ini, Resource.cfg", "sliders-horizontal"),
-            (HealthArea.Mods, T("Mods"), T("conflicts and what they need"), "layout-grid"),
-            (HealthArea.Stability, T("Stability"), T("crashes, memory, script errors"), "heart-pulse"),
-            (HealthArea.Saves, T("Saves"), T("size, backups, complete"), "folder"),
-            (HealthArea.Disk, T("Space and caches"), T("free space, OneDrive, game caches"), "hard-drive"),
-        ];
-        foreach (var (area, name, detail, icon) in all)
-        {
-            var items = _health.Where(i => i.Area == area).ToList();
-            var bad = items.Count(i => i.Finding.Severity != Severity.Info);
-            var error = items.Any(i => i.Finding.Severity == Severity.Error);
-            var open = _openArea.Contains((int)area);
-            var head = new Grid { ColumnSpacing = 14, Padding = new Thickness(18, 12, 14, 12) };
-            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            head.ColumnDefinitions.Add(new ColumnDefinition());
-            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var glyph = Lucide.Icon(icon, 18, Res("ApexSoftTextBrush"));
-            glyph.VerticalAlignment = VerticalAlignment.Center;
-            head.Children.Add(glyph);
-            var t = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-            t.Children.Add(new TextBlock { Text = name, FontSize = 14 });
-            if (detail.Length > 0) t.Children.Add(new TextBlock { Text = detail, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
-            Grid.SetColumn(t, 1);
-            head.Children.Add(t);
-            var brush = bad == 0 ? "ApexSuccessBrush" : error ? "ApexErrorBrush" : "ApexWarningBrush";
-            var status = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-            status.Children.Add(bad == 0 ? Lucide.Icon("check", 14, Res(brush)) : new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Res(brush), VerticalAlignment = VerticalAlignment.Center });
-            status.Children.Add(new TextBlock { Text = bad == 0 ? T("All good") : bad == 1 ? T("1 to look at") : T("{0} to look at", bad), FontSize = 12, Foreground = Res(brush) });
-            Grid.SetColumn(status, 2);
-            head.Children.Add(status);
-            var chevron = (LucideIcon)Lucide.Icon(open ? "chevron-down" : "chevron-right", 14, Res("ApexMutedBrush"));
-            chevron.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(chevron, 3);
-            head.Children.Add(chevron);
-            var content = new StackPanel { Spacing = 8, Padding = new Thickness(50, 0, 18, 14), Visibility = open ? Visibility.Visible : Visibility.Collapsed };
-            // Stability: the sessions and crashes as a timeline, each with its cause and clues; its other notes (script errors,
-            // memory) below it
-            var timeline = area == HealthArea.Stability ? Health.Timeline : [];
-            if (timeline.Count > 0)
-            {
-                content.Spacing = 0;
-                content.Padding = new Thickness(18, 4, 18, 14);
-                foreach (var e in timeline) content.Children.Add(TimelineRow(e));
-                items = items.Where(i => !i.Finding.Text.Contains("crashed", StringComparison.Ordinal)).ToList();
-            }
-            if (items.Count == 0 && timeline.Count == 0) content.Children.Add(Muted(T("Nothing to report.")));
-            foreach (var it in items) content.Children.Add(NoteRow(it));
-            var toggle = new Button { Content = head, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0) };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, name);
-            toggle.Click += (_, _) =>
-            {
-                var now = content.Visibility != Visibility.Visible;
-                content.Visibility = now ? Visibility.Visible : Visibility.Collapsed;
-                if (now) _openArea.Add((int)area); else _openArea.Remove((int)area);
-                chevron.Kind = now ? "chevron-down" : "chevron-right";
-            };
-            var row = new StackPanel { BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, areas.Children.Count == 0 ? 0 : 1, 0, 0) };
-            row.Children.Add(toggle);
-            row.Children.Add(content);
-            areas.Children.Add(row);
-        }
-        body.Children.Add(Card(areas, pad: false));
-    }
-
-    // one session, crash or freeze of the Stability timeline: the day and time, a dot on the line, and a card with what happened,
-    // what caused it and, opened, the clues each log gave
+    // one session, crash or freeze of the Stability page: what happened and what caused it and, opened, the clues each log gave
     UIElement TimelineRow(CrashTimeline.Entry e)
     {
         var c = LangCulture();
@@ -665,47 +500,43 @@ public sealed partial class MainWindow
         }
         if (e.Count > 1) title += " · " + T("{0} times", e.Count);
 
-        var row = new Grid { ColumnSpacing = 14 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(92) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        // the day, and the time with the minutes played
-        var day = e.Count > 1 && e.First.Date != e.When.Date ? $"{e.First.ToString("d MMM", c)} – {e.When.ToString("d MMM", c)}" : e.When.ToString("d MMM", c);
+        // one line: the day and time, a dot (green closed well, amber crashed or froze, faint when an update fixed it, grey
+        // closed without a report), what happened with its cause, and the details on demand
+        var row = new Grid { ColumnSpacing = 16, Padding = new Thickness(18, 12, 14, 12), MinHeight = 60 };
+        foreach (var w in new[] { new GridLength(96), GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+        var day = e.Count > 1 && e.First.Date != e.When.Date ? $"{e.First.ToString("d MMM", c)} – {e.When.ToString("d MMM", c)}" : e.When.Date == DateTime.Today ? T("Today") : e.When.ToString("d MMM", c);
         var time = e.Count > 1 ? T("{0} crashes", e.Count) : e.Played is { } p && p.TotalMinutes >= 1 ? $"{e.When.ToString("t", c)} · {T("{0} min", (int)p.TotalMinutes)}" : e.When.ToString("t", c);
-        var when = new StackPanel { Spacing = 1, Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
-        when.Children.Add(new TextBlock { Text = day, FontSize = 13, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right });
-        when.Children.Add(new TextBlock { Text = time, FontSize = 12, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Right });
+        var when = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+        when.Children.Add(new TextBlock { Text = day, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+        when.Children.Add(new TextBlock { Text = time, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
         row.Children.Add(when);
-        // the line and its dot: green closed well, amber crashed or froze (faint when an update fixed it), grey closed without a report
-        var line = new Grid();
-        line.Children.Add(new Border { Width = 2, Background = Res("ApexCardBorderBrush"), HorizontalAlignment = HorizontalAlignment.Center });
         var dot = e.End switch { CrashTimeline.Ending.Normal => "ApexSuccessBrush", CrashTimeline.Ending.NoReport => "ApexMutedBrush", _ => "ApexWarningBrush" };
-        line.Children.Add(new Border { Width = 16, Height = 16, CornerRadius = new CornerRadius(8), Background = Res(dot), Opacity = e.Earlier ? 0.45 : 1,
-            BorderBrush = Res("ApexCardBrush"), BorderThickness = new Thickness(3), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 15, 0, 0), HorizontalAlignment = HorizontalAlignment.Center });
-        Grid.SetColumn(line, 1);
-        row.Children.Add(line);
+        var mark = new Border { Width = 9, Height = 9, CornerRadius = new CornerRadius(5), Background = Res(dot), Opacity = e.Earlier ? 0.45 : 1, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(mark, 1);
+        row.Children.Add(mark);
+        var what = new TextBlock { Text = title, FontSize = 14, FontWeight = ok ? FontWeights.Normal : FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
+            Foreground = ok ? Res("ApexSoftTextBrush") : Res("TextFillColorPrimaryBrush") };
+        Grid.SetColumn(what, 2);
+        row.Children.Add(what);
+        var right = ok ? (FrameworkElement)new TextBlock { Text = T("memory {0} of 4 GB", gb), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center } : Chip(chip, chipBrush);
+        Grid.SetColumn(right, 3);
+        row.Children.Add(right);
+        var all = new StackPanel();
+        all.Children.Add(row);
+        if (body.Length + e.Clues.Count == 0) return all;
 
-        var card = new StackPanel { Spacing = 6 };
-        var head = new Grid { ColumnSpacing = 10 };
-        head.ColumnDefinitions.Add(new ColumnDefinition());
-        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        head.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = ok ? FontWeights.Normal : FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
-            Foreground = ok ? Res("ApexSoftTextBrush") : Res("TextFillColorPrimaryBrush") });
-        var right = ok ? (FrameworkElement)new TextBlock { Text = T("memory {0} of 4 GB", gb), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }
-            : Chip(chip, chipBrush);
-        Grid.SetColumn(right, 1);
-        head.Children.Add(right);
-        card.Children.Add(head);
-        if (body.Length > 0) card.Children.Add(new TextBlock { Text = body, FontSize = 13, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap });
+        var inner = new StackPanel { Spacing = 10, Padding = new Thickness(155, 0, 18, 16), Visibility = Visibility.Collapsed };
+        if (body.Length > 0) inner.Children.Add(new TextBlock { Text = body, FontSize = 13, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap });
         if (e.Clues.Count > 0)
         {
             // the clues, one per line with the log it came from
-            var clues = new StackPanel { Spacing = 6, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(8), Background = Res("ApexCardBrush"), Visibility = Visibility.Collapsed };
+            var clues = new StackPanel { Spacing = 6, Padding = new Thickness(14, 12, 14, 12), CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Pick(0x80101010, 0x80F3F3F3)),
+                BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(1) };
             string? lastSource = null;
             foreach (var cl in e.Clues)
             {
                 var g = new Grid { ColumnSpacing = 10 };
-                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
                 g.ColumnDefinitions.Add(new ColumnDefinition());
                 // (the log's name once for its run of lines)
                 g.Children.Add(new TextBlock { Text = cl.Source == lastSource ? "" : T(cl.Source), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
@@ -715,21 +546,19 @@ public sealed partial class MainWindow
                 clues.Children.Add(g);
                 lastSource = cl.Source;
             }
-            var how = new HyperlinkButton { Content = T("How we know"), FontSize = 13, Padding = new Thickness(0, 2, 0, 2) };
-            how.Click += (_, _) =>
-            {
-                var show = clues.Visibility != Visibility.Visible;
-                clues.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-                how.Content = show ? T("Hide the clues") : T("How we know");
-            };
-            card.Children.Add(how);
-            card.Children.Add(clues);
+            inner.Children.Add(clues);
         }
-        var box = new Border { Child = card, Margin = new Thickness(0, 6, 0, 6), Padding = ok ? new Thickness(14, 9, 14, 9) : new Thickness(14, 11, 14, 12), CornerRadius = new CornerRadius(10),
-            BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = ok ? new SolidColorBrush(Microsoft.UI.Colors.Transparent) : Res("ApexPillBrush") };
-        Grid.SetColumn(box, 2);
-        row.Children.Add(box);
-        return row;
+        all.Children.Add(inner);
+        var how = new Button { Content = T("Details"), MinWidth = 88, VerticalAlignment = VerticalAlignment.Center };
+        how.Click += (_, _) =>
+        {
+            var show = inner.Visibility != Visibility.Visible;
+            inner.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            how.Content = show ? T("Close") : T("Details");
+        };
+        Grid.SetColumn(how, 4);
+        row.Children.Add(how);
+        return all;
     }
 
     // a small rounded label in a tint of its colour
@@ -739,53 +568,6 @@ public sealed partial class MainWindow
         return new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 2, 10, 3), VerticalAlignment = VerticalAlignment.Center,
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, col.R, col.G, col.B)),
             Child = new TextBlock { Text = text, FontSize = 12, Foreground = new SolidColorBrush(col) } };
-    }
-
-    // Repair: every file the launcher installed copied again, the settings fixed; the other choices in Repair or remove
-    void HealthRepair(StackPanel body)
-    {
-        body.Children.Add(Eyebrow(T("REPAIR THE GAME")));
-        var g = new Grid { ColumnSpacing = 16 };
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
-            Child = new FontIcon { Glyph = "\uE90F", FontSize = 18, Foreground = Res("ApexAccentBrush") } });
-        var text = Col(new TextBlock { Text = T("Something wrong in the game?"), FontSize = 14, FontWeight = FontWeights.SemiBold },
-            Muted(T("Repair copies again every file the launcher installed and fixes the game's settings. Your saves, mods and Apex Radiance settings aren't touched.")));
-        Grid.SetColumn((FrameworkElement)text, 1);
-        g.Children.Add(text);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        var repair = Button(T("Repair"), async () => await Repair(), accent: true);
-        repair.IsEnabled = !_running && !_busy && _state?.ApexVersion is not null;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(repair, "HealthRepair");
-        buttons.Children.Add(repair);
-        buttons.Children.Add(Button(T("More options"), () => Show(Manage)));
-        Grid.SetColumn(buttons, 2);
-        g.Children.Add(buttons);
-        body.Children.Add(Card(g));
-    }
-
-    // Needs you: one card per finding, its area's icon on the severity's tint, the first sentence as the title and the rest
-    // as the detail line, the action on the right
-    UIElement IssueCard(Health.Item it)
-    {
-        var f = it.Finding;
-        var tint = ((SolidColorBrush)Res(f.Severity == Severity.Error ? "ApexErrorBrush" : "ApexWarningBrush")).Color;
-        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(18, 16, 18, 16) };
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(10), VerticalAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x2E, tint.R, tint.G, tint.B)), Child = Lucide.Icon(AreaIcon(it.Area), 20, new SolidColorBrush(tint)) });
-        var (title, detail) = Sentences(T(f.Text, f.Args));
-        var text = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        if (detail.Length > 0) text.Children.Add(new TextBlock { Text = detail, FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
-        Grid.SetColumn(text, 1);
-        g.Children.Add(text);
-        if (FindingAction(it) is { } act) { Grid.SetColumn(act, 2); act.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(act); }
-        return new Border { Style = (Style)Application.Current.Resources["ApexCard"], Child = g, Padding = new Thickness(0) };
     }
 
     // a finding's first sentence, and the rest ("" when it is one sentence)
@@ -810,38 +592,9 @@ public sealed partial class MainWindow
         if (f.CanFix) return Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); BuildHealth(); } }, accent: true);
         if (ModsFor(it.Files) is { Count: > 0 } hits) return Button(T("Show in Mods"), () => ShowInMods(hits));
         if (f.Link is { } link) return Button(T("Read more"), () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }));
+        // (what is missing is installed in Components)
+        if (f.Severity == Severity.Error && it.Area is (HealthArea.ApexRadiance or HealthArea.Loaders)) return Button(T("Components"), () => Show(ComponentsStep), accent: true);
         return null;
-    }
-
-    // a finding as a quiet line (the notes, an area's findings), its action beside it when it has one
-    UIElement NoteRow(Health.Item it)
-    {
-        var text = new TextBlock { Text = T(it.Finding.Text, it.Finding.Args), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
-        if (FindingAction(it) is not { } act) return text;
-        var g = new Grid { ColumnSpacing = 12 };
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.Children.Add(text);
-        Grid.SetColumn(act, 1);
-        act.VerticalAlignment = VerticalAlignment.Center;
-        g.Children.Add(act);
-        return g;
-    }
-
-    UIElement FindingRow(Health.Item it, bool line)
-    {
-        var f = it.Finding;
-        var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(18, 14, 18, 14), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, line ? 1 : 0, 0, 0) };
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var error = f.Severity == Severity.Error;
-        g.Children.Add(new Border { Width = 10, Height = 10, CornerRadius = new CornerRadius(5), VerticalAlignment = VerticalAlignment.Center, Background = Res(error ? "ApexErrorBrush" : "ApexWarningBrush") });
-        var text = Body(T(f.Text, f.Args));
-        Grid.SetColumn(text, 1);
-        g.Children.Add(text);
-        if (FindingAction(it) is { } act) { Grid.SetColumn(act, 2); act.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(act); }
-        return g;
     }
 
     // the player's mods a finding names (by full path, game-relative path or file name)
@@ -864,67 +617,10 @@ public sealed partial class MainWindow
         });
     }
 
-    void HealthFixes(StackPanel body)
-    {
-        body.Children.Add(Muted(T("Safe fixes run on their own before the game starts. Each file is copied first, so you can undo any fix.")));
-        var fixes = _game is { } g ? RestorePoints.List(g.Bin).Where(p => p.Label.StartsWith("Fix", StringComparison.Ordinal)).ToList() : [];
-        var waiting = _health.Where(i => i.Finding.CanFix).ToList();
-        var list = new StackPanel();
-        foreach (var it in waiting) list.Children.Add(FindingRow(it, list.Children.Count > 0));
-        foreach (var p in fixes) list.Children.Add(PointRow(p, list.Children.Count > 0, T("Undo")));
-        if (list.Children.Count == 0) list.Children.Add(new TextBlock { Text = T("No fixes yet."), Margin = new Thickness(18, 14, 18, 14), Foreground = Res("ApexMutedBrush") });
-        body.Children.Add(Card(list, pad: false));
-    }
-
-    void HealthRestore(StackPanel body)
-    {
-        body.Children.Add(Muted(T("Going back undoes that point and every later one.")));
-        var list = new StackPanel();
-        if (_game is { } g)
-            foreach (var p in RestorePoints.List(g.Bin)) list.Children.Add(PointRow(p, list.Children.Count > 0, T("Go back")));
-        if (list.Children.Count == 0) list.Children.Add(new TextBlock { Text = T("No restore points yet."), Margin = new Thickness(18, 14, 18, 14), Foreground = Res("ApexMutedBrush") });
-        body.Children.Add(Card(list, pad: false));
-    }
-
-    UIElement PointRow(RestorePoint p, bool line, string action)
-    {
-        var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(18, 12, 18, 12), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, line ? 1 : 0, 0, 0) };
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.Children.Add(Col(new TextBlock { Text = T(p.Label, p.Args), FontSize = 14 }, Muted(p.Created.ToLocalTime().ToString("g"))));
-        var b = Button(action, async () => { await RestoreAsync(p); _ = CheckHealth(); BuildHealth(); });
-        b.IsEnabled = !_running && !_busy;
-        Grid.SetColumn(b, 1);
-        b.VerticalAlignment = VerticalAlignment.Center;
-        g.Children.Add(b);
-        return g;
-    }
-
-    void HealthSession(StackPanel body)
-    {
-        // (the newest kept session: the same one Home's status line shows)
-        if (SessionHistory.List().FirstOrDefault() is not { } s) { body.Children.Add(Card(Muted(T("Play once through the launcher and the session shows here.")))); return; }
-        var grid = new Grid { ColumnSpacing = 12 };
-        (string, string, string)[] stats =
-        [
-            (T("Played"), Duration(s.Played), "ApexSoftTextBrush"),
-            (T("Ended"), s.End switch { SessionEnd.Crash => T("In a crash"), SessionEnd.LowMemory => T("Low on memory"), _ => T("Normally") }, s.End == SessionEnd.Normal ? "ApexSuccessBrush" : "ApexWarningBrush"),
-            (T("Peak memory"), $"{s.PeakBytes >> 20} MB", "ApexSoftTextBrush"),
-        ];
-        for (int i = 0; i < stats.Length; i++)
-        {
-            grid.ColumnDefinitions.Add(new ColumnDefinition());
-            var c = Card(Col(Muted(stats[i].Item1), new TextBlock { Text = stats[i].Item2, FontSize = 20, FontWeight = FontWeights.SemiBold, Foreground = Res(stats[i].Item3) }));
-            Grid.SetColumn(c, i);
-            grid.Children.Add(c);
-        }
-        body.Children.Add(grid);
-    }
-
     void CopyReport()
     {
         var lines = new List<string> { App.Details(), "", "Health: " + _healthState };
-        lines.AddRange(_health.Select(i => $"[{i.Finding.Severity}] {i.Area}: {string.Format(i.Finding.Text, i.Finding.Args)}"));
+        lines.AddRange(_healthAll.Select(i => $"[{i.Finding.Severity}{(IsIgnored(i) ? ", ignored" : "")}] {i.Area}: {string.Format(i.Finding.Text, i.Finding.Args)}"));
         var dp = new Windows.ApplicationModel.DataTransfer.DataPackage();
         dp.SetText(string.Join("\r\n", lines));
         Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);

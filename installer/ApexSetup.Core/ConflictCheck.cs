@@ -8,8 +8,9 @@ public sealed record OverlapEntry(string Label, string Risk, string[] Parties);
 public sealed record DuplicateEntry(string[] Parties, string Text);
 public sealed record ConflictResult(string Fingerprint, List<ConflictEntry> Conflicts, List<OverlapEntry> Overlaps, List<DuplicateEntry> Duplicates, bool NeedsSevenZip);
 
-// ModConflicts' scan as a mod check. CONFLICT: a Warning tied to every party's files, with the likely winner; WARNING (two
-// mods in one behaviour area, not proven): an Info for Health only; INFO duplicate copies: Duplicates. The result is kept in
+// ModConflicts' scan as a mod check. CONFLICT: a ModConflict with its level; the ones that count and are not ignored are a
+// Warning tied to every party's files. WARNING (two mods in one behaviour area) shows nowhere: on a real Mods folder every
+// area lists a dozen mods that work together. INFO duplicate copies: Duplicates. The result is kept in
 // %LOCALAPPDATA%\Apex Launcher\conflicts.json with the size and time of every mod file: while none changed it is reused
 // as is. A change rescans everything, since a conflict is between files. The scan runs at most Timeout; one that takes
 // longer finishes in the background and is kept for the next check. Not in ModChecks.All: the Mods and Game screens run
@@ -22,6 +23,8 @@ public sealed class ConflictCheck : IModCheck
     public Func<ModConflicts.Options, ModConflicts.Report> Scan { get; init; } = ModConflicts.Scan; // (tests)
     public int Scans { get; private set; }                               // scans run (tests: none when the cache is reused)
     public ConflictResult? Last { get; private set; }
+    public ICollection<string> Ignored { get; init; } = [];              // ModConflict.Id of the ones the player ignored
+    public IReadOnlyList<ModConflict> Found { get; private set; } = [];  // the last check's, ignored ones too
 
     static string CacheFile => Path.Combine(Paths.Data, "conflicts.json");
     static readonly object Gate = new();
@@ -31,7 +34,7 @@ public sealed class ConflictCheck : IModCheck
     public List<DuplicateEntry> Duplicates => Last?.Duplicates ?? [];
 
     // (Rules goes up when the scan's rules change, so a result kept from older rules is scanned again)
-    const int Rules = 3;
+    const int Rules = 4;
     public static string Fingerprint(IEnumerable<ModFile> mods) => $"rules {Rules}\n" +
         string.Join("\n", mods.Where(Scanned).OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
             .Select(m => $"{m.Path}|{m.Size}|{(File.Exists(m.Path) ? File.GetLastWriteTimeUtc(m.Path).Ticks : 0)}"));
@@ -84,14 +87,17 @@ public sealed class ConflictCheck : IModCheck
         if (Result(mods, game, docs) is not { } r) return [];
         string[] FilesOf(IEnumerable<string> parties) => parties.SelectMany(p => mods.Where(m => Path.GetFileNameWithoutExtension(m.Path).Equals(p, StringComparison.OrdinalIgnoreCase)).Select(m => m.Path)).Distinct().ToArray();
         var f = new List<ModFinding>();
+        var found = new List<ModConflict>();
         // (ccmerged.package, the game's own merged store lists, is the player's choice to keep in Mods: never a conflict)
         static bool Ccmerged(string party) => party.Equals("ccmerged", StringComparison.OrdinalIgnoreCase);
         foreach (var c in r.Conflicts.Where(c => !c.Parties.Any(Ccmerged)))
-            f.Add(new(c.Winner is { } w
-                ? new Finding(Severity.Warning, "{0} change the same game data. {1} likely wins and the others' changes are lost.", [string.Join(", ", c.Parties), w])
-                : new Finding(Severity.Warning, "{0} conflict: {1}", [string.Join(", ", c.Parties), c.Text]), FilesOf(c.Parties)));
-        foreach (var o in r.Overlaps)
-            f.Add(new(new Finding(Severity.Info, "{0} may overlap in {1}: {2}", [string.Join(", ", o.Parties), o.Label, o.Risk]), []));
+        {
+            var m = ModConflict.Of(c, FilesOf(c.Parties));
+            if (found.Any(x => x.Id == m.Id)) continue;
+            found.Add(m);
+            if (m.Finding is { } warn && !Ignored.Contains(m.Id)) f.Add(new(warn, m.Files));
+        }
+        Found = found.OrderBy(x => x.Level).ToList();
         if (r.NeedsSevenZip)
             f.Add(new(new Finding(Severity.Info, "Some mod archives couldn't be read. Install 7-Zip so the conflict check can read them too.", []), []));
         return f;

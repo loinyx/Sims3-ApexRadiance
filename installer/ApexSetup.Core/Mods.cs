@@ -34,11 +34,10 @@ public static class Mods
         var list = new List<ModFile>();
         var mods = Path.Combine(docs, "Mods");
         var off = Disabled(docs);
-        var merged = ModMerge.Folder(docs) + Path.DirectorySeparatorChar; // (originals kept by a merge: not the player's mods now)
         var managed = Manifest.Load(g.Bin).Files.Select(f => Path.IsPathRooted(f.Path) ? f.Path : Path.Combine(g.Bin, f.Path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (Directory.Exists(mods))
-            foreach (var p in Files(mods, "*.package").Where(p => !p.StartsWith(merged, StringComparison.OrdinalIgnoreCase)))
+            foreach (var p in Files(mods, "*.package").Where(p => !ModMerge.Keeps(docs, p)))
             {
                 var isOff = p.StartsWith(off + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
                 var rel = Path.Combine("Mods", Path.GetRelativePath(isOff ? off : mods, p));

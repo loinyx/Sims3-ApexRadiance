@@ -199,7 +199,7 @@ static class ModMergeTests
                 var listed = Mods.List(new Game(root, root, "TS3.exe", Edition.EA, "1.69.47"), docs, kinds: false);
                 check(File.Exists(Path.Combine(store, A)) && File.Exists(Path.Combine(store, B)) && File.Exists(Path.Combine(store, "merge.json")) && !File.Exists(Path.Combine(mods, A))
                     && !listed.Any(m => m.Path.StartsWith(ModMerge.Folder(docs))) && listed.Any(m => m.Rel == res.Merged.Rel) && !ModLibrary.Folders(docs).Any(f => f.StartsWith(ModMerge.FolderName)),
-                    "merge: originals kept under Mods\\Merged (Apex Launcher) at their places, out of the mod list and the folder list");
+                    "merge: originals kept in Merged (Apex Launcher) next to Mods, at their places, out of the mod list and the folder list");
                 check(ModMerge.IsMerged(res.Merged) && ModMerge.Info(res.Merged)!.Originals.Count == 2 && ModNotes.Get(Path.Combine("Mods", A)) is null
                     && ModNotes.TagsOf(res.Merged.Rel).SequenceEqual(["Fav"]) && File.ReadAllLines(res.LogPath).Any(l => l.StartsWith("key  00000003")),
                     "merge: made of 2 mods; the originals' notes kept in merge.json, their tags on the merged file; the log names the shared key");
@@ -285,6 +285,18 @@ static class ModMergeTests
             File.Delete(removed.Path);
             ModMerge.Recover(docs);
             check(File.Exists(Path.Combine(ModMerge.Folder(docs), "Removed", A)) && !File.Exists(Path.Combine(mods, A)), "merge: a merged file the player removed keeps its originals kept");
+            // a merge an older launcher kept inside Mods: next to Mods at the next read, and it still splits
+            File.Move(Path.Combine(ModMerge.Folder(docs), "Removed", A), Path.Combine(mods, A));
+            File.Move(Path.Combine(ModMerge.Folder(docs), "Removed", B), Path.Combine(mods, B));
+            Directory.Delete(ModMerge.Folder(docs), true);
+            ModMerge.Recover(docs);
+            var older = ModMerge.Run(ModMerge.Plan(docs, [M(A), M(B)], "Older", "Packages", false), null, default).Merged;
+            var inMods = Path.Combine(docs, "Mods", ModMerge.FolderName);
+            Directory.Move(ModMerge.Folder(docs), inMods);
+            ModMerge.Recover(docs);
+            check(!Directory.Exists(inMods) && File.Exists(Path.Combine(ModMerge.Folder(docs), "Older", A)) && ModMerge.IsMerged(older), "merge: originals an older launcher kept inside Mods move next to it");
+            ModMerge.Split(docs, older);
+            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "merge: one moved out of Mods still splits, every file identical " + Diff(before3, Snap(docs), docs));
             // a write cut short before its record: an old .package.tmp-* no record names goes, one written now stays
             var orphan = Path.Combine(mods, "Lost.package.tmp-" + Guid.NewGuid().ToString("N"));
             var fresh = Path.Combine(mods, "Busy.package.tmp-" + Guid.NewGuid().ToString("N"));

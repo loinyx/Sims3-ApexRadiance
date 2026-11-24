@@ -661,7 +661,7 @@
                             </ItemsControl>
                             <TextBlock x:Name="SavesEmpty" Tag="dyn" Style="{StaticResource ApexMuted}" Visibility="Collapsed" />
                         </StackPanel>
-                        <StackPanel x:Name="ScreenHealth" Spacing="24" Visibility="Collapsed" />
+                        <Grid x:Name="ScreenHealth" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenNews" Spacing="16" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenSettings" Spacing="10" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenGallery" Spacing="16" Visibility="Collapsed" />

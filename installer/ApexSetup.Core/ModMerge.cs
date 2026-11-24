@@ -23,7 +23,7 @@ public sealed class MergePlan
     public required string Name { get; init; }
     public required string TargetPath { get; init; }   // Mods\<folder>\<name>.package
     public required string TargetRel { get; init; }    // as ModFile.Rel
-    public required string StoreDir { get; init; }     // Mods\Merged (Apex Launcher)\<name>, where the originals go
+    public required string StoreDir { get; init; }     // Merged (Apex Launcher)\<name> next to Mods, where the originals go
     public List<ModFile> Inputs { get; } = new();      // in the game's load order (the first one wins a shared key)
     public List<MergeSkip> Skipped { get; } = new();
     public List<MergeDuplicate> Duplicates { get; } = new();
@@ -66,8 +66,8 @@ public sealed class MergeRecord
 
 // Merge packages into one: the plan says what goes in and which copy of a shared resource key is kept (the one the game
 // loads today), Run writes a temporary file copying every resource's stored bytes as they are (compressed stays
-// compressed), reads it back and compares each resource, then moves the originals to Mods\Merged (Apex Launcher)\<name>
-// (outside Packages and Overrides, so the game does not load them) and renames the new file into place. Split puts the
+// compressed), reads it back and compares each resource, then moves the originals to Merged (Apex Launcher)\<name>
+// (next to Mods, so no Resource.cfg loads them) and renames the new file into place. Split puts the
 // originals back by hash and sends the merged file to the Recycle Bin.
 // The uninstall leaves merges alone: the merged package works without the launcher, merge.json keeps the notes once the
 // launcher's data is gone, and splitting there could stop halfway on a replaced original.
@@ -76,7 +76,12 @@ public sealed class MergeRecord
 public static partial class ModMerge
 {
     public const string FolderName = "Merged (Apex Launcher)";
-    public static string Folder(string docs) => Path.Combine(docs, "Mods", FolderName);
+    public static string Folder(string docs) => Path.Combine(docs, FolderName);
+    static string OldFolder(string docs) => Path.Combine(docs, "Mods", FolderName); // (where 2.1 and older kept them)
+    public const string ShownFolder = "The Sims 3\\" + FolderName;
+    // an original kept by a merge, not one of the player's mods now
+    public static bool Keeps(string docs, string path) => new[] { Folder(docs), OldFolder(docs) }
+        .Any(d => Path.GetFullPath(path).StartsWith(Path.GetFullPath(d) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
     public const long MaxBytes = int.MaxValue; // (the game is 32-bit and the index offsets are 32-bit)
     const int MaxEntries = 200_000;
 
@@ -100,7 +105,7 @@ public static partial class ModMerge
         if (name.Equals(FolderName, StringComparison.OrdinalIgnoreCase)) refusals.Add(R("That name is taken by the launcher's own folder."));
         var folderFull = Path.GetFullPath(Path.Combine(modsDir, folderRel));
         bool Inside(string full, string dir) => full.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || full.Equals(dir, StringComparison.OrdinalIgnoreCase);
-        if (!Inside(folderFull, modsDir) || Inside(folderFull, Path.GetFullPath(Mods.Disabled(docs))) || Inside(folderFull, Path.GetFullPath(Folder(docs))))
+        if (!Inside(folderFull, modsDir) || Inside(folderFull, Path.GetFullPath(Mods.Disabled(docs))) || Inside(folderFull, Path.GetFullPath(OldFolder(docs))))
         {
             refusals.Add(R("That folder is outside Mods."));
             folderFull = modsDir;
@@ -127,7 +132,6 @@ public static partial class ModMerge
             plan.Refusals.Add(R("The game does not load packages from {0} (Resource.cfg).", Path.GetDirectoryName(targetRel) ?? "Mods"));
 
         var ok = new List<(MergeSource Src, (int, int, string) Key)>();
-        var store = Path.GetFullPath(Folder(docs)) + Path.DirectorySeparatorChar;
         foreach (var m in mods)
         {
             MergeReason? why = null;
@@ -137,10 +141,9 @@ public static partial class ModMerge
             if (m.FileType != "package" || !m.Rel.StartsWith("Mods" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) why = R("Not a package in Mods.");
             else if (m.Locked) why = R("Part of what the launcher installs.");
             else if (!m.Enabled) why = R("Turned off.");
-            else if (Path.GetFullPath(m.Path).StartsWith(store, StringComparison.OrdinalIgnoreCase)) why = R("Kept by an earlier merge.");
+            else if (Keeps(docs, m.Path)) why = R("Kept by an earlier merge.");
             else if (m.Name.StartsWith('~') || m.Name.Contains(".tmp", StringComparison.OrdinalIgnoreCase)) why = R("A temporary file.");
             else if (key is null) why = R("The game does not load it (Resource.cfg).");
-            else if (ModConflicts.LoadKey(dirs, Slash(Path.Combine(FolderName, name, relMods))) is not null) why = R("Resource.cfg would load it from the merge folder.");
             else
             {
                 (entries, why) = Probe(m.Path);
@@ -187,13 +190,12 @@ public static partial class ModMerge
     {
         var skip = new HashSet<string>(inputs, StringComparer.OrdinalIgnoreCase);
         var off = Path.GetFullPath(Mods.Disabled(plan.Docs)) + Path.DirectorySeparatorChar;
-        var store = Path.GetFullPath(Folder(plan.Docs)) + Path.DirectorySeparatorChar;
         List<string> files;
         try { files = Directory.EnumerateFiles(modsDir, "*.package", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true }).ToList(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); return; }
         foreach (var f in files)
         {
-            if (skip.Contains(f) || f.StartsWith(off, StringComparison.OrdinalIgnoreCase) || f.StartsWith(store, StringComparison.OrdinalIgnoreCase)) continue;
+            if (skip.Contains(f) || f.StartsWith(off, StringComparison.OrdinalIgnoreCase) || Keeps(plan.Docs, f)) continue;
             var rel = Slash(Path.GetRelativePath(modsDir, f));
             if (ModConflicts.LoadKey(dirs, rel) is not { } lk) continue;
             List<ModConflicts.Entry> entries;
@@ -456,6 +458,7 @@ public static partial class ModMerge
     public static void Recover(string docs)
     {
         try { Engine.CheckWritable(); } catch (InvalidOperationException) { return; } // (a dry run, the game running: next time)
+        MoveOut(docs);
         foreach (var r in Records(docs).ToList())
             try
             {
@@ -490,6 +493,29 @@ public static partial class ModMerge
                 foreach (var t in Directory.EnumerateFiles(mods, "*.package.tmp-*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }).ToList())
                     if (File.GetLastWriteTime(t) < started && !waiting.Any(w => t.StartsWith(w, StringComparison.OrdinalIgnoreCase)))
                         Fs.Retry(() => File.Delete(t));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        Forget(docs);
+    }
+
+    // the merges an older launcher kept inside Mods go next to it, where no Resource.cfg loads them; one that can't (a file in
+    // use, a Mods folder on another drive) stays and is still read from there
+    static void MoveOut(string docs)
+    {
+        var old = OldFolder(docs);
+        if (!Directory.Exists(old)) return;
+        try
+        {
+            Directory.CreateDirectory(Folder(docs));
+            foreach (var d in Directory.GetDirectories(old))
+                try
+                {
+                    var to = Path.Combine(Folder(docs), Path.GetFileName(d));
+                    if (!Directory.Exists(to)) Fs.Retry(() => Directory.Move(d, to));
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+            foreach (var d in new[] { old, Folder(docs) })
+                if (!Directory.EnumerateFileSystemEntries(d).Any()) Fs.Retry(() => Directory.Delete(d));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         Forget(docs);
@@ -533,8 +559,8 @@ public static partial class ModMerge
         {
             if (_records.TryGetValue(docs, out var l)) return l;
             l = new();
-            if (Directory.Exists(Folder(docs)))
-                foreach (var d in Directory.EnumerateDirectories(Folder(docs)))
+            foreach (var folder in new[] { Folder(docs), OldFolder(docs) }.Where(Directory.Exists))
+                foreach (var d in Directory.EnumerateDirectories(folder))
                     try
                     {
                         var j = Path.Combine(d, "merge.json");

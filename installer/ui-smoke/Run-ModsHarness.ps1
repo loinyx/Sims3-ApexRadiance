@@ -103,7 +103,7 @@ Step "undo the rename" { Click 'Undo' } { Test-Path (Join-Path $set "$third.pack
 Step "merge three mods, verified, with a log" {
   Pick $names[3]; Pick $names[4] -Add; Pick $names[5] -Add
   Click 'Merge into one package…'; Start-Sleep 2; Dialog 'PrimaryButton'; Start-Sleep 6; Dialog 'CloseButton' } {
-  (Get-ChildItem $set -Filter '*merged*.package').Count -eq 1 -and (Get-ChildItem (Join-Path $docs 'Mods\Merged (Apex Launcher)') -Recurse -Filter merge.json).Count -eq 1 }
+  (Get-ChildItem $set -Filter '*merged*.package').Count -eq 1 -and (Get-ChildItem (Join-Path $docs 'Merged (Apex Launcher)') -Recurse -Filter merge.json).Count -eq 1 }
 Step "split the merge back" {
   $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split it back into its 3 mods'; Dialog 'PrimaryButton'; Start-Sleep 4 } {
   (Get-ChildItem $set -Filter '*merged*.package').Count -eq 0 -and (Test-Path (Join-Path $set "$($names[4]).package")) }

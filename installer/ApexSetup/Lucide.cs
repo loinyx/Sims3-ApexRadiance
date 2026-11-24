@@ -21,6 +21,7 @@ public static class Lucide
         ["calendar-clock"] = "M 21 7.5 V 6 a 2 2 0 0 0 -2 -2 H 5 a 2 2 0 0 0 -2 2 v 14 a 2 2 0 0 0 2 2 h 3.5 M 16 2 v 4 M 8 2 v 4 M 3 10 h 5 M 17.5 17.5 16 16.3 V 14 M 10 16 A 6 6 0 1 0 22 16 A 6 6 0 1 0 10 16 Z",
         ["check"] = "M 20 6 9 17 l -5 -5",
         ["chevron-down"] = "M 6 9 l 6 6 6 -6",
+        ["chevron-left"] = "M 15 6 l -6 6 6 6",
         ["chevron-right"] = "M 9 18 l 6 -6 -6 -6",
         ["circle-check"] = "M 2 12 A 10 10 0 1 0 22 12 A 10 10 0 1 0 2 12 Z M 9 12 l 2 2 4 -4",
         ["code-xml"] = "M 18 16 l 4 -4 -4 -4 M 6 8 l -4 4 4 4 M 14.5 4 l -5 16",

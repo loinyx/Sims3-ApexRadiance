@@ -304,6 +304,7 @@ public sealed partial class MainWindow : Window
 
     void Show(int step)
     {
+        if (step == HealthScreen && _step != step) (_healthPage, _healthNote) = ("", null); // (Health opens on its overview)
         _step = step;
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
         if (step != GalleryScreen) FullBleed(false);
@@ -1234,10 +1235,9 @@ public sealed partial class MainWindow : Window
         _state = _game is null ? null : Scan.Run(_game);
         // once per scan: Compat walks Mods and reads every Bin .asi, and the status and footer read it again
         _found = _state is null ? new() : Compat.Check(_game!, _state);
-        _health = _state is null ? [] : Verify.Files(_game!, _state, _latest.GetValueOrDefault(Releases.Apex)).Concat(_found)
-            .Select(f => new Health.Item(f, Health.AreaOf(f), [])).ToList();
+        SetHealth(_state is null ? [] : Verify.Files(_game!, _state, _latest.GetValueOrDefault(Releases.Apex)).Concat(_found)
+            .Select(f => new Health.Item(f, Health.AreaOf(f), [])).ToList());
         _ = CheckHealth(); // (the full check, off the window's thread; this quick list shows until it is done)
-        _healthState = Health.StateOf(_health);
         _checked = DateTime.Now;
         GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;
         FillProblems();

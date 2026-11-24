@@ -62,7 +62,7 @@ public sealed partial class MainWindow
         var scriptBox = new CheckBox { Content = T("Include script mods (their makers usually ask not to merge them)"), IsChecked = scripts };
         if (scripts || plan.Skipped.Any(s => s.Reason.Key.StartsWith("A script mod"))) body.Children.Add(scriptBox);
         foreach (var r in plan.Refusals) body.Children.Add(Warn(T(r.Key, r.Args), null));
-        body.Children.Add(Muted(T("The originals are kept in Mods\\{0}. Split puts them back as they were.", ModMerge.FolderName)));
+        body.Children.Add(Muted(T("The originals are kept in {0}. Split puts them back as they were.", ModMerge.ShownFolder)));
         var d = new ContentDialog
         {
             Title = plan.Inputs.Count == plan.Inputs.Count + plan.Skipped.Count ? T("Merge {0} mods", plan.Inputs.Count) : T("Merge {0} of the {1} mods chosen", plan.Inputs.Count, plan.Inputs.Count + plan.Skipped.Count), Content = new ScrollViewer { Content = body, MaxHeight = 460 },

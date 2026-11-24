@@ -85,7 +85,7 @@ public sealed partial class MainWindow
             });
             _mods = mods;
             _modFindings = new(StringComparer.OrdinalIgnoreCase);
-            foreach (var f in found)
+            foreach (var f in found.Where(f => !IsIgnored(new(f.Finding, HealthArea.Mods, f.Files))))
                 foreach (var file in f.Files)
                     (_modFindings.TryGetValue(file, out var l) ? l : _modFindings[file] = []).Add(T(f.Finding.Text, f.Finding.Args));
             _modLooks = _modFindings.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1550,7 +1550,7 @@ public sealed partial class MainWindow
         var merged = rows.Count(r => ModMerge.IsMerged(r.File));
         var text = (rows.Count == 1 ? T("{0} goes to the Recycle Bin. You can restore it from there.", rows[0].Name)
             : T("{0} mods go to the Recycle Bin. You can restore them from there.", rows.Count))
-            + (merged > 0 ? "\n\n" + T("A merged mod's originals stay in Mods\\{0}. Use Split to get them back.", ModMerge.FolderName) : "")
+            + (merged > 0 ? "\n\n" + T("A merged mod's originals stay in {0}. Use Split to get them back.", ModMerge.ShownFolder) : "")
             + (rows.Any(HasItems) ? "\n\n" + T("Lots and Sims that use its objects or outfits lose them the next time you save without it.") : "");
         if (!await Confirm(rows.Count == 1 ? T("Remove this mod?") : T("Remove these mods?"), text, T("Remove"), danger: true)) return;
         await ModsChange(() => { foreach (var r in rows) ModLibrary.Remove(r.File); }, rows.Count == 1 ? T("Mod moved to the Recycle Bin") : T("{0} mods moved to the Recycle Bin", rows.Count));

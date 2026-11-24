@@ -9,7 +9,12 @@ public enum HealthArea { ApexRadiance, Loaders, Graphics, GameSettings, Mods, Sa
 // crystal: blocked when Apex Radiance cannot run and nothing fixes it, needs you when something waits for the player.
 public static class Health
 {
-    public sealed record Item(Finding Finding, HealthArea Area, IReadOnlyList<string> Files);
+    public sealed record Item(Finding Finding, HealthArea Area, IReadOnlyList<string> Files)
+    {
+        // the same finding at the next check, whatever its counts, dates and versions: one the player ignored stays ignored
+        public string Id => string.Join("|", Finding.Args.Select(a => System.Text.RegularExpressions.Regex.Replace(a, @"\d+|\b[AP]M\b", "#"))
+            .Prepend(Finding.Text.Replace("at least ", "", StringComparison.Ordinal)).Prepend(Area.ToString()));
+    }
 
     // conflicts: ModConflicts' scan (seconds on a cold cache: call Gather off the UI thread when passing it).
     // beforePlay: only Verify's and Compat's findings, the ones that decide a start (every StopsApex item is one of them)

@@ -871,7 +871,9 @@ public static partial class ModConflicts
         }
 
         if (o.Bin is not null)
-            foreach (var f in Walk(o.Bin).Where(n => n.EndsWith(".asi", StringComparison.OrdinalIgnoreCase)))
+            // (not the launcher's backup folder, whose restore points keep old plugins the game never loads)
+            foreach (var f in Walk(o.Bin).Where(n => n.EndsWith(".asi", StringComparison.OrdinalIgnoreCase)
+                         && !n.StartsWith(Manifest.DirOf(o.Bin) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
             {
                 var p = new Party(Path.GetFileNameWithoutExtension(f), $"Bin/{Slash(Path.GetRelativePath(o.Bin, f))}", "");
                 p.Mod = p.File;
