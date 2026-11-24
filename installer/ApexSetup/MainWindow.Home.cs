@@ -398,13 +398,12 @@ public sealed partial class MainWindow
 
     const double PlaySize = 44;
 
-    // a save's round Play in its card's corner: an outline in the accent. Under the pointer anywhere on the card, or with the
-    // keyboard on it, the accent rises inside like a liquid, two waves one behind the other, and the triangle turns dark as the
-    // level passes it; leaving, it drains faster. Without a wait when Windows' animation effects are off.
+    // a save's round Play in its card's corner, a dark green circle. Under the pointer anywhere on the card, or with the
+    // keyboard on it, the accent rises inside like a liquid (a turning rounded square, larger than the circle) and the triangle
+    // turns dark; leaving, it goes back down. Without a wait when Windows' animation effects are off.
     static (FrameworkElement Corner, Action<bool> Over) PlayCorner(Button play)
     {
-        const float size = (float)PlaySize, wide = size * 2.3f;      // (the wave: a turning rounded square, much larger than the circle)
-        const float empty = size + 12, full = -size * 0.55f;         // (its top edge: below the circle, and above it with room for the turning corners)
+        const float size = (float)PlaySize, wave = 100, empty = 48, full = -22;
         var none = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         foreach (var state in new[] { "", "PointerOver", "Pressed", "Disabled" }) play.Resources["ButtonBackground" + state] = none;
         play.Background = none;
@@ -418,41 +417,30 @@ public sealed partial class MainWindow
             };
             return new Canvas { Width = 16, Height = 16, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(13, 14, 0, 0), Children = { path } };
         }
-        Microsoft.UI.Xaml.Shapes.Rectangle Wave(double opacity)
-        {
-            var w = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = wide, Height = wide, RadiusX = wide * 0.42, RadiusY = wide * 0.42, Fill = accent, Opacity = opacity };
-            Canvas.SetLeft(w, (size - wide) / 2);
-            return w;
-        }
-        var (behind, front) = (Wave(1), Wave(1));
-        var pool = new Canvas { Width = size, Height = size, Children = { behind, front } };
-        var glass = new Grid { Width = size, Height = size, Background = Res("ApexCardBrush") };
-        glass.Children.Add(pool);
+        var liquid = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = wave, Height = wave, RadiusX = wave * 0.42, RadiusY = wave * 0.42, Fill = accent };
+        Canvas.SetLeft(liquid, -28);
         var (light, dark) = (Tri(accent), Tri(Res("TextOnAccentFillColorPrimaryBrush")));
-        var inside = new Grid { Width = size, Height = size, IsHitTestVisible = false, Opacity = play.IsEnabled ? 1 : 0.45 };
-        foreach (var e in new UIElement[] { glass, new Microsoft.UI.Xaml.Shapes.Ellipse { Width = size, Height = size, Stroke = accent, StrokeThickness = 2 }, light, dark }) inside.Children.Add(e);
+        var inside = new Grid { Width = size, Height = size, IsHitTestVisible = false, Opacity = play.IsEnabled ? 1 : 0.45,
+            Background = new SolidColorBrush(Pick(0xFF12402A, 0xFFBFEBD3)) };
+        foreach (var e in new UIElement[] { new Canvas { Children = { liquid } }, light, dark }) inside.Children.Add(e);
         (play.Width, play.Content) = (size, inside);
         (play.HorizontalAlignment, play.VerticalAlignment, play.Margin) = (HorizontalAlignment.Right, VerticalAlignment.Bottom, new Thickness(0, 0, 14, 14));
 
         Microsoft.UI.Composition.Visual V(UIElement e) => ElementCompositionPreview.GetElementVisual(e);
-        var (pv, gv, bv, fv, lv, dv) = (V(play), V(glass), V(behind), V(front), V(light), V(dark));
+        var (pv, iv, wv, lv, dv) = (V(play), V(inside), V(liquid), V(light), V(dark));
         var c = pv.Compositor;
         pv.CenterPoint = new(size / 2, size / 2, 0);
         var round = c.CreateRoundedRectangleGeometry();
         (round.Size, round.CornerRadius) = (new(size, size), new(size / 2, size / 2));
-        gv.Clip = c.CreateGeometricClip(round);
-        foreach (var (e, v) in new[] { (behind, bv), (front, fv) })
-        {
-            ElementCompositionPreview.SetIsTranslationEnabled(e, true);
-            v.Properties.InsertVector3("Translation", new(0, empty, 0));
-            v.CenterPoint = new(wide / 2, wide / 2, 0);
-        }
-        bv.Opacity = 0.45f;
+        iv.Clip = c.CreateGeometricClip(round);
+        ElementCompositionPreview.SetIsTranslationEnabled(liquid, true);
+        wv.Properties.InsertVector3("Translation", new(0, empty, 0));
+        wv.CenterPoint = new(wave / 2, wave / 2, 0);
         dv.Opacity = 0;
 
         var moves = AnimationsOn;
         var ease = c.CreateCubicBezierEasingFunction(new(0.22f, 1f), new(0.36f, 1f));
-        var rise = c.CreateCubicBezierEasingFunction(new(0.35f, 0f), new(0.2f, 1f));
+        var soft = c.CreateCubicBezierEasingFunction(new(0.25f, 0.1f), new(0.25f, 1f));
         TimeSpan Ms(int ms) => TimeSpan.FromMilliseconds(moves ? ms : 1);
         void To(Microsoft.UI.Composition.Visual v, string what, float to, int ms, Microsoft.UI.Composition.CompositionEasingFunction how, int wait = 0)
         {
@@ -461,21 +449,13 @@ public sealed partial class MainWindow
             (a.Duration, a.DelayTime) = (Ms(ms), TimeSpan.FromMilliseconds(moves ? wait : 0));
             v.StartAnimation(what, a);
         }
-        void Turn(Microsoft.UI.Composition.Visual v, int ms, float by)
-        {
-            var a = c.CreateScalarKeyFrameAnimation();
-            a.InsertExpressionKeyFrame(0, "this.StartingValue");
-            a.InsertExpressionKeyFrame(1, "this.StartingValue + " + by.ToString(System.Globalization.CultureInfo.InvariantCulture), c.CreateLinearEasingFunction());
-            a.Duration = TimeSpan.FromMilliseconds(ms);
-            v.StartAnimation("RotationAngleInDegrees", a);
-        }
         var (over, focus, shown) = (false, false, false);
         void Press()
         {
             var a = c.CreateVector3KeyFrameAnimation();
             var to = play.IsPressed ? 0.9f : shown ? 1.08f : 1f;
             a.InsertKeyFrame(1, new(to, to, 1), ease);
-            a.Duration = Ms(play.IsPressed ? 100 : 360);
+            a.Duration = Ms(play.IsPressed ? 100 : 320);
             pv.StartAnimation("Scale", a);
         }
         void Open()
@@ -483,12 +463,10 @@ public sealed partial class MainWindow
             var on = play.IsEnabled && (over || focus);
             if (on == shown) return;
             shown = on;
-            // (the wave behind leads, so its crest shows over the one in front while the level moves)
-            To(bv, "Translation.Y", on ? full : empty, on ? 820 : 520, rise, on ? 0 : 40);
-            To(fv, "Translation.Y", on ? full : empty, on ? 900 : 460, rise, on ? 70 : 0);
-            if (moves) { Turn(bv, 1500, on ? 300 : -160); Turn(fv, 1500, on ? -240 : 140); }
-            To(dv, "Opacity", on ? 1 : 0, 170, ease, on ? 300 : 120);
-            To(lv, "Opacity", on ? 0 : 1, 170, ease, on ? 300 : 120);
+            To(wv, "Translation.Y", on ? full : empty, 700, ease);
+            To(wv, "RotationAngleInDegrees", on ? 150 : 0, 700, ease);
+            To(dv, "Opacity", on ? 1 : 0, 200, soft, 120);
+            To(lv, "Opacity", on ? 0 : 1, 200, soft, 120);
             Press();
         }
         play.RegisterPropertyChangedCallback(Microsoft.UI.Xaml.Controls.Primitives.ButtonBase.IsPressedProperty, (_, _) => Press());
