@@ -50,6 +50,7 @@ public sealed partial class MainWindow
             case GameSettingsScreen: BuildGameSettings(); break;
             case WizardSettings: BuildWizardSettings(); break;
         }
+        RefreshSavePage();
     }
 
     // Compat, Verify and the mod checks, run again (Check now, after a change, at start)

@@ -685,6 +685,8 @@
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
+                <!-- 11 one save's page, over Saves, with its own scrolling (MainWindow.SavePage.cs) -->
+                <Grid x:Name="SavePage" Grid.Row="1" Tag="dyn" Visibility="Collapsed" />
                 <!-- 9 Mods: its own full-height page (the side pane, the list, the chosen mods), each part scrolling on its own -->
                 <Grid x:Name="ScreenMods" Grid.Row="1" Visibility="Collapsed" SizeChanged="OnModsSized">
                     <Grid.KeyboardAccelerators>

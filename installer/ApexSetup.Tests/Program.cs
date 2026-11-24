@@ -1697,6 +1697,7 @@ DefaultReplacementsTests.Run(Check);
 ModInspectTests.Run(Check);
 ModFindTests.Run(Check);
 SavesTests.Run(Check);
+SaveLayoutTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
