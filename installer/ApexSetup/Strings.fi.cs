@@ -687,7 +687,7 @@ public static partial class Strings
         ["It is gone"] = "Se on poissa",
         ["Stop and put every mod back"] = "Pysäytä ja palauta kaikki modit",
         ["What runs with your game. Nothing changes until you apply."] = "Mitä pelisi kanssa toimii. Mikään ei muutu ennen kuin otat muutokset käyttöön.",
-        ["Recommended"] = "Suositellut",
+        ["Recommended"] = "Suositeltu",
         ["Other mods"] = "Muut modit",
         ["Made by other modders. The launcher installs and updates them for you."] = "Muiden modaajien tekemiä. Käynnistin asentaa ja päivittää ne puolestasi.",
         ["Folders"] = "Kansiot",

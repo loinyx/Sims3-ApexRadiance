@@ -1624,7 +1624,8 @@ public sealed partial class MainWindow : Window
             SetInfo(GraphicsInfo, InfoBarSeverity.Warning, "",
                 T("Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back."));
         else GraphicsInfo.IsOpen = false;
-        RendererResetNote.Visibility = GraphicsInfo.IsOpen ? Visibility.Visible : Visibility.Collapsed;
+        if (GraphicsInfo.IsOpen) SetInfo(RendererResetNote, InfoBarSeverity.Warning, "", GraphicsInfo.Message);
+        else RendererResetNote.IsOpen = false;
         ShowCoreNotes();
 
         // An installed component shows a Remove button (Keep once marked: Apply removes it, and its pill says so); a missing one

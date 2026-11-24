@@ -904,7 +904,7 @@ public static partial class Strings
         ["It is gone"] = "Sumiu",
         ["Stop and put every mod back"] = "Parar e devolver todos os mods",
         ["What runs with your game. Nothing changes until you apply."] = "O que roda com o seu jogo. Nada muda até você aplicar.",
-        ["Recommended"] = "Recomendados",
+        ["Recommended"] = "Recomendado",
         ["Other mods"] = "Outros mods",
         ["Made by other modders. The launcher installs and updates them for you."] = "Feitos por outros modders. O launcher os instala e atualiza para você.",
         ["Folders"] = "Pastas",

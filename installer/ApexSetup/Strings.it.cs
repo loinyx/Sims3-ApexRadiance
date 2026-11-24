@@ -697,7 +697,7 @@ public static partial class Strings
         ["It is gone"] = "È sparito",
         ["Stop and put every mod back"] = "Interrompi e rimetti a posto ogni mod",
         ["What runs with your game. Nothing changes until you apply."] = "Cosa gira con il tuo gioco. Non cambia nulla finché non applichi.",
-        ["Recommended"] = "Consigliati",
+        ["Recommended"] = "Consigliato",
         ["Other mods"] = "Altre mod",
         ["Made by other modders. The launcher installs and updates them for you."] = "Create da altri modder. Il launcher le installa e le aggiorna per te.",
         ["Folders"] = "Cartelle",

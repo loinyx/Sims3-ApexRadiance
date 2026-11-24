@@ -692,7 +692,7 @@ public static partial class Strings
         ["It is gone"] = "Problém zmizel",
         ["Stop and put every mod back"] = "Zastavit a vrátit všechny mody",
         ["What runs with your game. Nothing changes until you apply."] = "Co běží s vaší hrou. Nic se nezmění, dokud změny nepoužijete.",
-        ["Recommended"] = "Doporučené",
+        ["Recommended"] = "Doporučeno",
         ["Other mods"] = "Další mody",
         ["Made by other modders. The launcher installs and updates them for you."] = "Od jiných modderů. Spouštěč je za vás nainstaluje a aktualizuje.",
         ["Folders"] = "Složky",

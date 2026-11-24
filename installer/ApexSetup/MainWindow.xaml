@@ -570,7 +570,7 @@
                             <TextBlock x:Name="GpuLine" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" />
                             <StackPanel x:Name="RendererCards" Tag="dyn" Spacing="8" />
                             <TextBlock x:Name="BridgeDetail" Tag="dyn" Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="RendererResetNote" Text="Your in-game graphics settings may reset once. The launcher keeps a copy and puts it back if you switch back." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" Foreground="{ThemeResource ApexWarningBrush}" />
+                            <InfoBar x:Name="RendererResetNote" IsClosable="False" Margin="0,4,0,0" />
                         </StackPanel>
 
                         <!-- 8..14 the launcher's own screens, filled in code (MainWindow.Launcher.cs) -->
@@ -857,7 +857,7 @@
                                TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
                     <Button x:Name="BackButton" Grid.Column="1" Content="Back" MinWidth="96" Click="OnBack" />
                     <Button x:Name="NextButton" Grid.Column="2" MinWidth="120" Style="{StaticResource AccentButtonStyle}" Click="OnNext">
-                        <TextBlock x:Name="NextText" Tag="dyn" />
+                        <TextBlock x:Name="NextText" Tag="dyn" FontWeight="SemiBold" />
                     </Button>
                 </Grid>
             </Grid>
@@ -959,11 +959,11 @@
                             </StackPanel>
                         </Grid>
                     </Border>
-                    <TextBlock Margin="28,0,28,8" Text="Close the game before you start. Everything comes from each author's official GitHub, and the launcher keeps a copy of every file it changes."
+                    <TextBlock Margin="22,2,22,20" Text="Close the game before you start. Everything comes from each author's official GitHub, and the launcher keeps a copy of every file it changes."
                                Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
                     <Border Padding="28,16,28,22" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource ApexCardBorderBrush}">
                         <Button Style="{StaticResource AccentButtonStyle}" MinWidth="160" Height="44" FontSize="15" HorizontalAlignment="Right" Click="OnFirstStart">
-                            <TextBlock Text="Get started" />
+                            <TextBlock Text="Get started" FontWeight="SemiBold" />
                         </Button>
                     </Border>
                 </StackPanel>
