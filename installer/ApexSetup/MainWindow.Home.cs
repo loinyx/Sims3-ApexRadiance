@@ -1,6 +1,7 @@
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using static ApexSetup.Strings;
 
@@ -331,7 +332,8 @@ public sealed partial class MainWindow
             tile.Children.Add(photo);
             var foot = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16, 0, 72, 14), Spacing = 1 };
             foot.Children.Add(new TextBlock { Text = name, FontSize = 15, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-            var meta = Muted(SavedWhen(save.LastPlayed));
+            var day = save.LastPlayed.Date == DateTime.Today ? T("Today") : save.LastPlayed.ToString("d MMM", LangCulture());
+            var meta = Muted(day);
             meta.TextWrapping = TextWrapping.NoWrap;
             meta.TextTrimming = TextTrimming.CharacterEllipsis;
             foot.Children.Add(meta);
@@ -339,16 +341,20 @@ public sealed partial class MainWindow
             // Play in the corner, straight into this save (the updates first, as Play on top)
             var play = new Button
             {
-                Width = 40, Height = 40, CornerRadius = new CornerRadius(20), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(0, 0, 14, 14), Background = Res("ApexPillBrush"), BorderThickness = new Thickness(0), Foreground = Res("ApexAccentBrush"), IsEnabled = !_busy && !Maintenance && !_running,
-                Content = new FontIcon { Glyph = "", FontSize = 12, Margin = new Thickness(2, 0, 0, 0) },
+                Height = PlaySize, CornerRadius = new CornerRadius(PlaySize / 2), Padding = new Thickness(0), BorderThickness = new Thickness(0),
+                IsEnabled = !_busy && !Maintenance && !_running,
             };
             ToolTipService.SetToolTip(play, T("Play this save"));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(play, T("Play {0}", name));
             play.Click += async (_, _) => await PlayAsync(name, update: _settings.InstallUpdatesOnPlay);
             var cell = new Grid();
             cell.Children.Add(new Border { Child = tile, CornerRadius = new CornerRadius(12), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) });
-            cell.Children.Add(play);
+            var (corner, over) = PlayCorner(play);
+            cell.Children.Add(corner);
+            ToolTipService.SetToolTip(tile, SavedWhen(save.LastPlayed));
+            cell.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(200) };
+            cell.PointerEntered += (_, _) => { cell.Translation = new(0, -4, 0); over(true); };
+            cell.PointerExited += (_, _) => { cell.Translation = default; over(false); };
             Grid.SetColumn(cell, i);
             grid.Children.Add(cell);
             tiles.Add(tile);
@@ -380,7 +386,7 @@ public sealed partial class MainWindow
                 var (save, photo, meta) = rows[i];
                 if (reports.FirstOrDefault(r => r.Save.Dir == save.Dir) is { } r)
                 {
-                    meta.Text = SavedWhen(save.LastPlayed) + " · " + ModRow.SizeText(r.Bytes);
+                    meta.Text += " · " + ModRow.SizeText(r.Bytes);
                     if (r.LastBackup is null) bare.Add(save);
                 }
                 if (await SaveCard.SimsOf(photos[i]) is { } img) photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 16, 0, 58) });
@@ -388,6 +394,84 @@ public sealed partial class MainWindow
             BackupLine(backup, bare, docs);
         }, TaskScheduler.FromCurrentSynchronizationContext());
         return s;
+    }
+
+    const double PlaySize = 44;
+
+    // a save's round Play in its card's corner, filled with the accent. Under the pointer anywhere on the card, or with the
+    // keyboard on it, it opens to the left into a pill that says Play; leaving, it closes back into the circle. Without a wait
+    // when Windows' animation effects are off.
+    static (FrameworkElement Corner, Action<bool> Over) PlayCorner(Button play)
+    {
+        const float size = (float)PlaySize;
+        var ink = Res("TextOnAccentFillColorPrimaryBrush");
+        var none = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        foreach (var state in new[] { "", "PointerOver", "Pressed", "Disabled" }) play.Resources["ButtonBackground" + state] = none;
+        play.Background = none;
+        var word = new TextBlock { Text = T("Play"), FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = ink, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(24, 0, 0, 0) };
+        word.Measure(new(double.PositiveInfinity, double.PositiveInfinity));
+        // (a longer word in another language widens the pill)
+        var wide = (float)Math.Max(104, Math.Ceiling(word.DesiredSize.Width) + 8 + 31);
+        var tri = new Microsoft.UI.Xaml.Shapes.Path
+        {
+            Data = (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), "M3.5 2.2c0-0.9 1-1.5 1.8-1l8 5c0.8 0.5 0.8 1.6 0 2.1l-8 5c-0.8 0.5-1.8-0.1-1.8-1z"),
+            Fill = ink, Width = 16, Height = 16,
+        };
+        var pill = new Grid { Width = wide, Height = size, Background = Res("ApexAccentBrush"), IsHitTestVisible = false, Opacity = play.IsEnabled ? 1 : 0.45 };
+        pill.Children.Add(word);
+        pill.Children.Add(new Canvas { Width = 16, Height = 16, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 14, 15, 0), Children = { tri } });
+        (play.Width, play.Content) = (wide, pill);
+        (play.HorizontalAlignment, play.VerticalAlignment, play.Margin) = (HorizontalAlignment.Right, VerticalAlignment.Bottom, new Thickness(0, 0, 14, 14));
+
+        var (pv, iv, wv) = (ElementCompositionPreview.GetElementVisual(play), ElementCompositionPreview.GetElementVisual(pill), ElementCompositionPreview.GetElementVisual(word));
+        ElementCompositionPreview.SetIsTranslationEnabled(word, true);
+        var c = pv.Compositor;
+        pv.CenterPoint = new(wide / 2, size / 2, 0);
+        var shape = c.CreateRoundedRectangleGeometry();
+        (shape.Offset, shape.Size, shape.CornerRadius) = (new(wide - size, 0), new(size, size), new(size / 2, size / 2));
+        iv.Clip = c.CreateGeometricClip(shape);
+        wv.Opacity = 0;
+        wv.Properties.InsertVector3("Translation", new(14, 0, 0));
+
+        var moves = AnimationsOn;
+        var ease = c.CreateCubicBezierEasingFunction(new(0.22f, 1f), new(0.36f, 1f));
+        TimeSpan Ms(int ms) => TimeSpan.FromMilliseconds(moves ? ms : 1);
+        void To2(string what, System.Numerics.Vector2 to)
+        {
+            var a = c.CreateVector2KeyFrameAnimation();
+            a.InsertKeyFrame(1, to, ease);
+            a.Duration = Ms(340);
+            shape.StartAnimation(what, a);
+        }
+        void To(string what, float to, int ms, bool late)
+        {
+            var a = c.CreateScalarKeyFrameAnimation();
+            a.InsertKeyFrame(1, to, ease);
+            (a.Duration, a.DelayTime) = (Ms(ms), TimeSpan.FromMilliseconds(late && moves ? 60 : 0));
+            wv.StartAnimation(what, a);
+        }
+        var (over, focus, shown) = (false, false, false);
+        void Open()
+        {
+            var on = play.IsEnabled && (over || focus);
+            if (on == shown) return;
+            shown = on;
+            To2("Offset", new(on ? 0 : wide - size, 0));
+            To2("Size", new(on ? wide : size, size));
+            To("Opacity", on ? 1 : 0, 160, on);
+            To("Translation.X", on ? 0 : 14, 300, on);
+        }
+        play.RegisterPropertyChangedCallback(Microsoft.UI.Xaml.Controls.Primitives.ButtonBase.IsPressedProperty, (_, _) =>
+        {
+            var to = play.IsPressed ? 0.9f : 1f;
+            var a = c.CreateVector3KeyFrameAnimation();
+            a.InsertKeyFrame(1, new(to, to, 1), ease);
+            a.Duration = Ms(play.IsPressed ? 100 : 320);
+            pv.StartAnimation("Scale", a);
+        });
+        play.GotFocus += (_, _) => { focus = play.FocusState == FocusState.Keyboard; Open(); };
+        play.LostFocus += (_, _) => { focus = false; Open(); };
+        return (play, on => { over = on; Open(); });
     }
 
     // a card that rises a little under the pointer, as the gallery's do
