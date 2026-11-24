@@ -1695,6 +1695,7 @@ ModAddTests.Run(Check);
 GalleryTests.Run(Check);
 DefaultReplacementsTests.Run(Check);
 ModInspectTests.Run(Check);
+ModFindTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;

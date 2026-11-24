@@ -38,6 +38,8 @@ public sealed partial class MainWindow
         catch (Exception e) when (e is not OutOfMemoryException) { App.Log(e); return; }
         if (!ReferenceEquals(rows, _modRows)) return;
         _mergeUpdates = found.Where(u => !u.Same).ToList();
+        (_mergeNews, _mergeNewsOf) = (_mergeUpdates.Where(u => !ModViewPrefs.MergeLater.Contains(ModViewPrefs.LaterKey(u.Newer), StringComparer.OrdinalIgnoreCase)).ToList(), docs);
+        ShowMergeUpdates();
         foreach (var r in rows)
         {
             var n = _mergeUpdates.Count(u => u.Merged.Rel.Equals(r.File.Rel, StringComparison.OrdinalIgnoreCase));

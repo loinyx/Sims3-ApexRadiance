@@ -131,7 +131,6 @@ public sealed partial class MainWindow
             FillMods();
         }
         catch (Exception e) when (e is not OutOfMemoryException) { App.Log(e); }
-        await FindMergeUpdatesAsync(rows);
     }
 
     // when a mod arrived: the later of its creation (a copy) and last change (an update)
@@ -230,6 +229,7 @@ public sealed partial class MainWindow
         }
         finally { _fillingMods = false; }
         FillModDetails();
+        FindFollows();
     }
 
     // the shown list changed: remove and insert rows in place, so the list animates instead of being rebuilt
@@ -1454,7 +1454,7 @@ public sealed partial class MainWindow
         ModDetailsFoot.Visibility = Visibility.Collapsed;
         _mergePaint = null;
         var picked = DraftRow() is { } open ? [open] : Picked(); // (a merge with changes not saved stays open whatever the list shows)
-        ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        ModDetailsPane.Visibility = _findPage is not null || _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         // (over the grid the pane would hide whole columns of tiles: the grid makes room for it instead)
         var room = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
         if (ModGrid.Padding.Right != 24 + room) { ModGrid.Padding = new Thickness(0, 0, 24 + room, 72); FitModGrid(); }

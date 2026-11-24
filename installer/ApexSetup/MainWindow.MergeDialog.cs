@@ -391,28 +391,10 @@ public sealed partial class MainWindow
 
     // ---------- newer versions of merged mods ----------
 
-    List<MergeUpdate> _mergeUpdates = [];
-    string _mergeUpdatesOf = "";
+    List<MergeUpdate> _mergeNews = []; // the ones not put off with Later
+    string _mergeNewsOf = "";
     (List<MergeUpdate> Updates, string Lang, bool Light)? _mergeBarShows;
     bool _mergeBarHooked;
-
-    // after the list is read (adding files reads it again)
-    async Task FindMergeUpdatesAsync(List<ModRow> rows)
-    {
-        var (docs, mods, index) = (Docs, rows.Select(r => r.File).ToList(), _gameIndex);
-        try
-        {
-            var found = await Task.Run(() =>
-            {
-                var later = ModViewPrefs.MergeLater.ToHashSet(StringComparer.OrdinalIgnoreCase);
-                return ModMerge.Updates(docs, mods, index).Where(u => !u.Same && !later.Contains(ModViewPrefs.LaterKey(u.Newer))).ToList();
-            });
-            if (!ReferenceEquals(rows, _modRows)) return; // (the list was read again meanwhile)
-            (_mergeUpdates, _mergeUpdatesOf) = (found, docs);
-            ShowMergeUpdates();
-        }
-        catch (Exception e) when (e is not OutOfMemoryException) { App.Log(e); }
-    }
 
     // The bar over the list: which mods have a newer file and which merge still uses the old one. A message on the Mods bar
     // or a hunt comes first: it shows when they are gone.
@@ -423,7 +405,7 @@ public sealed partial class MainWindow
             _mergeBarHooked = true;
             ModsInfo.RegisterPropertyChangedCallback(InfoBar.IsOpenProperty, (_, _) => ShowMergeUpdates());
         }
-        var ups = _mergeUpdatesOf == Docs ? _mergeUpdates : [];
+        var ups = _mergeNewsOf == Docs ? _mergeNews : [];
         var show = ups.Count > 0 && !ModsInfo.IsOpen && ModHunt.Current() is null;
         ModMergeBar.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         // (said already: a button in it may have the keyboard)
@@ -446,7 +428,7 @@ public sealed partial class MainWindow
         acts.Children.Add(Button(T("Later"), () =>
         {
             ModViewPrefs.MergeLater = [.. ModViewPrefs.MergeLater, .. ups.Select(u => ModViewPrefs.LaterKey(u.Newer))];
-            _mergeUpdates = [];
+            _mergeNews = [];
             ShowMergeUpdates();
         }));
         var g = new Grid { ColumnSpacing = 12, RowSpacing = 10 };
@@ -472,7 +454,7 @@ public sealed partial class MainWindow
     async Task UpdateMergesAsync(List<MergeUpdate> updates)
     {
         var docs = Docs;
-        if (_mergeUpdatesOf != docs) return;
+        if (_mergeNewsOf != docs || AskLeaveMerge(() => Safe(UpdateMergesAsync(updates)))) return;
         var jobs = updates.GroupBy(u => u.Merged.Rel, StringComparer.OrdinalIgnoreCase).Select(g =>
         {
             MergeEditPlan? plan = null;

@@ -45,12 +45,11 @@ public static class Health
         Add("places", () => PlaceChecks.Check(g, docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("caches", () => CacheFindings(docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("sessions", () => SessionHistory.Check().Select(f => new Item(f, HealthArea.Stability, [])));
-        // the script errors since the last game start, at most a week back (a game started without the launcher records no
-        // start, so the last recorded one can be long ago); Read takes the crash logs of the whole week either way
+        // the script errors since the last game start; Read takes the crash logs of the whole week either way
         var week = DateTime.Now.AddDays(-7);
         // (one read for both: the crash logs of the week come with it, which is what the timeline needs)
         ScriptErrors.Report? report = null;
-        Add("script errors", () => ScriptErrors.Findings(report = ScriptErrors.Read(docs, SessionHistory.List().FirstOrDefault()?.Started is { } s && s > week ? s : week, mods))
+        Add("script errors", () => ScriptErrors.Findings(report = ScriptErrors.Read(docs, ScriptErrors.Since(), mods))
             .Select(m => new Item(m.Finding, HealthArea.Stability, m.Files)));
         try
         {
