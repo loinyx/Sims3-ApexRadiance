@@ -3222,9 +3222,15 @@ public sealed partial class MainWindow
             return card;
         }
         // a copy of a picture's card flown between its place in the room (big) and a card's place (small), above all
-        void Fly(Picture pic, Windows.Foundation.Rect big, Windows.Foundation.Rect small, double turn, bool open, int ms, Action? done)
+        void Fly(Picture pic, Windows.Foundation.Rect big, Windows.Foundation.Rect small, double turn, bool open, int ms, Action? done, BitmapImage? sharp = null)
         {
             var copy = CardFor(pic);
+            if (sharp is { PixelWidth: > 0 })
+                switch (PhotoOf(copy))
+                {
+                    case Image i: i.Source = sharp; break;
+                    case Border { Background: ImageBrush ib }: ib.ImageSource = sharp; break;
+                }
             // (the copy carries no empty caption: that only shows under the pointer)
             void Hush(DependencyObject d)
             {
@@ -3387,9 +3393,23 @@ public sealed partial class MainWindow
                 var dst = Bounds(card);
                 from!.Opacity = 0;
                 photo.Opacity = 0;
-                Fly(pic, dst, src, turn, true, 600, () => { photo.Opacity = 1; if (pic.Video) PlayIn(); });
+                Fly(pic, dst, src, turn, true, 600, () => { photo.Opacity = 1; if (pic.Video) PlayIn(); }, sharpCopy);
             }
-            if (card.ActualWidth > 0) Rise(); else { void Once(object o, SizeChangedEventArgs e) { card.SizeChanged -= Once; Rise(); } card.SizeChanged += Once; }
+            void Start()
+            {
+                if (card.ActualWidth > 0) Rise(); else { void Once(object o, SizeChangedEventArgs e) { card.SizeChanged -= Once; Rise(); } card.SizeChanged += Once; }
+            }
+            // (the sharp picture is read before the card grows, so it never opens on the small copy and sharpens later;
+            // a slow read waits at most a quarter of a second, then the card grows and sharpens when ready)
+            if (sharpCopy.PixelWidth > 0 || pic.Video) Start();
+            else
+            {
+                var started = false;
+                void Go() { if (started || closing) return; started = true; Start(); }
+                loader.ImageOpened += (_, _) => Go();
+                loader.ImageFailed += (_, _) => Go();
+                After(250, Go);
+            }
         }
 
         // an action tile: an icon over its name
