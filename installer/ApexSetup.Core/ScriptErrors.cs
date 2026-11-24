@@ -85,6 +85,21 @@ public static partial class ScriptErrors
         return new(from, errors.OrderByDescending(e => e.When).ToList(), byMod, unread);
     }
 
+    // from when Health counts script errors: the last game start, at most a week back (a game started without the launcher
+    // records no start, so the last recorded one can be long ago). It only moves forward.
+    public static DateTime Since() => DateTime.Now.AddDays(-7) is var week && SessionHistory.List().FirstOrDefault()?.Started is { } s && s > week ? s : week;
+
+    // the script error logs Health no longer reads (a crash log is never one: the Stability timeline goes by them)
+    public static List<string> OldLogs(string docs)
+    {
+        try
+        {
+            var since = Since();
+            return new DirectoryInfo(docs).EnumerateFiles().Where(f => IsLog(f.Name) && !IsCrash(f.Name) && f.LastWriteTime < since).Select(f => f.FullName).ToList();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
+    }
+
     static bool Installed(IReadOnlyList<ModFile> mods, string mod) => mods.Any(m => Path.GetFileNameWithoutExtension(m.Name).StartsWith(mod, StringComparison.OrdinalIgnoreCase)
         || m.Rel.Split(Path.DirectorySeparatorChar).Any(part => part.Equals(mod, StringComparison.OrdinalIgnoreCase)));
 

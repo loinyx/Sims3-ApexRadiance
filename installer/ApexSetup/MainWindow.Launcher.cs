@@ -613,6 +613,7 @@ public sealed partial class MainWindow
     // Mods, opened on those mods: one found by name and chosen, several listed in Needs a look
     void ShowInMods(List<ModFile> hits)
     {
+        CloseFind();
         _modPlace = hits.Count == 1 ? (hits[0].FileType == "asi" ? AsiMods : AllMods) : LookMods;
         ModSearch.Text = hits.Count == 1 ? Path.GetFileNameWithoutExtension(hits[0].Name) : "";
         _folderSig = "";

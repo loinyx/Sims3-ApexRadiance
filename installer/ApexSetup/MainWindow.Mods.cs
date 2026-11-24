@@ -228,6 +228,7 @@ public sealed partial class MainWindow
         }
         finally { _fillingMods = false; }
         FillModDetails();
+        FindFollows();
     }
 
     // the shown list changed: remove and insert rows in place, so the list animates instead of being rebuilt
@@ -1443,7 +1444,7 @@ public sealed partial class MainWindow
         ModDetailsFoot.ColumnDefinitions.Clear();
         ModDetailsFoot.Visibility = Visibility.Collapsed;
         var picked = Picked();
-        ModDetailsPane.Visibility = _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        ModDetailsPane.Visibility = _findPage is not null || _modsNarrow && picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         // (over the grid the pane would hide whole columns of tiles: the grid makes room for it instead)
         var room = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
         if (ModGrid.Padding.Right != 24 + room) { ModGrid.Padding = new Thickness(0, 0, 24 + room, 72); FitModGrid(); }

@@ -183,7 +183,7 @@ public static class Worlds
         return null;
     }
 
-    static ulong Fnv64(string s)
+    internal static ulong Fnv64(string s)
     {
         var h = 0xCBF29CE484222325UL;
         foreach (var c in s.ToLowerInvariant()) { h *= 0x100000001B3UL; h ^= (byte)c; }
