@@ -582,7 +582,17 @@ public sealed partial class MainWindow
             Grid.SetColumn(chevron, 3);
             head.Children.Add(chevron);
             var content = new StackPanel { Spacing = 8, Padding = new Thickness(50, 0, 18, 14), Visibility = open ? Visibility.Visible : Visibility.Collapsed };
-            if (items.Count == 0) content.Children.Add(Muted(T("Nothing to report.")));
+            // Stability: the sessions and crashes as a timeline, each with its cause and clues; its other notes (script errors,
+            // memory) below it
+            var timeline = area == HealthArea.Stability ? Health.Timeline : [];
+            if (timeline.Count > 0)
+            {
+                content.Spacing = 0;
+                content.Padding = new Thickness(18, 4, 18, 14);
+                foreach (var e in timeline) content.Children.Add(TimelineRow(e));
+                items = items.Where(i => !i.Finding.Text.Contains("crashed", StringComparison.Ordinal)).ToList();
+            }
+            if (items.Count == 0 && timeline.Count == 0) content.Children.Add(Muted(T("Nothing to report.")));
             foreach (var it in items) content.Children.Add(NoteRow(it));
             var toggle = new Button { Content = head, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0) };
@@ -600,6 +610,126 @@ public sealed partial class MainWindow
             areas.Children.Add(row);
         }
         body.Children.Add(Card(areas, pad: false));
+    }
+
+    // one session, crash or freeze of the Stability timeline: the day and time, a dot on the line, and a card with what happened,
+    // what caused it and, opened, the clues each log gave
+    UIElement TimelineRow(CrashTimeline.Entry e)
+    {
+        var c = LangCulture();
+        var ok = e.End == CrashTimeline.Ending.Normal;
+        var gb = (e.Peak / (double)(1L << 30)).ToString("0.0", c);
+        string title, body = "", chip = "", chipBrush = "ApexWarningBrush";
+        switch (e.End)
+        {
+            case CrashTimeline.Ending.Normal: title = T("Closed normally"); break;
+            case CrashTimeline.Ending.NoReport when e.Why == "driver":
+            case CrashTimeline.Ending.Froze when e.Why == "driver":
+                title = T("Froze when the graphics driver failed");
+                body = T("The graphics driver reported a GPU error at that moment and the game stopped responding. Updating the driver, or turning off overlays while playing, usually helps.");
+                chip = T("Graphics driver"); break;
+            case CrashTimeline.Ending.Froze:
+                title = T("Froze and was closed");
+                body = T("The game stopped responding and was closed. No crash report names a file, so no mod is blamed.");
+                chip = T("Froze"); chipBrush = "ApexMutedBrush"; break;
+            case CrashTimeline.Ending.NoReport:
+                title = T("Closed without a crash report");
+                body = T("The game stopped without writing a crash report: it froze and was closed, or the graphics driver stopped. Nothing crashed in a mod.");
+                chip = T("No report"); chipBrush = "ApexMutedBrush"; break;
+            default:
+                (title, body, chip) = e.Why switch
+                {
+                    "driver" => (T("Crashed when the graphics driver failed"), T("The driver reported a GPU error at the same moment. Updating the graphics driver usually helps."), T("Graphics driver")),
+                    "memory" => (T("Crashed with memory nearly full"), T("Memory reached {0} of 4 GB. Fewer mods, less CC or a smaller world lowers it.", gb), T("Memory")),
+                    "called" when e.Culprit is not null => (T("Crashed in a call from {0}", e.Culprit), T("{0} called {1}, and that call crashed.", e.Culprit, e.Into ?? ""), T("Mod")),
+                    _ when e.Culprit is null => (T("Crashed in the game's own code"), T("No mod was calling it."), T("The game")),
+                    _ when e.Renderer => (T("Crashed in {0}", e.Culprit), T("In the renderer's own code, while the game was drawing."), T("Renderer")),
+                    _ => (T("Crashed in {0}", e.Culprit), T("In its own code."), T("Mod")),
+                };
+                if (e.Culprit is null && e.Why is null) chipBrush = "ApexMutedBrush";
+                if (e.Earlier)
+                {
+                    body = e.Replaced is { } r ? T("That version was replaced on {0}. No crash in it since.", r.ToString("d MMM", c)) : T("That version was replaced since. No crash in it since.");
+                    chip = T("Fixed by an update"); chipBrush = "ApexSuccessBrush";
+                }
+                break;
+        }
+        if (e.Count > 1) title += " · " + T("{0} times", e.Count);
+
+        var row = new Grid { ColumnSpacing = 14 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(92) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        // the day, and the time with the minutes played
+        var day = e.Count > 1 && e.First.Date != e.When.Date ? $"{e.First.ToString("d MMM", c)} – {e.When.ToString("d MMM", c)}" : e.When.ToString("d MMM", c);
+        var time = e.Count > 1 ? T("{0} crashes", e.Count) : e.Played is { } p && p.TotalMinutes >= 1 ? $"{e.When.ToString("t", c)} · {T("{0} min", (int)p.TotalMinutes)}" : e.When.ToString("t", c);
+        var when = new StackPanel { Spacing = 1, Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
+        when.Children.Add(new TextBlock { Text = day, FontSize = 13, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right });
+        when.Children.Add(new TextBlock { Text = time, FontSize = 12, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Right });
+        row.Children.Add(when);
+        // the line and its dot: green closed well, amber crashed or froze (faint when an update fixed it), grey closed without a report
+        var line = new Grid();
+        line.Children.Add(new Border { Width = 2, Background = Res("ApexCardBorderBrush"), HorizontalAlignment = HorizontalAlignment.Center });
+        var dot = e.End switch { CrashTimeline.Ending.Normal => "ApexSuccessBrush", CrashTimeline.Ending.NoReport => "ApexMutedBrush", _ => "ApexWarningBrush" };
+        line.Children.Add(new Border { Width = 16, Height = 16, CornerRadius = new CornerRadius(8), Background = Res(dot), Opacity = e.Earlier ? 0.45 : 1,
+            BorderBrush = Res("ApexCardBrush"), BorderThickness = new Thickness(3), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 15, 0, 0), HorizontalAlignment = HorizontalAlignment.Center });
+        Grid.SetColumn(line, 1);
+        row.Children.Add(line);
+
+        var card = new StackPanel { Spacing = 6 };
+        var head = new Grid { ColumnSpacing = 10 };
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = ok ? FontWeights.Normal : FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
+            Foreground = ok ? Res("ApexSoftTextBrush") : Res("TextFillColorPrimaryBrush") });
+        var right = ok ? (FrameworkElement)new TextBlock { Text = T("memory {0} of 4 GB", gb), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }
+            : Chip(chip, chipBrush);
+        Grid.SetColumn(right, 1);
+        head.Children.Add(right);
+        card.Children.Add(head);
+        if (body.Length > 0) card.Children.Add(new TextBlock { Text = body, FontSize = 13, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap });
+        if (e.Clues.Count > 0)
+        {
+            // the clues, one per line with the log it came from
+            var clues = new StackPanel { Spacing = 6, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(8), Background = Res("ApexCardBrush"), Visibility = Visibility.Collapsed };
+            string? lastSource = null;
+            foreach (var cl in e.Clues)
+            {
+                var g = new Grid { ColumnSpacing = 10 };
+                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+                g.ColumnDefinitions.Add(new ColumnDefinition());
+                // (the log's name once for its run of lines)
+                g.Children.Add(new TextBlock { Text = cl.Source == lastSource ? "" : T(cl.Source), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+                var text = new TextBlock { Text = T(cl.Text, cl.Args), FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+                Grid.SetColumn(text, 1);
+                g.Children.Add(text);
+                clues.Children.Add(g);
+                lastSource = cl.Source;
+            }
+            var how = new HyperlinkButton { Content = T("How we know"), FontSize = 13, Padding = new Thickness(0, 2, 0, 2) };
+            how.Click += (_, _) =>
+            {
+                var show = clues.Visibility != Visibility.Visible;
+                clues.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+                how.Content = show ? T("Hide the clues") : T("How we know");
+            };
+            card.Children.Add(how);
+            card.Children.Add(clues);
+        }
+        var box = new Border { Child = card, Margin = new Thickness(0, 6, 0, 6), Padding = ok ? new Thickness(14, 9, 14, 9) : new Thickness(14, 11, 14, 12), CornerRadius = new CornerRadius(10),
+            BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = ok ? new SolidColorBrush(Microsoft.UI.Colors.Transparent) : Res("ApexPillBrush") };
+        Grid.SetColumn(box, 2);
+        row.Children.Add(box);
+        return row;
+    }
+
+    // a small rounded label in a tint of its colour
+    static FrameworkElement Chip(string text, string brush)
+    {
+        var col = ((SolidColorBrush)Res(brush)).Color;
+        return new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 2, 10, 3), VerticalAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, col.R, col.G, col.B)),
+            Child = new TextBlock { Text = text, FontSize = 12, Foreground = new SolidColorBrush(col) } };
     }
 
     // Repair: every file the launcher installed copied again, the settings fixed; the other choices in Repair or remove

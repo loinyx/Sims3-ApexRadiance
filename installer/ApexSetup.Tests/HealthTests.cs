@@ -163,6 +163,17 @@ static class HealthTests
             "crashes: a fault in the game called straight from a mod is that mod's; deep in a hook's own code it is the hook's");
         File.Delete(called);
         File.Delete(deep);
+        // the timeline: a crash inside a session is that session's end; a freeze with a GPU driver error at that moment is the
+        // driver's; a freeze outside any session is an entry of its own
+        var t0 = DateTime.Now.AddHours(-5);
+        var played = new SessionInfo(t0, TimeSpan.FromMinutes(20), 1L << 30, SessionEnd.Crash, -1073741819);
+        var inside = new ScriptErrors.Error(t0.AddMinutes(20), "Hooky.asi", [], "ACCESS_VIOLATION", true, "x");
+        var hang = new CrashEvidence.WinEvent(t0.AddHours(2), "hang", "");
+        var gpu = new CrashEvidence.WinEvent(t0.AddHours(2).AddSeconds(-20), "gpu", "nvlddmkm 13");
+        var tl = CrashTimeline.Build([played], [inside], [hang, gpu], null, docs, null);
+        check(tl.Count == 2 && tl[1].End == CrashTimeline.Ending.Crash && tl[1].Culprit == "Hooky.asi" && tl[1].Played == played.Played
+              && tl[0].End == CrashTimeline.Ending.Froze && tl[0].Why == "driver" && tl[0].Clues.Any(c => c.Source == "Graphics driver"),
+            "timeline: a crash ends its session, a freeze with a GPU driver error is the driver's, with the clues that say so");
         Health.Item Err(string text, Action? fix = null) { var f = new Finding(Severity.Error, text, [], fix); return new(f, Health.AreaOf(f), []); }
         check(Health.StateOf([Err("Apex Radiance is not installed in this game.")]) == HealthState.Blocked && Health.StateOf([Err("No ASI loader in Game\\Bin: x")]) == HealthState.Blocked
             && Health.StateOf([Err("Sims 3 Modernization's ts3native is the build for the other edition and does nothing."), Err("{0} is missing: the RTX Remix bridge does not start.")]) == HealthState.NeedsYou
@@ -306,6 +317,13 @@ static class HealthTests
         var r = ScriptErrors.Read(docs, DateTime.Now.AddDays(-30), mods);
         Console.WriteLine($"REAL script errors (30 days): {r.Total}; " + string.Format(r.Summary.Text, r.Summary.Args));
         foreach (var m in r.ByMod) Console.WriteLine($"  {m.Mod ?? "(game)"}: {m.Count} ({m.Crashes} crashes), newest {m.Newest:g}, {m.Exception}, files {string.Join(", ", m.Files.Select(Path.GetFileName))}");
+        Paths.LocalAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData); // (the player's own session record)
+        var week = ScriptErrors.Read(docs, DateTime.Now.AddDays(-7), mods);
+        foreach (var e in CrashTimeline.Build(SessionHistory.List(), week.Errors, CrashEvidence.Windows(DateTime.Now.AddDays(-7)), ScriptErrors.ApexReport(docs), docs, g?.Bin))
+        {
+            Console.WriteLine($"REAL timeline {e.When:g} x{e.Count} {e.End} culprit={e.Culprit ?? "-"} why={e.Why ?? "-"} into={e.Into ?? "-"} earlier={e.Earlier} renderer={e.Renderer} peak={e.Peak >> 20}MB");
+            foreach (var cl in e.Clues) Console.WriteLine($"    [{cl.Source}] " + string.Format(cl.Text, cl.Args));
+        }
         if (g is null) return;
         foreach (var f in PlaceChecks.Check(g, docs)) Console.WriteLine("REAL place: " + string.Format(f.Text, f.Args));
         Console.WriteLine($"REAL places: OneDrive={PlaceChecks.InOneDrive(docs)}");

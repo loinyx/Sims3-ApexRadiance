@@ -36,8 +36,17 @@ public static class Health
         var week = DateTime.Now.AddDays(-7);
         Add("script errors", () => ScriptErrors.Findings(ScriptErrors.Read(docs, SessionHistory.List().FirstOrDefault()?.Started is { } s && s > week ? s : week, mods))
             .Select(m => new Item(m.Finding, HealthArea.Stability, m.Files)));
+        try
+        {
+            var report = ScriptErrors.Read(docs, week, mods);
+            Timeline = CrashTimeline.Build(SessionHistory.List(), report.Errors, CrashEvidence.Windows(week), ScriptErrors.ApexReport(docs), docs, g.Bin);
+        }
+        catch (Exception e) { Engine.Log(new InvalidOperationException("Health check timeline failed", e)); }
         return items;
     }
+
+    // the last Gather's Stability timeline: sessions, crashes and freezes with their causes and clues
+    public static List<CrashTimeline.Entry> Timeline { get; private set; } = [];
 
     // over CacheSuggestBytes, or after a crash: clearing is offered (Apply), never run by Install or Repair; a kept backup can go back
     public const long CacheSuggestBytes = 2L << 30;
