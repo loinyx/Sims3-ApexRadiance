@@ -206,6 +206,43 @@ public sealed partial class MainWindow
         return new Grid { Children = { t }, Height = 30, Margin = new Thickness(10, first ? 0 : 12, 0, 2) };
     }
 
+    // a picture dragged onto an album of the side pane: the tile is dragged by the system, a card on the board by the pointer
+    Picture? _dragPic;
+    Button? _sideLit;
+    Windows.Foundation.Point _dragPoint;
+
+    void LightAlbum(Button? b)
+    {
+        if (b == _sideLit) return;
+        if (_sideLit is { } was) { was.Background = (Brush)was.Resources["RestBackground"]; was.BorderThickness = new Thickness(0); }
+        _sideLit = b;
+        if (b is null) return;
+        b.Resources["RestBackground"] = b.Background;
+        b.Background = new SolidColorBrush(((SolidColorBrush)Res("ApexAccentBrush")).Color) { Opacity = 0.28 };
+        b.BorderBrush = Res("ApexAccentBrush");
+        b.BorderThickness = new Thickness(1);
+    }
+
+    // the album button under a point of the window, if any
+    Button? AlbumAt(Windows.Foundation.Point at)
+    {
+        if (_galSide is not { } side || side.Visibility != Visibility.Visible || side.XamlRoot is null) return null;
+        foreach (var e in VisualTreeHelper.FindElementsInHostCoordinates(at, side))
+            if (e is Button { Tag: string, AllowDrop: true } b) return b;
+        return null;
+    }
+
+    void DropOnAlbum(string key, Picture p)
+    {
+        _dragPic = null;
+        if (key == Gallery.Favourites) Gallery.Info(_gal!, p.Path).Favourite = true;
+        else if (Gallery.CustomOf(_gal!, key) is { } c) { if (!c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)) c.Pictures.Add(p.Path); }
+        else Gallery.Info(_gal!, p.Path).Household = key;
+        Keep();
+        if (_galBook) { if (_galSide is not null) _galSide.Content = GalleryAlbums(); FlipBoard(); }
+        else BuildGallery();
+    }
+
     UIElement GalleryAlbums()
     {
         var s = new StackPanel { Spacing = 2 };
@@ -231,6 +268,21 @@ public sealed partial class MainWindow
             b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Pick(0xFF1E1E1E, 0xFFF1F1F1));
             b.Click += (_, _) => { _galAlbum = key; _galLimit = 60; BuildGallery(); };
             if (none) b.Visibility = Visibility.Collapsed;
+            if (key != Gallery.All)
+            {
+                b.Tag = key;
+                b.AllowDrop = true;
+                b.DragEnter += (_, _) => { if (_dragPic is not null) LightAlbum(b); };
+                b.DragLeave += (_, e) => { var at = e.GetPosition(b); if (at.X <= 0 || at.Y <= 0 || at.X >= b.ActualWidth || at.Y >= b.ActualHeight) LightAlbum(null); };
+                b.DragOver += (_, e) =>
+                {
+                    if (_dragPic is null) return;
+                    LightAlbum(b);
+                    e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Link;
+                    e.DragUIOverride.Caption = T("Add to {0}", name);
+                };
+                b.Drop += (_, _) => { LightAlbum(null); if (_dragPic is { } dp) DropOnAlbum(key, dp); };
+            }
             return b;
         }
         Windows.UI.Color[] dots = [Rgb(0x7D, 0xBE, 0x9A), Rgb(0x57, 0xB6, 0xE8), Rgb(0xE0, 0xA8, 0x4F), Rgb(0xE8, 0x6F, 0xB8), Rgb(0xB4, 0xAE, 0xF2), Rgb(0x8E, 0x8E, 0x8E)];
@@ -638,6 +690,9 @@ public sealed partial class MainWindow
         b.PointerEntered += (_, _) => { b.Translation = new Vector3(0, -6, 30); b.Scale = new Vector3(1.025f, 1.025f, 1); when.Opacity = 1; };
         b.PointerExited += (_, _) => { b.Translation = new Vector3(0, 0, 8); b.Scale = Vector3.One; when.Opacity = 0; };
         b.Click += (_, _) => open(b);
+        b.CanDrag = true;
+        b.DragStarting += (_, e) => { _dragPic = p; e.Data.SetText(p.Path); e.Data.RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Link; };
+        b.DropCompleted += (_, _) => { _dragPic = null; LightAlbum(null); };
         return b;
     }
 
@@ -2429,13 +2484,13 @@ public sealed partial class MainWindow
 
     // a picture in the album's frame: it falls in turning and bounces, its tape sticks, its caption writes itself; dragged
     // to move, lifted under the pointer, its caption written on with a click, opened with a double-click
-    FrameworkElement Framed(Picture p, Placed place, AlbumLook look, Brush ink, int order, int delay, List<Picture> pics, CustomAlbum? pile = null, bool still = false, bool bare = false, double? read = null, bool shut = false, double captionMax = double.MaxValue, int? kind = null)
+    FrameworkElement Framed(Picture p, Placed place, AlbumLook look, Brush ink, int order, int delay, List<Picture> pics, CustomAlbum? pile = null, bool still = false, bool bare = false, double? read = null, bool shut = false, double captionMax = double.MaxValue, int? kind = null, ImageSource? photo = null)
     {
         var info = Gallery.Peek(_gal!, p.Path);
         var big = (kind ?? order) % 4 == 0;
         var style = kind ?? order;
         double w = (big ? 290 : 230) * _boardScale * look.Size, h = (big ? 194 : 154) * _boardScale * look.Size;
-        var source = Thumb(p.Path, read ?? w);
+        var source = photo ?? Thumb(p.Path, read ?? w);
         var dark = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
         var caption = new TextBlock { FontFamily = new FontFamily(look.Font), FontSize = Math.Min(captionMax, (big ? 24 : 20) * Math.Max(0.85, _boardScale)), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.Wrap, MaxLines = 2, MaxWidth = w + 8, MinHeight = 28, HorizontalAlignment = HorizontalAlignment.Left };
         if (info.Caption is { Length: > 40 } longText) ToolTipService.SetToolTip(caption, longText);
@@ -2620,7 +2675,19 @@ public sealed partial class MainWindow
         // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
         outer.PointerEntered += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
         outer.PointerExited += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, _restZ.GetValueOrDefault(outer, order * 10)); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
-        if (pile is null && !still) Draggable(outer, () => CardDropped(p, place, outer, pile), () => MarkUnder(outer), shut ? null : () => OpenViewer(pics, pics.IndexOf(p), outer));
+        if (pile is null && !still) Draggable(outer, () =>
+            {
+                if (_sideLit is { Tag: string key })
+                {
+                    LightAlbum(null);
+                    MarkUnder(null);
+                    Canvas.SetLeft(outer, _dragFrom.X);
+                    Canvas.SetTop(outer, _dragFrom.Y);
+                    DropOnAlbum(key, p);
+                    return;
+                }
+                CardDropped(p, place, outer, pile);
+            }, () => { MarkUnder(outer); LightAlbum(AlbumAt(_dragPoint)); }, shut ? null : () => OpenViewer(pics, pics.IndexOf(p), outer));
         if (pile is null && !shut) outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
         caption.Tapped += (_, e) =>
         {
@@ -2731,6 +2798,7 @@ public sealed partial class MainWindow
             edge.Interval = TimeSpan.FromMilliseconds(16);
             edge.Tick += (_, _) =>
             {
+                if (_sideLit is not null) return;
                 var left = Canvas.GetLeft(el) - sv.HorizontalOffset;
                 var right = left + el.ActualWidth - sv.ViewportWidth;
                 // (faster the nearer the edge)
@@ -2750,6 +2818,7 @@ public sealed partial class MainWindow
             // (kept whole on the board)
             Canvas.SetLeft(el, Math.Clamp(Canvas.GetLeft(el) + e.Delta.Translation.X, 8, Math.Max(8, w - el.ActualWidth - 8)));
             Canvas.SetTop(el, Math.Clamp(Canvas.GetTop(el) + e.Delta.Translation.Y, 8, Math.Max(8, BoardHeight - el.ActualHeight - 8)));
+            _dragPoint = el.TransformToVisual(null).TransformPoint(e.Position);
             moving?.Invoke();
         };
         el.ManipulationCompleted += (_, _) =>
@@ -3199,7 +3268,7 @@ public sealed partial class MainWindow
         root.Changed += Resized;
 
         // the card for a picture, as large as the room allows
-        FrameworkElement CardFor(Picture pic)
+        FrameworkElement CardFor(Picture pic, ImageSource? photo = null)
         {
                 var light = new SolidColorBrush(Rgb(0xEC, 0xE7, 0xDA));
                 var keepScale = _boardScale;
@@ -3216,7 +3285,7 @@ public sealed partial class MainWindow
                     var nat = probe.DesiredSize.Width > 1 ? probe.DesiredSize : new Windows.Foundation.Size(260, 230);
                     var room = new Windows.Foundation.Size(Math.Max(200, zoomer.ActualWidth > 0 ? zoomer.ActualWidth : root.Size.Width - 480), Math.Max(200, zoomer.ActualHeight > 0 ? zoomer.ActualHeight : root.Size.Height - 100));
                     _boardScale = Math.Min(room.Width * 0.94 / nat.Width, room.Height * 0.92 / nat.Height);
-                    card = Framed(pic, new Placed(), look, light, 1, 0, pics, null, still: true, read: 700, shut: true, captionMax: 28);
+                    card = Framed(pic, new Placed(), look, light, 1, 0, pics, null, still: true, read: 700, shut: true, captionMax: 28, photo: photo);
                 }
                 finally { _boardScale = keepScale; _boardCalm = keepCalm; }
             return card;
@@ -3224,17 +3293,8 @@ public sealed partial class MainWindow
         // a copy of a picture's card flown between its place in the room (big) and a card's place (small), above all
         void Fly(Picture pic, Windows.Foundation.Rect big, Windows.Foundation.Rect small, double turn, bool open, int ms, Action? done, BitmapImage? sharp = null)
         {
-            var copy = CardFor(pic);
-            // (its photo is found once it is in the window: before that it has no visual children to look in)
-            if (sharp is { PixelWidth: > 0 })
-                copy.Loaded += (_, _) =>
-                {
-                    switch (PhotoOf(copy))
-                    {
-                        case Image i: i.Source = sharp; break;
-                        case Border { Background: ImageBrush ib }: ib.ImageSource = sharp; break;
-                    }
-                };
+            // (made with the picture already read, so it flies sharp from the first frame)
+            var copy = CardFor(pic, sharp is { PixelWidth: > 0 } ? sharp : null);
             // (the copy carries no empty caption: that only shows under the pointer)
             void Hush(DependencyObject d)
             {
@@ -3316,7 +3376,10 @@ public sealed partial class MainWindow
                 grow = false;
                 return;
             }
-            var card = CardFor(pic);
+            // (the picture itself, read at the size it is shown; a video keeps its cached frame)
+            var sharpCopy = pic.Video ? Thumb(path, root.Size.Width)
+                : new BitmapImage { DecodePixelType = DecodePixelType.Logical, DecodePixelWidth = (int)Math.Max(640, root.Size.Width), UriSource = new Uri(path) };
+            var card = CardFor(pic, sharpCopy);
             // a video opens as its card does, then the player takes the card's place where it landed
             void PlayIn()
             {
@@ -3336,29 +3399,9 @@ public sealed partial class MainWindow
             if (grow || old is null) photo.Children.Clear();
             photo.Children.Add(card);
             shown = card;
-            // (once in place the cached copy gives way to a sharp one, read off screen first so nothing blinks)
-            // (the picture itself, read at the size it is shown: a cached copy may not be made yet, and then the view opened
-            // on the small one; a video keeps its cached frame)
-            var sharpCopy = pic.Video ? Thumb(path, root.Size.Width)
-                : new BitmapImage { DecodePixelType = DecodePixelType.Logical, DecodePixelWidth = (int)Math.Max(640, root.Size.Width), UriSource = new Uri(path) };
+            // (read off screen too, so the grow below can wait for it)
             var loader = new Image { Source = sharpCopy, Width = 1, Height = 1, Opacity = 0.01, IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
-            void Sharpen()
-            {
-                stage.Children.Remove(loader);
-                if (shown != card) return;
-                void Apply()
-                {
-                    switch (PhotoOf(card))
-                    {
-                        case Image i: i.Source = sharpCopy; break;
-                        case Border { Background: ImageBrush ib }: ib.ImageSource = sharpCopy; break;
-                    }
-                }
-                // (a card not in the window yet has no photo to find: it takes the sharp one as it arrives)
-                if (card.IsLoaded) Apply(); else card.Loaded += (_, _) => Apply();
-            }
-            if (sharpCopy.PixelWidth > 0) Sharpen();
-            else { stage.Children.Add(loader); loader.ImageOpened += (_, _) => Sharpen(); }
+            if (sharpCopy.PixelWidth == 0) { stage.Children.Add(loader); loader.ImageOpened += (_, _) => stage.Children.Remove(loader); loader.ImageFailed += (_, _) => stage.Children.Remove(loader); }
             if (!grow)
             {
                 // (the next picture waits until it is read, then slides in over the last one, which slides out the other way)

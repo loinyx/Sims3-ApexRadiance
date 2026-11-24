@@ -994,6 +994,8 @@ public static partial class Strings
         ["{0} script errors involved {1} since {2} ({3}). If it causes problems, update or remove it."] = "{0} erros de script envolveram {1} desde {2} ({3}). Se ele der problema, atualize ou remova.",
         ["{0} of the last {1} game sessions ran out of memory (peak {2} MB of the game's 4096 MB). Fewer mods, less CC or a smaller world lowers it."] = "{0} das últimas {1} sessões de jogo ficaram sem memória (pico de {2} MB dos 4096 MB do jogo). Menos mods, menos CC ou um mundo menor reduzem o uso.",
         ["{0} of the last {1} game sessions crashed."] = "{0} das últimas {1} sessões de jogo fecharam com erro.",
+        ["{1} crashed the game once on {2}, before it was updated. No crash in it since."] = "{1} fechou o jogo uma vez em {2}, antes de ser atualizado. Nenhum erro nele desde então.",
+        ["{1} crashed the game {0} times before it was updated, last on {2}. No crash in it since."] = "{1} fechou o jogo {0} vezes antes de ser atualizado, a última em {2}. Nenhum erro nele desde então.",
         ["The game came close to its memory limit (peak {0} MB of 4096 MB)."] = "O jogo chegou perto do limite de memória (pico de {0} MB de 4096 MB).",
 
         // Home, Gallery, mod details and panels, launcher notes; the Gallery's data names (colours, sticker sets, album icons, entrances, frames, papers)

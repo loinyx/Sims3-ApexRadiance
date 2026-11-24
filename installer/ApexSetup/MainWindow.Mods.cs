@@ -490,7 +490,10 @@ public sealed partial class MainWindow
         else e.Cancel = true;
     }
 
-    void OnFolderDragDone(ListViewBase sender, DragItemsCompletedEventArgs e) => _dragFolder = null;
+    void OnFolderDragDone(ListViewBase sender, DragItemsCompletedEventArgs e) { _dragFolder = null; DragEnded?.Invoke(); }
+
+    // (a drag that ends anywhere, Esc included, puts out every lit target)
+    static event Action? DragEnded;
 
     static bool CanNest(string folder, string into) =>
         !into.Equals(folder, StringComparison.OrdinalIgnoreCase) && !into.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
@@ -504,22 +507,30 @@ public sealed partial class MainWindow
         g.CornerRadius = new CornerRadius(4);
         g.BorderThickness = new Thickness(1);
         g.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        // (the tint fades in and out, the row lifts a touch: a held item sees where it lands without a jump)
-        if (AnimationsOn) g.BackgroundTransition = new BrushTransition { Duration = TimeSpan.FromMilliseconds(120) };
+        // (the tint fades in and out; no scaling, which blurred the text and shifted the row under the pointer)
+        if (AnimationsOn) g.BackgroundTransition = new BrushTransition { Duration = TimeSpan.FromMilliseconds(100) };
+        var lit = false;
         void Light(bool on)
         {
-            g.Background = on ? Res("ApexAccentSoftBrush") : normal;
+            if (on == lit) return;
+            lit = on;
+            g.Background = on ? new SolidColorBrush(((SolidColorBrush)Res("ApexAccentBrush")).Color) { Opacity = 0.28 } : normal;
             g.BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            if (!AnimationsOn) return;
-            g.CenterPoint = new System.Numerics.Vector3((float)g.ActualWidth / 2, (float)g.ActualHeight / 2, 0);
-            g.ScaleTransition ??= new Vector3Transition { Duration = TimeSpan.FromMilliseconds(160) };
-            g.Scale = on ? new System.Numerics.Vector3(1.02f, 1.02f, 1) : new System.Numerics.Vector3(1, 1, 1);
         }
         g.DragEnter += (_, _) => { if (can()) Light(true); };
-        g.DragLeave += (_, _) => Light(false);
+        void Out() => Light(false);
+        g.Loaded += (_, _) => DragEnded += Out;
+        g.Unloaded += (_, _) => DragEnded -= Out;
+        // (leaving for the row's own text also raises a leave: only a pointer really outside the row puts the light out)
+        g.DragLeave += (_, e) =>
+        {
+            var at = e.GetPosition(g);
+            if (at.X <= 0 || at.Y <= 0 || at.X >= g.ActualWidth || at.Y >= g.ActualHeight) Light(false);
+        };
         g.DragOver += (_, e) =>
         {
             if (!can()) return;
+            Light(true);
             e.AcceptedOperation = DataPackageOperation.Move;
             e.DragUIOverride.Caption = caption();
         };
@@ -702,7 +713,7 @@ public sealed partial class MainWindow
     }
 
     // (a drag let go outside a target or cancelled with Esc: a later drop from Explorer must not act on these rows)
-    void OnModDragDone(ListViewBase sender, DragItemsCompletedEventArgs e) => _dragRows = null;
+    void OnModDragDone(ListViewBase sender, DragItemsCompletedEventArgs e) { _dragRows = null; DragEnded?.Invoke(); }
 
     void MoveMods(List<ModRow> rows, string dir)
     {
@@ -1293,13 +1304,13 @@ public sealed partial class MainWindow
         var narrow = w < 1100;
         var compact = w < 780;
         DispatcherQueue.TryEnqueue(PlaceSelectionBar);
+        ModsHuntText.Visibility = w < 1280 ? Visibility.Collapsed : Visibility.Visible; // (the title keeps its line: the button goes to its icon first)
         if (narrow == _modsNarrow && compact == _modsCompact && e.PreviousSize.Width > 0) return;
         _modsNarrow = narrow;
         _modsCompact = compact;
         ModColFolders.Width = new GridLength(compact ? 0 : narrow ? 220 : 248);
         ModSide.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         ModsPlaces.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
-        ModsHuntText.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
         ModColDetails.Width = new GridLength(narrow ? 0 : 340);
         Grid.SetColumn(ModDetailsPane, narrow ? 1 : 2);
         ModDetailsPane.Shadow = narrow ? new ThemeShadow() : null;

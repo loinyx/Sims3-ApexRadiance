@@ -14,8 +14,9 @@ namespace ApexSetup;
 // All three formats seen on a real install; the frame layout matches NRaas' ErrorTrap output.
 public static partial class ScriptErrors
 {
-    public sealed record Error(DateTime When, string? Mod, IReadOnlyList<string> Files, string Exception, bool Crash, string Log);
-    public sealed record ModErrors(string? Mod, IReadOnlyList<string> Files, int Count, int Crashes, DateTime Newest, string Exception);
+    // Earlier: a crash in a file replaced since (an update): history, not a pattern
+    public sealed record Error(DateTime When, string? Mod, IReadOnlyList<string> Files, string Exception, bool Crash, string Log, bool Earlier = false);
+    public sealed record ModErrors(string? Mod, IReadOnlyList<string> Files, int Count, int Crashes, DateTime Newest, string Exception, bool Earlier = false);
     // Unread: script logs past MaxFiles, not read (the counts are then "at least")
     public sealed record Report(DateTime Since, List<Error> Errors, List<ModErrors> ByMod, int Unread = 0)
     {
@@ -76,8 +77,8 @@ public static partial class ScriptErrors
                 || m.Rel.Split(Path.DirectorySeparatorChar).Any(part => part.Equals(mod, StringComparison.OrdinalIgnoreCase)));
             errors = errors.Where(e => e.Crash || e.Mod is not { } name || Installed(name)).ToList();
         }
-        var byMod = errors.GroupBy(e => e.Mod ?? "").Select(g => new ModErrors(g.Key == "" ? null : g.Key, g.SelectMany(e => e.Files).Distinct().ToList(), g.Count(),
-                g.Count(e => e.Crash), g.Max(e => e.When), g.GroupBy(e => e.Exception).OrderByDescending(x => x.Count()).First().Key))
+        var byMod = errors.GroupBy(e => (Mod: e.Mod ?? "", e.Earlier)).Select(g => new ModErrors(g.Key.Mod == "" ? null : g.Key.Mod, g.SelectMany(e => e.Files).Distinct().ToList(), g.Count(),
+                g.Count(e => e.Crash), g.Max(e => e.When), g.GroupBy(e => e.Exception).OrderByDescending(x => x.Count()).First().Key, g.Key.Earlier))
             .OrderByDescending(m => m.Newest).ThenByDescending(m => m.Count).ToList();
         return new(from, errors.OrderByDescending(e => e.When).ToList(), byMod, unread);
     }
@@ -117,19 +118,38 @@ public static partial class ScriptErrors
         return t;
     }
 
-    // the game's crash log: the module that faulted ("address: 0x... "<path>":..."), else the first module in the call stack
-    // that is neither the game's exe nor Windows'
+    // the game's crash log: only the module that faulted ("address: 0x... "<path>":...") is named. A module further down the
+    // call stack is not: plugins that hook the game's frame (Apex Radiance, the settings setter) sit in nearly every stack
+    // without having done anything. A fault in the game's exe or in Windows is the game's own.
     static IEnumerable<Error> Native(string text, FileInfo f, IReadOnlyList<ModFile>? mods)
     {
         if (!text.Contains("[Exception info]")) yield break;
         var type = Regex.Match(text, @"^type:\s*([A-Z_]+)", RegexOptions.Multiline).Groups[1].Value;
         var fault = Regex.Match(text, @"^address:\s*0x[0-9a-fA-F]+\s+""([^""]+)""", RegexOptions.Multiline).Groups[1].Value;
-        var stack = text.IndexOf("[Call stack]", StringComparison.Ordinal) is var at and >= 0 ? text[at..] : "";
-        var module = new[] { fault }.Concat(Regex.Matches(stack, @"^([A-Za-z]:\\[^\r\n]+\.(?:asi|dll|exe))\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase).Select(m => m.Groups[1].Value))
-            .FirstOrDefault(p => p.Length > 0 && !Regex.IsMatch(Path.GetFileName(p), @"^TS3W?\.exe$", RegexOptions.IgnoreCase)
-                                 && !p.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows), StringComparison.OrdinalIgnoreCase));
+        string? module = fault.Length > 0 && !Regex.IsMatch(Path.GetFileName(fault), @"^TS3W?\.exe$", RegexOptions.IgnoreCase)
+            && !fault.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows), StringComparison.OrdinalIgnoreCase) ? fault : null;
         var file = module is null ? null : mods?.FirstOrDefault(m => m.Path.Equals(module, StringComparison.OrdinalIgnoreCase))?.Path ?? module;
-        yield return new(f.LastWriteTime, module is null ? null : Path.GetFileName(module), file is null ? [] : [file], type.Length > 0 ? type : "crash", true, f.FullName);
+        // (the file was replaced after the crash: an update since, so the crash is history)
+        var earlier = module is not null && File.Exists(module) && File.GetLastWriteTime(module) > f.LastWriteTime.AddMinutes(1);
+        yield return new(f.LastWriteTime, module is null ? null : NameOf(module), file is null ? [] : [file], type.Length > 0 ? type : "crash", true, f.FullName, earlier);
+    }
+
+    // what a faulting file is, by its version info: a d3d9.dll is the renderer put in Game\Bin, not "a mod"
+    public static string NameOf(string path)
+    {
+        var name = Path.GetFileName(path);
+        if (name.Equals("ApexRadiance.asi", StringComparison.OrdinalIgnoreCase)) return "Apex Radiance";
+        try
+        {
+            var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(path);
+            var what = $"{v.ProductName} {v.FileDescription} {v.CompanyName}";
+            var known = what.Contains("remix", StringComparison.OrdinalIgnoreCase) ? "RTX Remix bridge"
+                : what.Contains("dxvk", StringComparison.OrdinalIgnoreCase) ? "DXVK"
+                : what.Contains("reshade", StringComparison.OrdinalIgnoreCase) ? "ReShade"
+                : null;
+            return known is null ? name : $"{known} ({name})";
+        }
+        catch (Exception e) when (e is FileNotFoundException or IOException or UnauthorizedAccessException) { return name; }
     }
 
     // ---------- type name -> the script mod that defines it ----------
@@ -217,9 +237,17 @@ public static partial class ScriptErrors
         {
             var sev = m.Count - m.Crashes >= 5 ? Severity.Warning : Severity.Info; // (unverified cut: one stray error is common with ErrorTrap)
             // the game crashes now and then without any mod: one or two in a place is a note, three a pattern worth a look
-            if (m.Crashes > 0)
+            if (m.Crashes > 0 && m.Earlier)
             {
-                var last = r.Errors.Where(e => e.Crash && e.Mod == m.Mod).Max(e => e.When).ToString("g");
+                // (crashes in a file updated since: a note, never a pattern; nothing has crashed there since the update)
+                var before = r.Errors.Where(e => e.Crash && e.Earlier && e.Mod == m.Mod).Max(e => e.When).ToString("g");
+                f.Add(new(new(Severity.Info, m.Crashes == 1 ? "{1} crashed the game once on {2}, before it was updated. No crash in it since."
+                        : "{1} crashed the game {0} times before it was updated, last on {2}. No crash in it since.",
+                    [m.Crashes.ToString(), m.Mod!, before]), m.Files));
+            }
+            else if (m.Crashes > 0)
+            {
+                var last = r.Errors.Where(e => e.Crash && !e.Earlier && e.Mod == m.Mod).Max(e => e.When).ToString("g");
                 f.Add(new(new(m.Crashes >= CrashPattern ? Severity.Warning : Severity.Info, m.Crashes == 1
                         ? m.Mod is null ? "The game crashed once in its own code, on {1}." : "The game crashed once in {1}, on {2}."
                         : m.Mod is null ? "The game crashed {0} times in its own code. This past week, last on {1}." : "{1} crashed the game {0} times. This past week, last on {2}.",
