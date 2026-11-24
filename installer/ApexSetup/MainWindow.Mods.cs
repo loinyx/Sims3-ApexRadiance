@@ -44,7 +44,6 @@ public sealed partial class MainWindow
     bool _fillingMods, _modsAgain;
     List<ModRow>? _dragRows;
     string? _dragFolder;
-    readonly Dictionary<string, ModContents> _modContents = new(StringComparer.OrdinalIgnoreCase);
     Action? _modUndo;
     GameIndex? _gameIndex;
 
@@ -294,7 +293,7 @@ public sealed partial class MainWindow
             || ModNotes.TagsOf(m.Rel).Any(t => t.Contains(q, StringComparison.OrdinalIgnoreCase))
             || (CreatorOf(m)?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
             || r.Kinds.Any(k => KindLabel(k).Contains(q, StringComparison.OrdinalIgnoreCase))
-            || _modContents.TryGetValue(m.Path, out var c) && c.Names.Concat(c.PartNames).Any(n => n.Contains(q, StringComparison.OrdinalIgnoreCase))))
+            || _contentNames.TryGetValue(m.Path, out var c) && c.Any(n => n.Contains(q, StringComparison.OrdinalIgnoreCase))))
             return false;
         if (_fFiles.Count > 0 && !_fFiles.Contains(m.FileType)) return false;
         if (_fKinds.Count > 0 && !r.Kinds.Any(_fKinds.Contains)) return false;
@@ -1741,40 +1740,6 @@ public sealed partial class MainWindow
     }
 
     // ---------- what a package holds ----------
-
-    UIElement InsidePanel(ModRow r)
-    {
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(new TextBlock { Text = T("INSIDE"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush") });
-        var path = r.File.Path;
-        void Fill(ModContents c)
-        {
-            while (panel.Children.Count > 1) panel.Children.RemoveAt(1);
-            if (c.Parts.Count == 0 && c.Names.Count == 0)
-            {
-                panel.Children.Add(Muted(r.File.Kind == ModKind.Script ? T("Game code and settings: no objects or Create a Sim parts.") : T("No objects or Create a Sim parts: it changes what the game already has.")));
-                return;
-            }
-            var wrap = new WrapPanel { Spacing = 6 };
-            foreach (var (kind, n) in c.Parts) wrap.Children.Add(Pill(PartsText(kind, n), "ApexSoftTextBrush"));
-            panel.Children.Add(wrap);
-            var names = c.Names.Count > 0 ? c.Names : c.PartNames;
-            const int shown = 8;
-            foreach (var n in names.Take(shown))
-                panel.Children.Add(new TextBlock { Text = "•  " + n, FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
-            var more = c.Parts.Sum(x => x.Count) - Math.Min(shown, names.Count);
-            if (names.Count > 0 && more > 0) panel.Children.Add(Muted(T("and {0} more", more)));
-        }
-        if (_modContents.TryGetValue(path, out var known)) Fill(known);
-        else
-        {
-            panel.Children.Add(Muted(T("Reading what it holds…")));
-            // (a damaged package of any kind reads as empty, never an error box)
-            _ = Task.Run(() => { try { return ModContent.Read(path); } catch (Exception e) { App.Log(e); return new ModContents([], [], []); } })
-                .ContinueWith(t => DispatcherQueue.TryEnqueue(() => { _modContents[path] = t.Result; Fill(t.Result); }));
-        }
-        return panel;
-    }
 
     // "12 objects", "1 hairstyle"
     static string PartsText(string kind, int n) => (kind, n == 1) switch

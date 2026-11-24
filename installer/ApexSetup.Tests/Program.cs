@@ -1667,8 +1667,8 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         var cp = Path.Combine(lr, "Contents", "Sofa.package");
         var stblData = Stbl((0x1111, "Comfy Sofa"), (0x2222, "A sofa."));
         TestPackage(cp, (0x220557DAu, stblData, false, stblData.Length), (0x319E4F1Du, objd.ToArray(), false, objd.Count), (0x034AEECBu, casp.ToArray(), false, casp.Count));
-        var inside = ModContent.Read(cp);
-        Check(inside.Names.SequenceEqual(["Comfy Sofa"]) && inside.PartNames.SequenceEqual(["afHairLong"])
+        var inside = ModInspect.Read(cp, "en");
+        Check(inside.Items.Select(i => i.Name).SequenceEqual(["Comfy Sofa", "afHairLong"])
             && inside.Parts.Contains(("Object", 1)) && inside.Parts.Contains(("Hair", 1)),
             "mods: an object's catalog name from the package's strings, a CAS part's kind and name");
 
@@ -1691,6 +1691,7 @@ HealthTests.Run(Check);
 ModToolsTests.Run(Check);
 GalleryTests.Run(Check);
 DefaultReplacementsTests.Run(Check);
+ModInspectTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;

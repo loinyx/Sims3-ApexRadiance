@@ -97,7 +97,7 @@ public static partial class ModConflicts
     // a resource this small in every copy is a placeholder (an empty video or image): mods that blank the same thing agree
     public const uint TinyBytes = 256;
     // (media only: a video, an image or a sound this small is blanked out; a small tuning file is still a real change)
-    static readonly HashSet<uint> Blankable = [0xB1CC1AF6, 0x00B2D882, 0x2F7D0004, 0x01A527DB, 0x01EEF63A, 0x8070223D];
+    internal static readonly HashSet<uint> Blankable = [0xB1CC1AF6, 0x00B2D882, 0x2F7D0004, 0x01A527DB, 0x01EEF63A, 0x8070223D];
     static readonly Dictionary<uint, string> TypeNames = new()
     {
         [0x0333406c] = "_XML", [0x03b33ddf] = "ITUN", [0x034aeecb] = "CASP", [0x319e4f1d] = "OBJD", [0x073faa07] = "S3SA", [0x0166038c] = "_KEY", [0x00b2d882] = "_IMG",
