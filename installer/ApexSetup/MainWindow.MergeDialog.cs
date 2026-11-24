@@ -23,7 +23,7 @@ public sealed partial class MainWindow
         if (rows.Count == 0) { SetInfo(ModsInfo, InfoBarSeverity.Informational, T("These mods can't be merged"), T("Pick at least two packages that can be merged.")); return; }
         var mods = rows.Select(r => r.File).ToList();
         folder ??= rows.Select(r => DirOf(r.File)).GroupBy(d => d).OrderByDescending(g => g.Count()).First().Key;
-        name ??= (Path.GetFileName(folder) is { Length: > 0 } f ? f : "Mods") + "-merged";
+        name ??= ModMerge.FreeName(Docs, folder, (Path.GetFileName(folder) is { Length: > 0 } f ? f : "Mods") + "-merged");
         if (await MergeDialog(Docs, mods, name, folder) is not { } jobs) return;
         var (done, error) = await MergeRunDialog(jobs);
         // (the game's caches point at the files as they were: cleared, a mod that looks missing in the game shows again)
@@ -175,7 +175,8 @@ public sealed partial class MainWindow
             var made = plans.Count + (scripts is null ? 0 : 1);
             busy.IsActive = false;
             d.Title = inside == mods.Count ? T("Merge {0} mods", inside) : T("Merge {0} of the {1} mods chosen", inside, mods.Count);
-            line.Text = trouble is not null ? "" : made == 1 ? T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, inside, resources, ModRow.SizeText(bytes))
+            line.Text = trouble is not null || inside < 2 ? "" : made == 1 ? // (one mod: no merge yet, and the reason is said below)
+                T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, inside, resources, ModRow.SizeText(bytes))
                 : T("Into {0} · {1} packages · {2} mods · {3} resources · {4}", PlaceTitle(folder).Title, made, inside, resources, ModRow.SizeText(bytes));
             d.PrimaryButtonText = CanRun() ? T("Merge") : T("Check again");
             d.IsPrimaryButtonEnabled = true;
@@ -431,7 +432,7 @@ public sealed partial class MainWindow
             _mergeNews = [];
             ShowMergeUpdates();
         }));
-        var g = new Grid { ColumnSpacing = 12, RowSpacing = 10 };
+        var g = new Grid { ColumnSpacing = 12 };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         foreach (var h in new[] { GridLength.Auto, GridLength.Auto }) g.RowDefinitions.Add(new RowDefinition { Height = h });
         Grid.SetColumn(say, 1);
@@ -440,6 +441,7 @@ public sealed partial class MainWindow
         void Place(double width)
         {
             var narrow = width < 560;
+            g.RowSpacing = narrow ? 10 : 0; // (one line: the empty second row adds no gap under it)
             Grid.SetRow(acts, narrow ? 1 : 0);
             Grid.SetColumn(acts, narrow ? 1 : 2);
             Grid.SetColumnSpan(acts, narrow ? 2 : 1);

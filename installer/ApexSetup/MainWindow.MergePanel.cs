@@ -266,7 +266,7 @@ public sealed partial class MainWindow
                 AutomationProperties.SetName(c, i.Name + ", " + line);
             }
             var share = _draftPlan?.Plan?.Shares.GetValueOrDefault(i.NewRel);
-            string With(string line) => string.Join(" · ", new[] { line, share is null ? null : ShareText(share) }.OfType<string>());
+            string With(string line) => string.Join(" · ", new[] { line, share is null ? null : ShareText(share) }.Where(x => !string.IsNullOrEmpty(x))); // (no share to tell: no dot left hanging)
             if (i.Changed) Say(With(ChangeText(i)), Res(i.Out is null ? "ApexSuccessBrush" : "ApexSoftTextBrush"));
             else if (newer is not null) Say(With(T("New version: {0}", Path.GetFileNameWithoutExtension(newer.Name))), Res("ApexWarningBrush"));
             else
@@ -728,7 +728,7 @@ public sealed partial class MainWindow
 
         var badges = new List<Border>();
         if (row.Defaults.IsDefault) badges.Add(StripBadge(T("Default replacement"), "replace", "#9CC7EE"));
-        ModDetailsHead.Children.Add(HeadPanel(row, back, PictureTile(row, KindIcon(row.Kinds[0]), o.Note?.Picture is not null), NameText(row.Name, row.File.Name), T("Inside the merge {0}", r.Name) + " · " + row.Size, null, badges));
+        ModDetailsHead.Children.Add(HeadPanel(row, back, PictureTile(row, KindIcon(row.Kinds[0]), o.Note?.Picture is not null), NameText(row.Name, row.File.Name), T("Inside the merge {0}", r.Name), null, badges));
         DetailsTabs(tabs, null);
 
         // the player's own words about it, kept with the merge

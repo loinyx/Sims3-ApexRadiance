@@ -105,6 +105,15 @@ public static partial class ModMerge
 {
     public const string FolderName = "Merged (Apex Launcher)";
     public static string Folder(string docs) => Path.Combine(docs, FolderName);
+
+    // the name offered for a new merge in a folder of Mods: this one, or it with the first number no file or merge there has
+    public static string FreeName(string docs, string folderRel, string name)
+    {
+        bool Taken(string n) => File.Exists(Path.Combine(docs, "Mods", folderRel, n + ".package")) || File.Exists(Path.Combine(Mods.Disabled(docs), folderRel, n + ".package"))
+            || Directory.Exists(Path.Combine(Folder(docs), n));
+        if (!Taken(name)) return name;
+        for (var i = 2; ; i++) if (!Taken($"{name} {i}")) return $"{name} {i}";
+    }
     static string OldFolder(string docs) => Path.Combine(docs, "Mods", FolderName); // (where 2.1 and older kept them)
     public const string ShownFolder = "The Sims 3\\" + FolderName;
     // an original kept by a merge, not one of the player's mods now

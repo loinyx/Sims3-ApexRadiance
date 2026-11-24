@@ -1458,8 +1458,12 @@ public sealed partial class MainWindow
         _mergePaint = null;
         var picked = DraftRow() is { } open ? [open] : Picked(); // (a merge with changes not saved stays open whatever the list shows)
         // (nothing chosen: no pane, the list has the whole width)
+        var opens = ModDetailsPane.Visibility == Visibility.Collapsed;
         ModDetailsPane.Visibility = _findPage is not null || picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         ModColDetails.Width = new GridLength(_modsNarrow || ModDetailsPane.Visibility == Visibility.Collapsed ? 0 : ModDetailsPane.Width);
+        // (the list gets narrower as the pane opens: the mod chosen stays in sight)
+        if (opens && ModDetailsPane.Visibility == Visibility.Visible && picked.Count == 1 && picked[0] is var seen)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => (_modsGrid ? (ListViewBase)ModGrid : ModList).ScrollIntoView(seen));
         // (over the grid the pane would hide whole columns of tiles: the grid makes room for it instead)
         var room = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
         if (ModGrid.Padding.Right != 24 + room) { ModGrid.Padding = new Thickness(0, 0, 24 + room, 72); FitModGrid(); }
