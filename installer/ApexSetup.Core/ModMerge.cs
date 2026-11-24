@@ -656,12 +656,7 @@ public static partial class ModMerge
         try
         {
             if (!Directory.Exists(dir)) return;
-            bool Others() => Kept(dir).Count > 0;
-            // (a file just moved or deleted that an antivirus still holds stays listed a moment: up to 2 s for it to go)
-            for (var i = 0; i < 40 && Others(); i++) Thread.Sleep(50);
-            if (Others()) return;
-            // (a recursive delete says nothing when a subfolder is still held: asked again, 3 times)
-            for (var i = 0; i < 3 && Directory.Exists(dir); i++) { Fs.Retry(() => Directory.Delete(dir, true)); Fs.Gone(dir); }
+            Fs.DeleteClear(dir, () => Files(dir).Count == 0);
             var parent = Path.GetDirectoryName(dir)!;
             if (!Directory.EnumerateFileSystemEntries(parent).Any()) { Fs.Retry(() => Directory.Delete(parent)); Fs.Gone(parent); }
         }

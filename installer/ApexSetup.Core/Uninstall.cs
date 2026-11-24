@@ -26,10 +26,10 @@ public static class Uninstall
             if (Path.GetFileName(f).Equals("setup.json", StringComparison.OrdinalIgnoreCase) && Path.GetDirectoryName(f)!.Equals(dir, StringComparison.OrdinalIgnoreCase)) continue;
             if (f.StartsWith(restore, StringComparison.OrdinalIgnoreCase)) continue;
             try { ModLibrary.Recycle(f); }
-            catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { left.Add(f); }
+            catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { if (File.Exists(f)) left.Add(f); } // (an antivirus's own file comes and goes)
         }
         if (left.Count > 0) return left;
-        try { Fs.Retry(() => Directory.Delete(dir, true)); }
+        try { Fs.DeleteClear(dir); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(dir); }
         return left;
     }
@@ -66,7 +66,7 @@ public static class Uninstall
             {
                 // (a link goes alone, never what it points to)
                 if (Directory.Exists(entry) && File.GetAttributes(entry).HasFlag(FileAttributes.ReparsePoint)) Directory.Delete(entry);
-                else if (Directory.Exists(entry)) Fs.Retry(() => Directory.Delete(entry, true));
+                else if (Directory.Exists(entry)) Fs.DeleteClear(entry);
                 else Fs.Retry(() => File.Delete(entry));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(entry); }

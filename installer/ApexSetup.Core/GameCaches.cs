@@ -94,7 +94,7 @@ public static class GameCaches
             foreach (var (from, dest) in Enumerable.Reverse(moved))
                 try { Fs.Retry(() => File.Move(dest, from)); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); } // (it stays in the backup, which Restore puts back)
-            try { if (!Kept(to).Any()) Directory.Delete(to, true); }
+            try { if (!Kept(to).Any()) Fs.DeleteClear(to); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
             throw;
         }
@@ -105,7 +105,7 @@ public static class GameCaches
                 if (DocsOf(d)?.Equals(docs, StringComparison.OrdinalIgnoreCase) != true) continue;
                 foreach (var f in files)
                     if (Path.Combine(d, f.Rel) is var stale && File.Exists(stale)) File.Delete(stale);
-                if (!Kept(d).Any()) Directory.Delete(d, true);
+                if (!Kept(d).Any()) Fs.DeleteClear(d);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         return files.Sum(f => f.Size);
@@ -133,7 +133,7 @@ public static class GameCaches
         }
         // (an emptied backup an antivirus still holds is dropped like an old one: hidden now, deleted by the next Clean or Forget)
         foreach (var from in all)
-            try { Fs.Retry(() => Directory.Delete(from, true)); }
+            try { Fs.DeleteClear(from); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); Forget(); break; }
         return all.Count > 0;
     }
@@ -143,7 +143,7 @@ public static class GameCaches
     {
         // what an earlier Forget renamed but could not delete
         foreach (var old in Directory.Exists(Paths.Data) ? Directory.EnumerateDirectories(Paths.Data, "cache-backup.old-*") : [])
-            try { Directory.Delete(old, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+            try { Fs.DeleteClear(old); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         if (!Directory.Exists(BackupRoot)) return;
         // renamed first, so the backup is gone at once even while Windows finishes deleting files an antivirus or indexer
         // still holds (deleting in place could leave the folder half there, or vanishing under the dropped mark)
@@ -156,7 +156,7 @@ public static class GameCaches
             try { Directory.CreateDirectory(BackupRoot); File.WriteAllText(DroppedMark, ""); } catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) { Engine.Log(e2); }
             return;
         }
-        try { Fs.Retry(() => Directory.Delete(gone, true)); }
+        try { Fs.DeleteClear(gone); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }
 }

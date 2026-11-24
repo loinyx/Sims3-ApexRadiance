@@ -115,7 +115,7 @@ public static class Mods
             Fs.Retry(() => File.Move(m.Path, target));
             n++;
         }
-        try { if (Directory.Exists(Disabled(docs)) && !Directory.EnumerateFileSystemEntries(Disabled(docs), "*", SearchOption.AllDirectories).Any(e => File.Exists(e))) Fs.Retry(() => Directory.Delete(Disabled(docs), true)); }
+        try { Fs.DeleteClear(Disabled(docs), () => !Directory.EnumerateFiles(Disabled(docs), "*", SearchOption.AllDirectories).Any()); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return n;
     }
