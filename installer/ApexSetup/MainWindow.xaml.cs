@@ -127,9 +127,13 @@ public sealed partial class MainWindow : Window
         RefreshGame();
         Show(Maintenance ? MaintenanceScreen(Elevation.Parse(Environment.GetCommandLineArgs()).Screen) : FirstInstall ? Welcome : Home);
         _ = DetectVulkanAsync();
+        // (at once, not after the releases are read: that can take half a minute, or the player can be playing by then)
+        var tour = AuditFile is not null && Environment.GetEnvironmentVariable("APEX_LAUNCHER_AUDIT_TOUR") == "1";
+        _started = !tour;
+        if (!tour) StartUpgrade();
         await LoadReleasesAsync();
-        if (AuditFile is not null && Environment.GetEnvironmentVariable("APEX_LAUNCHER_AUDIT_TOUR") == "1") _ = AuditTourAsync();
-        else { StartUpgrade(); await OpenPendingAsync(); }
+        if (tour) _ = AuditTourAsync();
+        else await OpenPendingAsync();
         // (the launcher's choices, applied as if Apply was clicked: the player already did, before Windows asked)
         if (Maintenance && TakeChoices()) OnNext(NextButton, new RoutedEventArgs());
         await CheckSetupUpdateAsync();
@@ -310,6 +314,8 @@ public sealed partial class MainWindow : Window
         Scroller.ChangeView(null, 0, null, true);
         SyncNav();
         RefreshAll();
+        // (a game with Apex Radiance found only now, by its folder: where the launcher lives was not asked yet)
+        if (step == Home && _started && !_upgradeAsked) StartUpgrade();
     }
 
     // the sidebar shows the screen that is open (also after a refused jump); Install and Done have no item
@@ -389,6 +395,7 @@ public sealed partial class MainWindow : Window
                 else Show(GameStep);
                 break;
             case RendererStep: Show(ComponentsStep); break;
+            case GameSettingsScreen: await ApplyGameSettings(); break;
             case WizardSettings: { var (add, del) = Plan(); await InstallAsync(add, del); break; }
             case GameStep: if (CanLeaveGame()) Show(ComponentsStep); break;
             case ComponentsStep:
@@ -432,7 +439,7 @@ public sealed partial class MainWindow : Window
         if (_step != InstallStep) BackButton.IsEnabled = true;
         // a game with Apex and nothing to update: the status card's own buttons are the actions, no wizard to go into
         var settled = _step == Welcome && _state?.ApexVersion is not null && _game is not null && WelcomeUpdates().Count == 0 && _updated is null;
-        NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or WizardSettings or DoneStep or RendererStep || _step == InstallStep && _failChoice is not null ? Visibility.Visible : Visibility.Collapsed;
+        NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or WizardSettings or GameSettingsScreen or DoneStep or RendererStep || _step == InstallStep && _failChoice is not null ? Visibility.Visible : Visibility.Collapsed;
         var (wa, wd) = _step == ComponentsStep ? Plan() : (new List<string>(), new List<string>());
         var settings = _step == ComponentsStep ? SettingChanges().Select(c => c.Label).ToList() : new List<string>();
         var work = wa.Concat(wd).Concat(settings).ToList();
@@ -444,6 +451,7 @@ public sealed partial class MainWindow : Window
             RendererStep => T("Use {0}", RendererShort(_renderer)),
             ComponentsStep when _offline && wa.Count > 0 => T("Try again"),
             WizardSettings => T("Install"),
+            GameSettingsScreen => GameSettingsCount() switch { 0 => T("Nothing to apply"), 1 => T("Apply 1 change"), var n => T("Apply {0} changes", n) },
             ComponentsStep when Wizard && FirstInstall && !Maintenance && wa.Count > 0 => T("Next"),
             ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Nothing to apply")) : _state?.ApexVersion is null ? T("Install")
                 : work.Count == 1 ? T("Apply 1 change") : T("Apply {0} changes", work.Count),
@@ -455,6 +463,8 @@ public sealed partial class MainWindow : Window
         {
             GameStep => CanLeaveGame(),
             WizardSettings => !_running && !_offline,
+            // (a value being typed counts once its box is left, which the click on the button itself does)
+            GameSettingsScreen => !_running && _game is not null && (_gsTyping || GameSettingsCount() > 0),
             // removals and fixes need no download; installs wait for the release check (offline: the button retries it)
             ComponentsStep => !_loading && !_running && _game is not null && (work.Count > 0 || fixes),
             _ => true,
@@ -464,6 +474,7 @@ public sealed partial class MainWindow : Window
             ComponentsStep or WizardSettings when _running && Wizard => T("Waiting for the game to close\u2026"),
             GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."),
             GameStep when Wizard && _gameAllSet => T("All set to install."),
+            GameSettingsScreen => _running ? T("Close The Sims 3 to continue") : T("Each file is copied before it changes."),
             WizardSettings => T("Nothing changes until you install. Each file is copied first."),
             InstallStep when Wizard && _busy => T("Don't close the window."),
             InstallStep when _failChoice is not null && _failDxvk => T("Try again, or install with DXVK instead of the bridge."),

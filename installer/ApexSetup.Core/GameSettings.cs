@@ -60,6 +60,8 @@ public static class GameSettings
     static bool IsSwitch(string v) => v is "0" or "1";
     static bool IsNumber(string v) => Number(v) is >= 0 and <= 100;
     public static double? Number(string? v) => double.TryParse(v, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var d) ? d : null;
+    // a value typed with a dot or a comma, as the files write it (a dot); null when it is not a number from 0 to 100
+    public static string? Typed(string text) => text.Trim().Replace(',', '.') is var t && IsNumber(t) ? t : null;
     public static bool Same(string? a, string? b) => a == b || Number(a) is { } x && Number(b) is { } y && Math.Abs(x - y) < 1e-6;
     public static GameSetting Of(string id) => All.First(s => s.Id == id);
     public static bool InBin(string id) => Of(id).File != SettingFile.Options;

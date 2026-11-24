@@ -666,8 +666,8 @@
                         <StackPanel x:Name="ScreenSettings" Spacing="10" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenGallery" Spacing="16" Visibility="Collapsed" />
                         <!-- 16 Game settings, 17 the install's step with the same options (MainWindow.GameSettings.cs) -->
-                        <StackPanel x:Name="ScreenGameSettings" Spacing="10" Visibility="Collapsed" />
-                        <StackPanel x:Name="ScreenWizardSettings" Spacing="8" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenGameSettings" Spacing="4" Visibility="Collapsed" MaxWidth="920" />
+                        <StackPanel x:Name="ScreenWizardSettings" Spacing="4" Visibility="Collapsed" />
 
                         <!-- 6 About -->
                         <StackPanel x:Name="ScreenAbout" Spacing="14" Visibility="Collapsed">

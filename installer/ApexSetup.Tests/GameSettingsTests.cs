@@ -33,6 +33,12 @@ static class GameSettingsTests
             check(GameSettings.Changes(new Dictionary<string, string> { ["shadow"] = "16384", ["walk.radius"] = "-1", ["walk.stop"] = "1.850", ["nope"] = "1" }, now).Count == 0,
                 "game settings: a value the page does not offer, or the one there, changes nothing");
 
+            var culture = System.Globalization.CultureInfo.CurrentCulture;
+            System.Globalization.CultureInfo.CurrentCulture = new("pt-BR");
+            check(GameSettings.Typed("0.15") == "0.15" && GameSettings.Typed(" 0,15 ") == "0.15" && GameSettings.Typed("3") == "3"
+                  && new[] { "", "abc", "-1", "101", "1.234,5", "NaN", "1e2" }.All(x => GameSettings.Typed(x) is null), "game settings: a typed dot and comma both mean decimals, whatever Windows' language");
+            System.Globalization.CultureInfo.CurrentCulture = culture;
+
             GameSettings.ApplyBin(g, docs, now);
             check(Get(rules) == Rules && Get(ini) == Ini && !GameSettings.CanRestore(bin, docs), "game settings: nothing wanted, nothing written or copied");
 
@@ -102,7 +108,7 @@ static class GameSettingsTests
                 var (r0, i0) = (Get(rules), Get(ini));
                 now = GameSettings.Now(bin, docs);
                 check(GameSettings.All.All(s => now.ContainsKey(s.Id)), "game settings (real files): every option has its place");
-                GameSettings.ApplyBin(g, docs, new Dictionary<string, string> { ["shadow"] = "8192", ["sims"] = "4096", ["reads"] = "40000000", ["walk.gap"] = "0.1", ["bloom"] = now["bloom"] == "1" ? "0" : "1" });
+                GameSettings.ApplyBin(g, docs, new Dictionary<string, string> { ["shadow"] = now["shadow"] == "8192" ? "4096" : "8192", ["sims"] = "4096", ["reads"] = now["reads"] == "40000000" ? "20000000" : "40000000", ["walk.gap"] = "0.2", ["bloom"] = now["bloom"] == "1" ? "0" : "1" });
                 check(Get(rules) != r0 && Get(ini) != i0, "game settings (real files): written");
                 GameSettings.RestoreBin(g);
                 check(Get(rules) == r0 && Get(ini) == i0, "game settings (real files): restored byte for byte");
