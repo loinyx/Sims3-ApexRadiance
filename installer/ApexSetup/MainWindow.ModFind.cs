@@ -342,9 +342,9 @@ public sealed partial class MainWindow
             rows.Add((title, info, mod.Enabled && !idle ? "ApexSuccessBrush" : "ApexWarningBrush", Listed(group.Select(i => i.Match.Item)), turnOn ? T("Turn on") : T("Show"),
                 _ => { if (turnOn) TurnOnFound(mod); else { CloseFind(); ShowInMods([mod]); } }));
         }
-        var game = mine.Where(i => i.State == FindState.Game && Has(i.Match.Item.Text, i.Match.Item.Name)).ToList();
-        if (game.Count > 0)
-            rows.Add((T("Comes with the game"), game.Count == 1 ? T("1 item") : T("{0} items", game.Count), "ApexMutedBrush", Listed(game.Select(i => i.Match.Item)), "", null));
+        foreach (var (state, title) in new[] { (FindState.Installed, T("Installed with the game's launcher")), (FindState.Game, T("Comes with the game")) })
+            if (mine.Where(i => i.State == state && Has(i.Match.Item.Text, i.Match.Item.Name)).ToList() is { Count: > 0 } of)
+                rows.Add((title, of.Count == 1 ? T("1 item") : T("{0} items", of.Count), "ApexMutedBrush", Listed(of.Select(i => i.Match.Item)), "", null));
         foreach (var i in mine.Where(i => i.State == FindState.Missing && Has(i.Match.Item.Text, i.Match.Item.Name)))
         {
             var item = i.Match.Item;
@@ -448,6 +448,7 @@ public sealed partial class MainWindow
         Part(T("Found"), i => i.State == FindState.Found);
         Part(T("Off"), i => i.State == FindState.Off);
         Part(T("Missing"), i => i.State == FindState.Missing);
+        Part(T("Installed with the game's launcher"), i => i.State == FindState.Installed);
         Part(T("Comes with the game"), i => i.State == FindState.Game);
         try
         {

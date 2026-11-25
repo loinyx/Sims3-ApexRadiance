@@ -457,6 +457,8 @@ public sealed partial class MainWindow
     {
         var docs = Docs;
         if (_mergeNewsOf != docs || AskLeaveMerge(() => Safe(UpdateMergesAsync(updates)))) return;
+        updates = updates.Select(u => ModMerge.Now(docs, u, _mods)).OfType<MergeUpdate>().ToList();
+        if (updates.Count == 0) { await ModsAgain(); return; } // (the bar was old: the list says what there is now)
         var jobs = updates.GroupBy(u => u.Merged.Rel, StringComparer.OrdinalIgnoreCase).Select(g =>
         {
             MergeEditPlan? plan = null;

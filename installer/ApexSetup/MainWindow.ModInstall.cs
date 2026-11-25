@@ -21,8 +21,14 @@ public sealed partial class MainWindow
     // from App: files given on the command line, opened once the game and the mods are read
     public void OpenWhenReady(List<string> files) { if (files.Count > 0) _openWhenReady = files; }
 
-    // from App, when a second launcher handed files over (Paths.Ops\open-*.txt)
+    // from App, when a second launcher handed files over; before this one is ready they wait for OpenPendingAsync
     public void TakeHandedFiles()
+    {
+        if (_started && HandedFiles() is { Count: > 0 } files) Safe(InstallFilesAsync(files));
+    }
+
+    // what second launchers left in Paths.Ops\open-*.txt, taken
+    static List<string> HandedFiles()
     {
         var files = new List<string>();
         try
@@ -35,7 +41,7 @@ public sealed partial class MainWindow
                 }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
-        if (files.Count > 0) Safe(InstallFilesAsync(files));
+        return files;
     }
 
     // a task started from a click or a menu: awaited here, so a failure is logged and said on the Mods bar
@@ -51,9 +57,9 @@ public sealed partial class MainWindow
 
     async Task OpenPendingAsync()
     {
-        if (_openWhenReady is not { } files) return;
+        List<string> files = [.. _openWhenReady ?? [], .. Maintenance ? [] : HandedFiles()];
         _openWhenReady = null;
-        await InstallFilesAsync(files);
+        if (files.Count > 0) await InstallFilesAsync(files);
     }
 
     // (every way in goes through here: a failure is logged and said, never lost in a task nobody awaits; files that come while
@@ -74,6 +80,8 @@ public sealed partial class MainWindow
         {
             while (_addNext.Count > 0)
             {
+                // (an install or other work under way keeps its screen: the files are shown once it ends)
+                while (_busy) await Task.Delay(200);
                 var now = _addNext.ToList();
                 _addNext.Clear();
                 await InstallFilesCoreAsync(now);
@@ -155,7 +163,7 @@ public sealed partial class MainWindow
     string AddInfo(AddItem i)
     {
         if (!i.Ok) return T(i.Problem!);
-        if (i.SameAs is { } same) return i.SameInList ? T("The same file as {0}", same) : i.SameInMerge ? T("Already inside the merge {0}", same) : T("Already installed as {0}", same);
+        if (i.SameAs is { } same) return i.SameInList ? T("The same file as {0}", same) : i.SameInMerge ? T("Already inside the merge {0}", same) : T("Already installed as {0}", same) + (i.OtherMod?.Enabled == false ? " (" + T("Turned off") + ")" : "");
         if (i.Place == AddPlace.Worlds && i.Other is not null) return T("Another world has this name. Your saves keep using that one.");
         if (i.OtherMod is { } o) return T("Another version is installed: {0}", ModRow.Place(o)) + (o.Enabled ? "" : " (" + T("Turned off") + ")");
         if (i.Other is not null) return T("Another file with this name is there");
@@ -229,7 +237,9 @@ public sealed partial class MainWindow
     // before anything is written: every file with its tick and its place, then the ones that can't be added and why
     async Task<bool> AddPlanDialog(ModAdd add, List<string> paths)
     {
-        var ok = add.Items.Where(i => i.Ok).ToList();
+        // (the ones with a choice to make first, so each has its row; one past the last row replaces nothing unseen)
+        var ok = add.Items.Where(i => i.Ok).OrderByDescending(i => i.CanReplace).ToList();
+        foreach (var i in ok.Skip(200)) i.Replace = false;
         var width = AddWidth(560);
         var d = new ContentDialog
         {
@@ -252,6 +262,8 @@ public sealed partial class MainWindow
         if (ok.Count > 0)
             body.Children.Add(Muted((ok.All(i => i.Archive is not null) && paths.Count == 1 ? T("From {0}.", Path.GetFileName(paths[0])) + " " : "") + T("Each file goes to its own place.")));
         if (ok.Any(i => i.Place == AddPlace.Mods && !i.CanReplace) && !FolderLoaded(add.Folder)) body.Children.Add(Warn(T("The game does not load this folder"), null));
+        if (ok.Any(i => i.Place == AddPlace.Mods) && !File.Exists(Path.Combine(Docs, "Mods", "Resource.cfg")))
+            body.Children.Add(Muted(T("The game isn't set up to load mods yet. The launcher adds the Resource.cfg file it needs.")));
         body.Children.Add(new ScrollViewer { Content = list, MaxHeight = 400 });
         d.Content = body;
         Changed();

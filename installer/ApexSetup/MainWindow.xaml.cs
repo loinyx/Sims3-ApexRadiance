@@ -71,10 +71,11 @@ public sealed partial class MainWindow : Window
         {
             var area = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
             AppWindow.Resize(new SizeInt32(Math.Min((int)(1180 * scale), area.Width), Math.Min((int)(760 * scale), area.Height)));
+            // (device pixels too: unscaled, the dialogs would be cut at 125% and more)
+            if (AppWindow.Presenter is OverlappedPresenter p) (p.PreferredMinimumWidth, p.PreferredMinimumHeight) = (Math.Min((int)(760 * scale), area.Width), Math.Min((int)(560 * scale), area.Height));
         }
         Size(GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0);
         ((FrameworkElement)Content).Loaded += (_, _) => Size(Content.XamlRoot.RasterizationScale); // the monitor's real scale
-        if (AppWindow.Presenter is OverlappedPresenter p) { p.PreferredMinimumWidth = 760; p.PreferredMinimumHeight = 560; }
         var ico = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "apex.ico");
         if (File.Exists(ico)) AppWindow.SetIcon(ico);
         SetupVersion.Text = "Apex Launcher " + Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
@@ -90,7 +91,7 @@ public sealed partial class MainWindow : Window
             if (!_busy && AskLeaveMerge(() => QuitForNewerCopy())) { a.Cancel = true; return; }
             if (!_busy) { _tray?.Dispose(); return; }
             a.Cancel = true;
-            _ = Message(T("The launcher is applying changes"), T("Don't close the launcher until it finishes."));
+            SayBusy();
         };
         ((FrameworkElement)Content).Loaded += async (_, _) => await StartAsync();
     }
@@ -133,9 +134,10 @@ public sealed partial class MainWindow : Window
         var tour = AuditFile is not null && Environment.GetEnvironmentVariable("APEX_LAUNCHER_AUDIT_TOUR") == "1";
         _started = !tour;
         if (!tour) StartUpgrade();
+        var pending = tour ? Task.CompletedTask : OpenPendingAsync();
         await LoadReleasesAsync();
         if (tour) _ = AuditTourAsync();
-        else await OpenPendingAsync();
+        await pending; // (before the dialogs below: a newer one would close theirs)
         // (the launcher's choices, applied as if Apply was clicked: the player already did, before Windows asked)
         if (Maintenance && TakeChoices()) OnNext(NextButton, new RoutedEventArgs());
         await CheckSetupUpdateAsync();

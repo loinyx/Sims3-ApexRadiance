@@ -75,6 +75,15 @@ public static partial class ModMerge
         return 0;
     }
 
+    // An update found earlier, as the mods are now (its files may have been moved, renamed or turned off since, or the update
+    // made); null when it no longer holds.
+    public static MergeUpdate? Now(string docs, MergeUpdate u, IReadOnlyCollection<ModFile> mods) =>
+        Records(docs).FirstOrDefault(r => r.Dir.Equals(u.Merge.Dir, StringComparison.OrdinalIgnoreCase)) is { } rec
+            && rec.Originals.FirstOrDefault(o => o.Rel.Equals(u.Original.Rel, StringComparison.OrdinalIgnoreCase) && o.Sha256 == u.Original.Sha256) is { } original
+            && mods.OrderByDescending(m => m.Enabled).FirstOrDefault(m => m.Rel.Equals(rec.Merged, StringComparison.OrdinalIgnoreCase)) is { } merged
+            && mods.FirstOrDefault(m => m.Enabled && m.Rel.Equals(u.Newer.Rel, StringComparison.OrdinalIgnoreCase)) is { } newer
+            ? new(merged, rec, original, newer, u.Same) : null;
+
     // For every merge whose file is in Mods, the candidates (mods of the list that are on, or files from outside Mods as
     // Outside gives them) that look like a newer version of one of its mods:
     //  - the same file name once versions, case, spaces and underscores are left out, with some resource in common; or

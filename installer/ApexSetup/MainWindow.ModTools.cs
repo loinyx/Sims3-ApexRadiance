@@ -173,6 +173,8 @@ public sealed partial class MainWindow
 
     async Task SplitAsync(ModRow r)
     {
+        // (a save makes the rows again)
+        if (AskLeaveMerge(() => { if (_modRows.FirstOrDefault(x => x.File.Rel.Equals(r.File.Rel, StringComparison.OrdinalIgnoreCase) && ModMerge.IsMerged(x.File)) is { } now) Safe(SplitAsync(now)); })) return;
         var info = ModMerge.Info(r.File);
         if (!await Confirm(T("Split {0}?", r.Name), T("Its {0} original mods go back where they were, checked against the saved copies. The merged package goes to the Recycle Bin.", info?.Originals.Count ?? 0), T("Split"))) return;
         List<ModFile>? back = null;

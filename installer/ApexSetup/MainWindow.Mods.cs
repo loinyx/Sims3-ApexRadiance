@@ -89,7 +89,8 @@ public sealed partial class MainWindow
                     (_modFindings.TryGetValue(file, out var l) ? l : _modFindings[file] = []).Add(T(f.Finding.Text, f.Finding.Args));
             _modLooks = _modFindings.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
             _modDirs = dirs;
-            _modLoadedBy = loaded;
+            // (no Resource.cfg yet: adding a mod writes the standard one, so the folders are judged by it)
+            _modLoadedBy = loaded ?? (rel => Compat.CfgReads(Engine.ResourceCfg, rel));
             _modCreatorGuess = ModCreators.Guess(mods);
             _modRows = mods.Select(m => new ModRow(m, _modFindings.TryGetValue(m.Path, out var l) ? l : [])
             {
@@ -657,8 +658,9 @@ public sealed partial class MainWindow
         return await ShowDialog(d) == ContentDialogResult.Primary && box.Text.Trim().Length > 0 ? box.Text : null;
     }
 
-    // new folders go in the chosen folder, else in Packages (where the game loads them), else in Mods
-    string NewFolderParent() => IsFolder(_modPlace) ? _modPlace : _modDirs.FirstOrDefault(d => d.Equals("Packages", StringComparison.OrdinalIgnoreCase)) ?? "";
+    // new folders and files go in the chosen folder, else in Packages (made then, when the game loads it), else in Mods
+    string NewFolderParent() => IsFolder(_modPlace) ? _modPlace : _modDirs.FirstOrDefault(d => d.Equals("Packages", StringComparison.OrdinalIgnoreCase)) 
+        ?? (FolderLoaded("Packages") ? "Packages" : "");
 
     async Task NewFolderAsync(string parent)
     {
@@ -744,8 +746,19 @@ public sealed partial class MainWindow
     // the files the launcher installed (Components turns them on and off): a folder holding one stays where it is
     List<string> LockedFiles() => _mods.Where(m => m.Locked).Select(m => m.Path).ToList();
 
+    // true while other work (a profile switch, a merge) moves files, which a change here would make fail: nothing is done, and
+    // the switches go back to what the mods are
+    bool ModsBusy()
+    {
+        if (!_busy) return false;
+        _dragRows = null;
+        DispatcherQueue.TryEnqueue(FillMods);
+        return true;
+    }
+
     void MoveMods(List<ModRow> rows, string dir)
     {
+        if (ModsBusy()) return;
         var back = new List<(ModRow Row, string Dir)>();
         string? error = null;
         foreach (var r in rows.Where(Mine))
@@ -783,6 +796,7 @@ public sealed partial class MainWindow
 
     ModFile? ToggleMod(ModRow row, bool on)
     {
+        if (_busy) return null;
         try
         {
             var path = Mods.SetEnabled(row.File, on, Docs);
@@ -803,6 +817,7 @@ public sealed partial class MainWindow
 
     async void SetMods(List<ModRow> rows, bool on)
     {
+        if (ModsBusy()) return;
         var todo = rows.Where(r => !r.File.Locked && r.File.Enabled != on).ToList();
         _dragRows = null;
         if (todo.Count == 0) return;
@@ -1554,6 +1569,7 @@ public sealed partial class MainWindow
 
     void RenameMod(ModRow r, string name)
     {
+        if (ModsBusy()) return;
         var old = r.Name;
         try
         {

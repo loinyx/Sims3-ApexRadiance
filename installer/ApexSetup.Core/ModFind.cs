@@ -18,10 +18,10 @@ public sealed record FindItem(uint Type, uint Group, ulong Instance, string? Nam
 public sealed record FindSource(string Name, IReadOnlyList<FindItem> Items, bool Truncated);
 // a mod that holds an item, by its place (the same on or off); Inside: the mod in that merge
 public sealed record FindHit(string Rel, string? Inside);
-// Game: the game ships it
-public sealed record FindMatch(FindItem Item, IReadOnlyList<FindHit> Hits, bool Game);
+// Game: the game ships it; Installed: the game's own launcher installed it (Store content, a .sims3pack)
+public sealed record FindMatch(FindItem Item, IReadOnlyList<FindHit> Hits, bool Game, bool Installed = false);
 public sealed record FindResult(FindSource Source, IReadOnlyList<FindMatch> Matches, bool GameKnown);
-public enum FindState { Found, Game, Off, Missing }
+public enum FindState { Found, Game, Installed, Off, Missing }
 
 // Find custom content: what a list (XML or any text with resource keys, package names or item names) or a game file (a
 // package, a Sim, a lot, a household, a world, a save) names, and which of the player's mods hold it.
@@ -38,7 +38,7 @@ public static class ModFind
     const long MaxDecoded = 1L << 30;
 
     const uint KeyTable = 0x05ED1226, LotObjects = 0x34E5247C, Outfit = 0x025ED6F4, Objk = 0x02DC343F, Xml = 0x0333406C, Tone = 0x0354796A,
-        Slider = 0x0358B08A, Vpxy = 0x736884F1;
+        Slider = 0x0358B08A, Vpxy = 0x736884F1, Footprint = 0xD382BF57;
     static readonly uint[] Catalog = [ModKinds.Objd, ModKinds.Cwst, ModKinds.Cwal, ModKinds.Cfen, ModKinds.Cral, ModKinds.Cstr, ModKinds.Crst, ModKinds.Crmt,
         ModKinds.Cfnd, ModKinds.Cfir, ModKinds.Ccfp, ModKinds.Ctpt, ModKinds.Cttl, ModKinds.Cwat, ModKinds.Mdlr];
     // what a scene uses, as a player knows it; a mod's own resources also need the object keys and meshes they point at
@@ -309,6 +309,18 @@ public static class ModFind
 
     // ---------- the player's mods ----------
 
+    // what the game's own launcher installed: the game reads it from here, not from Mods (a .dbc is a package)
+    static IEnumerable<string> InstalledContent(string docs)
+    {
+        foreach (var (folder, pattern) in new[] { ("DCCache", "*.dbc"), ("DCBackup", "*.package") })
+        {
+            string[] files = [];
+            try { if (Path.Combine(docs, folder) is var dir && Directory.Exists(dir)) files = Directory.GetFiles(dir, pattern); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+            foreach (var f in files) yield return f;
+        }
+    }
+
     // a package's keys and, once a list of names asks for them, its items' names; read again when the file changes
     sealed class Pack
     {
@@ -372,14 +384,19 @@ public static class ModFind
             }
         }
 
+        void Keys(Pack p, HashSet<int> found)
+        {
+            foreach (var (type, instance) in p.Keys)
+                if (byInstance.TryGetValue(instance, out var l))
+                    foreach (var n in l) if (items[n].Type == 0 || items[n].Type == type) found.Add(n);
+        }
+
         HashSet<int> Holds(string path)
         {
             var found = new HashSet<int>();
             if (byFile.TryGetValue(Path.GetFileName(path), out var named)) found.UnionWith(named);
             if (PackOf(path) is not { } p) return found;
-            foreach (var (type, instance) in p.Keys)
-                if (byInstance.TryGetValue(instance, out var l))
-                    foreach (var n in l) if (items[n].Type == 0 || items[n].Type == type) found.Add(n);
+            Keys(p, found);
             if (byName.Count > 0)
             {
                 foreach (var name in p.Names ??= NamesIn(path)) if (byName.TryGetValue(name, out var l)) found.UnionWith(l);
@@ -407,16 +424,24 @@ public static class ModFind
                 }
             foreach (var n in left) hits[n].Add(new(m.Rel, null));
         }
+        var installed = new HashSet<int>();
+        foreach (var f in InstalledContent(docs))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (PackOf(f) is { } p) Keys(p, installed);
+        }
         progress?.Report(1);
         if (gi is { Count: 0 }) gi = null;
         // (some keys carry a number in the group's low bits: the game's resource is in the group without it)
-        bool Ships(FindItem i) => gi is not null && i.Type != 0 && (gi.Contains(i.Type, i.Group, i.Instance) || gi.Contains(i.Type, i.Group & 0xFF000000, i.Instance) || gi.Contains(i.Type, 0, i.Instance));
-        return new(source, items.Select((i, n) => new FindMatch(i, hits[n], Ships(i))).ToList(), gi is not null);
+        // (and the game's own saves name catalog resources of which it ships only the footprint or the picture)
+        bool Ships(FindItem i) => gi is not null && i.Type != 0 && (gi.Contains(i.Type, i.Group, i.Instance) || gi.Contains(i.Type, i.Group & 0xFF000000, i.Instance) || gi.Contains(i.Type, 0, i.Instance)
+            || gi.Contains(Footprint, 0, i.Instance) || gi.Contains(ModKinds.Img, 0, i.Instance));
+        return new(source, items.Select((i, n) => new FindMatch(i, hits[n], Ships(i), installed.Contains(n))).ToList(), gi is not null);
     }
 
     // where an item stands now. on: whether the mod of that place is on, null when it is gone.
     public static FindState StateOf(FindMatch m, Func<string, bool?> on) =>
-        m.Hits.Any(h => on(h.Rel) == true) ? FindState.Found : m.Game ? FindState.Game : m.Hits.Any(h => on(h.Rel) == false) ? FindState.Off : FindState.Missing;
+        m.Hits.Any(h => on(h.Rel) == true) ? FindState.Found : m.Game ? FindState.Game : m.Installed ? FindState.Installed : m.Hits.Any(h => on(h.Rel) == false) ? FindState.Off : FindState.Missing;
 
     // an instance this small is the game's own numbering (custom content keys are 64-bit hashes): something of a pack the
     // player does not have, not custom content that is gone

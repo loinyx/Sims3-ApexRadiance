@@ -112,6 +112,31 @@ static class ModAddTests
                 check(threw && !File.Exists(Path.Combine(mods, "Packages", "moving.package")) && Directory.GetFiles(Path.Combine(mods, "Packages")).Length == 1, "add: a file that changed since it was shown is refused");
             }
 
+            // no framework yet: the standard Resource.cfg goes in with the first mod, so the game loads it (a Sim needs none)
+            var bare = Path.Combine(root, "Bare");
+            using (var add = ModAdd.Open(game, bare, "Packages", [Put("Solo.sim", sim), Put("solo.package", Pkg((Xml, 90, "solo")))], []))
+            {
+                add.Add(add.Items[0]);
+                var none = !Directory.Exists(Path.Combine(bare, "Mods"));
+                add.Add(add.Items[1]);
+                check(none && ModLibrary.LoadedBy(bare) is { } by && by(Path.GetRelativePath(Path.Combine(bare, "Mods"), add.Items[1].Added!)), "add: the first mod of a game without Resource.cfg brings it, and the game loads that mod");
+            }
+
+            // a copy that is on in a subfolder and one that is off where the new one goes: the one the game loads is replaced
+            Directory.CreateDirectory(Path.Combine(mods, "Packages", "Sub"));
+            Directory.CreateDirectory(Path.Combine(Mods.Disabled(docs), "Packages"));
+            var dupOn = Path.Combine(mods, "Packages", "Sub", "dup.package");
+            var dupOff = Path.Combine(Mods.Disabled(docs), "Packages", "dup.package");
+            File.WriteAllBytes(dupOn, Pkg((Xml, 91, "one")));
+            File.WriteAllBytes(dupOff, Pkg((Xml, 91, "two")));
+            // (whatever order the list is in)
+            foreach (var order in new[] { list(), list().AsEnumerable().Reverse().ToList() })
+                using (var add = ModAdd.Open(game, docs, "Packages", [Put("dup.package", Pkg((Xml, 91, "three"))), Put("copy.package", Pkg((Xml, 91, "two")))], order))
+                    check(add.Items[0].Other == dupOn && add.Items[0].OtherMod!.Enabled && add.Items[1] is { SameAs: "dup.package", OtherMod.Enabled: false }, "add: of two copies, the one that is on is replaced; the same file turned off is told so");
+            File.Delete(dupOn);
+            File.Delete(dupOff);
+            Directory.Delete(Path.Combine(mods, "Packages", "Sub"));
+
             // Undo: the file added goes to the Recycle Bin, one changed since stays
             var two = AddAll(Put("u1.package", Pkg((Xml, 21, "u1"))), Put("u2.package", Pkg((Xml, 22, "u2"))));
             File.AppendAllText(two[1].Added!, "edited");

@@ -2240,5 +2240,7 @@ public static partial class Strings
         ["Your mods were not checked"] = "Seus mods não foram verificados",
         ["The conflict check didn't finish. Check again in a moment."] = "A verificação de conflitos não terminou. Verifique de novo daqui a pouco.",
         ["A save can't be kept out of the game or put back while the Saves folder is on another drive."] = "Não dá para guardar um save fora do jogo nem colocar de volta enquanto a pasta Saves está em outro disco.",
+        ["The game isn't set up to load mods yet. The launcher adds the Resource.cfg file it needs."] = "O jogo ainda não está pronto para carregar mods. O launcher adiciona o arquivo Resource.cfg de que ele precisa.",
+        ["Installed with the game's launcher"] = "Instalado pelo launcher do jogo",
     };
 }

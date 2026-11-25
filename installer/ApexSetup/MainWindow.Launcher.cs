@@ -280,9 +280,24 @@ public sealed partial class MainWindow
     {
         _tray ??= new Tray(Path.Combine(AppContext.BaseDirectory, "Assets", "apex.ico"), () => DispatcherQueue.TryEnqueue(() => { AppWindow.Show(); Activate(); }),
             () => [(T("Open Apex Launcher"), () => DispatcherQueue.TryEnqueue(() => { AppWindow.Show(); Activate(); })),
-                   // (never in the middle of an install: the same refusal as closing the window)
-                   (T("Quit"), () => DispatcherQueue.TryEnqueue(() => { if (!QuitForNewerCopy()) _ = Message(T("The launcher is applying changes"), T("Don't close the launcher until it finishes.")); }))]);
+                   (T("Quit"), () => DispatcherQueue.TryEnqueue(QuitFromTray))]);
         _tray.Show(tip);
+    }
+
+    // the same questions and refusal as closing the window
+    void QuitFromTray()
+    {
+        var asks = !_busy && AskLeaveMerge(() => QuitForNewerCopy());
+        if (!asks && QuitForNewerCopy()) return;
+        AppWindow.Show();
+        Activate();
+        if (!asks) SayBusy();
+    }
+
+    // (over the work's own dialog it would close that one and leave the window free while files move)
+    void SayBusy()
+    {
+        if (_dialog is null) _ = Message(T("The launcher is applying changes"), T("Don't close the launcher until it finishes."));
     }
 
     static string Duration(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}" : $"{t.Minutes}:{t.Seconds:00}";
@@ -881,6 +896,7 @@ public sealed partial class MainWindow
     // mod work (merge, split, take out, edit) off the UI thread, with the window and Quit held until it ends
     async Task<TR> ModWork<TR>(Func<TR> work)
     {
+        while (_busy) await Task.Delay(100); // (one at a time: the first to end would clear the mark of the other)
         _busy = true;
         try { return await Task.Run(work); }
         finally { _busy = false; }

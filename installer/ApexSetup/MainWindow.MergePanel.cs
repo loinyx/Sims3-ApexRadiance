@@ -325,7 +325,13 @@ public sealed partial class MainWindow
                 {
                     Option("file", T("Replace file"), () => Safe(ReplaceInsideAsync(r, i.Rel)));
                     Button? take = null;
-                    take = Option("out", T("Take out"), () => TakeOutMenu(r, i.Rel).ShowAt(take!));
+                    take = Option("out", T("Take out"), () =>
+                    {
+                        // (the row is made again while the menu has the keyboard)
+                        var menu = TakeOutMenu(r, i.Rel);
+                        menu.Closed += (_, _) => DispatcherQueue.TryEnqueue(() => FocusRow(c, "out", FocusState.Programmatic));
+                        menu.ShowAt(take!);
+                    });
                 }
                 Grid.SetRow(options, 1);
                 Grid.SetColumn(options, 1);
