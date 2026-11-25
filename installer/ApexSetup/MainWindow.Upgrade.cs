@@ -90,8 +90,9 @@ public sealed partial class MainWindow
                 Margin = new Thickness(80, 80, 0, 0), Child = Lucide.Icon("check", 20, Res("ApexSuccessBrush"), 2.5) });
         g.Children.Add(side);
         var words = new StackPanel { Padding = new Thickness(40), VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(words, 1);
-        g.Children.Add(words);
+        var scroll = new ScrollViewer { Content = words, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetColumn(scroll, 1);
+        g.Children.Add(scroll);
         return (g, words);
     }
     // the install's side: the logo in its light, smaller, over the steps, what is done checked and the one open lit

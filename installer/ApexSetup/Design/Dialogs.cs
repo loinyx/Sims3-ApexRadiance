@@ -19,8 +19,9 @@ public static class Dialogs
         d.Tag = null;
         d.CornerRadius = new CornerRadius(Radius.Panel);
         if (d.Content is string text) d.Content = Words(text);
-        var width = d.Content is FrameworkElement { Width: > 0 and var w } ? w : Small;
-        if (d.Content is FrameworkElement { Width: double.NaN } body)
+        // (a body that scrolls: the width is of what is in it)
+        var width = d.Content is FrameworkElement { Width: > 0 and var w } ? w : d.Content is ScrollViewer { Content: FrameworkElement { Width: > 0 and var inside } } ? inside : Small;
+        if (d.Content is FrameworkElement { Width: double.NaN } body and not ScrollViewer { Content: FrameworkElement { Width: > 0 } })
         {
             body.Width = width = Math.Clamp(Math.Max(body.MinWidth, double.IsInfinity(body.MaxWidth) ? Small : body.MaxWidth), Small, Small);
             if (body.MaxWidth < Small) body.MaxWidth = Small;

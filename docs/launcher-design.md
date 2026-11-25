@@ -69,7 +69,7 @@ corners and colours off the scale may only become fewer.
   widths (440, 560, 680), buttons 40 high at the right with the one that goes on last. A dialog says its icon in `Tag`, with `!`
   before it for what needs care; the keyboard starts on Cancel when the action deletes.
 - A message (`SetInfo`) is a neutral card with a Lucide icon in its tone. What came of an action floats at the bottom of Mods and
-  Saves: a success goes by itself (7 s, or 20 s with Undo), the rest stays until it is closed.
+  Saves: a success goes by itself after 7 s, what can be undone and the rest stay until they are closed.
 - Menus, tooltips and lists that open share one surface; a field is 36 high, its label at 14 above it.
 - A page with nothing in it says so with an icon and one line (`Empty`, `EmptyPlace`).
 

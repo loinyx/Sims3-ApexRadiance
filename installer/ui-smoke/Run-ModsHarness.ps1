@@ -117,7 +117,7 @@ Step "Open with: a second launcher hands two files over, only the real one is in
   Start-Process $Exe -ArgumentList "`"$(Join-Path $drop 'Opened with.package')`" `"$(Join-Path $drop 'fake.package')`""; Start-Sleep 6
   Dialog 'PrimaryButton'; Start-Sleep 4; Dialog 'CloseButton' } {
   (Get-ChildItem $docs -Recurse -Filter 'Opened with.package').Count -eq 1 -and (Get-ChildItem $docs -Recurse -Filter 'fake.package').Count -eq 0 }
-Step "remove a mod to the Recycle Bin, confirmed" { Pick ("Set {0}" -f (Get-ChildItem $set -Recurse -Filter *.package).Count); Pick $second; Click 'Remove to the Recycle Bin'; Dialog 'PrimaryButton'; Start-Sleep 2 } { -not (Test-Path (Join-Path $set "$second.package")) }
+Step "remove a mod to the Recycle Bin, confirmed" { Pick ("Set {0}" -f (Get-ChildItem $set -Recurse -Filter *.package).Count); Pick $second; Click 'Move to the Recycle Bin'; Dialog 'PrimaryButton'; Start-Sleep 2 } { -not (Test-Path (Join-Path $set "$second.package")) }
 
 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 Write-Output ("steps: {0}, failures: {1}, captures: {2}" -f $step, $fails, $shots)

@@ -926,13 +926,14 @@
         <Grid x:Name="FirstRun" Grid.Row="1" Visibility="Collapsed" Background="{ThemeResource ApexPageBrush}">
             <local:Aurora x:Name="FirstAurora" />
             <!-- the welcome, as the install's prototype: the logo and version, one line, the game found, then Get started -->
-            <Border Width="900" MaxHeight="680" Margin="24" HorizontalAlignment="Center" CornerRadius="16" BorderThickness="1"
+            <Border MaxWidth="900" MaxHeight="680" Margin="24" VerticalAlignment="Center" CornerRadius="16" BorderThickness="1"
                     BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}">
                 <Border.Shadow><ThemeShadow /></Border.Shadow>
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="280" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                     <Grid x:Name="FirstSide" Tag="dyn" />
-                    <StackPanel Grid.Column="1" Padding="40" VerticalAlignment="Center">
+                    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Padding="40" VerticalAlignment="Center">
                         <TextBlock Text="Apex Radiance" FontSize="32" LineHeight="40" FontWeight="SemiBold" />
                         <TextBlock Text="Lighting, picture and performance for The Sims 3" Foreground="{ThemeResource ApexSoftTextBrush}" FontSize="14" LineHeight="22" TextWrapping="Wrap" Margin="0,8,0,0" />
                         <StackPanel x:Name="FirstPoints" Tag="dyn" Spacing="20" Margin="0,28,0,0" />
@@ -951,6 +952,7 @@
                             <TextBlock Text="Get started" FontWeight="SemiBold" />
                         </Button>
                     </StackPanel>
+                    </ScrollViewer>
                 </Grid>
             </Border>
         </Grid>
@@ -958,7 +960,7 @@
              the aurora, filled in code (MainWindow.Upgrade.cs) -->
         <Grid x:Name="UpgradeRun" Grid.Row="1" Visibility="Collapsed" Background="{ThemeResource ApexPageBrush}">
             <local:Aurora x:Name="UpgradeAurora" />
-            <Border x:Name="UpgradeCard" Width="900" MaxHeight="680" Margin="24" HorizontalAlignment="Center" CornerRadius="16" BorderThickness="1"
+            <Border x:Name="UpgradeCard" MaxWidth="900" MaxHeight="680" Margin="24" VerticalAlignment="Center" CornerRadius="16" BorderThickness="1"
                     BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}">
                 <Border.Shadow><ThemeShadow /></Border.Shadow>
             </Border>

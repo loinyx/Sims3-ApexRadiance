@@ -705,10 +705,18 @@ public sealed partial class MainWindow
     void ModsResult(string done, Action? undo, string detail = "", InfoBarSeverity severity = InfoBarSeverity.Success)
     {
         _modUndo = undo;
-        SetInfo(ModsInfo, severity, done, detail, undo is null ? null : T("Undo"), undo is null ? null : () => { var u = _modUndo; _modUndo = null; ModsInfo.IsOpen = false; u?.Invoke(); });
-        // (what went well goes by itself, as in Saves; the rest stays until it is read)
+        SetInfo(ModsInfo, severity, done, detail, undo is null ? null : T("Undo"), undo is null ? null : () =>
+        {
+            // (other work moves files now: Undo stays for after it)
+            if (_busy) { ModsInfo.Message = T("The launcher is applying changes"); return; }
+            var u = _modUndo;
+            _modUndo = null;
+            ModsInfo.IsOpen = false;
+            u?.Invoke();
+        });
+        // (what went well goes by itself, as in Saves; what can be undone and the rest stay until they are closed)
         var mine = ++_modsNote;
-        if (severity == InfoBarSeverity.Success) After(undo is null ? 7000 : 20000, () => { if (mine == _modsNote && ModsInfo.Severity == InfoBarSeverity.Success) ModsInfo.IsOpen = false; });
+        if (severity == InfoBarSeverity.Success && undo is null) After(7000, () => { if (mine == _modsNote && ModsInfo.Title == done) ModsInfo.IsOpen = false; });
     }
     int _modsNote;
 
@@ -1964,6 +1972,7 @@ public sealed partial class MainWindow
     async Task<(string Name, string Color)?> AskTag(string title, string name, string color, string yes)
     {
         var box = new TextBox { Header = T("Name"), Text = name, PlaceholderText = T("Tag name"), MaxLength = 40 };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Tag name"));
         var colors = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var chosen = color;
         var rings = new List<Border>();

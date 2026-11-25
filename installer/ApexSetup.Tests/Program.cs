@@ -1432,7 +1432,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
             "Health: ready, needs you, blocked");
         Check(Health.AreaOf(new Finding(Severity.Error, "{0} is missing: the RTX Remix bridge does not start.", [])) == HealthArea.Graphics
             && Health.AreaOf(new Finding(Severity.Error, "Two ASI loaders are in the game folder: {0}. Every ASI mod loads twice, so the launcher keeps {1} and moves the others to the backup folder.", [])) == HealthArea.Loaders
-            && Health.AreaOf(new Finding(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it.", [])) == HealthArea.GameSettings
+            && Health.AreaOf(new Finding(Severity.Warning, "The game does not load {0}. Mods\\Resource.cfg does not include its folder. Move it to Mods\\Packages.", [])) == HealthArea.GameSettings
             && Health.AreaOf(new Finding(Severity.Error, "Apex Radiance is not installed in this game.", [])) == HealthArea.ApexRadiance,
             "Health: findings fall in their area");
 

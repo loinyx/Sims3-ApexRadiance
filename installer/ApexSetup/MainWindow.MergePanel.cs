@@ -634,10 +634,11 @@ public sealed partial class MainWindow
             // (a SetupException says itself what is out of place, when something is)
             var why = stopped ? T("Nothing was changed.") : error is SetupException ? ErrorText(error) : error is not null ? ErrorText(error) + " " + T("Your mods are back as they were.")
                 : string.Join("\n", Reasons(planned!)) + "\n" + T("Nothing was changed.");
-            dlg.Title = stopped ? T("Not saved") : T("The merge was not saved");
+            var title = stopped ? T("Not saved") : T("The merge was not saved");
+            dlg.Title = title;
             dlg.Content = new Grid { Width = Design.Dialogs.Small, Children = { Design.Dialogs.Words(why) } };
             dlg.CloseButtonText = T("Close");
-            SetInfo(ModsInfo, stopped ? InfoBarSeverity.Informational : InfoBarSeverity.Error, (string)dlg.Title, why); // (the dialog may be gone: another one takes its place)
+            SetInfo(ModsInfo, stopped ? InfoBarSeverity.Informational : InfoBarSeverity.Error, title, why); // (the dialog may be gone: another one takes its place)
             await shown;
             _draftPlan = planned;
             if (error is not null && !stopped) await ModsAgain();
