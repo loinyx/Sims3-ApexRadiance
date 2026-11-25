@@ -134,9 +134,9 @@ public sealed partial class MainWindow
         top.Children.Add(Center(_healthState switch
         {
             HealthState.Blocked => T("The game still starts, but without Apex Radiance until this is fixed."),
-            HealthState.NeedsYou => T("The game starts fine. Have a look when you have a minute."),
+            HealthState.NeedsYou => T("The game starts fine."),
             _ when ModsUnread || _healthAll.Count(i => i.Finding.Severity != Severity.Info) > 0 => T("Nothing else needs your attention."),
-            _ => T("Every check passed. The launcher checks again each time you press Play."),
+            _ => T("Every check passed."),
         }, 14, Res("ApexSoftTextBrush")));
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0) };
         var check = PillButton(Labeled("rotate-ccw", T("Check now")), T("Check now"), () => { _modsLoaded = false; RefreshGame(); BuildHealth(); });
@@ -186,8 +186,7 @@ public sealed partial class MainWindow
         foot.ColumnDefinitions.Add(new ColumnDefinition());
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        foot.Children.Add(Col(new TextBlock { Text = T("Something wrong in the game?"), FontSize = 14, FontWeight = FontWeights.SemiBold },
-            Muted(T("Repair copies the launcher's files again. Your saves and mods don't change."))));
+        foot.Children.Add(new TextBlock { Text = T("Something wrong in the game?"), FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         var hist = Button(T("History"), () => HealthGo(HistoryPage));
         var repair = Button(T("Repair"), async () => await Repair());
         repair.IsEnabled = !_running && !_busy && _state?.ApexVersion is not null;
@@ -212,7 +211,7 @@ public sealed partial class MainWindow
         var name = new TextBlock { Text = AreaName(area), FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
         var how = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
         how.Children.Add(bad == 0 && !unread ? Lucide.Icon("check", 14, Res(brush)) : new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Res(brush), VerticalAlignment = VerticalAlignment.Center });
-        how.Children.Add(new TextBlock { Text = state, FontSize = 13, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Center });
+        if (bad > 0 || unread || gone > 0) how.Children.Add(new TextBlock { Text = state, FontSize = 13, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Center });
         var go = Lucide.Icon("chevron-right", 14, Res("ApexMutedBrush"));
         foreach (var (e, i) in new (FrameworkElement, int)[] { (icon, 0), (name, 1), (how, 2), (go, 3) }) { Grid.SetColumn(e, i); e.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(e); }
         var b = new Button { Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -572,7 +571,7 @@ public sealed partial class MainWindow
 
     void HealthHistory(StackPanel body)
     {
-        HealthHead(body, T("History"), T("What the launcher changed. Going back undoes that point and every later one."));
+        HealthHead(body, T("History"), T("Going back undoes that point and every later one."));
         var waiting = _health.Where(i => i.Finding.CanFix).ToList();
         if (waiting.Count > 0) body.Children.Add(Rows(waiting.Select(FindingLine)));
         var points = _game is { } g ? RestorePoints.List(g.Bin) : [];

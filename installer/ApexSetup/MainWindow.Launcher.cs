@@ -724,21 +724,19 @@ public sealed partial class MainWindow
     {
         var host = ScreenSettings;
         host.Children.Clear();
-        host.Children.Add(PageHead(T("Settings"), T("How the launcher works. Changes are saved as you make them.")));
+        host.Children.Add(PageHead(T("Settings"), null));
         host.Children.Add(Section(T("Starting the game")));
         var installed = Environment.ProcessPath is { } exe && LauncherInstall.IsInstalledCopy(exe);
-        host.Children.Add(Toggle("power", T("Start with Windows"), T("Opens quietly in the notification area, so updates are ready before you play."), LauncherInstall.RunsAtStartup(),
+        host.Children.Add(Toggle("power", T("Start with Windows"), T("Opens quietly in the notification area."), LauncherInstall.RunsAtStartup(),
             on => LauncherInstall.SetRunAtStartup(Paths.InstalledExe, on), enabled: installed));
-        host.Children.Add(Toggle("eye-off", T("Hide while playing"), T("The launcher goes to the notification area while the game runs and comes back when it closes."), _settings.HideWhilePlaying,
+        host.Children.Add(Toggle("eye-off", T("Hide while playing"), T("The launcher comes back when the game closes."), _settings.HideWhilePlaying,
             on => { _settings.HideWhilePlaying = on; _settings.Save(); }));
-        host.Children.Add(Toggle("shield-check", T("Apply safe fixes without asking"), T("Like the Resource.cfg and Edge Smoothing fixes. Each file is copied first, so you can undo them."), _settings.FixSafeAutomatically,
+        host.Children.Add(Toggle("shield-check", T("Apply safe fixes without asking"), T("You can undo them in Repair or remove."), _settings.FixSafeAutomatically,
             on => { _settings.FixSafeAutomatically = on; _settings.Save(); }));
         host.Children.Add(Section(T("Updates")));
-        host.Children.Add(Row("app-window", T("Apex Launcher {0}", App.Version), T("Updates itself from each Apex Radiance release."), null));
-        host.Children.Add(Toggle("wand-sparkles", T("Install updates when I press Play"), T("Ready updates install first, then the game starts. When off, Play starts the game as it is."), _settings.InstallUpdatesOnPlay,
+        host.Children.Add(Toggle("wand-sparkles", T("Install updates when I press Play"), T("Then the game starts."), _settings.InstallUpdatesOnPlay,
             on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
-        host.Children.Add(InstallModeRow());
-        host.Children.Add(Section(T("Home")));
+        host.Children.Add(Section(T("Appearance")));
         var picture = new ComboBox { Width = 232 };
         string[] kinds = ["gallery", "household", "none"];
         foreach (var k in kinds) picture.Items.Add(k switch { "gallery" => T("A picture from the gallery"), "household" => T("The household's photo"), _ => T("No picture") });
@@ -750,7 +748,7 @@ public sealed partial class MainWindow
         var choose = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         choose.Children.Add(Button(T("Choose in the gallery"), () => Show(GalleryScreen)));
         if (chosen) choose.Children.Add(Button(T("Use the newest"), () => { _gal!.HomePicture = null; Gallery.Save(_gal); BuildSettings(); }));
-        host.Children.Add(Row("image-plus", T("Gallery picture"), chosen ? T("The one you chose in the gallery (Use on Home).") : T("The newest picture you took. In the gallery, Use on Home keeps one."), choose));
+        host.Children.Add(Row("image-plus", T("Gallery picture"), chosen ? T("The one you chose in the gallery.") : T("The newest one you took."), choose));
         int[] heights = [240, 330, 440];
         var height = new ComboBox { Width = 232 };
         foreach (var label in new[] { T("Low"), T("Medium"), T("Tall") }) height.Items.Add(label);
@@ -761,25 +759,23 @@ public sealed partial class MainWindow
         var strength = new Slider { Minimum = 30, Maximum = 100, StepFrequency = 5, Width = 232, Value = Math.Clamp(_settings.HomePictureStrength, 30, 100) };
         strength.ValueChanged += (_, e) => { _settings.HomePictureStrength = (int)e.NewValue; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(strength, T("Picture strength"));
-        host.Children.Add(Row("sliders-horizontal", T("Picture strength"), T("Lower it for a quieter picture behind the save's name."), strength));
-        host.Children.Add(Section(T("Window")));
+        host.Children.Add(Row("sliders-horizontal", T("Picture strength"), T("Lower it for a quieter picture."), strength));
         string[] backs = ["mica", "micaalt", "acrylic", "solid"];
         var back = new ComboBox { Width = 232 };
         foreach (var label in new[] { T("Mica (Windows default)"), T("Mica, stronger"), T("Acrylic"), T("Solid colour") }) back.Items.Add(label);
         back.SelectedIndex = Math.Max(0, Array.IndexOf(backs, _settings.Backdrop));
         back.SelectionChanged += (_, _) => { _settings.Backdrop = backs[Math.Max(0, back.SelectedIndex)]; _settings.Save(); ApplyBackdrop(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(back, T("Window background"));
-        host.Children.Add(Row("layers", T("Window background"), T("Mica and Acrylic take a tint from your desktop wallpaper; Solid colour takes none."), back));
+        host.Children.Add(Row("layers", T("Window background"), T("Mica and Acrylic take a tint from your wallpaper."), back));
         host.Children.Add(Section(T("General")));
         host.Children.Add(Row("languages", T("Language"), Languages.First(l => l.Code == Lang).Name, Button(T("Change"), () => OnLanguage(LangButton, new RoutedEventArgs()))));
         host.Children.Add(Row("folder", T("Game folder"), _game?.Root ?? T("No game chosen"), Id(Button(T("Change"), () => Show(GameStep)), "SettingsGame")));
         host.Children.Add(Row("file-down", T("Logs"), T("What to attach when you ask for help."), Button(T("Open logs folder"), () => OpenFolder(App.LogDir))));
-        host.Children.Add(Row("wrench", T("Repair or remove"), T("Repair the files, remove a component, or go back to a restore point."), Id(Button(T("Open"), () => Show(Manage)), "SettingsManage")));
-        host.Children.Add(Section(T("Uninstall")));
-        host.Children.Add(Row("trash-2", T("Uninstall Apex Launcher"), T("Removes Apex Radiance and everything the launcher installed, puts back every file it replaced, then the launcher itself. Your saves and your own mods stay."),
+        host.Children.Add(Row("wrench", T("Repair or remove"), T("Repair, remove a component, or go back in time."), Id(Button(T("Open"), () => Show(Manage)), "SettingsManage")));
+        host.Children.Add(InstallModeRow());
+        host.Children.Add(Row("info", T("Credits and licences"), T("Apex Launcher {0}", App.Version), Id(Button(T("Open"), () => Show(About)), "SettingsAbout")));
+        host.Children.Add(Row("trash-2", T("Uninstall Apex Launcher"), T("Removes everything it installed. Your saves and mods stay."),
             Id(Button(T("Uninstall"), async () => await UninstallAsync(), danger: true), "SettingsUninstall")));
-        host.Children.Add(Section(T("About and licences")));
-        host.Children.Add(Row("info", T("Credits and licences"), T("Apex Radiance by loinyx, and the authors of every component the launcher installs."), Id(Button(T("Open"), () => Show(About)), "SettingsAbout")));
     }
 
     // ---------- uninstall ----------
@@ -1109,7 +1105,8 @@ public sealed partial class MainWindow
         var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         if (icon is not null) g.Children.Add(RowIcon(icon));
-        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }, Muted(detail) } };
+        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap } } };
+        if (detail.Length > 0) words.Children.Add(Muted(detail));
         Grid.SetColumn(words, 1);
         g.Children.Add(words);
         if (action is FrameworkElement a) { Grid.SetColumn(a, 2); a.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(a); }

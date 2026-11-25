@@ -408,8 +408,8 @@ public sealed partial class MainWindow
         var keep = Id2(Link(T("Choose the pictures that stay"), () => Safe(KeepAsync([l]))), "SaveKeep");
         keep.VerticalAlignment = VerticalAlignment.Center;
         host.Children.Add(Section(T("Clean"), new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children = { keep, Dims(clean) } }));
-        var note = PageSub(T("A backup is made first, and you can undo it."));
-        note.Margin = new Thickness(0, 8, 0, 0);
+        var note = PageSub("");
+        (note.Margin, note.Visibility) = (new Thickness(0, 8, 0, 0), Visibility.Collapsed);
         var rows = new StackPanel { Spacing = 4 };
         AutomationProperties.SetName(rows, T("Clean"));
         var says = new List<Action<SaveRead?, bool>>();
@@ -457,7 +457,7 @@ public sealed partial class MainWindow
             var gain = read is null ? 0 : Gain(read, _saveParts);
             clean.Content = !done ? T("Reading the save…") : read is null ? T("Can't be read") : read.Plan.Gains.Count == 0 ? T("Can't be cleaned") : gain > 0 ? T("Clean {0}", SaveSize(gain)) : T("Nothing to clean");
             clean.IsEnabled = gain > 0 && SavesBlocked() is null;
-            if (read?.Plan is { Refusal: { } no, Gains.Count: 0 }) note.Text = T(no.Key, TArgs(no.Args));
+            if (read?.Plan is { Refusal: { } no, Gains.Count: 0 }) (note.Text, note.Visibility) = (T(no.Key, TArgs(no.Args)), Visibility.Visible);
         }
     }
 

@@ -365,11 +365,6 @@ public sealed partial class MainWindow
         mine.Children.Add(make);
         s.Children.Add(mine);
         foreach (var c in loose) s.Children.Add(Mine(c, false));
-        var note = Muted(T("A picture goes to the household you saved next. Open it to change that."));
-        note.TextWrapping = TextWrapping.Wrap;
-        note.FontSize = 12;
-        note.Margin = new Thickness(10, 16, 10, 0);
-        s.Children.Add(note);
         return s;
     }
 

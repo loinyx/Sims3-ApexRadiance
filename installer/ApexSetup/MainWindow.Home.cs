@@ -131,18 +131,13 @@ public sealed partial class MainWindow
 
         // the game, low in the corner of the picture or centred on the plain card
         var words = new StackPanel { Spacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
-        var kick = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        if (_state?.ApexVersion is { Length: > 0 } apex)
-            kick.Children.Add(new Border { Background = onPhoto ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)) : Res("ApexPillBrush"), CornerRadius = new CornerRadius(11), Padding = new Thickness(9, 3, 9, 3),
-                Child = new TextBlock { Text = "Apex Radiance " + apex, FontSize = 12, Foreground = onPhoto ? text : soft } });
-        words.Children.Add(kick);
         _homeWords = words;
         words.Children.Add(_homeName = new TextBlock
         {
             Text = "The Sims 3", FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 48, FontWeight = FontWeights.SemiBold,
-            TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 4, 0, 0), Foreground = text,
+            TextTrimming = TextTrimming.CharacterEllipsis, Foreground = text,
         });
-        words.Children.Add(new TextBlock { Text = _game is { } game ? game.Label + (game.Version.Length > 0 ? " \u00b7 " + game.Version : "") : "", FontSize = 14, Foreground = soft });
+        words.Children.Add(new TextBlock { Text = _game is { } game ? (game.Label + " " + game.Version).Trim() : "", FontSize = 14, Foreground = soft });
         var acts = HomeActions();
         acts.Margin = new Thickness(0, 16, 0, 0);
         words.Children.Add(acts);
@@ -280,7 +275,7 @@ public sealed partial class MainWindow
         // (only what stops Apex gets its own words here; the rest waits calmly in Health)
         var first = _healthState == HealthState.Blocked ? _health.FirstOrDefault(h => h.Finding.Severity == Severity.Error) : null;
         var note = first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1
-            : _healthState == HealthState.NeedsYou ? T("Nothing stops the game from starting.") : T("Everything is in place.");
+            : "";
         var white = new SolidColorBrush(Microsoft.UI.Colors.White);
         var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 10, 18, 10), MaxWidth = 360 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -290,7 +285,7 @@ public sealed partial class MainWindow
         g.Children.Add(crystal);
         var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = _healthState == HealthState.Blocked ? Res("ApexErrorBrush") : white, TextTrimming = TextTrimming.CharacterEllipsis });
-        words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xBF, 255, 255, 255)), TextTrimming = TextTrimming.CharacterEllipsis });
+        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xBF, 255, 255, 255)), TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(words, 1);
         g.Children.Add(words);
         var chev = Lucide.Icon("chevron-right", 12, new SolidColorBrush(Windows.UI.Color.FromArgb(0xBF, 255, 255, 255)));

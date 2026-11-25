@@ -218,7 +218,7 @@ function OneRun([int]$run) {
         foreach ($t in $toggles) {
             $id = $t.Current.AutomationId
             for ($k = 0; $k -lt 4; $k++) { Step "toggle $id #$k" { $x = ById $id; if ($x.Current.IsEnabled) { Toggle $x } } }
-            Step "footer after $id" { [void](ById 'NextButton').Current.Name }
+            Step "footer after $id" { $b = ById 'NextButton'; if ($b) { [void]$b.Current.Name } }
         }
         $radios = (Root).FindAll($TS::Descendants, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::RadioButton)))
         $first = $null

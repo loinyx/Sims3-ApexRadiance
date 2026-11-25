@@ -17,8 +17,6 @@ public sealed class GameItem
     public Game Game { get; init; } = null!;
     public string Name { get; set; } = "";
     public string Path { get; set; } = "";
-    public string Badge { get; set; } = "";
-    public string Packs { get; set; } = "";
 }
 
 public sealed partial class MainWindow : Window
@@ -258,9 +256,7 @@ public sealed partial class MainWindow : Window
     GameItem Item(Game g) => new()
     {
         Game = g, Path = g.Root,
-        Name = "The Sims 3",
-        Badge = g.Label + (g.Version.Length > 0 ? " · " + g.Version : ""),
-        Packs = Packs(g),
+        Name = (g.Label + " " + g.Version).Trim(),
     };
 
     // the bridge's version is the Apex release's only when that release ships the bridge zip
@@ -462,7 +458,7 @@ public sealed partial class MainWindow : Window
             RendererStep => T("Use {0}", RendererShort(_renderer)),
             ComponentsStep when _offline && wa.Count > 0 => T("Try again"),
             WizardSettings => _offline ? T("Try again") : T("Install"),
-            GameSettingsScreen => GameSettingsCount() switch { 0 => T("Nothing to apply"), 1 => T("Apply 1 change"), var n => T("Apply {0} changes", n) },
+            GameSettingsScreen => GameSettingsCount() switch { 0 => _gsTyping ? T("Apply") : T("Nothing to apply"), 1 => T("Apply 1 change"), var n => T("Apply {0} changes", n) },
             ComponentsStep when Wizard && FirstInstall && !Maintenance && wa.Count > 0 => T("Next"),
             ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Nothing to apply")) : _state?.ApexVersion is null ? T("Install")
                 : work.Count == 1 ? T("Apply 1 change") : T("Apply {0} changes", work.Count),
@@ -470,6 +466,8 @@ public sealed partial class MainWindow : Window
             DoneStep => DoneChoice.Visibility == Visibility.Visible ? T("Open Apex Launcher") : _doneClean ? T("Play") : T("Finish"),
             _ => T("Next"),
         };
+        // (Components and Game settings show the bar once there is something to apply)
+        if (!Wizard && !FirstInstall && (_step is ComponentsStep or GameSettingsScreen) && NextText.Text == T("Nothing to apply")) NextButton.Visibility = Visibility.Collapsed;
         NextButton.IsEnabled = !_busy && _step switch
         {
             GameStep => CanLeaveGame(),
@@ -484,17 +482,14 @@ public sealed partial class MainWindow : Window
         {
             ComponentsStep or WizardSettings when _running && Wizard => T("Waiting for the game to close\u2026"),
             GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."),
-            GameStep when Wizard && _gameAllSet => T("All set to install."),
-            GameSettingsScreen => _running ? T("Close The Sims 3 to continue") : T("Each file is copied before it changes."),
-            WizardSettings => T("Nothing changes until you install. Each file is copied first."),
+            GameSettingsScreen when _running => T("Close The Sims 3 to continue"),
             InstallStep when Wizard && _busy => T("Don't close the window."),
-            InstallStep when _failChoice is not null && _failDxvk => T("Try again, or install with DXVK instead of the bridge."),
             ComponentsStep when _loading => T("Checking the latest versions\u2026"),
             ComponentsStep when _offline && wa.Count > 0 && _releaseError is { } le => T(le.Key, le.Args),
             ComponentsStep when _offline && wa.Count > 0 => T("The launcher needs an internet connection to download files."),
-            ComponentsStep when work.Count == 0 && !fixes => T("Everything is installed and up to date."),
+            ComponentsStep when work.Count == 0 && !fixes => "",
             ComponentsStep when _state?.ApexVersion is null && Engine.DownloadEstimate(wa, c => Repo.GetValueOrDefault(c) is { } r ? _latest.GetValueOrDefault(r) : null) is var bytes
-                => T("{0} items · about {1} MB · nothing changes until you install", wa.Count(c => c != Components.Loader), Math.Max(1, bytes >> 20)),
+                => T("About {0} MB to download", Math.Max(1, bytes >> 20)),
             // what Apply will change in the drivers and Apex's settings (the components show theirs on their rows)
             ComponentsStep when work.Count > 0 => T("To apply: {0}", string.Join(", ", wa.Select(Name).Concat(wd.Select(c => T("remove {0}", Name(c)))).Concat(settings))),
             _ => "",
@@ -512,13 +507,9 @@ public sealed partial class MainWindow : Window
 
     void RefreshFirstRun()
     {
-        var latest = Latest(Components.Apex);
-        FirstTitle.Text = "Apex Radiance" + (latest is null ? "" : " " + latest);
         FirstGame.Text = _game is not null ? "The Sims 3" : T("The launcher didn't find the game. Choose the game folder.");
-        FirstGameStore.Text = _game is { } g ? g.Label + (g.Version.Length > 0 ? " \u00b7 " + g.Version : "") : "";
-        FirstGameIcon.Visibility = FirstGameStorePill.Visibility = _game is null ? Visibility.Collapsed : Visibility.Visible;
-        FirstGamePath.Text = _game?.Root ?? "";
-        FirstGamePath.Visibility = FirstGameIcon.Visibility;
+        FirstGameStore.Text = _game is { } g ? (g.Label + " " + g.Version).Trim() : "";
+        FirstGameIcon.Visibility = FirstGameStore.Visibility = _game is null ? Visibility.Collapsed : Visibility.Visible;
         Steps(StepsGame, 1);
         Steps(StepsComponents, 2);
         Steps(StepsRenderer, 2);
@@ -553,13 +544,11 @@ public sealed partial class MainWindow : Window
         ContentFrame.MaxHeight = on && Nav.ActualHeight > 0 ? Math.Max(320, Nav.ActualHeight - 48) : double.PositiveInfinity;
         BackButton.MinHeight = NextButton.MinHeight = on ? 40 : 36; // (one height through the install, the welcome and the move)
         if (on) Scroller.Padding = new Thickness(32, 24, 32, 0);
-        // the card's own header: Apex Radiance, its version and the steps (each screen's own steps row then stays hidden)
+        // the card's own header: Apex Radiance and the steps (each screen's own steps row then stays hidden)
         WizardBrand.Visibility = on && !(_step == DoneStep && _doneClean) ? Visibility.Visible : Visibility.Collapsed; // (the install's end has its own logo)
         foreach (var host in new[] { StepsGame, StepsComponents, StepsRenderer, StepsInstall }) host.Visibility = on || host.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (on)
         {
-            WizardVersion.Text = Latest(Components.Apex) ?? "";
-            WizardVersionPill.Visibility = WizardVersion.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             Steps(WizardSteps, _step == GameStep ? 1 : _step is ComponentsStep or RendererStep ? 2 : _step == WizardSettings ? 3 : 4);
         }
     }
@@ -737,30 +726,12 @@ public sealed partial class MainWindow : Window
             }
             return t;
         }
-        // Apex Radiance on top: in the install, the list's first row (always included); in Components, set apart with its
-        // version and whether it is up to date
-        if (wizard)
-        {
-            var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 36, Height = 36, VerticalAlignment = VerticalAlignment.Center });
-            var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            words.Children.Add(new TextBlock { Text = "Apex Radiance" + (Latest(Components.Apex) is { } v ? " " + v : ""), FontSize = 14, FontWeight = FontWeights.SemiBold });
-            words.Children.Add(new TextBlock { Text = T("Lighting, picture and performance"), FontSize = 12, Foreground = Res("ApexMutedBrush") });
-            Grid.SetColumn(words, 1); g.Children.Add(words);
-            var always = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-            always.Children.Add(Lucide.Icon("shield-check", 14, Res("ApexMutedBrush")));
-            always.Children.Add(new TextBlock { Text = T("Always included"), FontSize = 12, Foreground = Res("ApexMutedBrush") });
-            Grid.SetColumn(always, 2); g.Children.Add(always);
-            Add(Card(g, 8));
-        }
-        else
+        // Apex Radiance on top, set apart with its version and whether it is up to date
+        if (!wizard)
         {
             var have = _state?.ApexVersion;
             var latest = Latest(Components.Apex);
-            var apexUpdate = !wizard && planAdd.Contains(Components.Apex); // (what Apply does: a test build is kept, so it is no update)
+            var apexUpdate = planAdd.Contains(Components.Apex); // (what Apply does: a test build is kept, so it is no update)
             var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -771,11 +742,11 @@ public sealed partial class MainWindow : Window
             words.Children.Add(new TextBlock { Text = T("Lighting, picture and performance for The Sims 3."), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
             Grid.SetColumn(words, 1); g.Children.Add(words);
             var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
-            var version = wizard ? latest : apexUpdate && have is not null && latest is not null ? have + " \u2192 " + latest : have;
+            var version = apexUpdate && have is not null && latest is not null ? have + " \u2192 " + latest : have;
             if (version is { Length: > 0 }) right.Children.Add(new TextBlock { Text = version, FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
             var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            if (!wizard && !apexUpdate) chip.Children.Add(Lucide.Icon("check", 13, Res("ApexSoftTextBrush")));
-            chip.Children.Add(new TextBlock { Text = wizard ? T("Always installed") : apexUpdate ? T("Update ready") : T("Up to date"), FontSize = 12, Foreground = Res("ApexSoftTextBrush") });
+            if (!apexUpdate) chip.Children.Add(Lucide.Icon("check", 13, Res("ApexSoftTextBrush")));
+            chip.Children.Add(new TextBlock { Text = apexUpdate ? T("Update ready") : T("Up to date"), FontSize = 12, Foreground = Res("ApexSoftTextBrush") });
             right.Children.Add(new Border { Child = chip, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 4, 10, 5), VerticalAlignment = VerticalAlignment.Center });
             Grid.SetColumn(right, 2); g.Children.Add(right);
             var hero = Card(g, 18);
@@ -797,9 +768,9 @@ public sealed partial class MainWindow : Window
         MonoDot.Visibility = Changes(Components.MonoPatcher) ? Visibility.Visible : Visibility.Collapsed;
         if (!wizard) Label(T("Parts of Apex"));
         if (CoreModernization.Visibility == Visibility.Visible)
-            Row(IconBox("wrench"), "Sims 3 Modernization", ModDesc.Text, wizard ? T("Recommended") : null, State(ModPill), Changes(Components.Modernization),
+            Row(IconBox("wrench"), "Sims 3 Modernization", ModDesc.Text, null, State(ModPill), Changes(Components.Modernization),
                 wizard || ModChannel.Visibility != Visibility.Visible ? null : Channel(), Mirror(ModToggle, "Sims 3 Modernization"));
-        if (wizard) Row(IconBox("monitor"), T("Graphics") + " · " + RendererShort(_renderer),
+        if (wizard) Row(IconBox("monitor"), RendererShort(_renderer),
             _renderer == RBridge ? T("About 600 MB more memory for big worlds") : _renderer == RDxvk ? T("Vulkan, fewer stutters") : RendererState.Text,
             null, null, false, Button(T("Change"), () => OnChangeRenderer(this, new RoutedEventArgs())));
         else
@@ -823,7 +794,7 @@ public sealed partial class MainWindow : Window
                 Changes(Components.Bridge, Components.Dxvk), menu);
         }
         Row(IconBox("rotate-ccw"), T("TS3Wrap"), Why(RestartToggle, RestartPill, T("Reopens your last save with fresh memory when the game runs low.")), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
-        if (SmoothSection.Visibility == Visibility.Visible && SmoothCard.Visibility == Visibility.Visible)
+        if (SmoothSection.Visibility == Visibility.Visible && SmoothCard.Visibility == Visibility.Visible && (!wizard || SmoothToggle.IsEnabled))
         {
             FrameworkElement? smoothState = State(SmoothPill);
             if (!wizard && SmoothHelp.Visibility == Visibility.Visible)
@@ -833,10 +804,10 @@ public sealed partial class MainWindow : Window
                 Put(both, Adopt(SmoothHelp, SmoothCard));
                 smoothState = both;
             }
-            Row(IconBox("film"), "NVIDIA Smooth Motion", Why(SmoothToggle, SmoothPill, T("An extra picture between every two the game makes, on RTX 40 and 50 cards.")), null, smoothState, _smoothWant is not null, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
+            Row(IconBox("film"), "NVIDIA Smooth Motion", T("Extra frames for smoother motion, on RTX 40 and 50 cards."), null, smoothState, _smoothWant is not null, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
         }
-        if (SmoothSection.Visibility == Visibility.Visible && AfmfCard.Visibility == Visibility.Visible)
-            Row(IconBox("film"), "AMD Fluid Motion Frames", Why(AfmfToggle, AfmfPill, T("The AMD driver adds frames for smoother motion.")), null, State(AfmfPill), _afmfWant is not null, Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
+        if (SmoothSection.Visibility == Visibility.Visible && AfmfCard.Visibility == Visibility.Visible && (!wizard || AfmfToggle.IsEnabled))
+            Row(IconBox("film"), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, State(AfmfPill), _afmfWant is not null, Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
         _fpsBox ??= ((Panel)FpsCard.Child).Children.OfType<StackPanel>().First(sp => sp.Children.Contains(FpsCombo));
         if (!wizard && SmoothSection.Visibility == Visibility.Visible && FpsCard.Visibility == Visibility.Visible)
         {
@@ -847,7 +818,7 @@ public sealed partial class MainWindow : Window
         // the mods by other modders, offered in the install too (outside it, the Other mods cards below the list)
         Label(T("Optional, from other authors"));
         Row(IconBox("sliders-horizontal"), "Sims3SettingsSetter", Why(S3ssToggle, S3ssPill, T("Fixes for game and graphics settings.")), null, null, false, Mirror(S3ssToggle, "Sims3SettingsSetter"));
-        Row(IconBox("zap"), "Sims 3 Performance Patch", T("Makes the game run faster. Needs a free Nexus Mods account. The launcher installs it when your download finishes."), null, null, false,
+        Row(IconBox("zap"), "Sims 3 Performance Patch", T("Makes the game run faster. Needs a free Nexus Mods account."), null, null, false,
             S3ppToggle.Visibility == Visibility.Visible ? Mirror(S3ppToggle, "Sims 3 Performance Patch")
             : S3ppWait.Visibility == Visibility.Visible ? new ProgressRing { Width = 16, Height = 16, IsActive = true }
             : Button(T("Download on Nexus Mods"), () => OnS3ppDownload(this, new RoutedEventArgs())));
@@ -858,52 +829,13 @@ public sealed partial class MainWindow : Window
     void OnContentFrameSized(object sender, SizeChangedEventArgs e) { if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
     void OnNotThisGame(object sender, RoutedEventArgs e) => Show(GameStep);
 
-    // Game, Components, Install: numbered, the done ones checked, the current one in the accent
+    // the install's steps, as dots
     void Steps(StackPanel host, int current)
     {
         host.Children.Clear();
         // (in the install's card the steps sit in its header, WizardSteps; each screen's own row stays hidden)
         host.Visibility = FirstInstall && (host == WizardSteps || !Wizard) ? Visibility.Visible : Visibility.Collapsed;
-        if (host.Visibility != Visibility.Visible) return;
-        var others = new List<FrameworkElement>(); // (what a narrow window leaves out)
-        var names = new[] { T("Game"), T("Components"), T("Game settings"), T("Install") };
-        for (int i = 1; i <= names.Length; i++)
-        {
-            if (i > 1)
-            {
-                var line = new Border { Width = 24, Height = 1, VerticalAlignment = VerticalAlignment.Center, Background = App.Brush("ApexCardBorderBrush") };
-                host.Children.Add(line);
-                others.Add(line);
-            }
-            var done = i < current;
-            var on = i == current;
-            var dot = new Border
-            {
-                Width = 22, Height = 22, CornerRadius = new CornerRadius(11),
-                Background = on ? App.Brush("ApexAccentBrush") : done ? Res("ApexSuccessSoftBrush") : null,
-                BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(on || done ? 0 : 1),
-                Child = done
-                    ? new FontIcon { Glyph = "\uE73E", FontSize = 11, Foreground = App.Brush("ApexSuccessBrush") }
-                    : new TextBlock { Text = i.ToString(), FontSize = 11, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                                      Foreground = on ? Res("TextOnAccentFillColorPrimaryBrush") : App.Brush("ApexMutedBrush") },
-            };
-            var label = new TextBlock
-            {
-                Text = names[i - 1], FontSize = 13, VerticalAlignment = VerticalAlignment.Center, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
-                Foreground = App.Brush(done ? "ApexSuccessBrush" : on ? "ApexSoftTextBrush" : "ApexMutedBrush"),
-            };
-            var step = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            step.Children.Add(dot);
-            step.Children.Add(label);
-            if (!on) others.Add(label);
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(step, T("Step {0} of {1}: {2}", i, names.Length, names[i - 1]));
-            host.Children.Add(step);
-        }
-        // (a narrow window or a language with long words: only the current step keeps its name)
-        if (host != WizardSteps || ContentFrame.ActualWidth <= 0) return;
-        host.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-        const double brand = 290; // (the logo, the name, the version and the card's own sides)
-        if (host.DesiredSize.Width > Math.Min(Nav.ActualWidth - 48, ContentFrame.MaxWidth) - brand) foreach (var l in others) l.Visibility = Visibility.Collapsed;
+        if (host.Visibility == Visibility.Visible) host.Children.Add(StepDots([T("Game"), T("Components"), T("Game settings"), T("Install")], current - 1));
     }
 
     // ---------- the update card (Welcome, a game with Apex) ----------
@@ -1450,8 +1382,8 @@ public sealed partial class MainWindow : Window
             ?? (_smoothError == "Test run: the launcher changes nothing." ? (T(_smoothError), "ApexMutedBrush")
             : _smoothError is not null ? (T(Engine.FriendlyFrameGenError(_smoothError, false, _smoothErrorOn)), "ApexWarningBrush")
             : blocked is { } b ? (T(b.Key, b.Arg), "ApexMutedBrush")
-            : sm.On ? (T(_smoothFps && LimitNow60 ? "On in the NVIDIA driver \u00b7 frame limit now 60 fps" : "On in the NVIDIA driver"), "ApexSuccessBrush")
-            : (T("Off for The Sims 3."), "ApexMutedBrush")));
+            : sm.On ? (_smoothFps && LimitNow60 ? T("On in the NVIDIA driver \u00b7 frame limit now 60 fps") : "", "ApexSuccessBrush")
+            : ("", "ApexMutedBrush")));
     }
 
     // AMD Fluid Motion Frames: one setting for the whole system in the AMD driver (Afmf.cs); read once per Setup run and after changes
@@ -1722,15 +1654,14 @@ public sealed partial class MainWindow : Window
     Grid RendererItem(string r, bool installed)
     {
         var nvidia = _vulkan?.Card?.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) == true;
-        var (icon, title, pill, lines) = r switch
+        var (icon, title, lines) = r switch
         {
-            RBridge => ("sparkle", "RTX Remix bridge", T("Recommended"), new List<(bool, string)> { (true, T("About 600 MB more memory")), (true, T("Good for big neighborhoods")) }
+            RBridge => ("sparkle", "RTX Remix bridge", new List<(bool, string)> { (true, T("About 600 MB more memory")), (true, T("Good for big neighborhoods")) }
                 .Concat(nvidia ? [(true, T("Unlocks NVIDIA Smooth Motion"))] : new List<(bool, string)>()).ToList()),
-            RDxvk => ("monitor", "DXVK", T("Alternative"), new List<(bool, string)> { (true, T("Vulkan, fewer stutters")), (true, T("Use it if the bridge gives you trouble")), (false, T("No extra memory")) }),
-            RNative => ("gamepad-2", "Direct3D 9", T("The game's own"), new List<(bool, string)> { (true, T("Changes nothing in the game")), (false, T("Apex runs worse")), (false, T("More crashes from low memory")) }),
-            _ => ("monitor", T("Keep my d3d9.dll"), "", new List<(bool, string)> { (true, T("Your d3d9.dll stays as it is.")) }),
+            RDxvk => ("monitor", "DXVK", new List<(bool, string)> { (true, T("Vulkan, fewer stutters")), (true, T("Use it if the bridge gives you trouble")), (false, T("No extra memory")) }),
+            RNative => ("gamepad-2", "Direct3D 9", new List<(bool, string)> { (true, T("Changes nothing in the game")), (false, T("Apex runs worse")), (false, T("More crashes from low memory")) }),
+            _ => ("monitor", T("Keep my d3d9.dll"), new List<(bool, string)> { (true, T("Your d3d9.dll stays as it is.")) }),
         };
-        if (installed) pill = pill.Length > 0 ? pill + " · " + T("installed") : T("Installed");
         var g = new Grid { Padding = new Thickness(18), RowSpacing = 10 };
         for (var i = 0; i < 4; i++) g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var top = new Grid();
@@ -1740,12 +1671,6 @@ public sealed partial class MainWindow : Window
         g.Children.Add(top);
         var name = new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
         Grid.SetRow(name, 1); g.Children.Add(name);
-        if (pill.Length > 0)
-        {
-            var tag = new Border { Style = (Style)Application.Current.Resources["ApexPill"], HorizontalAlignment = HorizontalAlignment.Left, Background = Res(r == RBridge ? "ApexAccentSoftBrush" : "ApexPillBrush"),
-                Child = new TextBlock { Text = pill, FontSize = 11, FontWeight = r == RBridge ? FontWeights.SemiBold : FontWeights.Normal, Foreground = Res(r == RBridge ? "ApexAccentTextBrush" : "ApexSoftTextBrush") } };
-            Grid.SetRow(tag, 2); g.Children.Add(tag);
-        }
         var list = new StackPanel { Spacing = 6 };
         foreach (var (good, text) in lines)
         {
@@ -1770,7 +1695,7 @@ public sealed partial class MainWindow : Window
     {
         var wizard = Wizard && _step == ComponentsStep;
         CompTitle.Text = wizard ? T("Along with Apex Radiance") : T("Components");
-        CompSub.Text = wizard ? T("The recommended set is already on. You can change it later, in Components.") : T("What runs with your game. Nothing changes until you apply.");
+        CompSub.Text = wizard ? T("The recommended set is already on.") : T("What runs with your game.");
         if (_state is not { } s || _game is not { } g) return;
         SetDefaults();
         var latest = Latest(Components.Apex) ?? "";
@@ -1792,7 +1717,6 @@ public sealed partial class MainWindow : Window
             : _renderer == RBridge ? StateLine(Components.Bridge, true, true, false)
             : _renderer == RNative ? (T("Works, but the RTX Remix bridge or DXVK run Apex Radiance better."), "ApexMutedBrush")
             : (T("Your d3d9.dll stays as it is."), "ApexMutedBrush"));
-        GpuLine.Text = _vulkan is { } gpu && gpu.Card is not null ? T("Your graphics card: {0}", $"{gpu.Card} \u00b7 Vulkan {gpu.Version}") : "";
         BridgeDetail.Text = "";
         if (OldCard)
             BridgeDetail.Text = T("DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0}).", CardFound);
@@ -1814,8 +1738,8 @@ public sealed partial class MainWindow : Window
         RestartToggle.IsEnabled = !waits;
         if (waits) RestartToggle.IsOn = false;
         SetState(RestartPill, waits ? (T(Engine.RestartHostWaitsText), "ApexMutedBrush") : StateLine(Components.RestartHost, RestartToggle.IsOn, s.RestartHost, false));
-        SetState(S3ppPill, S3ppPresent ? (S3ppToggle.IsOn ? (T("Installed"), "ApexMutedBrush") : (T("Will be removed"), "ApexWarningBrush"))
-            : _s3ppArchive is not null ? (T("Ready to install"), "ApexAccentBrush") : (T("Not installed"), "ApexMutedBrush"));
+        SetState(S3ppPill, S3ppPresent ? (S3ppToggle.IsOn ? ("", "ApexMutedBrush") : (T("Will be removed"), "ApexWarningBrush"))
+            : _s3ppArchive is not null ? (T("Ready to install"), "ApexAccentBrush") : ("", "ApexMutedBrush"));
         S3ppToggle.Visibility = Visibility.Visible;
         if (!S3ppPresent) S3ppToggle.Visibility = Visibility.Collapsed; // (missing: its download buttons below)
         S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null ? Visibility.Visible : Visibility.Collapsed;
@@ -1845,11 +1769,11 @@ public sealed partial class MainWindow : Window
     {
         var v = Known(c);
         var latest = Latest(c);
-        if (!present) return on ? (T("Will be installed"), "ApexAccentBrush") : (T("Not installed"), "ApexMutedBrush");
+        if (!present) return on ? (T("Will be installed"), "ApexAccentBrush") : ("", "ApexMutedBrush");
         if (!on) return (v is { Length: > 0 } ? T("{0} \u00b7 will be removed", v) : T("Will be removed"), "ApexWarningBrush");
         if (wrong) return (T("Wrong build"), "ApexWarningBrush");
-        if (v is not { Length: > 0 }) return (T("Installed"), "ApexMutedBrush");
-        return Newer(latest, v) || c == Components.Modernization && ModChannelChange() ? (T("{0} \u2192 {1}", v, latest!), "ApexAccentBrush") : (T("{0} \u00b7 up to date", v), "ApexMutedBrush");
+        if (v is not { Length: > 0 }) return ("", "ApexMutedBrush");
+        return Newer(latest, v) || c == Components.Modernization && ModChannelChange() ? (T("{0} \u2192 {1}", v, latest!), "ApexAccentBrush") : (v, "ApexMutedBrush");
     }
 
     static void SetState(TextBlock line, (string Text, string Brush) state)
@@ -2019,11 +1943,12 @@ public sealed partial class MainWindow : Window
             InstallTitle.Text = _wizardFlow ? (_state?.ApexVersion is null ? T("Installing Apex Radiance") : T("Updating")) : T("Applying changes");
             Show(InstallStep);
             TaskList.Children.Clear();
-            // the install's card: the logo in a ring of progress, the step in words, and that a failure undoes everything
+            // the install's card: the logo in a ring of progress
             var wiz = _wizardFlow;
-            InstallRingSide.Visibility = InstallSafe.Visibility = InstallSub.Visibility = wiz ? Visibility.Visible : Visibility.Collapsed;
+            InstallRingSide.Visibility = wiz ? Visibility.Visible : Visibility.Collapsed;
             InstallBar.Visibility = wiz ? Visibility.Collapsed : Visibility.Visible;
-            InstallRing.Value = 0; InstallPercent.Text = "0%"; InstallEta.Text = InstallSub.Text = "";
+            InstallRing.Value = 0; InstallPercent.Text = "0%"; InstallEta.Text = "";
+            InstallSub.Visibility = Visibility.Collapsed;
         }
         installBar.Value = 0;
         // removing the bridge or Apex turns Setup's Smooth Motion profile off (Engine.Remove): its own row
@@ -2050,7 +1975,6 @@ public sealed partial class MainWindow : Window
             at = active;
             for (int i = 0; i < rows.Count; i++)
                 rows[i](i < active ? 2 : i == active ? 1 : 0);
-            if (active < names.Count) InstallSub.Text = T("{0} · step {1} of {2}", names[active], active + 1, names.Count);
         }
         Mark(0);
         var touched = false; // (a file was already changed: the error message points at Repair or remove)
@@ -2193,14 +2117,15 @@ public sealed partial class MainWindow : Window
         // a first install: said in its own card, where the steps are (the install's prototype); an update keeps the dialog
         if (!_updatingForPlay && _step == InstallStep && left is null)
         {
-            InstallRing.Visibility = InstallSafe.Visibility = Visibility.Collapsed;
+            InstallRing.Visibility = Visibility.Collapsed;
             InstallFailBadge.Visibility = InstallCopy.Visibility = Visibility.Visible;
             InstallLogo.Opacity = 0.5;
             InstallPercent.Text = "";
             InstallPercent.Visibility = Visibility.Collapsed;
-            InstallEta.Text = T("Your game is as it was");
+            InstallEta.Text = "";
             InstallTitle.Text = T("Nothing was changed");
-            InstallSub.Text = string.Join('\n', text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0)) + " " + T("The launcher undid what it had done.");
+            InstallSub.Text = Sentences(text.Trim().Split('\n')[0].Trim()).Item1;
+            InstallSub.Visibility = Visibility.Visible;
             InstallCopy.Click -= OnCopyFailure;
             InstallCopy.Click += OnCopyFailure;
             _failText = text;
@@ -2296,27 +2221,18 @@ public sealed partial class MainWindow : Window
             });
         if (_lastChanges.Any(p => p.Error is not null && p.Error != "Test run: the launcher changes nothing.")) { DoneTitle.Text = T("Some changes did not apply"); DoneText.Text = ""; }
         DoneSummaryCard.Visibility = DoneSummary.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        // a first install that went in whole: the install's own end (the logo with a check, what went in as chips)
+        // a first install that went in whole: the install's own end (the logo with a check)
         var clean = _doneClean = _wizardFlow && apex && !_lastWasUpdate && _lastRemove.Count == 0 && _lastChanges.All(p => p.Error is null);
         DoneLogo.Visibility = clean ? Visibility.Visible : Visibility.Collapsed;
         DoneCheck.Visibility = clean ? Visibility.Collapsed : Visibility.Visible;
-        DoneChips.Children.Clear();
         if (clean)
         {
             DoneTitle.FontSize = 34;
             DoneTitle.Text = T("All installed");
-            DoneText.Text = T("Apex Radiance {0} is in your The Sims 3. Your saves and mods weren't touched.", _state?.ApexVersion ?? "");
+            DoneText.Text = T("Your game is ready to play.");
             DoneText.MaxWidth = 500;
-            foreach (var c in _lastInstall.Where(c => c != Components.Loader))
-            {
-                var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-                chip.Children.Add(Lucide.Icon("check", 12, App.Brush("ApexSuccessBrush"), 3));
-                chip.Children.Add(new TextBlock { Text = Name(c) + (c == Components.Apex && _state?.ApexVersion is { } v ? " " + v : ""), FontSize = 12, Foreground = App.Brush("ApexSoftTextBrush") });
-                DoneChips.Children.Add(new Border { Child = chip, Background = App.Brush("ApexPillBrush"), CornerRadius = new CornerRadius(14), Padding = new Thickness(12, 5, 12, 6) });
-            }
         }
         else DoneTitle.FontSize = 28;
-        DoneChips.Visibility = clean ? Visibility.Visible : Visibility.Collapsed;
         DoneSummaryCard.Visibility = clean ? Visibility.Collapsed : DoneSummaryCard.Visibility;
         FillDoneChoice();
     }
@@ -2336,9 +2252,9 @@ public sealed partial class MainWindow : Window
         if (_game is not { } g || _state is not { } s) { ManageIntro.Text = T("Choose your game first."); return; }
         ManageIntro.Text = T("The Sims 3 \u00b7 {0}", g.Label);
         var m = s.Manifest;
-        ManageRow("hammer", T("Repair or update"), T("Downloads and reinstalls everything installed here. Your settings are kept."), T("Repair"), Repair);
+        ManageRow("hammer", T("Repair or update"), T("Installs everything again. Your settings stay."), T("Repair"), Repair);
         if (s.ApexVersion is not null)
-            ManageRow("sparkles", "Apex Radiance " + s.ApexVersion, T("Removes ApexRadiance.asi. Your settings in Documents are kept."), T("Remove"), () => RemoveAsync(Components.Apex));
+            ManageRow("sparkles", "Apex Radiance " + s.ApexVersion, "", T("Remove"), () => RemoveAsync(Components.Apex));
         if (s.Layer == Layer.Bridge)
         {
             bool backup = m.Files.Any(f => f.Component == Components.Bridge && f.Backup is not null && System.IO.Path.GetFileName(f.Path) == "d3d9.dll");
@@ -2346,12 +2262,12 @@ public sealed partial class MainWindow : Window
         }
         if (s.Layer == Layer.Dxvk)
             ManageRow("monitor", "DXVK", GraphicsRemoval(m.Files.Any(f => f.Component == Components.Dxvk && f.Backup is not null)), T("Remove"), () => RemoveAsync(Components.Dxvk));
-        if (S3ppPresent) ManageRow("zap", "Sims 3 Performance Patch", T("Removes Sims3Performance.asi and its .ini."), T("Remove"), () => RemoveAsync(Components.S3pp));
-        if (s.MonoPatcher) ManageRow("file-code", "MonoPatcher", T("Removes MonoPatcher.asi and its package."), T("Remove"), () => RemoveAsync(Components.MonoPatcher));
-        if (s.S3ss) ManageRow("sliders-horizontal", "Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
-        if (s.RestartHost) ManageRow("rotate-ccw", T("TS3Wrap"), T("Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."), T("Remove"), () => RemoveAsync(Components.RestartHost));
-        if (s.Modernization) ManageRow("wrench", "Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
-        ManageRow("trash-2", T("Uninstall everything"), T("Removes what the launcher installed, and Apex Radiance, and puts back every file the launcher replaced."), T("Uninstall"), UninstallAll, danger: true);
+        if (S3ppPresent) ManageRow("zap", "Sims 3 Performance Patch", "", T("Remove"), () => RemoveAsync(Components.S3pp));
+        if (s.MonoPatcher) ManageRow("file-code", "MonoPatcher", "", T("Remove"), () => RemoveAsync(Components.MonoPatcher));
+        if (s.S3ss) ManageRow("sliders-horizontal", "Sims3SettingsSetter", "", T("Remove"), () => RemoveAsync(Components.S3ss));
+        if (s.RestartHost) ManageRow("rotate-ccw", T("TS3Wrap"), "", T("Remove"), () => RemoveAsync(Components.RestartHost));
+        if (s.Modernization) ManageRow("wrench", "Sims 3 Modernization", "", T("Remove"), () => RemoveAsync(Components.Modernization));
+        ManageRow("trash-2", T("Uninstall everything"), T("Puts back every file it replaced."), T("Uninstall"), UninstallAll, danger: true);
 
         foreach (var p in RestorePoints.List(g.Bin))
         {
@@ -2483,29 +2399,29 @@ public sealed partial class MainWindow : Window
 
     // ---------- about ----------
 
-    static readonly (string Name, string Licence, string? File, string Url)[] Credits =
+    static readonly (string Name, string By, string Licence, string? File, string Url)[] Credits =
     {
-        ("RTX Remix bridge", "MIT", "RTX-Remix-bridge-LICENSE.txt", "https://github.com/NVIDIAGameWorks/dxvk-remix"),
-        ("RTX Remix bridge: third-party notices", "", "RTX-Remix-bridge-ThirdPartyLicenses.txt", "https://github.com/NVIDIAGameWorks/dxvk-remix"),
-        ("Microsoft Detours", "MIT", "Detours-LICENSE.txt", "https://github.com/microsoft/Detours"),
-        ("DXVK", "zlib", "DXVK-LICENSE.txt", "https://github.com/doitsujin/dxvk"),
-        ("Ultimate ASI Loader", "MIT", "Ultimate-ASI-Loader-LICENSE.txt", "https://github.com/ThirteenAG/Ultimate-ASI-Loader"),
-        ("Sims3SettingsSetter", "", null, "https://github.com/sims3fiend/Sims3SettingsSetter"),
-        ("Sims 3 Modernization", "MIT", null, "https://github.com/rodneypantonial/sims3-modernization"),
-        ("MonoPatcher", "", null, "https://github.com/LazyDuchess/MonoPatcher"),
+        ("RTX Remix bridge", "NVIDIA, dalexlol, alexvixell35-stack", "MIT", "RTX-Remix-bridge-LICENSE.txt", "https://github.com/NVIDIAGameWorks/dxvk-remix"),
+        ("RTX Remix bridge: third-party notices", "NVIDIA", "", "RTX-Remix-bridge-ThirdPartyLicenses.txt", "https://github.com/NVIDIAGameWorks/dxvk-remix"),
+        ("Microsoft Detours", "Microsoft", "MIT", "Detours-LICENSE.txt", "https://github.com/microsoft/Detours"),
+        ("DXVK", "doitsujin", "zlib", "DXVK-LICENSE.txt", "https://github.com/doitsujin/dxvk"),
+        ("Ultimate ASI Loader", "ThirteenAG", "MIT", "Ultimate-ASI-Loader-LICENSE.txt", "https://github.com/ThirteenAG/Ultimate-ASI-Loader"),
+        ("Sims3SettingsSetter", "sims3fiend", "", null, "https://github.com/sims3fiend/Sims3SettingsSetter"),
+        ("Sims 3 Modernization", "rodneypantonial", "MIT", null, "https://github.com/rodneypantonial/sims3-modernization"),
+        ("MonoPatcher", "LazyDuchess", "", null, "https://github.com/LazyDuchess/MonoPatcher"),
     };
 
     void RefreshAbout()
     {
         BackOnce(AboutHead);
         if (LicenceList.Children.Count > 0) return;
-        foreach (var (name, lic, file, url) in Credits)
+        foreach (var (name, by, lic, file, url) in Credits)
         {
             // (Read, then GitHub, each in its own place from row to row)
             var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             if (file is not null) acts.Children.Add(Named(Button(T("Read"), () => ReadLicence(T(name), Licence(file))), T("Read") + ", " + T(name)));
             acts.Children.Add(Named(Button("GitHub", () => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })), "GitHub, " + T(name)));
-            LicenceList.Children.Add(Row("file-code", T(name), lic.Length > 0 ? T("{0} licence", lic) : file is null ? T("Its terms are on GitHub") : T("The notices of the parts it includes"), acts));
+            LicenceList.Children.Add(Row("file-code", T(name), lic.Length > 0 ? by + " · " + lic : by, acts));
         }
         static Button Named(Button b, string name) { b.MinWidth = 84; Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name); return b; }
     }

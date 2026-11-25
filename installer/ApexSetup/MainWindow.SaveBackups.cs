@@ -434,7 +434,7 @@ public sealed partial class MainWindow
 
     // ---------- the page of the automatic ones ----------
 
-    StackPanel SavesSubHead(string title, string sub, FrameworkElement? act = null)
+    StackPanel SavesSubHead(string title, string? sub, FrameworkElement? act = null)
     {
         var back = BackButtonTo(T("Saves"), () => SavesGo(""), "SavesBack");
         return new StackPanel { Spacing = 4, Children = { back, PageHead(title, sub, act) } };
@@ -453,7 +453,7 @@ public sealed partial class MainWindow
     {
         var (c, docs) = (BackupChoices.Load(), now.Docs);
         var page = new StackPanel { Spacing = 4, MaxWidth = 920 };
-        page.Children.Add(SavesSubHead(T("Automatic backups"), T("For every save. Each save can have its own.")));
+        page.Children.Add(SavesSubHead(T("Automatic backups"), null));
         page.Children.Add(Section(T("When")));
         page.Children.Add(Toggle("shield-check", T("When the game closes"), T("Only the saves that changed"), c.OnClose, on => ChangeBackups(x => x.OnClose = on), !DryRun));
         page.Children.Add(Toggle("play", T("Before playing"), T("Takes a few seconds for each save"), c.BeforePlay, on => ChangeBackups(x => x.BeforePlay = on), !DryRun));
@@ -463,13 +463,13 @@ public sealed partial class MainWindow
         var keep = KeepBox(c.Keep);
         AutomationProperties.SetName(keep, T("Backups of each save"));
         keep.SelectionChanged += (_, _) => ChangeBackups(x => x.Keep = (int)((ComboBoxItem)keep.SelectedItem).Tag);
-        page.Children.Add(Row("layers", T("Backups of each save"), T("Counts the automatic ones. Older ones go to the Recycle Bin; named and pinned ones stay."), keep));
+        page.Children.Add(Row("layers", T("Backups of each save"), T("Older automatic ones go to the Recycle Bin."), keep));
         var limit = Numbers(c.LimitGb, [2, 5, 10, 20, 50, 0], n => n == 0 ? T("No limit") : n + " GB");
         AutomationProperties.SetName(limit, T("Space limit"));
         limit.SelectionChanged += (_, _) => ChangeBackups(x => x.LimitGb = (int)((ComboBoxItem)limit.SelectedItem).Tag);
         var all = Id(Button(T("See all"), () => SavesGo("all")), "SavesAll");
         var used = now.Points.Values.SelectMany(p => p).Where(SaveBackups.IsOwn).Sum(p => p.Stored);
-        page.Children.Add(Row("hard-drive", T("Space limit"), T("{0} in automatic ones. Past it, the oldest go first.", SaveSize(used)), new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { limit, all } }));
+        page.Children.Add(Row("hard-drive", T("Space limit"), T("{0} used", SaveSize(used)), new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { limit, all } }));
 
         page.Children.Add(Section(T("Where and how")));
         var change = new Button { Content = T("Change"), MinHeight = 36, Padding = new Thickness(14, 0, 14, 0), IsEnabled = !DryRun };

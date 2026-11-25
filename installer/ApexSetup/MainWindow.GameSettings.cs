@@ -52,7 +52,7 @@ public sealed partial class MainWindow
         var host = ScreenGameSettings;
         host.Children.Clear();
         var resetAll = Id(Button(T("Reset all to default"), GameSettingsToDefault), "GameSettingsReset");
-        host.Children.Add(PageHead(T("Game settings"), T("Graphics and speed options the game keeps in its files. Close the game before you apply."), _game is null ? null : resetAll));
+        host.Children.Add(PageHead(T("Game settings"), T("Options the game keeps in its own files."), _game is null ? null : resetAll));
         if (_game is not { } g) { host.Children.Add(Muted(T("Choose the game first."))); return; }
         if (_gsFor != g.Bin) LoadGameSettings();
         resetAll.IsEnabled = !_busy;
@@ -63,7 +63,7 @@ public sealed partial class MainWindow
         GraphicsRows(list);
         Label(T("In-game options"), Link(T("Turn all off"), () => { foreach (var i in InGame) _gsWant[i.Id] = "1"; SyncGameSettings(); }));
         InGameRows(list);
-        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set after its first session.")));
+        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("Set after you open the game once.")));
         Label(T("Loading and walking"));
         LoadingRows(list);
         WalkingValues(host);
@@ -249,7 +249,9 @@ public sealed partial class MainWindow
     FrameworkElement? ResetOf(string id, string title)
     {
         if (!Available(id)) return null;
-        var reset = Link(T("Reset"), () => Want(id, DefaultOf(id)));
+        var reset = new Button { Content = Lucide.Icon("undo-2", 15, Res("ApexMutedBrush")), Width = 36, Height = 36, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        reset.Click += (_, _) => Want(id, DefaultOf(id));
+        ToolTipService.SetToolTip(reset, T("Reset"));
         _gsSync.Add(() => reset.Visibility = GameSettings.Same(Wanted(id), DefaultOf(id)) ? Visibility.Collapsed : Visibility.Visible);
         AutomationProperties.SetName(reset, T("Reset {0}", title));
         return reset;
@@ -472,7 +474,7 @@ public sealed partial class MainWindow
         var head = new Grid { ColumnSpacing = 16 };
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        head.Children.Add(Col(Heading(T("Game settings")), Muted(T("Optional. You can change these later in the launcher."))));
+        head.Children.Add(Col(Heading(T("Game settings")), Muted(T("Optional. You can change these later."))));
         var reset = Button(T("Reset to default"), GameSettingsToDefault);
         reset.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(reset, 1);
@@ -485,7 +487,7 @@ public sealed partial class MainWindow
         }
         GraphicsRows(Label(T("Graphics")));
         InGameRows(Label(T("In-game options")));
-        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set after its first session.")));
+        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("Set after you open the game once.")));
         LoadingRows(Label(T("Loading and walking")));
         // (only with the mod chosen in Components, and something to change)
         if (S3ssToggle.IsOn && SetterSettings.Differences(SetterSettings.Read(Docs)) is var d && d.TurnOn.Count + d.TurnOff.Count > 0)

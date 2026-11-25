@@ -56,8 +56,8 @@ public sealed partial class MainWindow
         var list = new StackPanel();
         foreach (var (value, icon, title, text) in new[]
         {
-            (true, "hard-drive", T("Keep Apex Launcher on this PC"), T("In the Start menu, on the desktop and in Installed apps. Start the game from it.")),
-            (false, "folder", T("Keep it as a single file"), T("Runs from {0}. Nothing is added to Windows.", ShortPath(Path.GetDirectoryName(self) ?? self))),
+            (true, "hard-drive", T("Keep Apex Launcher on this PC"), T("In the Start menu and on the desktop")),
+            (false, "folder", T("Keep it as a single file"), T("One file you can move anywhere")),
         })
         {
             var on = value == _doneInstall;
@@ -65,19 +65,12 @@ public sealed partial class MainWindow
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(10), Background = Res(on ? "ApexAccentSoftBrush" : "ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
-                Child = Lucide.Icon(icon, 17, Res(on ? "ApexAccentBrush" : "ApexSoftTextBrush")) });
+            var mark = Lucide.Icon(icon, 18, Res("ApexSoftTextBrush"));
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            g.Children.Add(mark);
             var s = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            head.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
-            if (value)
-                head.Children.Add(new Border { Style = (Style)Application.Current.Resources["ApexPill"], Background = Res("ApexAccentSoftBrush"), VerticalAlignment = VerticalAlignment.Center,
-                    Child = new TextBlock { Text = T("Recommended"), FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexAccentTextBrush") } });
-            s.Children.Add(head);
+            s.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
             s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
-            // (where it goes: the launcher's own folder in the player's programs)
-            if (value) s.Children.Add(new TextBlock { Text = Path.GetDirectoryName(Paths.InstalledExe) ?? "", FontFamily = new FontFamily("Consolas"), FontSize = 11, Foreground = Res("ApexMutedBrush"),
-                TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 2, 0, 0) });
             Grid.SetColumn(s, 1);
             g.Children.Add(s);
             var check = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(1.5), VerticalAlignment = VerticalAlignment.Center,
