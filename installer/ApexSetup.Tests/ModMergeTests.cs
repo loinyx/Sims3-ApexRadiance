@@ -435,6 +435,220 @@ static class ModMergeTests
         check(Throws<SetupException>(() => ModMerge.Update(docs, byName.Where(u => u.Same).ToList())), "updates: nothing to update is said, not done");
     }
 
+    // Changes to a merge picked at random, each stopped at every point it can stop at, in two ways: as a failure (the change
+    // undoes itself) and as a launcher that ends there (a copy of the folder as it is at that moment, put right by the next
+    // start, and by one more start that reads the same unfinished record again). Wherever it stops before the new record is
+    // written, every file is as it was; from there on, and when nothing stops it, the merge still splits and no mod is lost.
+    // Seeds 1 to 3 are fixed: a file from outside Mods under the name of the one it replaces, a mod of the list that goes in
+    // under the name of one sent to the Recycle Bin, and that first one again in a merge that is off (the replaced file, when
+    // the launcher ends before the Recycle Bin has it, comes back beside the new one and not under its name).
+    static void Fuzz(Action<bool, string> check, string root, string recycled, int rounds, int seed)
+    {
+        const string F = @"Packages\F";
+        var bad = new List<string>();
+        int ran = 0, stops = 0;
+        var bin = ModMerge.Recycle;
+        string Rel(string n) => Path.Combine("Mods", F, n + ".package");
+        ModFile At(string docs, string n, bool on = true) => new(Path.Combine(on ? Path.Combine(docs, "Mods") : Mods.Disabled(docs), F, n + ".package"), Rel(n), 0, ModKind.Package, on, false);
+        // (a file still being written can't be copied: a launcher that ends there leaves a part of it, which nothing reads; nor
+        // can an antivirus's own file that is gone again)
+        void Shot(string from, string to)
+        {
+            foreach (var f in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+                try { var t = Path.Combine(to, Path.GetRelativePath(from, f)); Directory.CreateDirectory(Path.GetDirectoryName(t)!); File.Copy(f, t); }
+                catch (IOException) { }
+        }
+        // (the test's Recycle Bin; an antivirus's own file beside one it scans is not counted)
+        void Empty() { foreach (var f in Directory.GetFiles(recycled)) try { File.Delete(f); } catch (IOException) { } }
+        // (a later start of the launcher: what an earlier run left is older than it)
+        void Restart(string docs)
+        {
+            foreach (var f in Directory.GetFiles(docs, "*.tmp-*", SearchOption.AllDirectories))
+                try { File.SetLastWriteTime(f, DateTime.Now.AddDays(-1)); } catch (IOException) { } // (an antivirus's own file beside one it scans, gone again)
+            ModMerge.Recover(docs);
+        }
+        Empty();
+        for (var round = 0; round < rounds; round++)
+        {
+            var pick = seed + round; // (1 to 3 are the fixed ones)
+            var rng = new Random(pick);
+            var home = Path.Combine(root, "Fuzz", round.ToString());
+            var (docs, downloads) = (Path.Combine(home, "Base"), Path.Combine(home, "Downloads"));
+            Directory.CreateDirectory(Path.Combine(docs, "Mods"));
+            File.WriteAllText(Path.Combine(docs, "Mods", "Resource.cfg"), "Priority 500\nPackedFile Packages/*/*.package\n");
+            var inside = "abcde"[..rng.Next(3, 6)].Select(c => c.ToString()).ToList();
+            uint t = 300;
+            foreach (var n in inside.Concat(["x", "y"])) Pkg(At(docs, n).Path, Raw(t, t++, n));
+            var on = pick <= 2 || pick > 3 && rng.Next(4) > 0;
+            var made = ModMerge.Run(ModMerge.Plan(docs, inside.Select(n => At(docs, n)).ToList(), "Pack", F, false), null, default).Merged;
+            if (!on) Mods.SetEnabled(made, false, docs);
+            var twin = pick == 2 || pick > 3 && rng.Next(3) == 0; // (a mod in the list at the place one inside the merge came from)
+            if (twin) Pkg(At(docs, "a").Path, Raw(t, t++, "a again"));
+            Pkg(Path.Combine(downloads, "a.package"), Raw(t, t++, "a newer"));
+            foreach (var n in inside) Pkg(Path.Combine(downloads, $"new {n}.package"), Raw(t, t++, "new " + n));
+
+            // each mod inside: 0 stays, 1 back on, 2 back off, 3 to the Recycle Bin, replaced by 4 a file from outside under its
+            // own name, 5 one under another name, 6 a mod of the list
+            var acts = new List<(string N, int A, string? With)>();
+            var free = new List<string> { "x", "y" };
+            foreach (var n in inside)
+            {
+                var a = pick switch { 1 => n == "a" ? 4 : n == "b" ? 1 : 0, 2 => n == "a" ? 3 : 0, 3 => n == "a" ? 4 : 0, _ => rng.Next(3) == 0 ? 0 : rng.Next(1, 7) };
+                if (a == 4 && n != "a") a = 5;
+                if (a == 6 && free.Count == 0) a = 0;
+                acts.Add((n, a, a == 6 ? free[0] : null));
+                if (a == 6) free.RemoveAt(0);
+            }
+            var adds = free.Where(_ => pick > 3 && rng.Next(3) == 0).ToList();
+            if (twin && acts[0].A == 3 && (pick == 2 || rng.Next(2) == 0)) adds.Add("a");
+            var name = pick > 3 && rng.Next(3) == 0 ? "Renamed" : null;
+            var order = pick > 3 && rng.Next(2) == 0 ? acts.Where(x => x.A is 0 or >= 4).Select(x => x.N).Concat(adds).OrderBy(_ => rng.Next()).Select(Rel).ToList() : null;
+            MergeEdit Edit(string d)
+            {
+                var e = new MergeEdit { Name = name, Order = order };
+                foreach (var (n, a, with) in acts)
+                    if (a is 1 or 2 or 3) e.Out[Rel(n)] = (TakeOutTo)(a - 1);
+                    else if (a == 4) e.Replace[Rel(n)] = ModMerge.Outside(Path.Combine(downloads, "a.package"));
+                    else if (a == 5) e.Replace[Rel(n)] = ModMerge.Outside(Path.Combine(downloads, $"new {n}.package"));
+                    else if (a == 6) e.Replace[Rel(n)] = At(d, with!);
+                e.Add.AddRange(adds.Select(n => At(d, n)));
+                return e;
+            }
+            var said = $"seed {pick} ({string.Join(" ", acts.Select(x => x.N + x.A + x.With))}; in {string.Join(" ", adds)}; {name}; {(order is null ? "" : "ordered")}; {(on ? "on" : "off")})";
+            string Kept(string n) => Sha(Path.Combine(ModMerge.Folder(docs), "Pack", F, n + ".package"));
+            // what must still be somewhere after the change: every mod but those sent to the Recycle Bin
+            var stay = acts.Where(x => x.A is 0 or 1 or 2).Select(x => Kept(x.N)).Concat(adds.Concat(acts.Where(x => x.A == 6).Select(x => x.With!)).Select(n => Sha(At(docs, n).Path))).ToList();
+            var replaced = acts.Where(x => x.A >= 4).Select(x => Kept(x.N)).ToList();
+            var copied = acts.Where(x => x.A is 4 or 5).Select(x => Sha(Path.Combine(downloads, x.A == 4 ? "a.package" : $"new {x.N}.package"))).ToList();
+            var outside = Snap(downloads);
+
+            for (var stop = 1; ; stop++)
+            {
+                var work = Path.Combine(home, "At " + stop);
+                Shot(docs, work);
+                var m = At(work, "Pack", on);
+                var plan = ModMerge.PlanEdit(work, m, Edit(work));
+                if (!plan.CanRun) break; // (refused whole: nothing to stop)
+                if (stop == 1) ran++;
+                // (with fewer than two mods left the merge goes and every mod goes back, a replaced one as it was)
+                var gone = plan.Plan is null;
+                var must = stay.Concat(gone ? replaced : copied).ToList();
+                string? Sound(string d)
+                {
+                    if (Directory.GetDirectories(d, ".out-*", SearchOption.AllDirectories).Any(o => Snap(o).Count > 0)) return "something set aside stays out of sight";
+                    var rec = ModMerge.Info(d, At(d, name ?? "Pack"));
+                    var store = Path.Combine(ModMerge.Folder(d), "Pack");
+                    if (gone ? rec is not null || Directory.Exists(store) && Directory.EnumerateFiles(store, "*", SearchOption.AllDirectories).Any() : rec is not { Pending: null }) return "the record is not as the change leaves it";
+                    // (the mod of the list at the place of one still inside would keep that one from going back: not this check's)
+                    if (rec?.Originals.Any(o => o.Rel.Equals(Rel("a"), StringComparison.OrdinalIgnoreCase)) == true && File.Exists(At(d, "a").Path)) File.Delete(At(d, "a").Path);
+                    try { if (!gone) ModMerge.Split(d, At(d, name ?? "Pack", on)); }
+                    catch (SetupException e) { return "the merge does not split: " + e.Message; }
+                    var have = Snap(d).Values.ToHashSet();
+                    return must.All(have.Contains) ? null : "a mod is lost";
+                }
+                var before = Snap(work);
+                var crash = Path.Combine(home, "Ended at " + stop);
+                var (calls, ended, failed) = (0, false, false);
+                ModMerge.FailPoint = _ => { if (++calls != stop) return; ended = true; Shot(work, crash); throw new IOException("injected"); };
+                ModMerge.Recycle = p => { if (++calls == stop) { ended = true; Shot(work, crash); } bin(p); };
+                try { ModMerge.Run(plan); }
+                catch (IOException) { failed = true; }
+                catch (SetupException e) { failed = true; bad.Add($"{said} stop {stop}: {e.Message}"); }
+                finally { ModMerge.FailPoint = _ => { }; ModMerge.Recycle = bin; }
+                if (failed)
+                {
+                    stops++;
+                    if (!Same(before, Snap(work)) || ModMerge.Info(work, m) is not { Pending: null } || Directory.GetFiles(recycled).Any(f => !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))) bad.Add($"{said} stop {stop}: a failed change left {Diff(before, Snap(work))}{(ModMerge.Info(work, m) is { Pending: null } ? "" : " (a record with a change in it, or none)")}{(Directory.GetFiles(recycled).Any(f => !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) ? " (files in the Recycle Bin)" : "")}");
+                }
+                else if (Sound(work) is { } why) bad.Add($"{said} stop {stop}: made, {why}");
+                Empty();
+                if (!ended) break;
+                var json = Path.Combine(ModMerge.Folder(crash), "Pack", "merge.json");
+                var journal = File.Exists(json) ? File.ReadAllText(json) : "";
+                Restart(crash);
+                if (!failed) { if (Sound(crash) is { } lost) bad.Add($"{said} stop {stop}: ended after the record, {lost}"); }
+                else
+                {
+                    if (!Same(before, Snap(crash))) bad.Add($"{said} stop {stop}: the next start left {Diff(before, Snap(crash))}");
+                    File.WriteAllText(json, journal);
+                    Restart(crash);
+                    if (!Same(before, Snap(crash))) bad.Add($"{said} stop {stop}: the record read again left {Diff(before, Snap(crash))}");
+                }
+                Empty();
+            }
+            if (!Same(outside, Snap(downloads))) bad.Add($"{said}: a file outside Mods changed");
+            Wipe(home);
+        }
+        check(bad.Count == 0 && ran > rounds / 2 && stops > ran * 5, $"edit: {ran} changes picked at random, stopped at {stops} points as a failure and as a launcher that ends: nothing lost, nothing out of place {string.Join(" | ", bad.Take(6))}");
+    }
+
+    // What the launcher did not put there: a record that is not its own, a folder of Mods that is a link, and a merge under
+    // the name of a mod another merge keeps. In a Documents folder of its own.
+    static void Guards(Action<bool, string> check, string root)
+    {
+        var docs = Path.Combine(root, "Guards", "The Sims 3");
+        var mods = Path.Combine(docs, "Mods");
+        Directory.CreateDirectory(Path.Combine(mods, "Packages"));
+        var cfg = Path.Combine(mods, "Resource.cfg");
+        File.WriteAllText(cfg, "Priority 500\nPackedFile Packages/*.package\nPackedFile Packages/*/*.package\n");
+        ModFile M(string rel) => new(Path.Combine(mods, rel), Path.Combine("Mods", rel), 0, ModKind.Package, true, false);
+        ModFile Merge(string name, params string[] rels) => ModMerge.Run(ModMerge.Plan(docs, rels.Select(M).ToList(), name, "Packages", false), null, default).Merged;
+
+        // records that name files outside Mods, or that are cut short: nothing moves, nothing throws, Mods still reads
+        var presets = Path.Combine(docs, "userPresets.package");
+        File.WriteAllText(presets, "presets");
+        File.WriteAllText(Path.Combine(mods, "Packages", "Bad.package.tmp-1"), "x");
+        foreach (var (name, json) in new[]
+                 {
+                     ("Bad", "{\"Name\":\"Bad\",\"Merged\":\"Mods\\\\Packages\\\\Bad.package\",\"Originals\":[{\"Rel\":\"..\\\\Mods\\\\Resource.cfg\"},{\"Rel\":\"..\\\\userPresets.package\"}]}"),
+                     ("Cut", "{\"Name\":\"Cut\",\"Merged\":\"Mods\\\\Packages\\\\Cut.package\",\"Originals\":null}"),
+                     ("Half", "{\"Name\":\"Half\",\"Merged\":\"Mods\\\\Packages\\\\Half.package\",\"Originals\":[null],\"Pending\":{\"Moves\":null}}"),
+                     ("None", "{\"Priority\":null}"),
+                 })
+        {
+            Directory.CreateDirectory(Path.Combine(ModMerge.Folder(docs), name));
+            File.WriteAllText(Path.Combine(ModMerge.Folder(docs), name, "merge.json"), json);
+        }
+        var threw = "";
+        try { ModMerge.Recover(docs); ModMerge.Orphans(docs); ModMerge.Lost(docs); }
+        catch (Exception e) { threw = e.GetType().Name; }
+        check(threw == "" && File.Exists(cfg) && File.Exists(presets) && !ModMerge.IsMerged(M(@"Packages\Bad.package")),
+            "merge: a record that names files outside Mods, or that is cut short, moves nothing and stops nothing " + threw);
+        File.Delete(Path.Combine(mods, "Packages", "Bad.package.tmp-1"));
+        Wipe(ModMerge.Folder(docs));
+
+        // a merge named as a mod another merge keeps, then removed by hand: its mods are still offered back
+        foreach (var n in new[] { "Hair", "B", "C", "D", "E" }) Pkg(M($@"Packages\{n}.package").Path, Raw(700, (ulong)n[0], n));
+        Merge("Pack", @"Packages\Hair.package", @"Packages\B.package");
+        var second = Merge("Hair", @"Packages\D.package", @"Packages\E.package");
+        File.Delete(second.Path);
+        var orphans = ModMerge.Orphans(docs);
+        check(orphans.Count == 1 && orphans[0].Name == "Hair" && orphans[0].Files.Count == 2 && ModMerge.PutBack(docs, orphans[0]) == 2 && File.Exists(M(@"Packages\D.package").Path),
+            "merge: a removed merge is still found when another merge keeps a mod of the same name");
+        // (and a merge that really is inside another one is not taken for a removed one)
+        var inner = Merge("Inner", @"Packages\D.package", @"Packages\E.package");
+        Merge("Outer", @"Packages\Inner.package", @"Packages\C.package");
+        check(ModMerge.Orphans(docs).Count == 0 && !File.Exists(inner.Path), "merge: a merge kept inside another merge is not one that was removed");
+
+        // a folder of Mods that is a link to another place (mods kept on another drive): its packages are loaded, so they count
+        // as neighbours whose order a merge could change
+        var far = Path.Combine(root, "Guards", "Far");
+        Pkg(Path.Combine(far, "Zeta.package"), Raw(710, 710, "zeta's"));
+        Pkg(M(@"Packages\ZZ\Hair2.package").Path, Raw(710, 710, "hair's"), Raw(711, 711, "h"));
+        Pkg(M(@"Packages\ZZ\O1.package").Path, Raw(712, 712, "o1"));
+        Pkg(M(@"Packages\ZZ\O2.package").Path, Raw(713, 713, "o2"));
+        var link = Path.Combine(mods, "Packages", "CC");
+        using (var mk = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{far}\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!) mk.WaitForExit();
+        if (!File.Exists(Path.Combine(link, "Zeta.package"))) Console.WriteLine("  (no folder link could be made here: that check is skipped)");
+        else
+        {
+            var plan = ModMerge.Plan(docs, new[] { "Hair2", "O1", "O2" }.Select(n => M($@"Packages\ZZ\{n}.package")).ToList(), "Linked", "Packages", false);
+            Directory.Delete(link); // (the link only)
+            check(plan.Inputs.Count == 2 && plan.Skipped.Single() is { Reason.Key: ModMerge.ClashReason } s && s.Mod.Name == "Hair2.package" && plan.Clashes.Single().Outside.SequenceEqual(["Zeta"]) && File.Exists(Path.Combine(far, "Zeta.package")),
+                "merge: a loaded package in a folder that is a link is a neighbour like any other");
+        }
+    }
+
     public static void Run(Action<bool, string> check)
     {
         var root = Path.Combine(Path.GetTempPath(), "ApexMergeTest-" + Guid.NewGuid().ToString("N")[..8]);
@@ -796,6 +1010,8 @@ static class ModMergeTests
             foreach (var f in Directory.GetFiles(recycled)) File.Delete(f);
 
             Edits(check, root, docs, recycled);
+            Fuzz(check, root, recycled, int.TryParse(Environment.GetEnvironmentVariable("APEX_MERGE_FUZZ"), out var rounds) ? rounds : 12, int.TryParse(Environment.GetEnvironmentVariable("APEX_MERGE_SEED"), out var seed) ? seed : 1);
+            Guards(check, root);
         }
         catch (Exception e) { check(false, "merge: exception " + e); }
         finally
