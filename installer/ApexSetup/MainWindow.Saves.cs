@@ -82,10 +82,10 @@ public sealed partial class MainWindow
         page.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var rows = new StackPanel();
-        AutomationProperties.SetName(rows, T("Your saves"));
-        foreach (var l in now.Here) rows.Children.Add(SaveRow(l, rows.Children.Count == 0));
-        var list = new Border { Child = rows, Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Top };
+        // (a row of its own for each, as in Settings)
+        var list = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Top };
+        AutomationProperties.SetName(list, T("Your saves"));
+        foreach (var l in now.Here) list.Children.Add(SaveRow(l));
         page.Children.Add(list);
         var panel = SaveCleanPanel(now);
         page.Children.Add(panel);
@@ -123,7 +123,7 @@ public sealed partial class MainWindow
         finally { _saveReading.Release(); }
     }
 
-    Task<ImageSource?> FamilyPicture(SaveLook l) => OfSave(l, "family", async () => await SaveCard.SimsOf(await OffThread(() => Saves.Photo(l.Save))));
+    Task<ImageSource?> FamilyPicture(SaveLook l) => OfSave(l, "family", async () => await SaveCard.SimsOf(await OffThread(() => Saves.Photo(l.Save)), small: true));
 
     Task<SaveRead?> CleanRead(SaveLook l) => OfSave(l, "clean", () => OffThread(() =>
     {
@@ -175,32 +175,33 @@ public sealed partial class MainWindow
 
     // ---------- the list ----------
 
-    FrameworkElement SaveRow(SaveLook l, bool first)
+    FrameworkElement SaveRow(SaveLook l)
     {
         var (name, place) = (FamilyName(l.Save, l.Info), SavePlace(l.Save, l.Info));
-        var sub = place + " · " + SaveDay(l.Info.LastPlayed);
-        var line = new Grid { ColumnSpacing = 14 };
+        var sub = SaveDay(l.Info.LastPlayed) + " · " + place; // (the day first: a narrow row cuts the end)
+        var line = new Grid { ColumnSpacing = 16 };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) line.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        var photo = new Grid { Width = 60, Height = 60, CornerRadius = new CornerRadius(8), Background = Res("ApexPillBrush"), Padding = new Thickness(2, 4, 2, 0) };
+        var photo = new Grid { Width = 48, Height = 48, CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Pick(0xFF232323, 0xFFF0F0F0)) };
         line.Children.Add(photo);
         _ = Photo();
-        var words = (FrameworkElement)Col(SaveText(name, 15, strong: true), SaveText(sub, 13, "ApexMutedBrush"));
-        (words.VerticalAlignment, ((StackPanel)words).Spacing) = (VerticalAlignment.Center, 1);
+        var words = (FrameworkElement)Col(SaveText(name, 14, strong: true), SaveText(sub, 12, "ApexMutedBrush"));
+        (words.VerticalAlignment, ((StackPanel)words).Spacing) = (VerticalAlignment.Center, 2);
         ToolTipService.SetToolTip(words, name + "\n" + sub);
         Grid.SetColumn(words, 1);
         line.Children.Add(words);
         var gain = SaveText("", 12, "ApexMutedBrush");
         var size = SaveText(SaveSize(l.Info.Bytes), 14, strong: true);
         size.HorizontalAlignment = gain.HorizontalAlignment = HorizontalAlignment.Right;
-        var numbers = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { size, gain } };
+        var numbers = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { size, gain } };
         Grid.SetColumn(numbers, 2);
         line.Children.Add(numbers);
 
         var box = new CheckBox
         {
-            Content = line, MinWidth = 0, MinHeight = 84, Padding = new Thickness(14, 0, 0, 0), IsChecked = _savePicks!.Contains(l.Save.Dir),
+            Content = line, MinWidth = 0, MinHeight = 66, Padding = new Thickness(16, 0, 0, 0), IsChecked = _savePicks!.Contains(l.Save.Dir),
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center,
         };
+        box.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
         box.Click += (_, _) => { if (box.IsChecked == true) _savePicks.Add(l.Save.Dir); else _savePicks.Remove(l.Save.Dir); _saveSums?.Invoke(); };
 
         var play = Dims(Button("", () => PlayAsync(l.Save.Name, update: _settings.InstallUpdatesOnPlay)));
@@ -213,14 +214,16 @@ public sealed partial class MainWindow
         ToolTipService.SetToolTip(more, T("More options"));
         var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center, Children = { play, more } };
 
-        var row = new Grid { ColumnSpacing = 18 };
+        var row = new Grid { ColumnSpacing = 20 };
         row.ColumnDefinitions.Add(new ColumnDefinition());
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.Children.Add(box);
         Grid.SetColumn(acts, 1);
         row.Children.Add(acts);
         _saveSums += Say;
-        return new Border { Child = row, Padding = new Thickness(18, 0, 16, 0), BorderThickness = new Thickness(0, first ? 0 : 1, 0, 0), BorderBrush = Res("ApexHairlineBrush"), ContextFlyout = SaveMenu(l) };
+        var card = new Border { Child = row, CornerRadius = new CornerRadius(8), Padding = new Thickness(20, 0, 16, 0), MinHeight = 68, ContextFlyout = SaveMenu(l) };
+        Soft(card);
+        return card;
 
         void Say()
         {
@@ -235,7 +238,8 @@ public sealed partial class MainWindow
         {
             try
             {
-                if (await FamilyPicture(l) is { } img) photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Bottom });
+                if (await FamilyPicture(l) is { } img)
+                    photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(2, 4, 2, 0) });
                 else photo.Children.Add(Lucide.Icon("users", 24, Res("ApexIconMutedBrush"), 1.4));
             }
             catch (Exception e) { App.Log(e); }
@@ -286,12 +290,13 @@ public sealed partial class MainWindow
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var about = SaveText(info, 12, "ApexMutedBrush");
             about.TextWrapping = TextWrapping.Wrap;
-            g.Children.Add(new StackPanel { Spacing = 1, Children = { SaveText(name, 14, strong: true), about } });
+            g.Children.Add(new StackPanel { Spacing = 2, Children = { SaveText(name, 14, strong: true), about } });
             var size = SaveText("", 14, "ApexMutedBrush");
             size.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(size, 1);
             g.Children.Add(size);
-            var box = new CheckBox { Content = g, MinWidth = 0, MinHeight = 60, Padding = new Thickness(12, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center };
+            var box = new CheckBox { Content = g, MinWidth = 0, MinHeight = 64, Padding = new Thickness(12, 10, 0, 10), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center };
+            box.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
             AutomationProperties.SetName(box, name + ". " + info);
             box.Click += (_, _) =>
             {

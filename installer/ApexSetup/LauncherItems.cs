@@ -195,7 +195,8 @@ public static class SaveCard
 
     // the household photo cut to its Sims (the game draws them small in a wide transparent frame); the whole photo when
     // it has no transparent edge
-    public static async Task<ImageSource?> SimsOf(byte[]? bytes)
+    // (small: one Sim alone, tall and thin, from the head to the waist, so a small picture still tells who it is)
+    public static async Task<ImageSource?> SimsOf(byte[]? bytes, bool small = false)
     {
         if (bytes is null || bytes.Length < 8) return null;
         try
@@ -214,6 +215,15 @@ public static class SaveCard
                     if (px[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
             if (x1 < 0 || (x1 - x0 + 1) * (y1 - y0 + 1) > w * h * 0.9) return await ImageOf(bytes);
             int cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+            if (small && cw < ch * 0.7)
+            {
+                // (the shadow at the feet is wider than the Sim)
+                (ch, x0, x1) = (ch / 2, w, -1);
+                for (int y = y0; y < y0 + ch; y++)
+                    for (int x = 0; x < w; x++)
+                        if (px[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
+                cw = x1 - x0 + 1;
+            }
             var cut = new Windows.Graphics.Imaging.SoftwareBitmap(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, cw, ch, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied);
             var rows = new byte[cw * ch * 4];
             for (int y = 0; y < ch; y++) Buffer.BlockCopy(px, ((y0 + y) * w + x0) * 4, rows, y * cw * 4, cw * 4);
