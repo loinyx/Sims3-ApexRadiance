@@ -406,7 +406,8 @@ public sealed partial class MainWindow
         void Fact(string what, string value)
         {
             var cell = new Border { Padding = new Thickness(facts.Children.Count == 0 ? 28 : 20, 16, 20, 16), BorderThickness = new Thickness(facts.Children.Count == 0 ? 0 : 1, 0, 0, 0), BorderBrush = Res("ApexHairlineBrush"),
-                Child = new StackPanel { Spacing = 2, Children = { SaveText(what, 12, "ApexMutedBrush"), SaveText(value, 14, strong: true) } } };
+                Child = new StackPanel { Spacing = 2, Children = { Wrapped(SaveText(what, 12, "ApexMutedBrush")), Wrapped(SaveText(value, 14, strong: true)) } } };
+            static TextBlock Wrapped(TextBlock t) { t.TextWrapping = TextWrapping.Wrap; return t; }
             ToolTipService.SetToolTip(cell, what + ": " + value);
             facts.ColumnDefinitions.Add(new ColumnDefinition());
             Grid.SetColumn(cell, facts.Children.Count);
