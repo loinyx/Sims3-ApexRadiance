@@ -47,7 +47,7 @@ public sealed partial class MainWindow
         public Dictionary<string, SelectorBarItem> Tabs { get; } = [];
         public Action? Repaint { get; set; }            // the memories in sight, when many are chosen at once
         public Action? ShowRepeated { get; set; }       // the Memories' third choice, once the memories were compared
-        public string Title => Info.Household.Length > 0 ? T("{0} household", Info.Household) : Save.Name;
+        public string Title => FamilyName(new SaveLook(Save, Info, null));
     }
 
     SavePageState? _sp;
@@ -68,7 +68,7 @@ public sealed partial class MainWindow
             SavePage.RowDefinitions.Add(new RowDefinition());
             SavePage.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var esc = new KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
-            esc.Invoked += (_, e) => { if (_sp is not null && _dialog is null && !_busy) { e.Handled = true; Show(SavesScreen); } };
+            esc.Invoked += (_, e) => { if (_sp is not null && _dialog is null && !_busy) { e.Handled = true; CloseSavePage(); } };
             SavePage.KeyboardAccelerators.Add(esc);
             SavePage.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
         }
@@ -96,6 +96,15 @@ public sealed partial class MainWindow
         Scroller.Visibility = Visibility.Visible;
     }
 
+    // back to Saves as it was left: its place in the list, and the keyboard on the save that was open
+    void CloseSavePage()
+    {
+        if (_sp is not { } p || _step != SavesScreen) { Show(SavesScreen); return; }
+        HideSavePage();
+        FillSaves();
+        FocusSave(p.Save.Dir);
+    }
+
     // the game started or closed, or the language or the theme changed: the page is read and built again
     void RefreshSavePage()
     {
@@ -121,7 +130,7 @@ public sealed partial class MainWindow
         try
         {
             var s = p.Save;
-            if (!Directory.Exists(s.Dir)) { Show(SavesScreen); return; }
+            if (!Directory.Exists(s.Dir)) { CloseSavePage(); return; }
             var (info, photo, contents, stars) = await Task.Run(() =>
             {
                 HashSet<string> kept = [];
@@ -132,7 +141,7 @@ public sealed partial class MainWindow
             if (_sp != p) return;
             (p.Info, p.Contents, p.Stars, p.Memories) = (info, contents, stars, contents.Items(SaveKind.Memory));
             p.Family = await SaveCard.SimsOf(photo);
-            p.Cover = await Task.Run(() => SpCover(p, ct), ct) is { } cover ? await SpImage(cover, 0, ct) : null;
+            p.Cover = (await Task.Run(() => SpCover(p, ct), ct) is { } cover ? await SpImage(cover, 0, ct) : null) ?? await SaveCard.ImageOf(await WorldView(new SaveLook(s, info, null)));
             if (_sp != p) return;
             SpBuild(p);
 
@@ -198,7 +207,7 @@ public sealed partial class MainWindow
         AutomationProperties.SetName(b, T("Back to Saves"));
         AutomationProperties.SetAutomationId(b, "SaveBack");
         ToolTipService.SetToolTip(b, T("Back to Saves"));
-        b.Click += (_, _) => Show(SavesScreen);
+        b.Click += (_, _) => CloseSavePage();
         b.Loaded += (_, _) => b.Focus(FocusState.Programmatic); // (a keyboard goes on from here)
         return b;
     }
@@ -260,10 +269,11 @@ public sealed partial class MainWindow
         var g = new Grid { Height = 168 };
         if (onCover)
         {
+            g.Background = Argb(0xFF141414); // (a lot's picture has clear corners)
             g.Children.Add(new Image { Source = p.Cover, Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Center });
             g.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(Windows.UI.Color.FromArgb(255, 10, 11, 12), [(0, 0xF2), (0.46, 0xC7), (1, 0x80)], across: true) });
         }
-        else g.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(((SolidColorBrush)Res("ApexAccentBrush")).Color, [(0, 0), (0.55, 0), (1, 0x1C)], across: true) });
+        else g.Children.Add(SaveTint());
         // (over the cover the buttons are the dark theme's: the picture is dark under its shade in both)
         var row = new Grid { ColumnSpacing = 18, Padding = new Thickness(22, 0, 22, 0), RequestedTheme = onCover ? ElementTheme.Dark : ElementTheme.Default };
         foreach (var w in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
@@ -278,9 +288,7 @@ public sealed partial class MainWindow
         AutomationProperties.SetHeadingLevel(title, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level1);
         ToolTipService.SetToolTip(title, p.Title);
         words.Children.Add(title);
-        // (the world being played first; a save that also has a university or a holiday names both)
-        var worlds = new[] { p.Info.World }.Concat(p.Info.Worlds).Where(w => w.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).Select(Worlds.Pretty).ToList();
-        words.Children.Add(new TextBlock { Text = worlds.Count == 2 ? T("{0} and {1}", worlds[0], worlds[1]) : string.Join(" · ", worlds), FontSize = 14, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
+        words.Children.Add(new TextBlock { Text = PlaceName(p.Info), FontSize = 14, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
         words.Children.Add(new TextBlock { Text = PlayedWhen(p.Info.LastPlayed) + " · " + Path.GetFileName(p.Save.Dir), FontSize = 12, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(words, 2);
         row.Children.Add(words);
@@ -410,7 +418,7 @@ public sealed partial class MainWindow
     async Task SpDuplicate(SavePageState p)
     {
         if (await SpWork(T("Duplicating the save"), (say, ct) => { say(T("Copying the save and checking the copy"), -1, true); return SaveCopies.Duplicate(p.Docs, p.Save, null, ct); }) is not { } made) return;
-        SpSay(InfoBarSeverity.Success, T("The copy is called {0}", made.Name), "", T("Open"), () => OpenSave(made));
+        SpSay(InfoBarSeverity.Success, T("The new save is called {0}", made.Name), "", T("Open"), () => OpenSave(made));
     }
 
     async Task SpRename(SavePageState p)
@@ -438,6 +446,6 @@ public sealed partial class MainWindow
     async Task SpDelete(SavePageState p)
     {
         if (!await Confirm(T("Move this save to the Recycle Bin?"), T("{0} leaves the game. You can bring it back from the Recycle Bin, and its copies stay where they are.", p.Title), T("Move to the Recycle Bin"), danger: true)) return;
-        if (await SpWork(T("Move to the Recycle Bin"), (say, _) => { say(T("Moving the save"), -1, false); SaveCopies.Delete(p.Save); return p.Save; }) is not null) Show(SavesScreen);
+        if (await SpWork(T("Move to the Recycle Bin"), (say, _) => { say(T("Moving the save"), -1, false); SaveCopies.Delete(p.Save); return p.Save; }) is not null) CloseSavePage();
     }
 }

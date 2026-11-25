@@ -285,6 +285,9 @@ static class SavesTests
         check(SaveCover.Best(c) is null && SaveCover.Fan(c, 5).Select(i => i.Instance).Distinct().Count() == SaveCover.Fan(c, 5).Count && SaveCover.Fan(c, 5).Count <= 2
               && SaveCover.Lots(c, 9).Count == 2 && SaveCover.Lots(c, 1).Single().Size == c.Items(SaveKind.LotThumbnail).Max(i => i.Size) && SaveCover.Lots(SaveContents.Read(Path.Combine(docs, "Saves", "Nowhere.sims3")), 9).Count == 0,
             "cover: no view among small memories, no picture twice in the fan, the lots with the most in them, none in an empty save");
+        var fullest = SaveCover.Lots(c, 1).Single();
+        check(SaveCover.Lots(new World("", WorldKind.Custom, null, fullest.File), 1).Single().AsSpan().SequenceEqual(SaveContents.Data(fullest)) && SaveCover.Lots(new World("", WorldKind.Custom, null, Path.Combine(docs, "none.world")), 1).Count == 0,
+            "cover: a world's file gives its own lots, and none when it can't be read");
 
         // stars and the Gallery
         SaveStars.Set(s.Name, mem.Key, true);

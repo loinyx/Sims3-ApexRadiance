@@ -114,7 +114,7 @@ Repeat until the tester stops you or a round finds nothing new three times in a 
 
 - Home: banners, Play (refused in a dry run), the health card, Continue, What's new, pictures.
 - Components: the toggles, Stable and Experimental, Apply.
-- Worlds and Saves: cards fill the width, pictures load, Back up all.
+- Worlds and Saves: cards fill the width, pictures load, Copy all.
 - Health: Check now, every area, Automatic fixes, Restore points, Last session, the copy-report button.
 - What's new, Settings (every row), the language menu, the first-start question (installed or portable).
 - Every dialog: the action has the accent colour; removing and deleting are in red; Esc and Cancel change nothing.

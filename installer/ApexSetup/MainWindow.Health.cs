@@ -31,7 +31,7 @@ public sealed partial class MainWindow
     {
         HealthArea.ApexRadiance => T("files, settings, one copy"), HealthArea.Loaders => T("ASI loader, Sims 3 Modernization"), HealthArea.Graphics => _state?.Layer.ToString() ?? "",
         HealthArea.GameSettings => "Options.ini, Resource.cfg", HealthArea.Mods => T("Conflicts that change something in the game."), HealthArea.Stability => T("Your latest sessions."),
-        HealthArea.Saves => T("size, backups, complete"), _ => T("free space, OneDrive, game caches"),
+        HealthArea.Saves => T("size, copies, complete"), _ => T("free space, OneDrive, game caches"),
     };
 
     // the conflicts the last check found, without or with only the ignored ones

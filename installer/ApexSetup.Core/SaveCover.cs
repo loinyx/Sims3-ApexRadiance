@@ -39,6 +39,9 @@ public static class SaveCover
     // the lots with the most in them, the fullest first (a picture of bare ground packs far smaller)
     public static List<SaveItem> Lots(SaveContents c, int count) => c.Items(SaveKind.LotThumbnail).OrderByDescending(i => i.Size).Take(count).ToList();
 
+    // the same of a world's own file, as the game ships it
+    public static List<byte[]> Lots(World w, int count) => Dbpf.Index(w.Path).Where(e => SaveContents.KindOf(e.Type, e.Group) == SaveKind.LotThumbnail).OrderByDescending(e => e.Size).Take(count).Select(e => Dbpf.Read(w.Path, e)).OfType<byte[]>().ToList();
+
     // how much of a view without Sims a picture is; 0: not one
     public static double Score(SavePicture p)
     {
