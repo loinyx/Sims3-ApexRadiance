@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 
@@ -62,9 +63,10 @@ public static partial class ModMerge
         if (exclude is not null) skip.Add(Path.GetFullPath(exclude));
         var off = Path.GetFullPath(Mods.Disabled(docs)) + Path.DirectorySeparatorChar;
         // (as the Mods list reads them: a folder that is a link to another drive is loaded too)
-        foreach (var f in Mods.Files(modsDir, "*.package"))
+        var beside = Mods.Files(modsDir, "*.package").Where(f => !skip.Contains(f) && !f.StartsWith(off, StringComparison.OrdinalIgnoreCase) && !Keeps(docs, f)).ToList();
+        Warm(beside);
+        foreach (var f in beside)
         {
-            if (skip.Contains(f) || f.StartsWith(off, StringComparison.OrdinalIgnoreCase) || Keeps(docs, f)) continue;
             if (ModConflicts.LoadKey(dirs, Slash(Path.GetRelativePath(modsDir, f))) is not { } lk) continue;
             // (Probe: a damaged package is no known neighbour)
             if (Probe(f).Item1 is not { } entries) continue;
@@ -93,7 +95,7 @@ public static partial class ModMerge
         {
             if (!_open.TryGetValue(path, out var f))
             {
-                if (_open.Count >= 64) Dispose();
+                if (_open.Count >= 400) Dispose();
                 _open[path] = f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 1 << 16);
             }
             var b = new byte[e.FileSize];
@@ -110,11 +112,30 @@ public static partial class ModMerge
             if (ea.MemSize != eb.MemSize && Math.Max(ea.MemSize, eb.MemSize) > ModConflicts.MeaningCap) return false;
             try
             {
-                var (x, y) = (Stored(a, ea), Stored(b, eb));
-                if (ea.Compressed == eb.Compressed && x.AsSpan().SequenceEqual(y)) return true;
-                return ModConflicts.SameMeaning(ea.Type, ea.Compressed == 0xFFFF ? ModConflicts.RefPack(x) : x, eb.Compressed == 0xFFFF ? ModConflicts.RefPack(y) : y);
+                var key = (a, Stamp(a), ea.Offset, b, Stamp(b), eb.Offset);
+                if (_same.TryGetValue(key, out var known)) return known;
+                if (_same.Count > 500_000) _same.Clear();
+                return _same[key] = Compare(a, ea, b, eb);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or IndexOutOfRangeException or OverflowException) { return false; }
+        }
+
+        // two resources compared once are not compared again while their files stay as they are (the merge is planned again at
+        // each choice, and reading and unpacking the same pairs took most of it)
+        static readonly ConcurrentDictionary<(string, (long, long), uint, string, (long, long), uint), bool> _same = new();
+        readonly Dictionary<string, (long, long)> _stamps = new(StringComparer.OrdinalIgnoreCase);
+        (long, long) Stamp(string path)
+        {
+            if (_stamps.TryGetValue(path, out var t)) return t;
+            var fi = new FileInfo(path);
+            return _stamps[path] = (fi.Length, fi.LastWriteTimeUtc.Ticks);
+        }
+
+        bool Compare(string a, ModConflicts.Entry ea, string b, ModConflicts.Entry eb)
+        {
+            var (x, y) = (Stored(a, ea), Stored(b, eb));
+            if (ea.Compressed == eb.Compressed && x.AsSpan().SequenceEqual(y)) return true;
+            return ModConflicts.SameMeaning(ea.Type, ea.Compressed == 0xFFFF ? ModConflicts.RefPack(x) : x, eb.Compressed == 0xFFFF ? ModConflicts.RefPack(y) : y);
         }
 
         public byte[]? Unpacked(string path, ModConflicts.Entry e)

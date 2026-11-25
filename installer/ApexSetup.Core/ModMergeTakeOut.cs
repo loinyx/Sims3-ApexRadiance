@@ -137,7 +137,7 @@ public static partial class ModMerge
         if (plan.Refusals.Concat(plan.Plan?.Refusals ?? []).FirstOrDefault() is { } no) throw new SetupException(no.Key, no.Args);
         if (plan.Plan?.Skipped.FirstOrDefault() is { } skip) throw new SetupException("{0} can't go in. {1}", skip.Mod.Name, skip.Reason.Text);
         Engine.CheckWritable();
-        lock (Gate) return EditNow(plan, progress, ct);
+        lock (Gate) return EditNow(plan, Paced.Of(progress), ct);
     }
 
     // Every original is checked against the record, the new merged file is written beside the old one and read back, and
@@ -199,11 +199,13 @@ public static partial class ModMerge
                 tmp = Path.Combine(Path.GetDirectoryName(plan.TargetPath)!, $"{plan.Name}.package.tmp-{Guid.NewGuid():N}");
                 log.WriteLine("step write " + Path.GetFileName(tmp));
                 ct.ThrowIfCancellationRequested();
-                (written, var resHashes, sha) = Write(plan, tmp, progress, ct);
+                log.Flush();
+                (written, sha, _) = Write(plan, tmp, progress, ct);
                 log.WriteLine("step verify");
+                log.Flush();
                 ct.ThrowIfCancellationRequested();
                 FailPoint("verify");
-                Verify(tmp, written, resHashes, sha, progress, ct);
+                Verify(tmp, written, sha, progress, ct);
                 log.WriteLine($"verified {written.Count} resources, sha256 {sha}");
                 ct.ThrowIfCancellationRequested();
                 Engine.CheckWritable();
@@ -212,6 +214,7 @@ public static partial class ModMerge
 
             // 4. the moves (no cancel from here: a rollback instead), written down before the first one
             log.WriteLine("step move");
+            log.Flush();
             foreach (var (o, to) in p.Outs)
                 moves.Add((StorePath(rec, o), to switch
                 {

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -153,6 +154,7 @@ public static partial class ModMerge
     static List<MergePlan> Plans(string docs, IReadOnlyList<ModFile> mods, string name, string folderRel, bool includeScripts, IReadOnlyList<string>? order, IReadOnlyCollection<string>? leaveOut, long partBytes, EditOf? of)
     {
         order ??= [];
+        var leftSet = leaveOut?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
         var modsDir = Path.GetFullPath(Path.Combine(docs, "Mods"));
         if (name.EndsWith(".package", StringComparison.OrdinalIgnoreCase)) name = name[..^8];
         var common = new List<MergeReason>();
@@ -237,6 +239,7 @@ public static partial class ModMerge
         if (dirs is null) return [Make(name, [])];
 
         var ok = new List<(MergeSource Src, (int, int, string) Key)>();
+        Warm(mods.Where(m => m.FileType == "package").Select(m => m.Path));
         foreach (var m in mods)
         {
             MergeReason? why = null;
@@ -265,7 +268,7 @@ public static partial class ModMerge
             var ranks = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             for (var i = 0; i < order.Count; i++) ranks.TryAdd(order[i], i);
             int Rank(int i) => ranks.GetValueOrDefault(ok[i].Src.Mod.Rel, -1);
-            bool Out(int i) => leaveOut?.Contains(ok[i].Src.Mod.Rel, StringComparer.OrdinalIgnoreCase) == true;
+            bool Out(int i) => leftSet.Contains(ok[i].Src.Mod.Rel);
             var left = new HashSet<int>();
             // (against the first part's name: shortcut: a loaded package named between two parts of one merge is judged by the first part's place, upgrade if parts ever clash with one)
             if (ModConflicts.LoadKey(dirs, Slash(UnderMods(Path.Combine("Mods", Path.GetRelativePath(modsDir, Path.Combine(folderFull, name + ".package")))))) is { } tk)
@@ -316,8 +319,35 @@ public static partial class ModMerge
         return plans;
     }
 
-    // a package's index, checked against the file before anything trusts it (untrusted input), or why not
+    // A package's index, or why it can't be read, kept while its file stays as it is: a merge of thousands of mods is planned
+    // again at each choice, and only what changed is read again.
+    static readonly ConcurrentDictionary<string, (long Size, long Written, List<ModConflicts.Entry> Entries)> _probes = new(StringComparer.OrdinalIgnoreCase);
+
     static (List<ModConflicts.Entry>?, MergeReason?) Probe(string path)
+    {
+        long size = -1, written = 0;
+        try
+        {
+            var fi = new FileInfo(path);
+            if (fi.Exists) (size, written) = (fi.Length, fi.LastWriteTimeUtc.Ticks);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { }
+        if (size >= 0 && _probes.TryGetValue(path, out var k) && k.Size == size && k.Written == written) return (k.Entries.ToList(), null);
+        var (entries, why) = ProbeNow(path);
+        if (_probes.Count > 20_000) _probes.Clear();
+        if (size >= 0 && entries is not null) _probes[path] = (size, written, entries.ToList()); // (one that can't be read is tried again the next time)
+        return (entries, why);
+    }
+
+    // the files' indexes read ahead, several at a time (most of a first plan is waiting for files to open)
+    static void Warm(IEnumerable<string> paths)
+    {
+        var left = new ConcurrentQueue<string>(paths);
+        Task.WaitAll(Enumerable.Range(0, 6).Select(_ => Task.Run(() => { while (left.TryDequeue(out var p)) Probe(p); })).ToArray());
+    }
+
+    // a package's index, checked against the file before anything trusts it (untrusted input), or why not
+    static (List<ModConflicts.Entry>?, MergeReason?) ProbeNow(string path)
     {
         try
         {
@@ -353,7 +383,7 @@ public static partial class ModMerge
     {
         if (!plan.CanRun) throw new SetupException("Can't merge: {0}", plan.Refusals[0].Text);
         if (plan.Of is not null) throw new InvalidOperationException("the plan of a change to a merge runs as that change");
-        lock (Gate) return RunNow(plan, progress, ct);
+        lock (Gate) return RunNow(plan, Paced.Of(progress), ct);
     }
 
     static MergeResult RunNow(MergePlan plan, IProgress<MergeProgress>? progress, CancellationToken ct)
@@ -372,29 +402,31 @@ public static partial class ModMerge
         var placed = false;
         try
         {
-            // 1. the inputs are as planned; their hashes go into merge.json
+            // 1. the inputs are as planned (each one's hash, for merge.json, is taken as it is read in 2)
             log.WriteLine("step check");
+            log.Flush();
             Engine.CheckWritable();
             var total = plan.Sources.Sum(s => s.Size);
             long done = 0;
-            var hashes = new List<string>();
             foreach (var s in plan.Sources)
             {
+                ct.ThrowIfCancellationRequested();
                 Unchanged(s);
-                hashes.Add(Sha(s.Mod.Path, ct));
                 progress?.Report(new(MergeStep.Check, done += s.Size, total));
             }
 
             // 2. the new file, next to the target
             log.WriteLine("step write " + Path.GetFileName(tmp));
             ct.ThrowIfCancellationRequested();
-            var (written, resHashes, sha) = Write(plan, tmp, progress, ct);
+            log.Flush();
+            var (written, sha, hashes) = Write(plan, tmp, progress, ct);
 
-            // 3. read back: header, index, every resource's stored bytes
+            // 3. read back: the index, and every byte by its hash
             log.WriteLine("step verify");
+            log.Flush();
             ct.ThrowIfCancellationRequested();
             FailPoint("verify");
-            Verify(tmp, written, resHashes, sha, progress, ct);
+            Verify(tmp, written, sha, progress, ct);
             log.WriteLine($"verified {written.Count} resources, sha256 {sha}");
             ct.ThrowIfCancellationRequested();
             Engine.CheckWritable();
@@ -402,6 +434,7 @@ public static partial class ModMerge
 
             // 4. the originals into the merge folder (no cancel from here: a rollback instead)
             log.WriteLine("step move");
+            log.Flush();
             var record = new MergeRecord
             {
                 Version = 2, Priority = plan.Order.ToList(), Name = plan.Name, Merged = plan.TargetRel, Sha256 = sha, Size = new FileInfo(tmp).Length, Resources = written.Count, Created = DateTime.UtcNow,
@@ -476,13 +509,43 @@ public static partial class ModMerge
             throw new SetupException("{0} changed since the merge was planned. Plan it again.", s.Mod.Rel);
     }
 
-    // the header first (every offset is known from the plan), then each resource's stored bytes, then the index
-    static (List<ModConflicts.Entry>, List<byte[]>, string) Write(MergePlan plan, string tmp, IProgress<MergeProgress>? progress, CancellationToken ct)
+    // Reports at most every 60 ms, and where a step starts or ends: one report per resource, a hundred thousand of them,
+    // kept the window from doing anything else.
+    sealed class Paced(IProgress<MergeProgress> to) : IProgress<MergeProgress>
     {
-        var written = new List<ModConflicts.Entry>();
-        var resHashes = new List<byte[]>();
-        var buf = new byte[1 << 16];
+        MergeStep? _step;
+        long _last;
+        public static IProgress<MergeProgress>? Of(IProgress<MergeProgress>? p) => p is null or Paced ? p : new Paced(p);
+        public void Report(MergeProgress p)
+        {
+            var now = Environment.TickCount64;
+            if (p.Step == _step && p.Done < p.Total && now - _last < 60) return;
+            (_step, _last) = (p.Step, now);
+            to.Report(p);
+        }
+    }
+
+    const long WholeBytes = 64 << 20, AheadBytes = 256 << 20;
+
+    // a source's bytes with their hash; one too big to hold is only hashed, and read again where it is copied
+    static (byte[]? Bytes, string Sha) Load(MergeSource s, CancellationToken ct)
+    {
+        if (s.Size > WholeBytes) return (null, Sha(s.Mod.Path, ct));
+        ct.ThrowIfCancellationRequested();
+        var b = File.ReadAllBytes(s.Mod.Path);
+        return (b, Convert.ToHexString(SHA256.HashData(b)).ToLowerInvariant());
+    }
+
+    // The header first (every offset is known from the plan), then each resource's stored bytes, then the index. Each source
+    // is read once, whole, the next ones ahead while this one is written. Back: what was written, the file's hash and each
+    // source's.
+    static (List<ModConflicts.Entry> Written, string Sha, List<string> Sources) Write(MergePlan plan, string tmp, IProgress<MergeProgress>? progress, CancellationToken ct)
+    {
+        var written = new List<ModConflicts.Entry>(plan.Resources);
+        var hashes = new List<string>(plan.Sources.Count);
+        var buf = new byte[1 << 18];
         long data = plan.Data, done = 0;
+        long all = plan.Sources.Sum(s => s.Size), read = 0; // (what the bar follows: a mod with nothing of its own to write is read too)
         var indexAt = 96 + data;
         var indexSize = 4 + 32 * plan.Resources;
         using var file = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -497,34 +560,53 @@ public static partial class ModMerge
             BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(60), 3);
             BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(64), (uint)indexAt);
             Put(head);
-            foreach (var s in plan.Sources)
+            var ahead = new Queue<Task<(byte[]? Bytes, string Sha)>>();
+            long held = 0;
+            for (int i = 0, next = 0; i < plan.Sources.Count; i++)
             {
-                using var src = new FileStream(s.Mod.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
+                for (; next < plan.Sources.Count && (ahead.Count == 0 || ahead.Count < 6 && held + plan.Sources[next].Size <= AheadBytes); next++)
+                {
+                    var n = plan.Sources[next];
+                    held += n.Size;
+                    ahead.Enqueue(Task.Run(() => Load(n, ct), ct));
+                }
+                var s = plan.Sources[i];
+                var (bytes, sha) = ahead.Dequeue().GetAwaiter().GetResult();
+                held -= s.Size;
+                hashes.Add(sha);
+                using var src = bytes is null ? new FileStream(s.Mod.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16) : null;
                 foreach (var e in s.Keep)
                 {
                     ct.ThrowIfCancellationRequested();
-                    using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                    src.Position = e.Offset;
-                    for (var left = e.FileSize; left > 0;)
+                    if (bytes is not null)
                     {
-                        var n = src.Read(buf, 0, Math.Min(buf.Length, left));
-                        if (n == 0) throw new InvalidDataException($"{s.Mod.Rel} ended inside a resource");
-                        Put(buf.AsSpan(0, n));
-                        h.AppendData(buf, 0, n);
-                        left -= n;
+                        if ((long)e.Offset + e.FileSize > bytes.Length) throw new InvalidDataException($"{s.Mod.Rel} ended inside a resource");
+                        Put(bytes.AsSpan((int)e.Offset, e.FileSize));
+                    }
+                    else
+                    {
+                        src!.Position = e.Offset;
+                        for (var left = e.FileSize; left > 0;)
+                        {
+                            var n = src.Read(buf, 0, Math.Min(buf.Length, left));
+                            if (n == 0) throw new InvalidDataException($"{s.Mod.Rel} ended inside a resource");
+                            Put(buf.AsSpan(0, n));
+                            left -= n;
+                        }
                     }
                     written.Add(e with { Offset = (uint)(96 + done) });
-                    resHashes.Add(h.GetHashAndReset());
                     done += e.FileSize;
-                    progress?.Report(new(MergeStep.Write, done, data));
+                    read += e.FileSize;
+                    progress?.Report(new(MergeStep.Write, read, all + 1)); // (+1: the end is said once the index is in)
                     if (written.Count == 1) FailPoint("write");
                 }
+                read += s.Size - s.Keep.Sum(e => (long)e.FileSize);
+                progress?.Report(new(MergeStep.Write, read, all + 1));
             }
             foreach (var (e, bytes) in plan.Made)
             {
                 Put(bytes);
                 written.Add(e with { Offset = (uint)(96 + done) });
-                resHashes.Add(SHA256.HashData(bytes));
                 done += bytes.Length;
             }
             var idx = new byte[indexSize];
@@ -545,40 +627,37 @@ public static partial class ModMerge
             Put(idx);
             o.Flush(true);
         }
-        return (written, resHashes, Convert.ToHexString(file.GetHashAndReset()).ToLowerInvariant());
+        progress?.Report(new(MergeStep.Write, all, all));
+        return (written, Convert.ToHexString(file.GetHashAndReset()).ToLowerInvariant(), hashes);
     }
 
-    static void Verify(string tmp, List<ModConflicts.Entry> written, List<byte[]> resHashes, string sha, IProgress<MergeProgress>? progress, CancellationToken ct)
+    // (the whole file's hash is of the very bytes the resources were written from: one pass says each of them is as it was)
+    static void Verify(string tmp, List<ModConflicts.Entry> written, string sha, IProgress<MergeProgress>? progress, CancellationToken ct)
     {
-        var (entries, why) = Probe(tmp);
+        var (entries, why) = ProbeNow(tmp);
         if (entries is null) throw new InvalidDataException("the merged file does not read back: " + why!.Text);
         if (!entries.SequenceEqual(written)) throw new InvalidDataException("the merged file's index differs from what was written");
-        var buf = new byte[1 << 16];
-        long total = written.Sum(e => (long)e.FileSize), done = 0;
-        using (var f = new FileStream(tmp, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16))
-            for (var i = 0; i < entries.Count; i++)
-            {
-                ct.ThrowIfCancellationRequested();
-                using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                f.Position = entries[i].Offset;
-                for (var left = entries[i].FileSize; left > 0;)
-                {
-                    var n = f.Read(buf, 0, Math.Min(buf.Length, left));
-                    if (n == 0) throw new InvalidDataException("the merged file ends early");
-                    h.AppendData(buf, 0, n);
-                    left -= n;
-                }
-                if (!h.GetHashAndReset().AsSpan().SequenceEqual(resHashes[i])) throw new InvalidDataException($"resource {i} differs from its source");
-                progress?.Report(new(MergeStep.Verify, done += entries[i].FileSize, total));
-            }
-        if (Sha(tmp, ct) != sha) throw new InvalidDataException("the merged file's hash differs from what was written");
+        if (Sha(tmp, ct, (done, total) => progress?.Report(new(MergeStep.Verify, done, total))) != sha) throw new InvalidDataException("the merged file differs from what was written");
     }
 
-    static string Sha(string path, CancellationToken ct = default)
+    static string Sha(string path, CancellationToken ct = default, Action<long, long>? said = null)
     {
         ct.ThrowIfCancellationRequested();
-        using var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20);
-        return Convert.ToHexString(SHA256.HashData(f)).ToLowerInvariant();
+        using var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan);
+        using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buf = System.Buffers.ArrayPool<byte>.Shared.Rent(1 << 20);
+        try
+        {
+            long done = 0, total = f.Length;
+            for (int n; (n = f.Read(buf, 0, buf.Length)) > 0;)
+            {
+                ct.ThrowIfCancellationRequested();
+                h.AppendData(buf, 0, n);
+                said?.Invoke(done += n, total);
+            }
+        }
+        finally { System.Buffers.ArrayPool<byte>.Shared.Return(buf); }
+        return Convert.ToHexString(h.GetHashAndReset()).ToLowerInvariant();
     }
 
     // A merge stopped during the move (the launcher closed or was ended): the merged file is not in place and its temporary
@@ -689,7 +768,7 @@ public static partial class ModMerge
         var dir = Path.Combine(Paths.Data, "logs");
         Directory.CreateDirectory(dir);
         path = Path.Combine(dir, $"{kind}-{DateTime.Now:yyyyMMdd-HHmmss-fff}.log");
-        return new StreamWriter(path, append: true) { AutoFlush = true };
+        return new StreamWriter(path, append: true); // (flushed at each step: a write for each of thousands of lines would cost more than the moves)
     }
 
     // ---------- what a merged file is made of ----------

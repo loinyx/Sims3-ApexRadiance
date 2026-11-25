@@ -16,11 +16,30 @@ public sealed class MergeChoice(ModFile mod)
     public bool In => Pick ?? Meets is null;
 }
 
+// the rows; thousands of them join in one change (one change each kept the window laying the list out)
+public sealed class MergeRows : ObservableCollection<MergeChoice>
+{
+    public void Join(IReadOnlyCollection<MergeChoice> top, IReadOnlyCollection<MergeChoice> end)
+    {
+        if (top.Count + end.Count > 20)
+        {
+            var list = (List<MergeChoice>)Items;
+            list.InsertRange(0, top);
+            list.AddRange(end);
+            OnCollectionChanged(new(System.Collections.Specialized.NotifyCollectionChangedAction.Reset));
+            return;
+        }
+        var at = 0;
+        foreach (var r in top) Insert(at++, r);
+        foreach (var r in end) Add(r);
+    }
+}
+
 // What the merge dialog holds: the mods in the order that counts (the top one's copy wins) and what the player chose for
 // each, kept in step with the plans made from them.
 public sealed class MergeChoices
 {
-    public ObservableCollection<MergeChoice> Rows { get; } = new();
+    public MergeRows Rows { get; } = new();
     readonly Dictionary<string, MergeChoice> _known = new(StringComparer.OrdinalIgnoreCase); // (a mod that goes and comes back keeps its choice)
 
     public List<string> Order => Rows.Where(r => r.In).Select(r => r.Mod.Rel).ToList();
@@ -41,12 +60,8 @@ public sealed class MergeChoices
         var had = Rows.Select(r => r.Mod.Rel).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var clash = all.SelectMany(p => p.Meets).DistinctBy(m => m.Key, StringComparer.OrdinalIgnoreCase).ToDictionary(m => m.Key, m => m.Value, StringComparer.OrdinalIgnoreCase);
         // (the ones that clash come in on top, where the player decides on them; the rest in the game's load order)
-        var top = 0;
-        foreach (var m in mods.Where(m => !had.Contains(m.Rel)))
-        {
-            var row = _known.TryGetValue(m.Rel, out var k) ? k : _known[m.Rel] = new(m);
-            if (clash.ContainsKey(m.Rel)) Rows.Insert(top++, row); else Rows.Add(row);
-        }
+        var fresh = mods.Where(m => !had.Contains(m.Rel)).Select(m => _known.TryGetValue(m.Rel, out var k) ? k : _known[m.Rel] = new(m)).ToList();
+        Rows.Join(fresh.Where(r => clash.ContainsKey(r.Mod.Rel)).ToList(), fresh.Where(r => !clash.ContainsKey(r.Mod.Rel)).ToList());
         var shares = all.SelectMany(p => p.Shares).DistinctBy(x => x.Key, StringComparer.OrdinalIgnoreCase).ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
         var apart = (scripts is null ? [] : scripts.Clashes.SelectMany(c => c.Mods).Concat(scripts.Inputs).Concat(scripts.Skipped.Select(s => s.Mod))).Select(m => m.Rel).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var r in Rows)
@@ -62,7 +77,10 @@ public sealed class MergeChoices
     }
 
     // why each mod that has no row stays out
-    public List<MergeSkip> Others(IReadOnlyList<MergePlan> plans, MergePlan? scripts) =>
-        plans.SelectMany(p => p.Skipped).Where(s => scripts is null || s.Reason.Key != ModMerge.ScriptReason).Concat(scripts?.Skipped ?? [])
-            .Where(s => !Rows.Any(r => r.Mod.Rel.Equals(s.Mod.Rel, StringComparison.OrdinalIgnoreCase))).ToList();
+    public List<MergeSkip> Others(IReadOnlyList<MergePlan> plans, MergePlan? scripts)
+    {
+        var shown = Rows.Select(r => r.Mod.Rel).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return plans.SelectMany(p => p.Skipped).Where(s => scripts is null || s.Reason.Key != ModMerge.ScriptReason).Concat(scripts?.Skipped ?? [])
+            .Where(s => !shown.Contains(s.Mod.Rel)).ToList();
+    }
 }
