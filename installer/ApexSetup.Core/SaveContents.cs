@@ -170,14 +170,6 @@ public sealed class SaveContents
     // the pictures of a kind, in file order (nothing is read)
     public IReadOnlyList<SaveItem> Items(SaveKind kind) => _pictures.Where(i => i.Kind == kind).ToList();
 
-    // up to count of them, spread over the whole list; of portraits and household pictures, the largest size of each
-    public IReadOnlyList<SaveItem> Sample(SaveKind kind, int count)
-    {
-        var all = Items(kind).GroupBy(i => (i.File, i.Instance)).Select(g => g.MaxBy(i => i.Type)).ToList();
-        if (all.Count <= count || count <= 0) return all;
-        return Enumerable.Range(0, count).Select(i => all[(int)((long)i * all.Count / count)]).ToList();
-    }
-
     // The memories that are one picture: grouped by their unpacked content, each under its own key (the game stores the
     // same picture again for another Sim's memory). Reads every memory once; the answer is kept. One that can't be read
     // stands alone.
@@ -237,16 +229,6 @@ public sealed class SaveContents
             }
             paths.Add(path);
         }
-        return paths;
-    }
-
-    // the same into the folder the Gallery shows new pictures from, each one set as this save's household
-    public static List<string> ToGallery(string docs, Save s, IEnumerable<SaveItem> items, CancellationToken ct = default)
-    {
-        var paths = Export(s.Name, items, Gallery.Folder(docs), ct);
-        var d = Gallery.Load();
-        foreach (var p in paths) Gallery.Info(d, p).Household = s.Name;
-        Gallery.Save(d);
         return paths;
     }
 }
@@ -385,8 +367,8 @@ public static class Dds
     }
 }
 
-// The memories the player starred, by save name and resource key, in %LOCALAPPDATA%\Apex Launcher\save-stars.json. A clean
-// never removes a starred memory, so a file that exists but can't be read throws: guessing "none" would unprotect them.
+// The pictures the player chose to keep, by save name and resource key, in %LOCALAPPDATA%\Apex Launcher\save-stars.json. A
+// clean never removes one, so a file that exists but can't be read throws: guessing "none" would unprotect them.
 public static class SaveStars
 {
     static string FilePath => Path.Combine(Paths.Data, "save-stars.json");
@@ -398,7 +380,7 @@ public static class SaveStars
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
         {
             Engine.Log(e);
-            throw new SetupException("The launcher can't read which memories you starred, so it removes none. Try again.");
+            throw new SetupException("The launcher can't read which pictures you chose to keep, so it removes none. Try again.");
         }
     }
 
@@ -415,12 +397,11 @@ public static class SaveStars
 
     public static HashSet<string> Of(string save) => new(Load().GetValueOrDefault(save) ?? [], StringComparer.OrdinalIgnoreCase);
 
-    public static void Set(string save, string key, bool on) => Change(all =>
+    // of the pictures shown, the ones that stay (one kept before that was not shown stays kept)
+    public static void Keep(string save, IReadOnlyCollection<string> shown, IReadOnlyCollection<string> kept) => Change(all =>
     {
-        var l = all.TryGetValue(save, out var have) ? have : all[save] = [];
-        l.RemoveAll(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
-        if (on) l.Add(key);
-        if (l.Count == 0) all.Remove(save);
+        var now = (all.GetValueOrDefault(save) ?? []).Except(shown, StringComparer.OrdinalIgnoreCase).Union(kept, StringComparer.OrdinalIgnoreCase).ToList();
+        if (now.Count > 0) all[save] = now; else all.Remove(save);
     });
 
     // a renamed save keeps its stars; a duplicate gets the same ones (keep: the first save still has them)

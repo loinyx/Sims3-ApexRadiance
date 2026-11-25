@@ -899,7 +899,6 @@ public static partial class Strings
         ["The Sims 3 is already running."] = "The Sims 3 už běží.",
         ["The Sims 3 is running"] = "The Sims 3 běží",
         ["The Sims 3 · {0} · {1} MB"] = "The Sims 3 · {0} · {1} MB",
-        ["The copy did not finish"] = "Záloha nebyla dokončena",
         ["The game closed unexpectedly"] = "Hra se nečekaně zavřela",
         ["The game did not start"] = "Hra se nespustila",
         ["This window can't start the game. Close it and press Play in Apex Launcher."] = "Z tohoto okna nelze spustit hru. Zavřete ho a stiskněte Hrát v Apex Launcher.",

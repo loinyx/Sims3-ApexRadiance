@@ -894,7 +894,6 @@ public static partial class Strings
         ["The Sims 3 is already running."] = "The Sims 3 kører allerede.",
         ["The Sims 3 is running"] = "The Sims 3 kører",
         ["The Sims 3 · {0} · {1} MB"] = "The Sims 3 · {0} · {1} MB",
-        ["The copy did not finish"] = "Backuppen blev ikke færdig",
         ["The game closed unexpectedly"] = "Spillet lukkede uventet",
         ["The game did not start"] = "Spillet startede ikke",
         ["This window can't start the game. Close it and press Play in Apex Launcher."] = "Dette vindue kan ikke starte spillet. Luk det, og tryk på Spil i Apex Launcher.",

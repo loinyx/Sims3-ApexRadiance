@@ -193,31 +193,9 @@ public static class SaveCard
         catch (Exception) { return null; } // (a thumbnail in a format Windows does not read: the placeholder stays)
     }
 
-    // how light a picture is where it is not transparent, 0 to 255
-    public static async Task<double> LightOf(byte[] bytes)
-    {
-        try
-        {
-            using var ms = new Windows.Storage.Streams.InMemoryRandomAccessStream();
-            await ms.WriteAsync(System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.AsBuffer(bytes));
-            ms.Seek(0);
-            var dec = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(ms);
-            var px = (await dec.GetPixelDataAsync(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Straight, new(),
-                Windows.Graphics.Imaging.ExifOrientationMode.IgnoreExifOrientation, Windows.Graphics.Imaging.ColorManagementMode.DoNotColorManage)).DetachPixelData();
-            return await Task.Run(() =>
-            {
-                double sum = 0;
-                var n = 0;
-                for (int i = 0; i < px.Length; i += 4) if (px[i + 3] > 200) { sum += (px[i] * 18 + px[i + 1] * 183 + px[i + 2] * 54) / 255.0; n++; }
-                return n == 0 ? 0 : sum / n;
-            });
-        }
-        catch (Exception) { return 0; } // (not a picture Windows reads)
-    }
-
     // the household photo cut to its Sims (the game draws them small in a wide transparent frame); the whole photo when
-    // it has no transparent edge. grey: without its colours and a little darker (a lost household)
-    public static async Task<ImageSource?> SimsOf(byte[]? bytes, bool grey = false)
+    // it has no transparent edge
+    public static async Task<ImageSource?> SimsOf(byte[]? bytes)
     {
         if (bytes is null || bytes.Length < 8) return null;
         try
@@ -234,21 +212,16 @@ public static class SaveCard
             for (int y = 0; y < h; y++)
                 for (int x = 0; x < w; x++)
                     if (px[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-            if (x1 < 0 || (x1 - x0 + 1) * (y1 - y0 + 1) > w * h * 0.9)
-            {
-                if (!grey) return await ImageOf(bytes);
-                (x0, y0, x1, y1) = (0, 0, w - 1, h - 1);
-            }
+            if (x1 < 0 || (x1 - x0 + 1) * (y1 - y0 + 1) > w * h * 0.9) return await ImageOf(bytes);
             int cw = x1 - x0 + 1, ch = y1 - y0 + 1;
             var cut = new Windows.Graphics.Imaging.SoftwareBitmap(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, cw, ch, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied);
             var rows = new byte[cw * ch * 4];
             for (int y = 0; y < ch; y++) Buffer.BlockCopy(px, ((y0 + y) * w + x0) * 4, rows, y * cw * 4, cw * 4);
-            for (int i = 0; grey && i < rows.Length; i += 4) rows[i] = rows[i + 1] = rows[i + 2] = (byte)((rows[i] * 18 + rows[i + 1] * 183 + rows[i + 2] * 54) * 0.78 / 255);
             cut.CopyFromBuffer(System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.AsBuffer(rows));
             var src = new Microsoft.UI.Xaml.Media.Imaging.SoftwareBitmapSource();
             await src.SetBitmapAsync(cut);
             return src;
         }
-        catch (Exception) { return grey ? null : await ImageOf(bytes); }
+        catch (Exception) { return await ImageOf(bytes); }
     }
 }

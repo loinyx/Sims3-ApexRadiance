@@ -179,21 +179,6 @@ static class SavesTests
               && small is { Width: 4, Height: 4 } && small.Bgra.AsSpan(0, 4).SequenceEqual(new byte[] { 0, 255, 0, 255 }) && Dds.Decode(Dxt1(8, 2, 1, 1), 64) is { Width: 8 },
             "pictures: a DXT1 memory decodes, at full size or at the smaller size asked for");
 
-        // a view of a town (detail from edge to edge) is a cover; the same with the plumbob, a thought bubble or in the dark is not, nor a plain wall
-        SavePicture View(int light, byte[]? mark = null)
-        {
-            var px = new byte[64 * 64 * 4];
-            for (var i = 0; i < 64 * 64; i++)
-            {
-                var v = (byte)((i % 64 / 2 + i / 64 / 2) % 2 == 0 ? light : light / 3);
-                (px[i * 4], px[i * 4 + 1], px[i * 4 + 2], px[i * 4 + 3]) = (v, v, v, 255);
-                if (mark is not null && i % 64 is >= 30 and < 36 && i / 64 is >= 10 and < 16) mark.CopyTo(px, i * 4);
-            }
-            return new(64, 64, px);
-        }
-        check(SaveCover.Score(View(160)) > 12 && SaveCover.Score(View(160, [20, 200, 20])) == 0 && SaveCover.Score(View(160, [240, 240, 240])) == 0 && SaveCover.Score(View(40)) == 0
-              && SaveCover.Score(new(64, 64, Enumerable.Repeat((byte)120, 64 * 64 * 4).ToArray())) == 0 && SaveCover.Score(new(4, 4, new byte[64])) == 0,
-            "cover: a memory of a place is told from one with a Sim, a dark one and a plain one");
         check(SaveHealth.RecentCopy(DateTime.Now.AddDays(-40), new("", "", DateTime.Now.AddDays(-50))) && SaveHealth.RecentCopy(DateTime.Now.AddDays(-3), new("", "", DateTime.Now))
               && !SaveHealth.RecentCopy(DateTime.Now.AddDays(-40), new("", "", DateTime.Now)) && !SaveHealth.RecentCopy(null, new("", "", DateTime.Now)),
             "copies: one made since the save was played, or not long ago, protects it");
@@ -275,41 +260,28 @@ static class SavesTests
             "contents: memories that are one picture are grouped by what they unpack to, however each is stored");
 
         var mem = c.Items(SaveKind.Memory)[0];
-        var faces = c.Sample(SaveKind.Portrait, 2);
         check(SaveContents.Picture(mem) is { Width: 8 } && SaveContents.Picture(mem, 4) is { Width: 4 } && SaveContents.Png(mem) is { } png && png[1] == 'P'
               && SaveContents.Png(c.Items(SaveKind.LotThumbnail)[0])!.AsSpan().SequenceEqual(Png("lot one")) && SaveContents.Data(mem)!.AsSpan().SequenceEqual(MemA)
-              && faces.Count == 2 && faces.All(f => f.Type == Face) && c.Sample(SaveKind.Portrait, 10).Count == 3 && mem.Key == "00b2d882:0269d005:00000000000000a1",
-            "contents: a picture on demand (a memory decoded, a portrait as stored), and a sample that reads nothing else");
-
-        // (the two pictures are 8 pixels: too small to be a view; the fuller lot first)
-        check(SaveCover.Best(c) is null && SaveCover.Fan(c, 5).Select(i => i.Instance).Distinct().Count() == SaveCover.Fan(c, 5).Count && SaveCover.Fan(c, 5).Count <= 2
-              && SaveCover.Lots(c, 9).Count == 2 && SaveCover.Lots(c, 1).Single().Size == c.Items(SaveKind.LotThumbnail).Max(i => i.Size) && SaveCover.Lots(SaveContents.Read(Path.Combine(docs, "Saves", "Nowhere.sims3")), 9).Count == 0,
-            "cover: no view among small memories, no picture twice in the fan, the lots with the most in them, none in an empty save");
-        var fullest = SaveCover.Lots(c, 1).Single();
-        check(SaveCover.Lots(new World("", WorldKind.Custom, null, fullest.File), 1).Single().AsSpan().SequenceEqual(SaveContents.Data(fullest)) && SaveCover.Lots(new World("", WorldKind.Custom, null, Path.Combine(docs, "none.world")), 1).Count == 0,
-            "cover: a world's file gives its own lots, and none when it can't be read");
+              && mem.Key == "00b2d882:0269d005:00000000000000a1",
+            "contents: a picture on demand (a memory decoded, a lot as stored)");
 
         // stars and the Gallery
-        SaveStars.Set(s.Name, mem.Key, true);
-        SaveStars.Set(s.Name, "x", true);
-        SaveStars.Set(s.Name, "x", false);
+        SaveStars.Keep(s.Name, ["x"], ["x"]);
+        SaveStars.Keep(s.Name, ["x", mem.Key], [mem.Key]);
         check(SaveStars.Of(s.Name).SetEquals([mem.Key]) && SaveStars.Of("Other").Count == 0, "stars: kept by save and key");
         File.WriteAllText(Path.Combine(Paths.Data, "save-stars.json"), "{ not json");
         var unread = SaveClean.Plan(docs, s, CleanParts.Memories);
         check(Throws<SetupException>(() => SaveStars.Of(s.Name)) && unread.Refusal is not null && !unread.CanRun, "stars: a star file that can't be read stops a clean, it never counts as no stars");
         File.Delete(Path.Combine(Paths.Data, "save-stars.json"));
 
-        var two = c.Items(SaveKind.Memory).Take(2).ToList();
-        var sent = SaveContents.ToGallery(docs, s, two);
-        var times = sent.Select(File.GetLastWriteTimeUtc).ToList();
-        var again = SaveContents.ToGallery(docs, s, two);
-        var g = Gallery.Load();
+        // a kept photo stays in a clean of them all
+        var photo = c.Items(SaveKind.Generated).Single().Key;
+        SaveStars.Keep(s.Name, [photo], [photo]);
+        check(SaveClean.Plan(docs, s, CleanParts.None).Gains[CleanParts.Generated].Count == 0, "stars: a photo the player keeps is not in a clean");
+        SaveStars.Keep(s.Name, [photo], []);
         var chosen = Path.Combine(docs, "Chosen");
-        check(sent.Count == 2 && sent.All(p => Path.GetDirectoryName(p) == Gallery.Folder(docs) && File.ReadAllBytes(p)[1] == 'P' && g.Pictures[p].Household == s.Name)
-              && Gallery.List(docs).Count == 2 && again.SequenceEqual(sent) && again.Select(File.GetLastWriteTimeUtc).SequenceEqual(times)
-              && SaveContents.Export(s.Name, c.Items(SaveKind.Portrait), chosen).Count == 4 && Directory.GetFiles(chosen).Length == 4 && !Directory.GetFiles(chosen).Any(f => f.EndsWith(".part")),
-            "gallery: memories go where the Gallery looks as PNG files of this household, once; any pictures save to a chosen folder");
-        foreach (var p in sent) File.Delete(p);
+        check(SaveContents.Export(s.Name, c.Items(SaveKind.Portrait), chosen).Count == 4 && Directory.GetFiles(chosen).Length == 4 && !Directory.GetFiles(chosen).Any(f => f.EndsWith(".part"))
+              && SaveContents.Export(s.Name, c.Items(SaveKind.Portrait), chosen).Count == 4 && Directory.GetFiles(chosen).Length == 4, "pictures: any of them save to a chosen folder, once");
     }
 
     static void Clean(Action<bool, string> check, string docs, Save s)
@@ -361,7 +333,7 @@ static class SavesTests
         check(Throws<OperationCanceledException>(() => SaveClean.Run(plan, null, cancel.Token)) && Same(before, Snap(s.Dir)) && Directory.GetFiles(Saves.BackupDir(docs)).Length == 0, "clean: cancelled, the save is as it was");
 
         // the clean itself: a starred memory stays, a memory picked by key goes
-        SaveStars.Set(s.Name, "00b2d882:0269d005:00000000000000a3", true);
+        SaveStars.Keep(s.Name, [], ["00b2d882:0269d005:00000000000000a3"]);
         plan = SaveClean.Plan(docs, s, CleanParts.Portraits | CleanParts.Thumbnails | CleanParts.RepeatedMemories | CleanParts.Generated, ["00b2d882:0269d005:00000000000000c1", "00b2d882:0269d005:00000000000000a3"]);
         var steps = new List<CleanStep>();
         var r = SaveClean.Run(plan, new Sync(p => steps.Add(p.Step)));
@@ -400,7 +372,7 @@ static class SavesTests
             "clean: a rewrite with nothing removed is byte for byte the same when the file has no unused room, and never writes over a file");
         foreach (var f in Directory.GetFiles(s.Dir, "*.copy").Append(town + ".meta")) File.Delete(f);
         foreach (var f in Directory.GetFiles(Saves.BackupDir(docs))) File.Delete(f);
-        SaveStars.Set(s.Name, "00b2d882:0269d005:00000000000000a3", false);
+        SaveStars.Keep(s.Name, ["00b2d882:0269d005:00000000000000a3"], []);
 
         // a file that changed since the plan
         var stale = SaveClean.Plan(docs, s, CleanParts.Portraits);
@@ -499,8 +471,24 @@ static class SavesTests
         check(failed && rescued.Name == "Gone" && Same(game, Snap(rescued.Dir)) && Same(game, Snap(lost[0].Dir)) && SaveCopies.Lost(docs).Count == 0 && Throws<SetupException>(() => SaveCopies.Rescue(docs, lost[0])),
             "lost: it comes back under its own name as a checked copy; the game's copy stays");
 
+        // a save only the launcher's zip still has
+        var only = Saves.Backup(rescued, docs);
+        var zips = Directory.GetFiles(Saves.BackupDir(docs), "*.zip").Length;
+        var there = SaveCopies.Gone(docs).Count;
+        Directory.Move(rescued.Dir, rescued.Dir + ".away");
+        var gone = SaveCopies.Gone(docs).Where(x => x.Save.Name == "Gone").ToList();
+        SaveCopies.FailPoint = p => { if (p == "swap") throw new IOException("stop"); };
+        var stopped = Throws<IOException>(() => SaveCopies.Restore(docs, gone[0].Save, gone[0].Point)) && !Directory.Exists(rescued.Dir) && !Directory.Exists(Path.Combine(saves, ".apex-work"));
+        SaveCopies.FailPoint = _ => { };
+        var revived = SaveCopies.Restore(docs, gone[0].Save, gone[0].Point);
+        check(there == 0 && gone.Count == 1 && gone[0].Point.Path == only && stopped && Same(Snap(rescued.Dir + ".away").ToDictionary(x => x.Key, x => x.Value[..64]), Snap(revived.Dir).ToDictionary(x => x.Key, x => x.Value[..64]))
+              && SaveCopies.Gone(docs).Count == 0 && Directory.GetFiles(Saves.BackupDir(docs), "*.zip").Length == zips, "gone: a save only a zip still has comes back under its name, and a failure leaves nothing behind");
+        Directory.Delete(revived.Dir, true);
+        Directory.Move(rescued.Dir + ".away", rescued.Dir);
+        File.Delete(only);
+
         // duplicate
-        SaveStars.Set("Town", "k1", true);
+        SaveStars.Keep("Town", [], ["k1"]);
         var twin = SaveCopies.Duplicate(docs, s);
         var named = SaveCopies.Duplicate(docs, s, " Twin ");
         check(twin.Name == "Town (2)" && named.Name == "Twin" && Same(files, Snap(twin.Dir)) && Same(files, Snap(s.Dir)) && !Directory.Exists(twin.Dir + ".backup")
@@ -515,7 +503,7 @@ static class SavesTests
         Gallery.Look(g, "Gone").Font = "Arial";
         g.LastAlbum = "Gone";
         Gallery.Save(g);
-        SaveStars.Set("Gone", "k2", true);
+        SaveStars.Keep("Gone", [], ["k2"]);
         var zip = Saves.Backup(rescued, docs);
         var refused = new[] { "", "  ", "a/b", @"..\x", "con", "Twin", "twin", new string('n', 200), "x:y" }.All(n => Throws<SetupException>(() => SaveCopies.Rename(docs, rescued, n)));
         SaveCopies.FailPoint = p => { if (p == "move") throw new IOException("stop"); };
@@ -585,13 +573,13 @@ static class SavesTests
 
         // put back in the game while a newer save has its name
         var old = Make(docs, "Smith");
-        SaveStars.Set("Smith", "old-star", true);
+        SaveStars.Keep("Smith", [], ["old-star"]);
         Saves.Backup(old, docs);
         SaveCopies.Store(docs, old);
         var live = Make(docs, "Smith");
         File.AppendAllText(Path.Combine(live.Dir, "TravelDB.package"), "another family");
         live = Saves.List(docs).First(x => x.Name == "Smith");
-        SaveStars.Set("Smith", "new-star", true);
+        SaveStars.Keep("Smith", [], ["new-star"]);
         Saves.Backup(live, docs);
         SaveHealth.Check(docs);
         var back = SaveCopies.Unstore(docs, SaveCopies.Stored(docs)[0]);
@@ -604,13 +592,13 @@ static class SavesTests
         var r1 = Make(docs, "R");
         Directory.CreateDirectory(r1.Dir + ".backup");
         File.WriteAllText(Path.Combine(r1.Dir + ".backup", "x.nhd"), "the game's copy");
-        SaveStars.Set("R", "r-star", true);
+        SaveStars.Keep("R", [], ["r-star"]);
         Saves.Backup(r1, docs);
         r1 = SaveCopies.Store(docs, r1);
         var r2 = SaveCopies.Rename(docs, Make(docs, "R"), "R new");
         var renamed = r2.Name == "R new" && Zips("R") == 1 && Zips("R new") == 0 && SaveStars.Of("R").Contains("r-star") && SaveStars.Of("R new").Contains("r-star");
         var r3 = Make(docs, "R");
-        SaveStars.Set("R", "third", true);
+        SaveStars.Keep("R", [], ["third"]);
         r3 = SaveCopies.Store(docs, r3);
         check(renamed && r3.Name == "R (2)" && Zips("R") == 1 && Zips("R (2)") == 0 && SaveStars.Of("R").Contains("third") && SaveStars.Of("R (2)").Contains("third"),
             "namesakes: the same when a save is renamed, or kept out of the game, while another one has its name");
@@ -729,7 +717,7 @@ static class SavesTests
             // APEX_SAVES_REAL_PICS=<folder>: a few pictures of each save as PNG files, to look at
             if (Environment.GetEnvironmentVariable("APEX_SAVES_REAL_PICS") is { Length: > 0 } pics)
             {
-                SaveContents.Export(name, new[] { SaveKind.Memory, SaveKind.Generated, SaveKind.Portrait, SaveKind.LotThumbnail, SaveKind.HouseholdPicture }.SelectMany(k => c.Sample(k, 2)), pics);
+                SaveContents.Export(name, new[] { SaveKind.Memory, SaveKind.Generated, SaveKind.Portrait, SaveKind.LotThumbnail, SaveKind.HouseholdPicture }.SelectMany(k => c.Items(k).Take(2)), pics);
                 if (c.Items(SaveKind.Memory).FirstOrDefault() is { Size: > 0 } m && SaveContents.Png(m, 128) is { } small) File.WriteAllBytes(Path.Combine(pics, name + " small.png"), small);
             }
             var none = SaveClean.Plan(docs, s, CleanParts.None, contents: c);

@@ -904,7 +904,6 @@ public static partial class Strings
         ["The Sims 3 is already running."] = "The Sims 3 è già in esecuzione.",
         ["The Sims 3 is running"] = "The Sims 3 è in esecuzione",
         ["The Sims 3 · {0} · {1} MB"] = "The Sims 3 · {0} · {1} MB",
-        ["The copy did not finish"] = "Il backup non è stato completato",
         ["The game closed unexpectedly"] = "Il gioco si è chiuso inaspettatamente",
         ["The game did not start"] = "Il gioco non si è avviato",
         ["This window can't start the game. Close it and press Play in Apex Launcher."] = "Questa finestra non può avviare il gioco. Chiudila e premi Gioca in Apex Launcher.",

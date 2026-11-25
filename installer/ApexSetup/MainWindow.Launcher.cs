@@ -50,7 +50,6 @@ public sealed partial class MainWindow
             case GameSettingsScreen: BuildGameSettings(); break;
             case WizardSettings: BuildWizardSettings(); break;
         }
-        RefreshSavePage();
     }
 
     // Compat, Verify and the mod checks, run again (Check now, after a change, at start)
@@ -387,8 +386,6 @@ public sealed partial class MainWindow
         DispatcherQueue.TryEnqueue(() =>
         {
             if (_step != to && !_busy && to >= Home) Show(to);
-            // (Saves again, from a save's page or the households out of the game: its home)
-            else if (to == SavesScreen && !_busy && _dialog is null && (_sp is not null || _savesPage.Length > 0)) { HideSavePage(); SavesGo(""); }
         });
     }
 

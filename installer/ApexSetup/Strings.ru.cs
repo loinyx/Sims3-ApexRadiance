@@ -892,7 +892,6 @@ public static partial class Strings
         ["The Sims 3 is already running."] = "The Sims 3 уже запущена.",
         ["The Sims 3 is running"] = "The Sims 3 запущена",
         ["The Sims 3 · {0} · {1} MB"] = "The Sims 3 · {0} · {1} МБ",
-        ["The copy did not finish"] = "Резервное копирование не завершено",
         ["The game closed unexpectedly"] = "Игра неожиданно закрылась",
         ["The game did not start"] = "Игра не запустилась",
         ["This window can't start the game. Close it and press Play in Apex Launcher."] = "Из этого окна нельзя запустить игру. Закройте его и нажмите «Играть» в Apex Launcher.",

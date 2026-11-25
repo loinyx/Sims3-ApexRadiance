@@ -894,7 +894,6 @@ public static partial class Strings
         ["The Sims 3 is already running."] = "The Sims 3가 이미 실행 중이에요.",
         ["The Sims 3 is running"] = "The Sims 3 실행 중",
         ["The Sims 3 · {0} · {1} MB"] = "The Sims 3 · {0} · {1}MB",
-        ["The copy did not finish"] = "백업을 완료하지 못했어요",
         ["The game closed unexpectedly"] = "게임이 예기치 않게 종료됐어요",
         ["The game did not start"] = "게임이 시작되지 않았어요",
         ["This window can't start the game. Close it and press Play in Apex Launcher."] = "이 창에서는 게임을 시작할 수 없어요. 이 창을 닫고 Apex Launcher에서 플레이를 누르세요.",

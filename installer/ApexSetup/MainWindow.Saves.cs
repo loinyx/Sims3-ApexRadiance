@@ -3,145 +3,123 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Shapes;
 using static ApexSetup.Strings;
 
 namespace ApexSetup;
 
-// Saves: the household played last over one of its own pictures, the memories of every save, how many saves have a copy, the
-// other households on a shelf, and those that left the game: the lost ones it still keeps a copy of, and the ones the player
-// put out of its sight. A save's own page is MainWindow.SavePage.cs.
+// Saves: the saves to clean on one side, what goes and the clean on the other. A save's other work is in its menu; the
+// copies and the pictures that stay are dialogs (MainWindow.SaveDialogs.cs). Nothing here reads or writes a save on the
+// window's thread; what changes one goes through SaveClean and SaveCopies, behind a dialog that says how far it is.
 public sealed partial class MainWindow
 {
-    const string LostPage = "lost", OutPage = "out";
-    string _savesPage = "";     // "" the households, LostPage or OutPage
-    Action? _saveView;          // a save's own page while it is open: draws it in SavesHost again
-    string _savesSig = "";      // what SavesHost shows (the same again is left as it is: the search keeps its place)
-    string _savesQuery = "";
-    bool _savesBySize, _savesBusy;
-    int _savesRun;
+    const CleanParts AllPictures = CleanParts.Memories | CleanParts.RepeatedMemories | CleanParts.Generated;
+    const long LeastGain = 50 << 10; // (less than this is not worth a clean, and would read as 0 MB)
+
+    string _savesSig = "";      // what SavesHost shows (the same again is left as it is)
+    bool _savesBusy;
+    int _savesRun, _savesNote;
     SavesNow? _savesNow;
-    List<SaveLook>? _away;                                // the households LostPage or OutPage opened with
-    readonly Dictionary<string, Save> _back = new();      // and those brought back since, by the folder they came from
-    readonly List<Control> _savesWork = [];               // the buttons that wait while a save is copied or moved
+    CleanParts _saveParts = CleanParts.Portraits | CleanParts.Thumbnails | CleanParts.RepeatedMemories;
+    HashSet<string>? _savePicks;                          // the saves to clean, by folder; null: not chosen yet
+    Action? _saveSums;                                    // the numbers of the rows and of the panel, said again
     readonly Dictionary<string, Task> _saveReads = new(); // what was read of the saves, kept while the launcher is open
     readonly SemaphoreSlim _saveReading = new(2);
-    readonly Dictionary<string, Button> _saveTiles = new(); // what opens each save's page, by its folder
 
-    // a save, what it says about itself, and when the launcher last copied it
-    sealed record SaveLook(Save Save, SaveInfo Info, DateTime? Copy);
-    sealed record SavesNow(string Docs, List<SaveLook> Here, List<SaveLook> Lost, List<SaveLook> Out);
-
-    static SavesNow ReadSaves(string docs)
-    {
-        List<SaveLook> Look(List<Save> saves) => saves.Select(s => new SaveLook(s, SaveInfo.Of(s), SaveHealth.LastBackup(s, docs))).ToList();
-        return new(docs, Look(Saves.List(docs)), Look(SaveCopies.Lost(docs)), Look(SaveCopies.Stored(docs)));
-    }
+    sealed record SaveLook(Save Save, SaveInfo Info);
+    sealed record SavesNow(string Docs, List<SaveLook> Here);
+    sealed record SaveRead(SaveContents Contents, CleanPlan Plan);
 
     // what was known shows at once; the folders are read off the window's thread and only a change is drawn
     void FillSaves()
     {
         if (_game is null)
         {
-            (_savesSig, _saveView) = ("", null);
+            _savesSig = "";
             SavesHost.Children.Clear();
             SavesHost.Children.Add(Heading(T("Saves")));
             SavesHost.Children.Add(Muted(T("Choose the game first.")));
             return;
         }
-        if (_saveView is { } open) { _savesSig = ""; open(); return; }
         var docs = Docs;
         if (_savesNow is { } last && last.Docs == docs) DrawSaves(last);
-        else if (_savesNow is not null) { _savesNow = null; _savesSig = ""; SavesHost.Children.Clear(); }
+        else if (_savesNow is not null) { _savesNow = null; _savePicks = null; _savesSig = ""; SavesHost.Children.Clear(); }
         _ = Read(++_savesRun);
 
         async Task Read(int run)
         {
             try
             {
-                var now = await Task.Run(() => ReadSaves(docs));
+                var now = await Task.Run(() => new SavesNow(docs, Saves.List(docs).Select(s => new SaveLook(s, SaveInfo.Of(s))).ToList()));
                 if (run != _savesRun) return;
                 _savesNow = now;
-                if (_step == SavesScreen && _saveView is null) DrawSaves(now);
+                if (_step == SavesScreen) DrawSaves(now);
             }
-            catch (Exception e) { App.Log(e); if (run == _savesRun) SetInfo(SavesInfo, InfoBarSeverity.Error, T("The launcher can't read your saves"), ErrorText(e)); }
+            catch (Exception e) { App.Log(e); if (run == _savesRun) SavesSay(InfoBarSeverity.Error, T("The launcher can't read your saves"), ErrorText(e)); }
         }
-    }
-
-    // another page of Saves, from its top
-    void SavesGo(string page)
-    {
-        (_savesPage, _saveView, _savesSig, _away) = (page, null, "", null);
-        _back.Clear();
-        SavesInfo.IsOpen = false;
-        FillSaves();
-        Scroller.ChangeView(null, 0, null, true);
-        Animate(SavesHost);
     }
 
     void DrawSaves(SavesNow now)
     {
-        var look = $"{_savesPage}|{Lang}|{_light}|{_running}|{_busy}|{Maintenance}|{_healthState}|{_settings.InstallUpdatesOnPlay}|{WelcomeUpdates().Count}";
-        var sig = _savesPage.Length > 0 ? look : string.Join('\n', new[] { now.Here, now.Lost, now.Out }
-            .SelectMany(l => l.Select(s => $"{s.Save.Dir}|{s.Info.LastPlayed.Ticks}|{s.Info.Bytes}|{s.Copy?.Ticks}").Append("")).Prepend(look));
+        var sig = string.Join('\n', now.Here.Select(l => $"{l.Save.Dir}|{l.Info.LastPlayed.Ticks}|{l.Info.Bytes}").Prepend($"{Lang}|{_light}|{_running}|{_busy}|{Maintenance}|{_settings.InstallUpdatesOnPlay}"));
         if (sig == _savesSig) return;
         _savesSig = sig;
-        // (drawn again under the keyboard: it stays on the same save)
-        var at = Content.XamlRoot is { } root && Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(root) is Button on ? _saveTiles.FirstOrDefault(t => t.Value == on).Key : null;
+        _savePicks ??= now.Here.Take(1).Select(l => l.Save.Dir).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _savePicks.IntersectWith(now.Here.Select(l => l.Save.Dir));
+        _saveSums = null;
         SavesHost.Children.Clear();
-        _savesWork.Clear();
-        _saveTiles.Clear();
-        if (_savesPage.Length > 0) { DrawAway(_away ??= _savesPage == LostPage ? now.Lost : now.Out, _savesPage == LostPage); return; }
-        if (now.Here.Count == 0)
+
+        var title = Heading(T("Saves"));
+        AutomationProperties.SetHeadingLevel(title, AutomationHeadingLevel.Level1);
+        var head = new Grid { ColumnSpacing = 16 };
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.Children.Add(Col(title, Body(now.Here.Count == 0 ? T("No saves yet. They show here after you save a game.") : T("Clean what makes a save grow. The household and the world stay the same."))));
+        var copies = Id(Button(T("Copies"), CopiesAsync), "SaveCopies");
+        (copies.Height, copies.Padding, copies.VerticalAlignment) = (36, new Thickness(18, 0, 18, 0), VerticalAlignment.Center);
+        Grid.SetColumn(copies, 1);
+        head.Children.Add(copies);
+        SavesHost.Children.Add(head);
+        if (SavesBlocked() is { } why && now.Here.Count > 0) SavesHost.Children.Add(Warn(why, null));
+        if (now.Here.Count == 0) return;
+
+        var page = new Grid { ColumnSpacing = 18, RowSpacing = 18 };
+        page.ColumnDefinitions.Add(new ColumnDefinition());
+        page.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var rows = new StackPanel();
+        AutomationProperties.SetName(rows, T("Your saves"));
+        foreach (var l in now.Here) rows.Children.Add(SaveRow(l, rows.Children.Count == 0));
+        var list = new Border { Child = rows, Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Top };
+        page.Children.Add(list);
+        var panel = SaveCleanPanel(now);
+        page.Children.Add(panel);
+        // beside the list; over it in a narrow window
+        void Fit(double w)
         {
-            var none = new StackPanel { Spacing = 8 };
-            none.Children.Add(Heading(T("Saves")));
-            none.Children.Add(Muted(T("No saves yet. They show here after you save a game.")));
-            SavesHost.Children.Add(none);
+            var narrow = w < 860;
+            panel.Width = narrow ? double.NaN : 328;
+            Grid.SetColumn(panel, narrow ? 0 : 1);
+            Grid.SetRow(list, narrow ? 1 : 0);
+            Grid.SetColumnSpan(panel, narrow ? 2 : 1);
+            Grid.SetColumnSpan(list, narrow ? 2 : 1);
         }
-        else SavesHost.Children.Add(SavesTop(now));
-        SavesHost.Children.Add(SavesShelf(now));
-        if (at is not null) FocusSave(at);
+        Fit(Scroller.ActualWidth - 48);
+        page.SizeChanged += (_, e) => Fit(e.NewSize.Width);
+        SavesHost.Children.Add(page);
+        _saveSums?.Invoke();
     }
 
-    // the keyboard on a save (one that is gone: on the first)
-    void FocusSave(string dir)
-    {
-        if ((_saveTiles.GetValueOrDefault(dir) ?? _saveTiles.Values.FirstOrDefault()) is { } b) DispatcherQueue.TryEnqueue(() => b.Focus(FocusState.Programmatic));
-    }
+    string? SavesBlocked() => DryRun ? T("Test run: the launcher changes nothing.") : _running || Games.IsRunning() ? T("Close The Sims 3 to clean your saves.") : null;
 
-    // ---------- words ----------
+    // ---------- what is read of a save ----------
 
-    static string FamilyName(SaveLook l) => l.Info.Household.Length > 0 ? T("{0} household", l.Info.Household) : l.Save.Name;
-
-    // the worlds it has, the one being played first
-    static string PlaceName(SaveInfo info)
-    {
-        var w = info.Worlds.DefaultIfEmpty(info.World).Select(Worlds.Pretty).Where(n => n.Length > 0).Distinct().ToList();
-        return w.Count == 2 ? T("{0} and {1}", w[0], w[1]) : string.Join(", ", w);
-    }
-
-    // two saves of one household in one world differ only by the save's name
-    static string SavePlace(SaveLook l) => PlaceName(l.Info) is var p && p.Length == 0 ? l.Save.Name
-        : l.Info.Worlds.Append(l.Info.World).Select(Worlds.Pretty).Any(w => w.StartsWith(l.Save.Name, StringComparison.OrdinalIgnoreCase)) ? p : l.Save.Name + " · " + p;
-
-    string PlayedWhen(DateTime t)
-    {
-        var c = LangCulture();
-        var days = (DateTime.Today - t.Date).Days;
-        return days <= 0 ? T("Played today, {0}", t.ToString("t", c)) : days == 1 ? T("Played yesterday, {0}", t.ToString("t", c))
-            : T("Played on {0}", t.ToString(t.Year == DateTime.Today.Year ? "M" : "d", c));
-    }
-
-    // ---------- pictures ----------
-
-    // read once for a save as it is; a save played since is read again
-    Task<R> OfSave<R>(SaveLook l, string what, Func<Task<R>> read)
-    {
-        var key = $"{what}|{l.Save.Dir}|{l.Info.LastPlayed.Ticks}|{l.Info.Bytes}";
-        return _saveReads.TryGetValue(key, out var t) ? (Task<R>)t : (Task<R>)(_saveReads[key] = read());
-    }
+    // read once for a save as it is; a save played or cleaned since is read again
+    static string ReadKey(SaveLook l, string what) => $"{what}|{l.Save.Dir}|{l.Info.LastPlayed.Ticks}|{l.Info.Bytes}";
+    Task<R> OfSave<R>(SaveLook l, string what, Func<Task<R>> read) =>
+        _saveReads.TryGetValue(ReadKey(l, what), out var t) ? (Task<R>)t : (Task<R>)(_saveReads[ReadKey(l, what)] = read());
 
     // off the window's thread, two saves at a time; null when it can't be read
     async Task<R?> OffThread<R>(Func<R?> read)
@@ -152,672 +130,420 @@ public sealed partial class MainWindow
         finally { _saveReading.Release(); }
     }
 
-    Task<ImageSource?> FamilyPicture(SaveLook l, bool grey = false) => OfSave(l, "family" + grey, async () => await SaveCard.SimsOf(await OffThread(() => Saves.Photo(l.Save)), grey));
+    Task<ImageSource?> FamilyPicture(SaveLook l) => OfSave(l, "family", async () => await SaveCard.SimsOf(await OffThread(() => Saves.Photo(l.Save))));
 
-    // of a few lots' pictures, a light one: many are taken at night
-    async Task<byte[]?> Lightest(Func<List<byte[]>> read)
+    Task<SaveRead?> CleanRead(SaveLook l) => OfSave(l, "clean", () => OffThread(() =>
     {
-        (byte[]? Png, double Light) best = default;
-        foreach (var png in await OffThread(read) ?? [])
-            if (await SaveCard.LightOf(png) is var light && light > best.Light + 8) best = (png, light);
-        return best.Png;
+        var c = SaveContents.Read(l.Save.Dir);
+        return new SaveRead(c, SaveClean.Plan(Docs, l.Save, CleanParts.None, null, c));
+    }));
+
+    // null: still being read
+    SaveRead? Known(SaveLook l) => _saveReads.TryGetValue(ReadKey(l, "clean"), out var t) && t is Task<SaveRead?> { IsCompletedSuccessfully: true, Result: { } r } ? r : null;
+
+    // what a clean of those parts frees; the plan of nothing chosen already gives back the room nothing uses
+    static long Gain(SaveRead r, CleanParts parts)
+    {
+        var gain = r.Plan.Gains.Where(g => (parts & g.Key) != 0).Sum(g => g.Value.Bytes);
+        return parts == CleanParts.None || gain + r.Plan.Before - r.Plan.After < LeastGain ? 0 : gain + r.Plan.Before - r.Plan.After;
     }
 
-    // of the save's fullest lots
-    Task<byte[]?> Lot(SaveLook l) => OfSave(l, "lot", () => Lightest(() => SaveCover.Lots(SaveContents.Read(l.Save.Dir), 6).Select(SaveContents.Data).OfType<byte[]>().ToList()));
+    // ---------- words ----------
 
-    // a memory of a place
-    Task<byte[]?> View(SaveLook l) => OfSave(l, "view", () => OffThread(() => SaveCover.Best(SaveContents.Read(l.Save.Dir)) is { } view ? SaveContents.Png(view) : null));
+    static string FamilyName(Save s, SaveInfo info) => info.Household.Length > 0 ? T("{0} household", info.Household) : s.Name;
 
-    // of the save's worlds as the game ships them: a lot, else a world's own picture
-    Task<byte[]?> WorldView(SaveLook l) => OfSave(l, "world", async () =>
+    // the worlds it has, the one being played first; two saves of one household in one world differ only by the save's name
+    static string SavePlace(Save s, SaveInfo info)
     {
-        if (_game is not { } g) return null;
-        var docs = Docs;
-        var names = l.Info.Worlds.Prepend(l.Info.World).ToList();
-        var worlds = await OffThread(() => Worlds.List(g, docs).Select(w => (World: w, At: names.FindIndex(n => n.Equals(System.IO.Path.GetFileNameWithoutExtension(w.Path), StringComparison.OrdinalIgnoreCase))))
-            .Where(w => w.At >= 0).OrderBy(w => w.At).Select(w => w.World).ToList()) ?? [];
-        foreach (var w in worlds) if (await Lightest(() => SaveCover.Lots(w, 6)) is { } lot) return lot;
-        foreach (var w in worlds) if (await OffThread(() => Worlds.Picture(w)) is { } own) return own;
-        return null;
-    });
-
-    // where the household lives (a save whose thumbnails were cleaned has no lot of its own)
-    Task<ImageSource?> PlacePicture(SaveLook l, bool grey = false) => OfSave(l, "place" + grey, async () => await SaveCard.SimsOf(await Lot(l) ?? await View(l) ?? await WorldView(l), grey));
-
-    // behind the household played last
-    Task<ImageSource?> CoverPicture(SaveLook l) => OfSave(l, "cover", async () => await SaveCard.ImageOf(await View(l) ?? await Lot(l) ?? await WorldView(l)));
-
-    // where there is no picture of a place at all
-    Border SaveTint() => new() { IsHitTestVisible = false, Background = Fade(Accent(), [(0, 0x08), (1, 0x28)]) };
-
-    Task<int> MemoryCount(SaveLook l) => OfSave(l, "memories", () => OffThread(() => SaveContents.Read(l.Save.Dir).Of(SaveKind.Memory).Count));
-
-    Task<List<ImageSource>> MemoryFan(SaveLook l) => OfSave(l, "fan", async () =>
-    {
-        var list = new List<ImageSource>();
-        foreach (var png in await OffThread(() => { var c = SaveContents.Read(l.Save.Dir); return SaveCover.Fan(c, 5).Select(i => SaveContents.Png(i, 200)).OfType<byte[]>().ToList(); }) ?? [])
-            if (await SaveCard.ImageOf(png) is { } img) list.Add(img);
-        return list;
-    });
-
-    // a picture when it is there: at once when it was read before, else faded in over the room kept for it
-    static void ShowWhenRead(UIElement on, Task<ImageSource?> read, Action<ImageSource> set, double opacity = 1, Action? none = null)
-    {
-        if (read.IsCompletedSuccessfully) { Put(read.Result); return; }
-        on.Opacity = 0;
-        if (AnimationsOn) on.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(320) };
-        _ = Later();
-        async Task Later() { try { Put(await read); } catch (Exception e) { App.Log(e); none?.Invoke(); } }
-        void Put(ImageSource? img) { if (img is null) { none?.Invoke(); return; } set(img); on.Opacity = opacity; }
+        var w = info.Worlds.DefaultIfEmpty(info.World).Select(Worlds.Pretty).Where(n => n.Length > 0).Distinct().ToList();
+        var place = w.Count == 2 ? T("{0} and {1}", w[0], w[1]) : string.Join(", ", w);
+        return place.Length == 0 ? s.Name : w.Any(n => n.StartsWith(s.Name, StringComparison.OrdinalIgnoreCase)) ? place : s.Name + " · " + place;
     }
 
-    static Image SaveImage(Task<ImageSource?> read, double opacity = 1, Action? none = null)
+    string SaveDay(DateTime t, bool hour = false)
     {
-        var i = new Image { Stretch = Stretch.Uniform, IsHitTestVisible = false };
-        ShowWhenRead(i, read, img => i.Source = img, opacity, none);
-        return i;
+        var c = LangCulture();
+        var day = t.Date == DateTime.Today ? T("Today") : t.ToString(t.Year == DateTime.Today.Year ? "M" : "d", c);
+        return hour ? day + ", " + t.ToString("t", c) : day;
     }
 
-    // a household with no picture in its save
-    static FrameworkElement NoPicture(double size) => Lucide.Icon("users", size, Res("ApexIconMutedBrush"), 1.4);
-
-    // ---------- the look of its parts ----------
-
-    static SolidColorBrush Argb(uint argb) => new(Windows.UI.Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
-
-    // a whole card that is a button: its border and fill a step up under the pointer
-    static Button SaveButton(UIElement content, string name, double radius, Action click)
+    // whole MB from 10 on
+    string SaveSize(long bytes)
     {
-        var b = new Button
-        {
-            Content = content, Padding = new Thickness(0), CornerRadius = new CornerRadius(radius), BorderThickness = new Thickness(1), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"),
-            HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch,
-        };
-        b.Resources["ButtonBackgroundPointerOver"] = b.Resources["ButtonBackgroundPressed"] = Res("ApexHoverBrush");
-        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Pick(0xFF454545, 0xFFB4B4B4));
-        b.Resources["ButtonBorderBrushPressed"] = Res("ApexAccentBrush");
-        AutomationProperties.SetName(b, name);
-        b.Click += (_, _) => click();
-        return b;
+        var c = LangCulture();
+        var mb = Math.Max(0, bytes) / (1024.0 * 1024);
+        return mb >= 1024 ? (mb / 1024).ToString("0.#", c) + " GB" : mb.ToString(mb >= 10 ? "0" : "0.#", c) + " MB";
     }
 
-    static TextBlock SaveText(string text, double size, string brush = "TextFillColorPrimaryBrush", bool strong = false, int lines = 1) => new()
+    static TextBlock SaveText(string text, double size, string brush = "TextFillColorPrimaryBrush", bool strong = false) => new()
     {
-        Text = text, FontSize = size, Foreground = Res(brush), FontWeight = strong ? FontWeights.SemiBold : FontWeights.Normal, MaxLines = lines,
-        TextWrapping = lines > 1 ? TextWrapping.Wrap : TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis,
+        Text = text, FontSize = size, Foreground = Res(brush), FontWeight = strong ? FontWeights.SemiBold : FontWeights.Normal, TextTrimming = TextTrimming.CharacterEllipsis,
     };
 
-    // ---------- the top: the household played last, the memories, the copies ----------
+    // ---------- the list ----------
 
-    FrameworkElement SavesTop(SavesNow now)
+    FrameworkElement SaveRow(SaveLook l, bool first)
     {
-        var top = new Grid { RowSpacing = 18 };
-        var side = new Grid { ColumnSpacing = 18, RowSpacing = 18 };
-        foreach (var g in new[] { top, side })
-        {
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0) });
-            g.RowDefinitions.Add(new RowDefinition());
-            g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        }
-        var hero = SavesHero(now);
-        var (memories, copies) = (MemoriesCard(now), CopiesCard(now));
-        top.Children.Add(hero);
-        top.Children.Add(side);
-        side.Children.Add(memories);
-        side.Children.Add(copies);
-        // beside the household, one over the other; under it, one by the other, in a narrow window
-        void Fit(double w)
-        {
-            var wide = w >= 880;
-            top.ColumnSpacing = wide ? 18 : 0;
-            top.ColumnDefinitions[1].Width = new GridLength(wide ? Math.Clamp(w * 0.29, 320, 420) : 0);
-            Grid.SetColumnSpan(hero, wide ? 1 : 2);
-            (int col, int row, int span) = wide ? (1, 0, 1) : (0, 1, 2);
-            Grid.SetColumn(side, col);
-            Grid.SetRow(side, row);
-            Grid.SetColumnSpan(side, span);
-            side.ColumnSpacing = wide ? 0 : 18;
-            side.ColumnDefinitions[1].Width = wide ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-            side.RowSpacing = wide ? 18 : 0;
-            Grid.SetColumnSpan(memories, wide ? 2 : 1);
-            Grid.SetRow(copies, wide ? 1 : 0);
-            Grid.SetColumn(copies, wide ? 0 : 1);
-            Grid.SetColumnSpan(copies, wide ? 2 : 1);
-        }
-        Fit(Scroller.ActualWidth - 48);
-        top.SizeChanged += (_, e) => Fit(e.NewSize.Width);
-        return top;
-    }
+        var (name, place) = (FamilyName(l.Save, l.Info), SavePlace(l.Save, l.Info));
+        var sub = place + " · " + SaveDay(l.Info.LastPlayed);
+        var line = new Grid { ColumnSpacing = 14 };
+        foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) line.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+        var photo = new Grid { Width = 60, Height = 60, CornerRadius = new CornerRadius(8), Background = Res("ApexPillBrush"), Padding = new Thickness(2, 4, 2, 0) };
+        line.Children.Add(photo);
+        _ = Photo();
+        var words = (FrameworkElement)Col(SaveText(name, 15, strong: true), SaveText(sub, 13, "ApexMutedBrush"));
+        (words.VerticalAlignment, ((StackPanel)words).Spacing) = (VerticalAlignment.Center, 1);
+        ToolTipService.SetToolTip(words, name + "\n" + sub);
+        Grid.SetColumn(words, 1);
+        line.Children.Add(words);
+        var gain = SaveText("", 12, "ApexMutedBrush");
+        var size = SaveText(SaveSize(l.Info.Bytes), 14, strong: true);
+        size.HorizontalAlignment = gain.HorizontalAlignment = HorizontalAlignment.Right;
+        var numbers = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { size, gain } };
+        Grid.SetColumn(numbers, 2);
+        line.Children.Add(numbers);
 
-    // dark in both themes, as any picture with words on it
-    FrameworkElement SavesHero(SavesNow now)
-    {
-        var l = now.Here[0];
-        var g = new Grid { MinHeight = 452, Background = Argb(0xFF141414) };
-        g.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(Accent(), [(0, 0), (0.5, 0), (1, 0x30)], across: true) });
-        // (as a brush: a picture's own size never makes the card taller)
-        var cover = new Border { IsHitTestVisible = false };
-        ShowWhenRead(cover, CoverPicture(l), img => cover.Background = new ImageBrush { ImageSource = img, Stretch = Stretch.UniformToFill });
-        g.Children.Add(cover);
-        var black = Windows.UI.Color.FromArgb(255, 10, 11, 12);
-        var shade = new Border { IsHitTestVisible = false };
-        g.Children.Add(shade);
-        g.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0xEB), (0.6, 0)]) });
-        var family = SaveImage(FamilyPicture(l));
-        (family.HorizontalAlignment, family.VerticalAlignment) = (HorizontalAlignment.Right, VerticalAlignment.Bottom);
-        g.Children.Add(family);
-
-        var words = new StackPanel { Spacing = 18, Margin = new Thickness(32), MaxWidth = 500, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom };
-        var names = new StackPanel { Spacing = 4 };
-        TextBlock White(string text, double size, byte alpha, int lines = 1) => new()
+        var box = new CheckBox
         {
-            Text = text, FontSize = size, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(alpha, 255, 255, 255)), TextWrapping = TextWrapping.Wrap, MaxLines = lines, TextTrimming = TextTrimming.CharacterEllipsis,
+            Content = line, MinWidth = 0, MinHeight = 84, Padding = new Thickness(14, 0, 0, 0), IsChecked = _savePicks!.Contains(l.Save.Dir),
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center,
         };
-        names.Children.Add(White(PlayedWhen(l.Save.LastPlayed), 13, 0xCC));
-        var title = White(FamilyName(l), 46, 0xFF, 2);
-        (title.FontFamily, title.FontWeight, title.LineHeight) = (new FontFamily("Segoe UI Variable Display"), FontWeights.SemiBold, 50);
-        AutomationProperties.SetHeadingLevel(title, AutomationHeadingLevel.Level1);
-        names.Children.Add(title);
-        names.Children.Add(White(SavePlace(l), 15, 0xDD, 2));
-        words.Children.Add(names);
-        if (l.Info.Description.Trim() is { Length: > 0 } about)
-        {
-            var text = White(about, 14, 0xCC, 4);
-            ToolTipService.SetToolTip(text, about);
-            words.Children.Add(text);
-        }
-        var acts = new WrapPanel { Spacing = 10 };
-        if (_running)
-        {
-            var pill = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            pill.Children.Add(new Ellipse { Width = 8, Height = 8, Fill = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center });
-            pill.Children.Add(new TextBlock { Text = T("The Sims 3 is running"), FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Foreground = Argb(0xFFFFFFFF) });
-            acts.Children.Add(new Border { Child = pill, Background = Argb(0x1FFFFFFF), CornerRadius = new CornerRadius(8), Padding = new Thickness(18, 0, 20, 0), Height = 56 });
-        }
-        else acts.Children.Add(PlayButton(l.Save.Name));
-        var album = new Button { Content = T("Open album"), FontSize = 15, Height = 56, Padding = new Thickness(24, 0, 24, 0), CornerRadius = new CornerRadius(8), Background = Argb(0x800C0D0E), BorderBrush = Argb(0x38FFFFFF), Foreground = Argb(0xFFFFFFFF) };
-        album.Resources["ButtonBackgroundPointerOver"] = Argb(0xA02A2B2D);
-        album.Resources["ButtonBackgroundPressed"] = Argb(0xA01C1D1E);
-        foreach (var state in new[] { "PointerOver", "Pressed" }) (album.Resources["ButtonForeground" + state], album.Resources["ButtonBorderBrush" + state]) = (Argb(0xFFFFFFFF), Argb(0x59FFFFFF));
-        album.Click += (_, _) => OpenSave(l.Save, "mem");
-        _saveTiles[l.Save.Dir] = album;
-        AutomationProperties.SetName(album, T("Open album") + ", " + FamilyName(l));
-        acts.Children.Add(album);
-        words.Children.Add(acts);
-        g.Children.Add(words);
+        box.Click += (_, _) => { if (box.IsChecked == true) _savePicks.Add(l.Save.Dir); else _savePicks.Remove(l.Save.Dir); _saveSums?.Invoke(); };
 
-        var card = new Border { Child = g, CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), RequestedTheme = ElementTheme.Dark, ContextFlyout = SaveMenu(l) };
-        // (the Sims stand clear of the words, and the buttons may reach a little further to stay in one row; in a narrow
-        // window the Sims are smaller and the words keep half of it)
-        void Fit(double w)
-        {
-            var wide = w >= 700;
-            // (the words read over the lightest picture: the shade goes as far as they do)
-            shade.Background = Fade(black, wide ? [(0, 0xF0), (0.34, 0xB8), (0.5, 0x99), (0.72, 0x1F), (1, 0x4D)] : [(0, 0xF0), (0.34, 0xB8), (0.64, 0x99), (0.9, 0x33), (1, 0x4D)], across: true);
-            family.Height = wide ? 350 : 250;
-            family.MaxWidth = Math.Max(120, w * 0.42);
-            family.Margin = new Thickness(0, 0, w * 0.04, 22);
-            words.MaxWidth = wide ? Math.Min(560, w * 0.62) : w;
-            foreach (var e in words.Children.OfType<FrameworkElement>().Where(e => e != acts)) (e.MaxWidth, e.HorizontalAlignment) = (wide ? Math.Min(500, w * 0.5 - 16) : Math.Min(420, w * 0.56), HorizontalAlignment.Left);
-        }
-        Fit(640);
-        card.SizeChanged += (_, e) => { if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 0.5) Fit(e.NewSize.Width); };
-        return card;
-    }
+        var play = Dims(Button("", () => PlayAsync(l.Save.Name, update: _settings.InstallUpdatesOnPlay)));
+        (play.Width, play.Height, play.Padding, play.IsEnabled) = (36, 36, new Thickness(0), !_busy && !Maintenance && !_running);
+        play.Content = Lucide.Icon("play", 16);
+        AutomationProperties.SetName(play, T("Play {0}", name));
+        ToolTipService.SetToolTip(play, T("Play this save"));
+        var more = new Button { Width = 36, Height = 36, Padding = new Thickness(0), Content = Lucide.Icon("ellipsis", 16), Flyout = SaveMenu(l) };
+        AutomationProperties.SetName(more, T("More options") + ", " + name);
+        ToolTipService.SetToolTip(more, T("More options"));
+        var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center, Children = { play, more } };
 
-    // a few of the pictures the game took, spread like prints, and how many there are in all
-    Button MemoriesCard(SavesNow now)
-    {
-        const double side = 118;
-        var g = new Grid { MinHeight = 262 };
-        var fan = new Canvas { Height = 168, Margin = new Thickness(0, 20, 0, 0), VerticalAlignment = VerticalAlignment.Top };
-        var prints = new List<(Border Print, double At)>();
-        foreach (var (at, y, turn) in new[] { (0.06, 34, -9), (0.22, 10, 4), (0.40, 30, -3), (0.57, 6, 7), (0.70, 40, -5) })
-        {
-            var print = new Border
-            {
-                Width = side, Height = side, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(4), BorderBrush = Argb(0xFFF1EFEA), Background = Res("ApexPillBrush"), Opacity = 0,
-                // (turned on its visual: a print with a RenderTransform refuses the fade)
-                Rotation = turn, CenterPoint = new System.Numerics.Vector3((float)side / 2, (float)side / 2, 0), Shadow = new ThemeShadow(), Translation = new System.Numerics.Vector3(0, 0, 16),
-            };
-            Canvas.SetTop(print, y);
-            fan.Children.Add(print);
-            prints.Add((print, at));
-        }
-        fan.SizeChanged += (_, e) => { foreach (var (print, at) in prints) Canvas.SetLeft(print, at / 0.70 * Math.Min(0.70 * e.NewSize.Width, Math.Max(0, e.NewSize.Width - side - 14))); };
-        g.Children.Add(fan);
-        var number = new TextBlock { Text = " ", FontSize = 40, LineHeight = 44, FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily("Segoe UI Variable Display"), VerticalAlignment = VerticalAlignment.Bottom };
-        var label = SaveText(" ", 14, strong: true);
-        var text = Col(label, SaveText(T("The game takes these pictures by itself"), 12, "ApexMutedBrush", lines: 2));
-        ((FrameworkElement)text).VerticalAlignment = VerticalAlignment.Center;
-        var foot = new Grid { ColumnSpacing = 12, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(22, 0, 22, 20) };
-        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        foot.ColumnDefinitions.Add(new ColumnDefinition());
-        foot.Children.Add(number);
-        Grid.SetColumn((FrameworkElement)text, 1);
-        foot.Children.Add(text);
-        g.Children.Add(foot);
-        var open = now.Here[0];
-        var b = SaveButton(new Border { Child = g, CornerRadius = new CornerRadius(17) }, T("Memories"), 18, () => OpenSave(open.Save, "mem"));
-        _ = Fill();
-        return b;
+        var row = new Grid { ColumnSpacing = 18 };
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(box);
+        Grid.SetColumn(acts, 1);
+        row.Children.Add(acts);
+        _saveSums += Say;
+        return new Border { Child = row, Padding = new Thickness(18, 0, 16, 0), BorderThickness = new Thickness(0, first ? 0 : 1, 0, 0), BorderBrush = Res("ApexHairlineBrush"), ContextFlyout = SaveMenu(l) };
 
-        async Task Fill()
+        void Say()
+        {
+            var read = Known(l);
+            var bytes = read is null ? 0 : Gain(read, _saveParts);
+            gain.Text = read is null ? CleanRead(l).IsCompleted ? T("can't be read") : T("reading…") : read.Plan.Gains.Count == 0 ? T("can't be cleaned") : bytes == 0 ? T("nothing to clean") : T("{0} less", SaveSize(bytes));
+            gain.Foreground = Res(bytes > 0 && box.IsChecked == true ? "ApexSuccessBrush" : "ApexMutedBrush");
+            if (read?.Plan is { Refusal: { } no, Gains.Count: 0 }) ToolTipService.SetToolTip(numbers, T(no.Key, TArgs(no.Args)));
+            AutomationProperties.SetName(box, $"{name}, {sub}, {size.Text}, {gain.Text}");
+        }
+        async Task Photo()
         {
             try
             {
-                var counts = await Task.WhenAll(now.Here.Select(MemoryCount));
-                var total = counts.Sum();
-                var with = now.Here.Where((_, i) => counts[i] > 0).ToList();
-                (number.Text, number.Visibility) = (total.ToString("N0", LangCulture()), total > 0 ? Visibility.Visible : Visibility.Collapsed);
-                label.Text = total switch { 0 => T("No memories yet"), 1 => T("memory in your saves"), _ => T("memories in your saves") };
-                AutomationProperties.SetName(b, total > 0 ? number.Text + " " + label.Text : label.Text);
-                if (total == 0)
-                {
-                    var icon = Lucide.Icon("image", 44, Res("ApexIconMutedBrush"), 1.4);
-                    (icon.HorizontalAlignment, icon.VerticalAlignment, icon.Margin) = (HorizontalAlignment.Center, VerticalAlignment.Top, new Thickness(0, 78, 0, 0));
-                    g.Children.Add(icon);
-                    return;
-                }
-                if (counts[0] == 0) open = with[0];
-                // two saves' pictures in turn, the last played one's first
-                var sets = await Task.WhenAll(with.Take(2).Select(MemoryFan));
-                var pics = Enumerable.Range(0, 5).SelectMany(i => sets.Where(s => i < s.Count).Select(s => s[i])).Take(5).ToList();
-                for (int i = 0; i < pics.Count; i++)
-                {
-                    var print = prints[i].Print;
-                    if (AnimationsOn) print.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(320) };
-                    print.Child = new Border { CornerRadius = new CornerRadius(6), Background = new ImageBrush { ImageSource = pics[i], Stretch = Stretch.UniformToFill } };
-                    print.Opacity = 1;
-                }
+                if (await FamilyPicture(l) is { } img) photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Bottom });
+                else photo.Children.Add(Lucide.Icon("users", 24, Res("ApexIconMutedBrush"), 1.4));
             }
             catch (Exception e) { App.Log(e); }
         }
     }
 
-    // how many saves have a copy made since they were played, or not long ago
-    Button CopiesCard(SavesNow now)
-    {
-        var total = now.Here.Count;
-        var safe = now.Here.Count(l => SaveHealth.RecentCopy(l.Copy, l.Save));
-        var newest = now.Here.Where(l => l.Copy is not null).MaxBy(l => l.Copy);
-        var title = total == 1 ? safe == 1 ? T("Protected") : T("Not protected") : safe == 1 ? T("1 of {0} protected", total) : T("{0} of {1} protected", safe, total);
-        var sub = (total - safe) switch { 0 => total == 1 ? T("It has a recent copy") : T("Every save has a recent copy"), 1 => T("1 save has no recent copy"), var n => T("{0} saves have no recent copy", n) };
-        var g = new Grid { MinHeight = 172, Padding = new Thickness(22, 20, 22, 20), RowSpacing = 14 };
-        g.RowDefinitions.Add(new RowDefinition());
-        g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var head = new Grid { ColumnSpacing = 14, VerticalAlignment = VerticalAlignment.Top };
-        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        head.ColumnDefinitions.Add(new ColumnDefinition());
-        head.Children.Add(CopiesRing(safe / (double)total, Res(safe == total ? "ApexSuccessBrush" : "ApexWarningBrush")));
-        var words = (FrameworkElement)Col(SaveText(title, 17, strong: true, lines: 2), SaveText(sub, 13, "ApexMutedBrush", lines: 2));
-        words.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(words, 1);
-        head.Children.Add(words);
-        g.Children.Add(head);
-        // (no copy at all: there is nothing to see yet, so it makes them)
-        var act = newest is null ? total == 1 ? T("Make a copy") : T("Copy all") : T("See copies");
-        var button = new Border { Height = 44, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexPillBrush"),
-            Child = new TextBlock { Text = act, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } };
-        Grid.SetRow(button, 1);
-        g.Children.Add(button);
-        var b = SaveButton(g, title + ". " + sub + ". " + act, 18, () => { if (newest is null) BackupAll(); else OpenSave(newest.Save, "time"); });
-        return newest is null ? WaitsForSaves(b) : b;
-    }
-
-    static FrameworkElement CopiesRing(double share, Brush brush)
-    {
-        const double size = 44, w = 5, c = size / 2, r = (size - w) / 2;
-        var g = new Grid { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center };
-        g.Children.Add(new Ellipse { StrokeThickness = w, Stroke = share >= 1 ? brush : new SolidColorBrush(Pick(0xFF2A2A2A, 0xFFE4E4E4)) });
-        if (share is <= 0 or >= 1) return g;
-        var a = share * 2 * Math.PI;
-        var fig = new PathFigure { StartPoint = new(c, c - r) };
-        fig.Segments.Add(new ArcSegment { Point = new(c + r * Math.Sin(a), c - r * Math.Cos(a)), Size = new(r, r), IsLargeArc = share > 0.5, SweepDirection = SweepDirection.Clockwise });
-        g.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = new PathGeometry { Figures = { fig } }, Stroke = brush, StrokeThickness = w, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
-        return g;
-    }
-
-    // ---------- the shelf: the other households, and those out of the game ----------
-
-    FrameworkElement SavesShelf(SavesNow now)
-    {
-        var s = new StackPanel { Spacing = 18 };
-        var others = now.Here.Skip(1).ToList();
-        var none = Muted(T("No household or world with that name."));
-        var cards = new CardGrid { MinItemWidth = 232, Spacing = 16 };
-        void Fill()
-        {
-            bool Has(string t) => t.Contains(_savesQuery, StringComparison.CurrentCultureIgnoreCase);
-            var shown = others.Where(l => _savesQuery.Length == 0 || Has(FamilyName(l)) || Has(l.Save.Name) || Has(PlaceName(l.Info))).ToList();
-            if (_savesBySize) shown = shown.OrderByDescending(l => l.Info.Bytes).ToList();
-            cards.Children.Clear();
-            foreach (var l in shown) cards.Children.Add(SaveTile(l));
-            if (now.Lost.Count > 0)
-                cards.Children.Add(AwayTile(now.Lost.Count == 1 ? T("1 lost household") : T("{0} lost households", now.Lost.Count), now.Lost.Count == 1 ? T("The game still keeps a copy of it") : T("The game still keeps a copy of them"),
-                    now.Lost, true, () => SavesGo(LostPage)));
-            if (now.Out.Count > 0)
-                cards.Children.Add(AwayTile(T("Out of the game"), now.Out.Count == 1 ? T("1 save the game doesn't see") : T("{0} saves the game doesn't see", now.Out.Count), now.Out, false, () => SavesGo(OutPage)));
-            none.Visibility = others.Count > 0 && shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        }
-        if (now.Here.Count > 0)
-        {
-            var bar = new Grid { ColumnSpacing = 16 };
-            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            bar.ColumnDefinitions.Add(new ColumnDefinition());
-            var title = SaveText(others.Count > 0 ? T("Other households") : "", 18, strong: true);
-            (title.VerticalAlignment, title.Margin) = (VerticalAlignment.Center, new Thickness(2, 0, 0, 0));
-            AutomationProperties.SetHeadingLevel(title, AutomationHeadingLevel.Level2);
-            bar.Children.Add(title);
-            var tools = new WrapPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right };
-            if (others.Count > 1)
-            {
-                // (as the search of Mods: one box, its border shows the focus and the field draws none of its own)
-                var find = new TextBox { PlaceholderText = T("Search household or world"), Text = _savesQuery, BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center, Background = Argb(0) };
-                foreach (var key in new[] { "Background", "BorderBrush" })
-                    foreach (var state in new[] { "Focused", "PointerOver" }) find.Resources["TextControl" + key + state] = Argb(0);
-                find.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
-                AutomationProperties.SetName(find, T("Search household or world"));
-                var glass = Lucide.Icon("search", 16, Res("ApexMutedBrush"));
-                glass.VerticalAlignment = VerticalAlignment.Center;
-                var line = new Grid { ColumnSpacing = 8 };
-                line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                line.ColumnDefinitions.Add(new ColumnDefinition());
-                line.Children.Add(glass);
-                Grid.SetColumn(find, 1);
-                line.Children.Add(find);
-                var box = new Border { Child = line, Width = 270, Height = 36, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexInputBorderBrush"), Background = Res("ApexCardBrush"), Padding = new Thickness(10, 0, 6, 0) };
-                find.GotFocus += (_, _) => box.BorderBrush = Res("ApexAccentBrush");
-                find.LostFocus += (_, _) => box.BorderBrush = Res("ApexInputBorderBrush");
-                var typed = 0;
-                find.TextChanged += (_, _) =>
-                {
-                    var mine = ++typed;
-                    After(160, () => { if (mine != typed || find.Text.Trim() == _savesQuery) return; _savesQuery = find.Text.Trim(); Fill(); });
-                };
-                find.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Escape && find.Text.Length > 0) { find.Text = ""; e.Handled = true; } };
-                tools.Children.Add(box);
-                var sort = new Button { Height = 36 };
-                void Say() { sort.Content = _savesBySize ? T("Largest") : T("Newest"); AutomationProperties.SetName(sort, T("Sort by") + ": " + sort.Content); }
-                Say();
-                sort.Click += (_, _) => { _savesBySize = !_savesBySize; Say(); Fill(); };
-                tools.Children.Add(sort);
-            }
-            else _savesQuery = "";
-            // (with no copy at all, the copies' card makes them)
-            if (now.Here.Any(l => l.Copy is not null)) tools.Children.Add(WaitsForSaves(new Button { Content = others.Count == 0 ? T("Make a copy") : T("Copy all"), Height = 36 }, BackupAll));
-            Grid.SetColumn(tools, 1);
-            bar.Children.Add(tools);
-            s.Children.Add(bar);
-        }
-        s.Children.Add(none);
-        s.Children.Add(cards);
-        Fill();
-        return s;
-    }
-
-    // a household before one of its lots; Play in the corner under the pointer, the rest on its page and in its menu
-    FrameworkElement SaveTile(SaveLook l)
-    {
-        var (name, place, size) = (FamilyName(l), SavePlace(l), SpSize(l.Info.Bytes));
-        var g = new Grid { Height = 244 };
-        var lot = SaveImage(PlacePicture(l), 0.62, () => g.Children.Insert(0, SaveTint()));
-        // (it fills the card however wide: a lot's picture has an edge of its own)
-        (lot.Stretch, lot.Height, lot.Margin, lot.HorizontalAlignment, lot.VerticalAlignment) = (Stretch.UniformToFill, 250, new Thickness(0, -14, 0, 0), HorizontalAlignment.Center, VerticalAlignment.Top);
-        g.Children.Add(lot);
-        g.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(((SolidColorBrush)Res("ApexCardBrush")).Color, [(0, 0xF8), (0.14, 0xF5), (0.52, 0x59), (0.8, 0)]) });
-        var stand = new Grid { Height = 150, MaxWidth = 190, Margin = new Thickness(22, 0, 0, 74), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom };
-        var family = SaveImage(FamilyPicture(l), none: () => stand.Children.Add(NoPicture(54)));
-        family.HorizontalAlignment = HorizontalAlignment.Left;
-        stand.Children.Add(family);
-        g.Children.Add(stand);
-        var foot = new Grid { ColumnSpacing = 10, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(18, 0, 18, 16) };
-        foot.ColumnDefinitions.Add(new ColumnDefinition());
-        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        foot.Children.Add(Col(SaveText(name, 17, strong: true), SaveText(place, 12, "ApexSoftTextBrush")));
-        var mb = SaveText(size, 12, "ApexSoftTextBrush");
-        mb.VerticalAlignment = VerticalAlignment.Bottom;
-        Grid.SetColumn(mb, 1);
-        foot.Children.Add(mb);
-        g.Children.Add(foot);
-        var b = SaveButton(new Border { Child = g, CornerRadius = new CornerRadius(15) }, $"{name}, {place}, {PlayedWhen(l.Save.LastPlayed)}, {size}", 16, () => OpenSave(l.Save, "mem"));
-        b.ContextFlyout = SaveMenu(l);
-        _saveTiles[l.Save.Dir] = b;
-        ToolTipService.SetToolTip(b, name + "\n" + place + "\n" + PlayedWhen(l.Save.LastPlayed));
-        var play = new Button { Height = PlaySize, CornerRadius = new CornerRadius(PlaySize / 2), Padding = new Thickness(0), BorderThickness = new Thickness(0), IsEnabled = !_busy && !Maintenance && !_running };
-        ToolTipService.SetToolTip(play, T("Play this save"));
-        AutomationProperties.SetName(play, T("Play {0}", l.Save.Name));
-        play.Click += async (_, _) => await PlayAsync(l.Save.Name, update: _settings.InstallUpdatesOnPlay);
-        var cell = new Grid();
-        cell.Children.Add(b);
-        var (corner, over) = PlayCorner(play);
-        (corner.VerticalAlignment, corner.Margin) = (VerticalAlignment.Top, new Thickness(0, 14, 14, 0));
-        // (the button's own visual is animated by PlayCorner, so what fades is a layer around it)
-        var layer = new Grid { Children = { corner }, Opacity = 0, IsHitTestVisible = false, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) } };
-        var (hover, focus) = (false, false);
-        void Show() { layer.Opacity = hover || focus ? 1 : 0; layer.IsHitTestVisible = hover; over(hover); } // (a touch on the card never starts the game)
-        play.GotFocus += (_, _) => { focus = true; Show(); };
-        play.LostFocus += (_, _) => { focus = false; Show(); };
-        cell.Children.Add(layer);
-        Lift(cell, () => { hover = true; Show(); }, () => { hover = false; Show(); });
-        return cell;
-    }
-
     MenuFlyout SaveMenu(SaveLook l)
     {
-        var menu = new MenuFlyout();
-        var play = MenuItem(T("Play this save"), () => _ = PlayAsync(l.Save.Name, update: _settings.InstallUpdatesOnPlay));
-        menu.Items.Add(play);
-        menu.Items.Add(MenuItem(T("Open album"), () => OpenSave(l.Save, "mem")));
+        var menu = new MenuFlyout { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight };
+        var changes = new List<MenuFlyoutItem>();
+        void Item(string text, Func<Task> run, string icon, bool change = true, bool danger = false)
+        {
+            var i = MenuItem(text, () => _ = run(), icon, danger: danger);
+            if (change) changes.Add(i);
+            menu.Items.Add(i);
+        }
+        Item(T("Make a copy"), () => CopySaves([l.Save]), "copy", change: false);
+        Item(T("Choose the pictures that stay"), () => KeepAsync([l]), "image", change: false);
+        Item(T("Open folder"), () => { OpenFolder(l.Save.Dir); return Task.CompletedTask; }, "folder", change: false);
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(MenuItem(T("Make a copy"), () => _ = BackupAsync([l.Save])));
-        menu.Items.Add(MenuItem(T("Open folder"), () => OpenFolder(l.Save.Dir)));
-        menu.Opening += (_, _) => play.IsEnabled = !_busy && !Maintenance && !_running;
+        Item(T("Duplicate save"), () => DuplicateSave(l), "layers");
+        Item(T("Rename save"), () => RenameSave(l), "pencil");
+        Item(T("Keep out of the game"), () => StoreSave(l), "folder-input");
+        menu.Items.Add(new MenuFlyoutSeparator());
+        Item(T("Move to the Recycle Bin"), () => DeleteSave(l), "trash-2", danger: true);
+        menu.Opening += (_, _) => { foreach (var i in changes) i.IsEnabled = SavesBlocked() is null; };
         return menu;
     }
 
-    // a dashed card with the households that are not in the game
-    FrameworkElement AwayTile(string title, string sub, List<SaveLook> looks, bool grey, Action go)
+    // ---------- what goes ----------
+
+    Border SaveCleanPanel(SavesNow now)
     {
-        var g = new Grid { Height = 244 };
-        g.Children.Add(new Rectangle { RadiusX = 16, RadiusY = 16, StrokeThickness = 1.4, StrokeDashArray = [4, 3], Stroke = new SolidColorBrush(Pick(0xFF3E3E3E, 0xFFB9B9B9)), IsHitTestVisible = false });
-        var row = new Grid { Margin = new Thickness(16, 24, 16, 74), ColumnSpacing = 4, VerticalAlignment = VerticalAlignment.Bottom };
-        foreach (var (l, i) in looks.Take(3).Select((l, i) => (l, i)))
+        var s = new StackPanel { Spacing = 16 };
+        var label = Muted("");
+        var number = new TextBlock { FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 36, FontWeight = FontWeights.SemiBold, LineHeight = 44 };
+        var less = new TextBlock { FontSize = 14, Foreground = Res("ApexSuccessBrush"), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 7) };
+        AutomationProperties.SetLiveSetting(less, AutomationLiveSetting.Polite);
+        s.Children.Add(new StackPanel { Children = { label, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { number, less } } } });
+
+        var options = new StackPanel();
+        var boxes = new List<(CheckBox Box, CleanParts Parts, TextBlock Size)>();
+        void Option(CleanParts parts, string name, string info, UIElement? under = null)
         {
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            var pic = SaveImage(FamilyPicture(l, grey), grey ? 0.75 : 1);
-            (pic.Height, pic.VerticalAlignment) = (new[] { 128, 140, 124 }[i], VerticalAlignment.Bottom);
-            Grid.SetColumn(pic, i);
-            row.Children.Add(pic);
+            var g = new Grid { ColumnSpacing = 12 };
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var about = SaveText(info, 12, "ApexMutedBrush");
+            about.TextWrapping = TextWrapping.Wrap;
+            g.Children.Add(new StackPanel { Spacing = 1, Children = { SaveText(name, 14, strong: true), about } });
+            var size = SaveText("", 14, "ApexMutedBrush");
+            size.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(size, 1);
+            g.Children.Add(size);
+            var box = new CheckBox { Content = g, MinWidth = 0, MinHeight = 60, Padding = new Thickness(12, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(box, name + ". " + info);
+            box.Click += (_, _) =>
+            {
+                if (box.IsChecked == true) _saveParts |= parts;
+                // (the last picture of each can't go while its copies stay)
+                else _saveParts &= parts == CleanParts.RepeatedMemories ? ~AllPictures : parts == AllPictures ? ~(CleanParts.Memories | CleanParts.Generated) : ~parts;
+                _saveSums?.Invoke();
+            };
+            boxes.Add((box, parts, size));
+            var cell = new StackPanel { Children = { box } };
+            if (under is not null) cell.Children.Add(under);
+            options.Children.Add(new Border { Child = cell, BorderThickness = new Thickness(0, boxes.Count > 1 ? 1 : 0, 0, 0), BorderBrush = Res("ApexHairlineBrush") });
         }
-        g.Children.Add(row);
-        var words = (FrameworkElement)Col(SaveText(title, 17, strong: true), SaveText(sub, 12, "ApexSoftTextBrush"));
-        (words.VerticalAlignment, words.Margin) = (VerticalAlignment.Bottom, new Thickness(18, 0, 18, 16));
-        g.Children.Add(words);
-        var b = SaveButton(g, title + ". " + sub, 16, go);
-        (b.BorderThickness, b.Background) = (new Thickness(0), new SolidColorBrush(Pick(0xFF111111, 0xFFF4F4F4)));
-        ToolTipService.SetToolTip(b, title + "\n" + sub);
-        var cell = new Grid { Children = { b } };
-        Lift(cell);
-        return cell;
-    }
+        Option(CleanParts.Portraits | CleanParts.Thumbnails, T("Portraits and thumbnails"), T("The game makes them again as you play"));
+        Option(CleanParts.RepeatedMemories, T("Repeated memories"), T("One of each picture stays"));
+        List<SaveLook> Picked() => now.Here.Where(l => _savePicks!.Contains(l.Save.Dir)).ToList();
+        var keep = Id2(Link(T("Choose the pictures that stay"), () => _ = KeepAsync(Picked())), "SaveKeep");
+        (keep.FontSize, keep.Margin) = (12, new Thickness(32, -6, 0, 10));
+        Option(AllPictures, T("All memories and photos"), T("These pictures are gone for good"), keep);
+        s.Children.Add(options);
 
-    // ---------- the households that are not in the game ----------
+        var clean = MainButton("", () => _ = CleanSaves(Picked()));
+        (clean.Height, clean.FontSize, clean.FontWeight) = (44, 15, FontWeights.SemiBold);
+        AutomationProperties.SetAutomationId(clean, "SaveClean");
+        var note = Muted(T("A copy is made first, and you can undo it."));
+        s.Children.Add(new StackPanel { Spacing = 10, Children = { clean, note } });
 
-    void DrawAway(List<SaveLook> looks, bool lost)
-    {
-        var head = new Grid { ColumnSpacing = 16 };
-        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        head.ColumnDefinitions.Add(new ColumnDefinition());
-        var back = new Button { Content = Lucide.Icon("chevron-left", 18, Res("TextFillColorPrimaryBrush")), Width = 44, Height = 44, Padding = new Thickness(0), CornerRadius = new CornerRadius(22), VerticalAlignment = VerticalAlignment.Center };
-        AutomationProperties.SetName(back, T("Back to Saves"));
-        AutomationProperties.SetAutomationId(back, "SavesBack");
-        ToolTipService.SetToolTip(back, T("Back to Saves"));
-        back.Click += (_, _) => SavesGo("");
-        head.Children.Add(back);
-        var title = Heading(lost ? T("Lost households") : T("Out of the game"));
-        AutomationProperties.SetHeadingLevel(title, AutomationHeadingLevel.Level1);
-        var words = (FrameworkElement)Col(title, Body(lost ? T("The save is gone, but the game kept the version before it. Bring back who you miss.") : T("The game doesn't see these saves. Put one back to play it.")));
-        Grid.SetColumn(words, 1);
-        head.Children.Add(words);
-        SavesHost.Children.Add(head);
-        var cards = new CardGrid { MinItemWidth = 300, Spacing = 18 };
-        foreach (var l in looks) cards.Children.Add(AwayCard(l, lost));
-        SavesHost.Children.Add(cards);
-        DispatcherQueue.TryEnqueue(() => back.Focus(FocusState.Programmatic));
-    }
-
-    // a lost household is grey; back in the game, its colours return
-    FrameworkElement AwayCard(SaveLook l, bool lost)
-    {
-        var g = new Grid { MinHeight = 560 };
-        g.RowDefinitions.Add(new RowDefinition { MinHeight = 350 });
-        g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var colours = new List<(UIElement Grey, UIElement Colour, double Dim, double Full)>();
-        void Pair(Grid host, Func<bool, Task<ImageSource?>> read, double dim, double full, Action? none = null)
-        {
-            // (each in a layer of its own: the picture fades in by itself, the layers change over)
-            var (grey, colour) = (new Grid(), new Grid());
-            if (lost) grey.Children.Add(SaveImage(read(true)));
-            colour.Children.Add(SaveImage(read(false), none: none));
-            host.Children.Add(grey);
-            host.Children.Add(colour);
-            colours.Add((grey, colour, dim, full));
-        }
-        var lot = new Grid { Height = 380, Margin = new Thickness(0, 10, 0, 0), VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false };
-        Pair(lot, grey => PlacePicture(l, grey), 0.4, 0.85, () => lot.Children.Insert(0, SaveTint()));
-        Grid.SetRowSpan(lot, 2);
-        g.Children.Add(lot);
-        var shade = new Border { IsHitTestVisible = false, Background = Fade(((SolidColorBrush)Res("ApexCardBrush")).Color, [(0, 0xFA), (0.3, 0xF2), (0.62, 0x4D), (1, 0)]) };
-        Grid.SetRowSpan(shade, 2);
-        g.Children.Add(shade);
-        var family = new Grid { Height = 270, Margin = new Thickness(22, 40, 22, 14), VerticalAlignment = VerticalAlignment.Bottom, IsHitTestVisible = false };
-        Pair(family, grey => FamilyPicture(l, grey), 1, 1, () => family.Children.Add(NoPicture(84)));
-        g.Children.Add(family);
-
-        var words = new StackPanel { Spacing = 12, Margin = new Thickness(22, 0, 22, 22) };
-        var place = SaveText(SavePlace(l) + ", " + SpSize(l.Info.Bytes), 14, "ApexSoftTextBrush");
-        ToolTipService.SetToolTip(place, place.Text);
-        words.Children.Add(Col(SaveText(FamilyName(l), 22, strong: true), place));
-        var about = l.Info.Description.Trim() is { Length: > 0 } d ? d : PlayedWhen(l.Save.LastPlayed);
-        var text = SaveText(about, 13, "ApexSoftTextBrush", lines: 3);
-        (text.LineHeight, text.Height) = (18, 54); // (the names and the buttons of a row of cards stand in line)
-        ToolTipService.SetToolTip(text, about);
-        words.Children.Add(text);
-        var act = new Border { MinHeight = 48 };
-        words.Children.Add(act);
-        Grid.SetRow(words, 1);
-        g.Children.Add(words);
-        var card = new Border { Child = g, CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1), Background = Res("ApexCardBrush") };
-        Show(_back.ContainsKey(l.Save.Dir), animate: false);
+        foreach (var l in now.Here) _ = Read(l);
+        _saveSums += Say;
+        var card = new Border { Child = s, Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(22, 20, 22, 20), VerticalAlignment = VerticalAlignment.Top };
+        AutomationProperties.SetName(card, T("Cleaning"));
         return card;
 
-        void Show(bool here, bool animate)
+        async Task Read(SaveLook l)
         {
-            foreach (var (grey, colour, dim, full) in colours)
+            try { await CleanRead(l); if (_savesNow == now || _savesNow?.Docs == now.Docs) _saveSums?.Invoke(); }
+            catch (Exception e) { App.Log(e); }
+        }
+        void Say()
+        {
+            var picked = Picked();
+            var reads = picked.Select(Known).OfType<SaveRead>().ToList();
+            var reading = picked.Any(l => !CleanRead(l).IsCompleted);
+            foreach (var (box, parts, size) in boxes)
             {
-                if (animate && AnimationsOn) foreach (var e in new[] { grey, colour }) e.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(900) };
-                grey.Opacity = here ? 0 : dim;
-                colour.Opacity = here || !lost ? full : 0;
+                var on = (_saveParts & parts) == parts;
+                box.IsChecked = on;
+                var only = parts == AllPictures ? CleanParts.Memories | CleanParts.Generated : parts;
+                size.Text = reading ? "" : SaveSize(reads.Sum(r => r.Plan.Gains.Where(g => (only & g.Key) != 0).Sum(g => g.Value.Bytes)));
+                size.Foreground = Res(on ? "ApexSuccessBrush" : "ApexMutedBrush");
             }
-            card.BorderBrush = Res(here ? "ApexAccentBrush" : "ApexCardBorderBrush");
-            if (here)
+            var gain = reads.Sum(r => Gain(r, _saveParts));
+            label.Text = picked.Count switch { 0 => T("No save chosen"), 1 => T("1 save, after cleaning"), var n => T("{0} saves, after cleaning", n) };
+            number.Text = SaveSize(picked.Sum(l => l.Info.Bytes) - gain);
+            less.Text = gain > 0 && !reading ? T("{0} less", SaveSize(gain)) : "";
+            clean.Content = reading ? T("Reading the saves…") : gain > 0 ? T("Clean {0}", SaveSize(gain)) : T("Nothing to clean");
+            clean.IsEnabled = gain > 0 && !reading && SavesBlocked() is null;
+            keep.IsEnabled = picked.Count > 0;
+        }
+    }
+
+    static HyperlinkButton Id2(HyperlinkButton b, string id) { AutomationProperties.SetAutomationId(b, id); return b; }
+
+    // ---------- the work ----------
+
+    sealed class CleanSay(Action<CleanProgress> say) : IProgress<CleanProgress> { public void Report(CleanProgress value) => say(value); }
+
+    // one save after the other, each planned again from its files as they are now; one that fails leaves those before it clean
+    async Task CleanSaves(List<SaveLook> picked)
+    {
+        var (docs, parts) = (Docs, _saveParts);
+        var todo = picked.Where(l => Known(l) is { } r && Gain(r, parts) > 0).ToList();
+        if (todo.Count == 0) return;
+        Exception? error = null;
+        var done = await SaveWork(todo.Count == 1 ? T("Cleaning the save") : T("Cleaning the saves"), (say, ct) =>
+        {
+            var list = new List<CleanResult>();
+            for (var i = 0; i < todo.Count; i++)
             {
-                var done = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                done.Children.Add(Lucide.Icon("check", 16, Res("ApexSuccessBrush")));
-                done.Children.Add(new TextBlock { Text = T("Back in the game"), FontWeight = FontWeights.SemiBold, Foreground = Res("ApexSuccessBrush") });
-                act.Child = new Border { Child = done, Height = 48, CornerRadius = new CornerRadius(8), Background = Res("ApexSuccessSoftBrush") };
-                return;
+                var (l, name) = (todo[i], todo.Count == 1 ? "" : T("{0} of {1}", i + 1, todo.Count) + " · ");
+                name += FamilyName(l.Save, l.Info) + "\n";
+                try
+                {
+                    var plan = SaveClean.Plan(docs, l.Save, parts, null, null, ct);
+                    list.Add(SaveClean.Run(plan, new CleanSay(c =>
+                    {
+                        var part = c.Total > 0 ? (double)c.Done / c.Total : 0;
+                        if (c.Step == CleanStep.Copy) say(name + T("Making a copy of the save"), -1, true);
+                        else if (c.Step == CleanStep.Write) say(name + T("Writing the smaller save"), 0.9 * part, true);
+                        else if (c.Step == CleanStep.Verify) say(name + T("Checking it against the save"), 0.9 * part, true);
+                        else say(name + T("Putting it in place"), 0.9 + 0.1 * part, false);
+                    }), ct));
+                }
+                catch (Exception e) when (list.Count > 0) { error = e; break; }
             }
-            var b = MainButton(lost ? T("Bring back") : T("Put back"), () => { });
-            b.Height = 48;
-            b.FontWeight = FontWeights.SemiBold;
-            AutomationProperties.SetName(b, (string)b.Content + ", " + FamilyName(l));
-            act.Child = WaitsForSaves(b, () => _ = BringBack(l, lost, b, () => Show(true, animate: true)));
-        }
-    }
-
-    async Task BringBack(SaveLook l, bool lost, Button b, Action shown)
-    {
-        if (_savesBusy) return;
-        var (docs, label) = (Docs, b.Content);
-        SavesBusy(true);
-        b.Content = new ProgressRing { IsActive = true, Width = 18, Height = 18 };
-        try
+            return list;
+        });
+        FillSaves();
+        if (done is null) return;
+        var freed = T("{0} less", SaveSize(done.Sum(r => r.Before - r.After)));
+        if (error is null) SavesSay(InfoBarSeverity.Success, done.Count == 1 ? T("Save cleaned") : T("{0} saves cleaned", done.Count), freed, T("Undo"), () => _ = UndoClean(done));
+        else
         {
-            var save = await Task.Run(() => lost ? SaveCopies.Rescue(docs, l.Save) : SaveCopies.Unstore(docs, l.Save));
-            _back[l.Save.Dir] = save;
-            shown();
-            SetInfo(SavesInfo, InfoBarSeverity.Success, T("{0} is back", FamilyName(l)), save.Name, T("Undo"), () => _ = UndoBringBack(docs, save, lost));
-            try { _savesNow = await Task.Run(() => ReadSaves(docs)); } catch (Exception e) { App.Log(e); } // (Saves opens on what is true now)
+            App.Log(error);
+            SavesSay(InfoBarSeverity.Warning, T("{0} of {1} saves cleaned", done.Count, todo.Count), error is OperationCanceledException ? freed : freed + ". " + ErrorText(error), T("Undo"), () => _ = UndoClean(done));
         }
-        catch (Exception e)
-        {
-            App.Log(e);
-            b.Content = label;
-            SetInfo(SavesInfo, InfoBarSeverity.Error, T("The save did not come back"), ErrorText(e));
-        }
-        finally { SavesBusy(false); }
     }
 
-    // the game's own copy of a lost save never left its place, and a save put back goes out again
-    async Task UndoBringBack(string docs, Save save, bool lost)
+    async Task UndoClean(List<CleanResult> done)
     {
-        if (_savesBusy) return;
-        SavesBusy(true);
-        try
-        {
-            await Task.Run(() =>
-            {
-                if (!lost) { SaveCopies.Store(docs, save); return; }
-                if (SaveInfo.Of(save).LastPlayed != save.LastPlayed) throw new SetupException("This save was played since it came back, so it stays.");
-                SaveCopies.Delete(save);
-            });
-            SavesInfo.IsOpen = false;
-            _savesNow = await Task.Run(() => ReadSaves(docs));
-            if (_step == SavesScreen && _saveView is null) SavesGo(_savesPage);
-        }
-        catch (Exception e) { App.Log(e); SetInfo(SavesInfo, InfoBarSeverity.Error, T("The save stayed as it is"), ErrorText(e)); }
-        finally { SavesBusy(false); }
-    }
-
-    // ---------- copies ----------
-
-    // a button that waits while a save is copied or moved
-    Button WaitsForSaves(Button b, Action? click = null)
-    {
-        if (click is not null) b.Click += (_, _) => click();
-        b.IsEnabled = !_savesBusy;
-        _savesWork.Add(b);
-        return b;
-    }
-
-    void SavesBusy(bool on)
-    {
-        _savesBusy = on;
-        foreach (var c in _savesWork) c.IsEnabled = !on;
-    }
-
-    void BackupAll() => _ = BackupAsync(_savesNow?.Here.Select(l => l.Save).ToList() ?? Saves.List(Docs));
-
-    async Task BackupAsync(List<Save> saves)
-    {
-        if (_savesBusy || saves.Count == 0) return;
         var docs = Docs;
+        var back = await SaveWork(T("Putting the saves back"), (say, ct) =>
+        {
+            say(T("Copying the save and checking the copy"), -1, true);
+            foreach (var r in done) SaveClean.Undo(docs, r, ct);
+            return done;
+        });
+        FillSaves();
+        if (back is not null) SavesSay(InfoBarSeverity.Success, T("The saves are as they were before."));
+    }
+
+    async Task CopySaves(List<Save> saves)
+    {
+        var docs = Docs;
+        if (await SaveWork(T("Making a copy"), (say, ct) =>
+        {
+            for (var i = 0; i < saves.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                say(saves[i].Name + "\n" + T("Copying the save and checking the copy"), saves.Count == 1 ? -1 : (double)i / saves.Count, true);
+                Saves.Backup(saves[i], docs);
+            }
+            return saves;
+        }) is null) return;
+        SavesSay(InfoBarSeverity.Success, saves.Count == 1 ? T("Copy made") : T("{0} saves copied", saves.Count), "", T("Open folder"), () => OpenFolder(Saves.BackupDir(docs)));
+    }
+
+    async Task DuplicateSave(SaveLook l)
+    {
+        var docs = Docs;
+        var made = await SaveWork(T("Duplicate save"), (say, ct) => { say(T("Copying the save and checking the copy"), -1, true); return SaveCopies.Duplicate(docs, l.Save, null, ct); });
+        FillSaves();
+        if (made is not null) SavesSay(InfoBarSeverity.Success, T("The new save is called {0}", made.Name));
+    }
+
+    async Task RenameSave(SaveLook l)
+    {
+        if (await AskName(T("Rename save"), l.Save.Name, T("Rename")) is { } name) await RenameTo(l.Save, name, undo: true);
+    }
+
+    async Task RenameTo(Save s, string name, bool undo)
+    {
+        var docs = Docs;
+        var now = await SaveWork(T("Rename save"), (say, _) => { say(T("Renaming the save and its copies"), -1, false); return SaveCopies.Rename(docs, s, name); });
+        if (now is not null && now.Name != s.Name) SavesGalleryAgain(s.Name, now.Name);
+        if (now is not null && _savePicks?.Remove(s.Dir) == true) _savePicks.Add(now.Dir);
+        FillSaves();
+        if (now is not null && now.Name != s.Name) SavesSay(InfoBarSeverity.Success, T("Renamed to {0}", now.Name), "", undo ? T("Undo") : null, () => _ = RenameTo(now, s.Name, undo: false));
+    }
+
+    async Task StoreSave(SaveLook l)
+    {
+        var docs = Docs;
+        var now = await SaveWork(T("Keep out of the game"), (say, _) => { say(T("Moving the save"), -1, false); return SaveCopies.Store(docs, l.Save); });
+        if (now is not null && now.Name != l.Save.Name) SavesGalleryAgain(l.Save.Name, now.Name);
+        FillSaves();
+        if (now is not null) SavesSay(InfoBarSeverity.Success, T("{0} is out of the game", FamilyName(l.Save, l.Info)), T("It is in Copies when you want it back."), T("Undo"), () => _ = PutBack(now));
+    }
+
+    async Task PutBack(Save s)
+    {
+        var docs = Docs;
+        var now = await SaveWork(T("Put back in the game"), (say, _) => { say(T("Moving the save"), -1, false); return SaveCopies.Unstore(docs, s); });
+        if (now is not null && now.Name != s.Name) SavesGalleryAgain(s.Name, now.Name);
+        FillSaves();
+        if (now is not null) SavesSay(InfoBarSeverity.Success, T("The save is back in the game."));
+    }
+
+    async Task DeleteSave(SaveLook l)
+    {
+        if (!await Confirm(T("Move this save to the Recycle Bin?"), T("{0} leaves the game. You can bring it back from the Recycle Bin, and its copies stay where they are.", FamilyName(l.Save, l.Info)), T("Move to the Recycle Bin"), danger: true)) return;
+        await SaveWork(T("Move to the Recycle Bin"), (say, _) => { say(T("Moving the save"), -1, false); SaveCopies.Delete(l.Save); return l.Save; });
+        FillSaves();
+    }
+
+    // the Gallery's own file was changed for it (its undo steps hold the old one)
+    void SavesGalleryAgain(string from, string to)
+    {
+        if (_gal is not null) _gal = LoadGallery();
+        if (_galAlbum == from) _galAlbum = to;
+        _lastKept = null;
+        _undoSteps.Clear();
+        _redoSteps.Clear();
+    }
+
+    // Work off the window's thread behind a dialog that says how far it is (say: the words, its share or -1, and whether it
+    // can still be stopped). Null when it was stopped or failed: then Saves says so.
+    async Task<TR?> SaveWork<TR>(string title, Func<Action<string, double, bool>, CancellationToken, TR> work) where TR : class
+    {
+        if (_busy || _savesBusy) { SavesSay(InfoBarSeverity.Informational, T("The launcher is applying changes")); return null; }
+        var bar = new ProgressBar { IsIndeterminate = true, Maximum = 1 };
+        var text = Body(T("Reading the save…"));
+        AutomationProperties.SetLiveSetting(text, AutomationLiveSetting.Polite);
+        var body = new StackPanel { Spacing = 14, Width = 420, Children = { text, bar } };
+        using var cts = new CancellationTokenSource();
+        var (running, canStop) = (true, true);
+        var d = new ContentDialog { Title = title, Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
+        d.CloseButtonClick += (_, _) => { if (running && canStop && !cts.IsCancellationRequested) { cts.Cancel(); d.CloseButtonText = T("Stopping…"); } };
+        d.Closing += (_, e) => e.Cancel = running; // (it closes when the work has ended)
+        var opened = new TaskCompletionSource();
+        d.Opened += (_, _) => opened.TrySetResult();
+        SavesNote.IsOpen = false;
+        var shown = ShowDialog(d);
+        TR? result = null;
+        Exception? error = null;
         SavesBusy(true);
         try
         {
-            for (int i = 0; i < saves.Count; i++)
+            result = await ModWork(() => work((t, share, stop) => DispatcherQueue.TryEnqueue(() =>
             {
-                var s = saves[i];
-                SetInfo(SavesInfo, InfoBarSeverity.Informational, saves.Count == 1 ? T("Making a copy…") : T("Copying {0} of {1}…", i + 1, saves.Count), s.Name);
-                await Task.Run(() => Saves.Backup(s, docs));
-            }
-            SetInfo(SavesInfo, InfoBarSeverity.Success, saves.Count == 1 ? T("Copy made") : T("{0} saves copied", saves.Count), Saves.BackupDir(docs), T("Open folder"), () => OpenFolder(Saves.BackupDir(docs)));
+                if (!running) return;
+                (text.Text, bar.IsIndeterminate, bar.Value) = (t, share < 0, Math.Max(0, share));
+                if (stop == canStop) return;
+                canStop = stop;
+                if (!cts.IsCancellationRequested) d.CloseButtonText = stop ? T("Cancel") : "";
+            }), cts.Token));
         }
-        catch (Exception e) { App.Log(e); SetInfo(SavesInfo, InfoBarSeverity.Error, T("The copy did not finish"), ErrorText(e)); }
-        finally { SavesBusy(false); if (_step == SavesScreen) FillSaves(); }
+        catch (Exception e) { error = e; }
+        finally { SavesBusy(false); }
+        running = false;
+        await Task.WhenAny(opened.Task, shown);
+        d.Hide();
+        await shown;
+        if (error is OperationCanceledException) SavesSay(InfoBarSeverity.Informational, T("Stopped"), T("Nothing was changed."));
+        else if (error is not null) { App.Log(error); SavesSay(InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(error)); }
+        return result;
+    }
+
+    void SavesBusy(bool on) => _savesBusy = on;
+
+    // a note at the foot of Saves, gone after a while (an error stays until it is closed)
+    void SavesSay(InfoBarSeverity sev, string title, string text = "", string? action = null, Action? run = null)
+    {
+        if (_step != SavesScreen) return;
+        var mine = ++_savesNote;
+        SetInfo(SavesNote, sev, title, text, action, () => { SavesNote.IsOpen = false; run?.Invoke(); });
+        if (sev != InfoBarSeverity.Error) After(action is null ? 7000 : 20000, () => { if (mine == _savesNote) SavesNote.IsOpen = false; });
     }
 }

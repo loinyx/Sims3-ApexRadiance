@@ -6,7 +6,7 @@ namespace ApexSetup;
 // Portraits: the Sims' faces, made again as you play. Thumbnails: lot pictures and other households' pictures, made
 // again too (the save's own household picture always stays). RepeatedMemories: every copy of a memory's picture but
 // one. Memories: that last one of each. Generated: selfies, cards and photo booth pictures.
-// Never taken: a starred memory, the textures of placed lots, anything that is the game's own data.
+// Never taken: a picture the player chose to keep, the textures of placed lots, anything that is the game's own data.
 [Flags]
 public enum CleanParts { None = 0, Portraits = 1, Thumbnails = 2, RepeatedMemories = 4, Memories = 8, Generated = 16 }
 
@@ -71,7 +71,7 @@ public static class SaveClean
                     part[(i.File, i.Index)] = kind switch
                     {
                         SaveKind.Portrait => CleanParts.Portraits,
-                        SaveKind.Generated => CleanParts.Generated,
+                        SaveKind.Generated => stars.Contains(i.Key) ? CleanParts.None : CleanParts.Generated,
                         // (the save's own household picture stays; when Meta.data does not name it, they all stay)
                         SaveKind.HouseholdPicture when contents.OwnPicture == 0 || i.Instance == contents.OwnPicture => CleanParts.None,
                         _ => CleanParts.Thumbnails,

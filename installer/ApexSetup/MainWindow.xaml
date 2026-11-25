@@ -627,7 +627,6 @@
                         <StackPanel x:Name="ScreenHome" Spacing="16" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenWorlds" Spacing="16" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenSaves" Spacing="16" Visibility="Collapsed">
-                            <InfoBar x:Name="SavesInfo" IsClosable="True" />
                             <StackPanel x:Name="SavesHost" Tag="dyn" Spacing="18" />
                         </StackPanel>
                         <Grid x:Name="ScreenHealth" Visibility="Collapsed" />
@@ -651,8 +650,8 @@
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
-                <!-- 11 one save's page, over Saves, with its own scrolling (MainWindow.SavePage.cs) -->
-                <Grid x:Name="SavePage" Grid.Row="1" Tag="dyn" Visibility="Collapsed" />
+                <!-- 11 what Saves did, at the foot of the window (MainWindow.Saves.cs) -->
+                <InfoBar x:Name="SavesNote" Grid.Row="1" Tag="dyn" IsOpen="False" MaxWidth="720" Margin="24,0,24,16" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
                 <!-- 9 Mods: its own full-height page (the side pane, the list, the chosen mods), each part scrolling on its own -->
                 <Grid x:Name="ScreenMods" Grid.Row="1" Visibility="Collapsed" SizeChanged="OnModsSized">
                     <Grid.KeyboardAccelerators>

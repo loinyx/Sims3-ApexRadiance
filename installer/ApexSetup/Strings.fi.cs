@@ -894,7 +894,6 @@ public static partial class Strings
         ["The Sims 3 is already running."] = "The Sims 3 on jo käynnissä.",
         ["The Sims 3 is running"] = "The Sims 3 on käynnissä",
         ["The Sims 3 · {0} · {1} MB"] = "The Sims 3 · {0} · {1} Mt",
-        ["The copy did not finish"] = "Varmuuskopiointi ei valmistunut",
         ["The game closed unexpectedly"] = "Peli sulkeutui odottamatta",
         ["The game did not start"] = "Peli ei käynnistynyt",
         ["This window can't start the game. Close it and press Play in Apex Launcher."] = "Tästä ikkunasta ei voi käynnistää peliä. Sulje se ja paina Pelaa Apex Launcherissa.",

@@ -10,8 +10,8 @@ public enum CopyKind { Launcher, Game, Now }
 // the game keeps (<name>.sims3.backup), or the save as it is. When: the day the save was like that; Bytes: its size then.
 public sealed record SavePoint(CopyKind Kind, string Path, DateTime When, long Bytes, string? Note);
 
-// Copies of a save and what is done with whole save folders: the timeline, going back to a point, bringing back a save
-// the game only has a previous version of, keeping a save out of the game's sight, duplicate, rename, delete.
+// Copies of a save and what is done with whole save folders: the list of them, going back to one, bringing back a save
+// that is gone or that the game only has a previous version of, keeping a save out of the game's sight, duplicate, rename, delete.
 // Nothing here writes over a save: a folder that replaces one is copied and checked beside it first, the one it replaces
 // is zipped (and checked) before it leaves, and a removed folder goes to the Recycle Bin. All of it is refused while the
 // game runs.
@@ -100,30 +100,42 @@ public static class SaveCopies
     // SaveHealth.History gives the sizes in between, for a curve.
     public static List<SavePoint> Timeline(string docs, Save s)
     {
-        var points = new List<SavePoint>();
-        try
-        {
-            if (Directory.Exists(Saves.BackupDir(docs)))
-                foreach (var zip in Directory.EnumerateFiles(Saves.BackupDir(docs), "*.zip"))
-                {
-                    var n = Path.GetFileNameWithoutExtension(zip);
-                    if (n.Length != s.Name.Length + 20 || !n.StartsWith(s.Name + " ", StringComparison.OrdinalIgnoreCase)
-                        || !DateTime.TryParseExact(n[^19..], "yyyy-MM-dd HH.mm.ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)) continue;
-                    try
-                    {
-                        using var z = ZipFile.OpenRead(zip);
-                        points.Add(new(CopyKind.Launcher, zip, when, z.Entries.Sum(e => e.Length), z.Comment is { Length: > 0 } c ? c : null));
-                    }
-                    catch (InvalidDataException) { } // (a zip that does not open is not a copy to offer)
-                }
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        var points = Zips(docs, n => n.Equals(s.Name, StringComparison.OrdinalIgnoreCase)).Select(z => z.Point).ToList();
         if (Directory.Exists(s.Dir + ".backup") && SaveInfo.Read(s.Dir + ".backup") is { Bytes: > 0 } game)
             points.Add(new(CopyKind.Game, s.Dir + ".backup", game.LastPlayed, game.Bytes, null));
         points.Sort((a, b) => a.When.CompareTo(b.When));
         points.Add(new(CopyKind.Now, s.Dir, s.LastPlayed, SaveInfo.Of(s).Bytes, null));
         return points;
     }
+
+    // the launcher's zips of the saves it is asked for
+    static List<(string Name, SavePoint Point)> Zips(string docs, Func<string, bool> wanted)
+    {
+        var zips = new List<(string, SavePoint)>();
+        try
+        {
+            if (Directory.Exists(Saves.BackupDir(docs)))
+                foreach (var zip in Directory.EnumerateFiles(Saves.BackupDir(docs), "*.zip"))
+                {
+                    var n = Path.GetFileNameWithoutExtension(zip);
+                    if (n.Length < 21 || n[^20] != ' ' || !wanted(n[..^20])
+                        || !DateTime.TryParseExact(n[^19..], "yyyy-MM-dd HH.mm.ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)) continue;
+                    try
+                    {
+                        using var z = ZipFile.OpenRead(zip);
+                        zips.Add((n[..^20], new(CopyKind.Launcher, zip, when, z.Entries.Sum(e => e.Length), z.Comment is { Length: > 0 } c ? c : null)));
+                    }
+                    catch (InvalidDataException) { } // (a zip that does not open is not a copy to offer)
+                }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return zips;
+    }
+
+    // the zips of saves that are gone (neither in the game nor kept out of it), newest first; Restore brings one back
+    public static List<(Save Save, SavePoint Point)> Gone(string docs) =>
+        Zips(docs, n => !Directory.Exists(Path.Combine(SavesDir(docs), n + ".sims3")) && !Directory.Exists(Path.Combine(StoredDir(docs), n + ".sims3")))
+            .OrderByDescending(z => z.Point.When).Select(z => (new Save(Path.Combine(SavesDir(docs), z.Name + ".sims3"), z.Name, z.Point.When), z.Point)).ToList();
 
     // Each zip the launcher makes by itself (before a clean, before going back) is a whole save: past the newest three of
     // a save they go to the Recycle Bin. Call after a change went through. A copy the player asked for carries no note
@@ -194,7 +206,7 @@ public static class SaveCopies
 
     // The save as it was at a point. The copy is laid out and checked beside the saves first, the save of now is zipped
     // (one more point on the timeline, so nothing is lost), then the two folders change places. A failure at any step
-    // leaves the save as it was. The game's .backup is only read.
+    // leaves the save as it was. The game's .backup is only read. A save that is gone (Gone) comes back under its name.
     public static Save Restore(string docs, Save s, SavePoint from, CancellationToken ct = default)
     {
         if (from.Kind == CopyKind.Now) return s;
@@ -208,12 +220,13 @@ public static class SaveCopies
                 if (from.Kind == CopyKind.Launcher) Unzip(from.Path, tmp, ct); else CopyDir(from.Path, tmp, ct);
                 if (!Directory.EnumerateFiles(tmp, "*.nhd").Any()) throw new SetupException("This copy can't be used: {0}", "no world file in it");
                 FailPoint("extract");
-                kept = Saves.Backup(s, docs, BeforeRestore);
+                var here = Directory.Exists(s.Dir);
+                if (here) kept = Saves.Backup(s, docs, BeforeRestore);
                 ct.ThrowIfCancellationRequested();
                 Engine.CheckWritable();
-                Fs.Retry(() => Directory.Move(s.Dir, old));
+                if (here) Fs.Retry(() => Directory.Move(s.Dir, old));
                 try { FailPoint("swap"); Fs.Retry(() => Directory.Move(tmp, s.Dir)); }
-                catch (Exception e)
+                catch (Exception e) when (here)
                 {
                     try { Fs.Retry(() => Directory.Move(old, s.Dir)); }
                     catch (Exception x) when (x is IOException or UnauthorizedAccessException) { Engine.Log(e); throw new SetupException("The save could not be put back in place. It is in {0}.", old); }
@@ -229,7 +242,7 @@ public static class SaveCopies
                 throw;
             }
             // (the folder that left is in the zip just made, whole and checked; one Windows can't take now goes at the next start)
-            try { Recycle(old); } catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); }
+            try { if (Directory.Exists(old)) Recycle(old); } catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); }
             Tidy(Path.GetDirectoryName(s.Dir)!);
             Thin(docs, s);
             return SaveOf(s.Dir);

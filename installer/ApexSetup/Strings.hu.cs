@@ -909,7 +909,6 @@ public static partial class Strings
         ["The Sims 3 is already running."] = "A The Sims 3 már fut.",
         ["The Sims 3 is running"] = "A The Sims 3 fut",
         ["The Sims 3 · {0} · {1} MB"] = "The Sims 3 · {0} · {1} MB",
-        ["The copy did not finish"] = "A biztonsági mentés nem fejeződött be",
         ["The game closed unexpectedly"] = "A játék váratlanul bezáródott",
         ["The game did not start"] = "A játék nem indult el",
         ["This window can't start the game. Close it and press Play in Apex Launcher."] = "Ez az ablak nem tudja elindítani a játékot. Zárd be, és nyomd meg a Játék gombot az Apex Launcherben.",

@@ -907,7 +907,6 @@ public static partial class Strings
         ["The Sims 3 is already running."] = "Το The Sims 3 εκτελείται ήδη.",
         ["The Sims 3 is running"] = "Το The Sims 3 εκτελείται",
         ["The Sims 3 · {0} · {1} MB"] = "The Sims 3 · {0} · {1} MB",
-        ["The copy did not finish"] = "Το αντίγραφο ασφαλείας δεν ολοκληρώθηκε",
         ["The game closed unexpectedly"] = "Το παιχνίδι έκλεισε απροσδόκητα",
         ["The game did not start"] = "Το παιχνίδι δεν ξεκίνησε",
         ["This window can't start the game. Close it and press Play in Apex Launcher."] = "Αυτό το παράθυρο δεν μπορεί να ξεκινήσει το παιχνίδι. Κλείσε το και πάτησε Παιχνίδι στο Apex Launcher.",
