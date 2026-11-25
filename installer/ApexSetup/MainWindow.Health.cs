@@ -81,7 +81,7 @@ public sealed partial class MainWindow
 
     static TextBlock SectionTitle(string text) => new() { Text = text, FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, Design.Space.SectionToBody) };
 
-    static FrameworkElement IconTile(string icon, Windows.UI.Color tint) => Design.IconTile.Of(icon, Design.Oklch.From(tint).H, Design.Size.Tile);
+    static FrameworkElement IconTile(string icon, Windows.UI.Color tint) => Design.Oklch.From(tint) is var of && of.C < 0.02 ? Design.IconTile.Of(icon) : Design.IconTile.Of(icon, of.H, Design.Size.Tile); // (a grey has no hue of its own)
 
     // an icon, a title with a line under it, and an action on the right
     static Grid Line(FrameworkElement? icon, string title, string detail, FrameworkElement? action, double pad = 10)

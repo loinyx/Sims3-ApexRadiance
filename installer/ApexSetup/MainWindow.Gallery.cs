@@ -73,12 +73,15 @@ public sealed partial class MainWindow
         _lastKept ??= System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         _galPics = Gallery.List(Docs);
         _galSaves = Saves.List(Docs);
+        _houseTitles = null;
         var page = new Grid();
         var albums = new ScrollViewer { Content = GalleryAlbums(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(12, 0, 12, 12) };
         _galSide = albums;
         var main = new StackPanel { Spacing = 18 };
+        var narrow = new ScrollViewer { MaxHeight = 520 };
+        narrow.Content = GalleryAlbums(narrow);
         var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible,
-            Flyout = new Flyout { Content = new StackPanel { Width = 260, Children = { GallerySearch(), new ScrollViewer { Content = GalleryAlbums(), MaxHeight = 520 } } } } };
+            Flyout = new Flyout { Content = new StackPanel { Width = 260, Children = { GallerySearch(), narrow } } } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, T("Albums"));
         if (_galBook) main.Children.Add(picker);
         ShowSide(GallerySearch(), albums, () => picker.Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible);
@@ -188,10 +191,15 @@ public sealed partial class MainWindow
     }
     string HouseTitle(string save)
     {
-        if (_galSaves.FirstOrDefault(x => x.Name.Equals(save, StringComparison.OrdinalIgnoreCase)) is not { } s) return save;
-        var name = FamilyName(s, SaveInfo.Of(s));
-        return name != s.Name && _galSaves.Count(x => FamilyName(x, SaveInfo.Of(x)) == name) > 1 ? name + " · " + s.Name : name;
+        // (once for the saves as they were read: a search asks for it at every picture, and each save's folder is on disk)
+        if (_houseTitles is null)
+        {
+            var names = _galSaves.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase).Select(x => (x.Name, Family: FamilyName(x, SaveInfo.Of(x)))).ToList();
+            _houseTitles = names.ToDictionary(n => n.Name, n => n.Family != n.Name && names.Count(x => x.Family == n.Family) > 1 ? n.Family + " · " + n.Name : n.Family, StringComparer.OrdinalIgnoreCase);
+        }
+        return _houseTitles.GetValueOrDefault(save, save);
     }
+    Dictionary<string, string>? _houseTitles;
 
     // ---------- the albums ----------
 
@@ -239,7 +247,8 @@ public sealed partial class MainWindow
         else BuildGallery();
     }
 
-    UIElement GalleryAlbums()
+    // (host: what holds this copy, the narrow window's list; null is the side pane)
+    UIElement GalleryAlbums(ScrollViewer? host = null)
     {
         var s = new StackPanel { Spacing = 0 };
         var folded = false;
@@ -323,7 +332,7 @@ public sealed partial class MainWindow
         async Task NewAlbum() { if (await AlbumDialog(null) is { } made) { _galAlbum = made.Key; BuildGallery(); } }
         void Group(string key, string label, (string, Action)? add = null)
         {
-            s.Children.Add(SideGroup("gallery:" + key, label, () => { if (_galSide is not null) _galSide.Content = GalleryAlbums(); }, add));
+            s.Children.Add(SideGroup("gallery:" + key, label, () => { if ((host ?? _galSide) is { } h) h.Content = GalleryAlbums(host); }, add));
             folded = _collapsed.Contains("gallery:" + key) && _galQuery.Length == 0;
         }
         void Into(UIElement e) { if (!folded) s.Children.Add(e); }
@@ -350,7 +359,7 @@ public sealed partial class MainWindow
         var hint = Muted(_galBook ? T("Drag to travel the timeline · click a picture to open it")
             : pics.Count == 1 ? T("1 picture · newest first") : T("{0} pictures · newest first", pics.Count));
         hint.FontSize = 13;
-        if (_galBook) { _boardHint = hint; hint.Foreground = Ink(look); hint.Opacity = 0.7; hint.TextWrapping = TextWrapping.NoWrap; hint.TextTrimming = TextTrimming.CharacterEllipsis; _boardTitle.TextTrimming = TextTrimming.CharacterEllipsis; }
+        if (_galBook) { _boardHint = hint; hint.Foreground = Ink(look); hint.Opacity = 0.85; hint.TextWrapping = TextWrapping.NoWrap; hint.TextTrimming = TextTrimming.CharacterEllipsis; _boardTitle.TextTrimming = TextTrimming.CharacterEllipsis; }
         titles.Children.Add(hint);
         g.Children.Add(titles);
 
@@ -421,7 +430,7 @@ public sealed partial class MainWindow
     {
         _galBook = at == 1;
         if (_gal is not null) { _gal.Book = _galBook; KeepQuiet(); }
-        After(Design.Motion.Base, BuildGallery); // (the mark arrives first)
+        After(Design.Motion.Base, () => { if (_step == GalleryScreen) BuildGallery(); }); // (the mark arrives first; another screen may be open by then)
     });
     Design.Segmented? _boardSwitch;
 
@@ -847,7 +856,12 @@ public sealed partial class MainWindow
         return new LinearGradientBrush { StartPoint = new(0.2, 0), EndPoint = new(0.8, 1), GradientStops =
             { new GradientStop { Color = Shade(c, 0.08), Offset = 0 }, new GradientStop { Color = c, Offset = 0.45 }, new GradientStop { Color = Shade(c, -0.42), Offset = 1 } } };
     }
-    static Windows.UI.Color BoardInk(AlbumLook look) => IsLight(BoardColor(look)) ? Rgb(0x3A, 0x34, 0x2A) : Rgb(0xE8, 0xE2, 0xD4);
+    // (the one of the two that reads better on it)
+    static Windows.UI.Color BoardInk(AlbumLook look)
+    {
+        var (board, dark, light) = (BoardColor(look), Rgb(0x1E, 0x1A, 0x14), Rgb(0xF2, 0xEC, 0xDF));
+        return Design.Oklch.Contrast(dark, board) > Design.Oklch.Contrast(light, board) ? dark : light;
+    }
     static Brush Ink(AlbumLook look) => new SolidColorBrush(BoardInk(look));
 
     // ---------- Customize: a panel that slides in over the board's right side, the board changing behind it ----------

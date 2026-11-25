@@ -85,36 +85,30 @@ public sealed partial class MainWindow
         catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { }
         _gameAllSet = findings.Count == 0 && !_running && checks.All(c => c.Ok);
 
-        var facts = new Grid { BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
-        for (int i = 0; i < checks.Count; i++)
-        {
-            facts.ColumnDefinitions.Add(new ColumnDefinition());
-            var fact = Fact(checks[i].Ok, checks[i].What, checks[i].Value);
-            var cell = new Border { Child = fact, Padding = new Thickness(Design.Space.CardPad), BorderThickness = new Thickness(i == 0 ? 0 : 1, 0, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
-            Grid.SetColumn(cell, i);
-            facts.Children.Add(cell);
-        }
+        var facts = new StackPanel();
+        foreach (var (ok, what, value) in checks) facts.Children.Add(Fact(ok, what, value));
         var all = new StackPanel { Children = { head, facts } };
         if (OldCard || OldDriver) all.Children.Add(new TextBlock { Text = BridgeDetail.Text, FontSize = 13, LineHeight = 18, Foreground = Res("ApexWarningTextBrush"), TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(Design.Space.CardPad, 0, Design.Space.CardPad, Design.Space.CardPad) });
         return new Border { Child = all, CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexRaisedBrush") };
     }
 
-    // something checked: what it is over what was found, its mark in front
+    // something checked: its mark, what it is, and what was found on the right
     static FrameworkElement Fact(bool ok, string what, string value)
     {
-        var g = new Grid { ColumnSpacing = Design.Space.X3 };
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        var mark = Lucide.Icon(ok ? "circle-check" : "triangle-alert", 18, Res(ok ? "ApexSuccessBrush" : "ApexWarningBrush"), 1.75);
+        var g = new Grid { ColumnSpacing = Design.Space.X3, Height = 52, Padding = new Thickness(Design.Space.CardPad, 0, Design.Space.CardPad, 0), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
+        foreach (var w in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star) }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+        var mark = Lucide.Icon(ok ? "circle-check" : "triangle-alert", 18, Res(ok ? "ApexSuccessBrush" : "ApexWarningBrush"));
         mark.VerticalAlignment = VerticalAlignment.Center;
         g.Children.Add(mark);
-        var words = new StackPanel { Spacing = 2 };
-        words.Children.Add(new TextBlock { Text = what, FontSize = 12, Foreground = Res("ApexMutedBrush") });
-        words.Children.Add(new TextBlock { Text = value, FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-        ToolTipService.SetToolTip(words, what + ": " + value);
-        Grid.SetColumn(words, 1);
-        g.Children.Add(words);
+        var name = new TextBlock { Text = what, FontSize = 14, Foreground = Res("ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(name, 1);
+        g.Children.Add(name);
+        var found = FactText(value);
+        (found.FontSize, found.HorizontalAlignment) = (14, HorizontalAlignment.Right);
+        Grid.SetColumn(found, 2);
+        g.Children.Add(found);
+        ToolTipService.SetToolTip(g, what + ": " + value);
         return g;
     }
 

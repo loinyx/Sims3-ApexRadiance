@@ -2293,5 +2293,7 @@ public static partial class Strings
         ["The recommended set is already on."] = "O recomendado já está ligado.",
         ["What runs with your game."] = "O que roda com o seu jogo.",
         ["Your game is ready to play."] = "Seu jogo está pronto.",
+        ["Backups of a save named {0} are kept. Choose another name."] = "Há backups de um save chamado {0}. Escolha outro nome.",
+        ["This save was played since it was cleaned, so it stays."] = "Este save foi jogado depois da limpeza, então ele fica.",
     };
 }

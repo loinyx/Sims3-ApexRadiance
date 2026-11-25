@@ -169,7 +169,7 @@ public sealed partial class MainWindow
         try { BackupChoices.Change(edit); }
         catch (Exception x) { App.Log(x); SavesSay(InfoBarSeverity.Error, T("That did not work"), ErrorText(x)); }
         _nextDaily = Math.Min(_nextDaily, Environment.TickCount64 + 5000); // (once a day, just turned on, does not wait)
-        SavesAgain();
+        DispatcherQueue.TryEnqueue(SavesAgain); // (later: it removes the control that changed)
     }
 
     // when this save gets one by itself and how many stay; as every save, or its own
@@ -235,7 +235,7 @@ public sealed partial class MainWindow
 
     async Task DeleteBackups(List<SavePoint> points)
     {
-        var bin = SaveBackups.HasBin(points[0].Path);
+        var bin = points.All(p => SaveBackups.HasBin(p.Path));
         if (!bin && !await Confirm(points.Count == 1 ? T("Delete this backup?") : T("Delete {0} backups?", points.Count), T("This drive has no Recycle Bin, so you can't bring them back."), T("Delete"), danger: true)) return;
         if (await SaveWork(T("Removing backups"), (say, _) => { say(BackupCount(points.Count), -1, false); SaveBackups.Delete(points); return points; }) is not null)
             SavesSay(InfoBarSeverity.Success, bin ? points.Count == 1 ? T("Backup moved to the Recycle Bin") : T("{0} backups moved to the Recycle Bin", points.Count) : points.Count == 1 ? T("Backup deleted") : T("{0} backups deleted", points.Count));
@@ -268,7 +268,7 @@ public sealed partial class MainWindow
 
     async Task ExportBackups(List<(SaveEntry Of, SavePoint Point)> what)
     {
-        string FileName(SaveEntry e, SavePoint p) => p.Kind == CopyKind.Launcher ? Path.GetFileName(p.Path) : $"{e.Save} {p.When:yyyy-MM-dd HH.mm.ss}.zip";
+        string FileName(SaveEntry e, SavePoint p) => p.Kind == CopyKind.Launcher ? Path.GetFileName(p.Path) : $"{e.Save} {Saves.Stamp(p.When)}.zip";
         string? folder, single = null;
         if (what.Count == 1)
         {
@@ -613,7 +613,7 @@ public sealed partial class MainWindow
         }
         if (pins.Count > 0) Act(unpin ? "pin-off" : "pin", unpin ? T("Unpin") : T("Pin"), () => MarkBackups(pins, p => (p.Label, !unpin)));
         Act("upload", T("Export"), () => ExportBackups(picked));
-        Act("trash-2", SaveBackups.HasBin(points[0].Path) ? T("Recycle Bin") : T("Delete"), () => DeleteBackups(points), "ApexErrorBrush");
+        Act("trash-2", points.All(p => SaveBackups.HasBin(p.Path)) ? T("Recycle Bin") : T("Delete"), () => DeleteBackups(points), "ApexErrorBrush");
         SavesBar.Child = s;
     }
 

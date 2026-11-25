@@ -34,7 +34,7 @@ public sealed class ModRow : INotifyPropertyChanged
     public string Size => SizeText(File.Size);
     // (a very large package: worth knowing, it slows loading)
     public Brush SizeBrush => File.Size > 200L << 20 ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
-    public Brush TileBrush { get; }
+    public Brush TileBrush => App.Brush("ApexTileBrush");
     public static bool ShowPlace = true;
     public string Sub => NewVersions == 0 ? Line : (NewVersions == 1 ? T("1 new version") : T("{0} new versions", NewVersions)) + (Line.Length > 0 ? " · " + Line : "");
     string Line => Findings.Count > 0 ? Findings[0]
@@ -79,12 +79,10 @@ public sealed class ModRow : INotifyPropertyChanged
         File = f;
         Findings = findings;
         Kinds = [f.Kind.ToString()];
-        // (neutral, as every icon: a mod's picture is its colour)
-        GlyphBrush = App.Brush("ApexSoftTextBrush");
-        TileBrush = App.Brush("ApexTileBrush");
     }
 
-    public Brush GlyphBrush { get; }
+    // (neutral, as every icon: a mod's picture is its colour; of the theme in use)
+    public Brush GlyphBrush => App.Brush("ApexSoftTextBrush");
 
     // the row's checkbox mirrors the list's selection; a click on it adds or takes the row out (the screen's handler)
     bool _picked;
@@ -147,7 +145,7 @@ public sealed class ModRow : INotifyPropertyChanged
     public void SetFindings(IReadOnlyList<string> findings) { Findings = findings; Refresh(); }
 
     // notes, tags, findings or the New mark changed
-    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(TagsVisible), nameof(NewVisible), nameof(Kind), nameof(KindIcon), nameof(SizeBrush));
+    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(TagsVisible), nameof(NewVisible), nameof(Kind), nameof(KindIcon), nameof(SizeBrush), nameof(GlyphBrush), nameof(TileBrush));
 
     public void OnToggled(object sender, RoutedEventArgs e)
     {

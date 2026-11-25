@@ -168,8 +168,8 @@ public sealed partial class MainWindow : Window
                 }
                 try
                 {
-                    SelfUpdate.ReplaceAndStart(file, self, LauncherInstall.HandoverArgs(Environment.GetCommandLineArgs().Skip(1)));
-                    Application.Current.Exit();
+                    SelfUpdate.ReplaceAndStart(file, self, LauncherInstall.HandoverArgs(LauncherInstall.LastingArgs(Environment.GetCommandLineArgs().Skip(1))));
+                    Leave();
                 }
                 catch (Exception e)
                 {
@@ -424,7 +424,7 @@ public sealed partial class MainWindow : Window
             }
             // (a copy not installed yet goes where the player chose: installed, it starts the installed copy and closes)
             case DoneStep when DoneChoice.Visibility == Visibility.Visible && Environment.ProcessPath is { } self:
-                _ = ApplyInstallMode(_doneInstall, self, _doneInstall ? _installFolder : null);
+                _ = ApplyInstallMode(_doneInstall, self, _doneInstall ? InstallTo : null);
                 if (!_doneInstall) Show(Home);
                 break;
             // (the install's end: Play starts the game from Home)
@@ -546,25 +546,24 @@ public sealed partial class MainWindow : Window
         var on = Wizard;
         if (!on && _step is not (GameStep or ComponentsStep or RendererStep or WizardSettings or InstallStep or DoneStep)) _wizardFlow = false;
         Nav.IsPaneVisible = !on;
-        ContentFrame.MaxWidth = on ? 840 : double.PositiveInfinity;
+        ContentFrame.MaxWidth = on ? Design.Size.InstallWidth : double.PositiveInfinity;
         ContentFrame.HorizontalAlignment = HorizontalAlignment.Stretch; // (with MaxWidth: the card keeps its width, centred, whatever the step holds)
-        ContentFrame.VerticalAlignment = on ? VerticalAlignment.Center : VerticalAlignment.Stretch;
         ContentFrame.Margin = new Thickness(on ? 24 : 0);
         ContentFrame.CornerRadius = new CornerRadius(on ? 16 : 0);
         ContentFrame.BorderThickness = new Thickness(on ? 1 : 0);
         ContentFrame.BorderBrush = on ? Res("ApexCardBorderBrush") : null;
         ContentFrame.Background = on ? Res("ApexCardBrush") : null;
-        ContentFrame.MaxHeight = on && Nav.ActualHeight > 0 ? Math.Max(320, Nav.ActualHeight - 48) : double.PositiveInfinity;
+        ContentFrame.MaxHeight = on ? Design.Size.InstallHeight : double.PositiveInfinity; // (one size from the welcome to the end; what is longer scrolls)
         BackButton.MinHeight = NextButton.MinHeight = on ? 40 : 36; // (one height through the install, the welcome and the move)
         var split = on && _step == DoneStep && _doneClean; // (its card reaches the edges)
         if (on) Scroller.Padding = split ? new Thickness(0) : new Thickness(32, 28, 32, 0);
         if (on) Screens.Margin = new Thickness(0, 0, 0, split ? 0 : 32);
-        // the card's own header: Apex Radiance and the steps (each screen's own steps row then stays hidden)
-        WizardBrand.Visibility = on && !(_step == DoneStep && _doneClean) ? Visibility.Visible : Visibility.Collapsed; // (the install's end has its own logo)
+        // the card's own side: Apex Radiance and the steps (each screen's own steps row then stays hidden; the install's end has its own)
+        WizardSide.Visibility = on && !split ? Visibility.Visible : Visibility.Collapsed;
         foreach (var host in new[] { StepsGame, StepsComponents, StepsRenderer, StepsInstall }) host.Visibility = on || host.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (on)
         {
-            Steps(WizardSteps, _step == GameStep ? 1 : _step is ComponentsStep or RendererStep ? 2 : _step == WizardSettings ? 3 : 4);
+            FillWizardSide(_step == GameStep ? 0 : _step is ComponentsStep or RendererStep ? 1 : _step == WizardSettings ? 2 : 3);
         }
     }
 
@@ -839,15 +838,15 @@ public sealed partial class MainWindow : Window
         Row(IconBox("file-code"), "MonoPatcher", Why(MonoToggle, MonoPill, T("Only some script mods need this. Turn it on if a mod asks for it.")), null, null, false, Mirror(MonoToggle, "MonoPatcher"));
     }
 
-    void OnContentFrameSized(object sender, SizeChangedEventArgs e) { FitSide(); if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
+    void OnContentFrameSized(object sender, SizeChangedEventArgs e) => FitSide();
     void OnNotThisGame(object sender, RoutedEventArgs e) => Show(GameStep);
 
     // the install's steps, as dots
     void Steps(StackPanel host, int current)
     {
         host.Children.Clear();
-        // (in the install's card the steps sit in its header, WizardSteps; each screen's own row stays hidden)
-        host.Visibility = FirstInstall && (host == WizardSteps || !Wizard) ? Visibility.Visible : Visibility.Collapsed;
+        // (in the install's card the steps sit at its side; each screen's own row stays hidden)
+        host.Visibility = FirstInstall && !Wizard ? Visibility.Visible : Visibility.Collapsed;
         if (host.Visibility == Visibility.Visible) host.Children.Add(StepDots([T("Game"), T("Components"), T("Game settings"), T("Install")], current - 1));
     }
 
@@ -1397,6 +1396,7 @@ public sealed partial class MainWindow : Window
 
     // after a removal or an apply: the rows read the drivers again; a failure is logged and shown on its own row (removals only
     // ever turn frame generation off)
+    bool _keepFrameGen; // (the next reading of the drivers keeps the change chosen)
     void AfterFrameGenOff()
     {
         _smoothFor = null;
@@ -1423,7 +1423,7 @@ public sealed partial class MainWindow : Window
 
     void RefreshSmooth(State s, Game g)
     {
-        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(); _smoothError = _smoothPending; _smoothPending = null; _smoothWant = null; _smoothDefaulted = false; }
+        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(); _smoothError = _smoothPending; _smoothPending = null; if (!_keepFrameGen) { _smoothWant = null; _smoothDefaulted = false; } }
         var sm = _smooth!;
         if (FirstInstall && !_smoothDefaulted) { _smoothDefaulted = true; if (sm.On) _smoothWant = false; }
         // no NVIDIA card (or no driver to ask): no row; an NVIDIA card that cannot run it: the row, off, with the reason
@@ -1455,7 +1455,7 @@ public sealed partial class MainWindow : Window
 
     void RefreshAfmf()
     {
-        if (_afmf is null) { _afmf = Afmf.Read(); _afmfError = _afmfPending; _afmfPending = null; _afmfWant = null; }
+        if (_afmf is null) { _afmf = Afmf.Read(); _afmfError = _afmfPending; _afmfPending = null; if (!_keepFrameGen) _afmfWant = null; _keepFrameGen = false; }
         var a = _afmf;
         // no AMD driver: no row; an AMD card ADLX says cannot run it: the row, off, with the reason (no renderer needed: AFMF 2
         // covers Vulkan; under the bridge it is unverified)
@@ -2125,8 +2125,11 @@ public sealed partial class MainWindow : Window
         {
             // (busy until the dialogs close: a background install cannot start and close the undo dialog)
             _inline = false;
-            _defaultsFor = null;
+            // (a first install taken back keeps what the player chose, for Try again and for Back)
+            var keeps = _wizardFlow && !engineDone;
+            if (!keeps) _defaultsFor = null;
             App.Log(ex);
+            _keepFrameGen = keeps;
             AfterFrameGenOff(); // (the drivers read again, a removal's turn-off error taken once, not left for the next Apply)
             var net = Engine.IsNetwork(ex);
             var title = net ? T("The launcher can't reach GitHub") : T("The launcher could not finish");
@@ -2139,7 +2142,7 @@ public sealed partial class MainWindow : Window
                     try { if (RestorePoints.Restore(g.Bin, wp, Scan.DocumentsFor(g)) is { Count: > 0 } kept) left = string.Join(", ", kept); }
                     catch (Exception re) { App.Log(re); left = ErrorText(re); }
                 _state = Scan.Run(g);
-                _defaultsFor = null;
+                _defaultsFor = left is null ? _game : null;
                 _busy = false;
                 // (Cancel and undo: everything is back as it was, and the install returns to its choices)
                 if (ex is OperationCanceledException && left is null) { Show(_updatingForPlay ? Home : ComponentsStep); return; }
@@ -2147,7 +2150,7 @@ public sealed partial class MainWindow : Window
                 var again = await WizardFailed(net, text, left, offerDxvk: order.Contains(Components.Bridge) && !VulkanBlocked);
                 if (again == "try") { await InstallAsync(comps, remove, inline, settingsOnly); return; }
                 // (the bridge would not install: the same install with DXVK in its place)
-                if (again == "dxvk") { _renderer = RDxvk; RefreshComponents(); var (da, dd) = Plan(); await InstallAsync(da, dd); return; }
+                if (again == "dxvk") { _defaultsFor = _game; _renderer = RDxvk; RefreshComponents(); var (da, dd) = Plan(); await InstallAsync(da, dd); return; }
                 if (again == "play") { _playAnyway = true; return; }
                 Show(_updatingForPlay ? Home : ComponentsStep);
                 return;
@@ -2310,6 +2313,7 @@ public sealed partial class MainWindow : Window
         if (clean)
         {
             var (card, words) = SplitCard(done: true);
+            card.MinHeight = Math.Max(360, Math.Min(Design.Size.InstallHeight, Nav.ActualHeight - 48) - 74); // (down to the footer)
             words.Children.Add(SplitTitle(T("All installed")));
             words.Children.Add(SplitText(T("Apex Radiance {0} is in your The Sims 3. Your saves and mods weren't touched.", _state?.ApexVersion ?? "")));
             var went = new StackPanel { Spacing = Design.Space.X3, Margin = new Thickness(0, 24, 0, 0) };
@@ -2645,12 +2649,7 @@ public sealed partial class MainWindow : Window
         static SolidColorBrush B(uint argb) => new(Windows.UI.Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
         // (light: Windows' own dialog colours)
         if (_light) return;
-        d.Resources["ContentDialogTopOverlay"] = B(0xFF161616);
-        d.Resources["ContentDialogBackground"] = B(0xFF101010);
-        d.Resources["ContentDialogBorderBrush"] = B(0xFF2C2C2C);
         d.Resources["ContentDialogSmokeFill"] = B(0xB3050507);
-        d.Background = B(0xFF101010);
-        d.BorderBrush = B(0xFF2C2C2C);
     }
 
     // WinUI allows one open ContentDialog: a newer one closes the open one (a Confirm closed so reads as Cancel)
@@ -2660,6 +2659,7 @@ public sealed partial class MainWindow : Window
     {
         while (_dialog is { } open) { open.Hide(); await _dialogShown!; }
         _dialog = d;
+        d.RequestedTheme = Root.ActualTheme; // (nor the theme, when it is not Windows' own)
         d.Language = Root.Language; // (a dialog is a popup: it does not inherit the window's language)
         DarkDialog(d);
         Design.DesignSystem.Into(d.Resources);

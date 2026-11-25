@@ -89,6 +89,8 @@ public sealed partial class MainWindow
         var own = ModNotes.PicturePath(m.Rel) is not null;
         // the picture, and the button that changes it
         FrameworkElement tile = PictureTile(r, merge is not null ? "merge" : r.KindIcon, own);
+        // (the player's own picture shows whole under the pointer: the banner cuts it to its shape)
+        if (own && r.Image is { } whole) ToolTipService.SetToolTip(tile, new ToolTip { Content = new Image { Source = whole, MaxWidth = 300, MaxHeight = 300 } });
         Button? change = null;
         if (mine)
         {
@@ -400,6 +402,12 @@ public sealed partial class MainWindow
             f.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             Grid.SetColumn(b, f.ColumnDefinitions.Count - 1);
             f.Children.Add(b);
+        }
+        if (merge is not null && mine)
+        {
+            var power = IconButton("power", m.Enabled ? T("Turn off") : T("Turn on"));
+            power.Click += (_, _) => SetMods([r], !r.File.Enabled);
+            Icon(power);
         }
         if (mine)
         {

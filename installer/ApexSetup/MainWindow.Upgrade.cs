@@ -41,7 +41,7 @@ public sealed partial class MainWindow
         _upgradeStage = stage;
         var steps = UpgradeSteps;
         var name = steps[Math.Min(stage, steps.Length - 1)];
-        var card = new StackPanel();
+        var card = new Grid();
         if (name == T("What's new")) FillUpgradeNews(card);
         else if (name == T("Where it lives")) FillUpgradeWhere(card, steps);
         else FillUpgradeReady(card, steps);
@@ -82,8 +82,8 @@ public sealed partial class MainWindow
     (Grid Card, StackPanel Words) SplitCard(bool done = false)
     {
         var g = new Grid { MinHeight = 440 };
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star), MaxWidth = 300 });
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5, GridUnitType.Star) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Design.Size.InstallSide) });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
         var side = SplitSide();
         if (done)
             side.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(20), Background = Res("ApexCardBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
@@ -93,6 +93,36 @@ public sealed partial class MainWindow
         Grid.SetColumn(words, 1);
         g.Children.Add(words);
         return (g, words);
+    }
+    // the install's side: the logo in its light, smaller, over the steps, what is done checked and the one open lit
+    void FillWizardSide(int current)
+    {
+        string[] steps = [T("Game"), T("Components"), T("Game settings"), T("Install")];
+        var key = $"{current}|{Lang}|{App.Light}|{Design.DesignSystem.Theme.Id}|{FirstInstall}";
+        if (WizardSide.Children.Count > 0 && (string?)WizardSide.DataContext == key) return;
+        WizardSide.DataContext = key;
+        WizardSide.Children.Clear();
+        var list = new StackPanel { Spacing = Design.Space.X1, Margin = new Thickness(0, Design.Space.X8, 0, 0) };
+        for (int i = 0; i < steps.Length && FirstInstall; i++)
+        {
+            var mark = new Border { Width = 24, Height = 24, CornerRadius = new CornerRadius(12), VerticalAlignment = VerticalAlignment.Center };
+            (mark.Background, mark.Child) = i == current ? (Design.DesignSystem.MainBrush, (UIElement)Number(i, "ApexInkBrush"))
+                : i < current ? (Res("ApexAccentSoftBrush"), Centred(Lucide.Icon("check", 14, Res("ApexAccentBrush"), 2.5))) : (Res("ApexTileBrush"), Number(i, "ApexMutedBrush"));
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X3, Padding = new Thickness(Design.Space.X3, 0, Design.Space.X3, 0), Height = 44 };
+            row.Children.Add(mark);
+            row.Children.Add(new TextBlock { Text = steps[i], FontSize = 14, FontWeight = i == current ? FontWeights.SemiBold : FontWeights.Normal, Foreground = Res(i == current ? "TextFillColorPrimaryBrush" : i < current ? "ApexSoftTextBrush" : "ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+            list.Children.Add(new Border { Child = row, CornerRadius = new CornerRadius(Design.Radius.Control), Background = i == current ? Res("ApexTileBrush") : null });
+        }
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(list, $"{steps[Math.Clamp(current, 0, steps.Length - 1)]}, {current + 1}/{steps.Length}");
+        var glow = new SoftGlow(Tone("Accent"), App.Light ? 0.16 : 0.20, 0.5) { Width = 320, Height = 320, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -72, 0, 0) };
+        var words = new StackPanel { Padding = new Thickness(Design.Space.X6, Design.Space.X10, Design.Space.X6, Design.Space.X6) };
+        words.Children.Add(Logo(72));
+        words.Children.Add(new TextBlock { Text = "Apex Radiance", FontSize = 20, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, Design.Space.X4, 0, 0) });
+        words.Children.Add(list);
+        WizardSide.Children.Add(new Grid { CornerRadius = new CornerRadius(Design.Radius.Panel - 1, 0, 0, Design.Radius.Panel - 1), Background = Res("ApexFooterBrush"), BorderThickness = new Thickness(0, 0, 1, 0), BorderBrush = Res("ApexCardBorderBrush"), Children = { glow, words } });
+
+        static TextBlock Number(int i, string ink) => new() { Text = (i + 1).ToString(), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res(ink), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        static UIElement Centred(FrameworkElement e) { (e.HorizontalAlignment, e.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center); return e; }
     }
     static Grid SplitSide()
     {
@@ -121,7 +151,7 @@ public sealed partial class MainWindow
         return b;
     }
 
-    void FillUpgradeNews(StackPanel card)
+    void FillUpgradeNews(Panel card)
     {
         var (split, words) = SplitCard();
         words.Children.Add(SplitTitle(T("Apex Radiance Setup is now Apex Launcher")));
@@ -144,7 +174,7 @@ public sealed partial class MainWindow
 
     bool _upgradeStartup;
     // installing is the way on; running without it is a line under the buttons
-    void FillUpgradeWhere(StackPanel card, string[] steps)
+    void FillUpgradeWhere(Panel card, string[] steps)
     {
         var self = Environment.ProcessPath ?? "";
         var (split, words) = SplitCard();
@@ -189,9 +219,10 @@ public sealed partial class MainWindow
             // the installed copy opens on Ready and can delete this one once it has closed
             var args = Environment.GetCommandLineArgs().Skip(1).Where(a => !a.StartsWith(MovedFromArg, StringComparison.Ordinal) && a != "--was-setup").Append(MovedFromArg + self);
             if (Paths.MovedFromSetup) args = args.Append("--was-setup");
-            if (_upgradeStartup) LauncherInstall.SetRunAtStartup(Paths.InstalledExe, true); // (Install points it at the chosen folder)
-            LauncherInstall.Install(self, args, folder: _installFolder);
-            Application.Current.Exit();
+            if (_busy || _savesBusy) { SayBusy(); return; }
+            LauncherInstall.Install(self, args, folder: InstallTo);
+            if (_upgradeStartup) LauncherInstall.SetRunAtStartup(Paths.InstalledExe, true);
+            Leave();
         }
         catch (Exception e)
         {
@@ -202,7 +233,7 @@ public sealed partial class MainWindow
 
     // ---------- 3 Ready (the installed copy) ----------
 
-    void FillUpgradeReady(StackPanel card, string[] steps)
+    void FillUpgradeReady(Panel card, string[] steps)
     {
         var (split, words) = SplitCard(done: true);
         words.Children.Add(SplitTitle(T("Apex Launcher is installed")));

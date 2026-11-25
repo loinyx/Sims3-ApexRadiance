@@ -227,8 +227,8 @@ public sealed partial class MainWindow
                 IsFolder(_modPlace) && !FolderLoaded(_modPlace) ? T("the game does not load this folder") : null,
             }.Where(x => x is not null));
             ModsAdd.IsEnabled = true; // (from a place that is no folder, files go into Mods › Packages; the preview says where)
-            FillChips();
             FillTypes(inPlace);
+            FillChips(); // (after the types: it leaves out the ones they show)
             FillSortText();
             FillFooter();
         }
@@ -674,6 +674,7 @@ public sealed partial class MainWindow
     // a change to the folders or files: done, said on the bar (with Undo when it can be undone), the list read again
     async Task ModsChange(Action work, string done, Action? undo = null)
     {
+        if (ModsBusy()) return;
         try { work(); ModsResult(done, undo); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         _modsLoaded = false;
@@ -964,7 +965,10 @@ public sealed partial class MainWindow
             var b = new Button { Content = words, Height = 32, Padding = new Thickness(14, 0, 14, 0), CornerRadius = new CornerRadius(16) };
             if (on) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("{0}, {1}", text, count));
-            b.Click += (_, _) => { pick(); FillMods(); };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(b, on ? T("Selected") : "");
+            b.Tag = text;
+            // (the pills are new ones after it: the keyboard stays on the same)
+            b.Click += (_, _) => { pick(); FillMods(); DispatcherQueue.TryEnqueue(() => ModTypes.Children.OfType<Button>().FirstOrDefault(x => Equals(x.Tag, text))?.Focus(FocusState.Programmatic)); };
             ModTypes.Children.Add(b);
         }
     }
@@ -1073,7 +1077,7 @@ public sealed partial class MainWindow
             if (used > 0)
             {
                 var badge = new Border { MinWidth = 16, Height = 16, CornerRadius = new CornerRadius(8), Background = Res("ApexAccentBrush"),
-                    Child = new TextBlock { Text = used.ToString(), FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Res("ApexInkBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } };
+                    Child = new TextBlock { Text = used.ToString(), FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Res("ApexOnAccentBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } };
                 Grid.SetColumn(badge, 2);
                 g.Children.Add(badge);
             }

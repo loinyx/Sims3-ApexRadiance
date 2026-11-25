@@ -149,7 +149,7 @@ public sealed partial class MainWindow
         panel.Children.Clear();
         FillContent(panel, path, c, ct);
         // (the keyboard stays on the switch, which is a new one)
-        if (panel.Children.OfType<Border>().FirstOrDefault()?.Child is Grid g && g.Children.ElementAtOrDefault(_contentKeys ? 1 : 0) is Button on) on.Loaded += (_, _) => on.Focus(FocusState.Programmatic);
+        panel.Children.OfType<Design.Segmented>().FirstOrDefault()?.FocusWhenShown();
     }
 
     async Task SaveKeysAsync(string path, IReadOnlyList<ContentResource> resources)

@@ -244,7 +244,8 @@ public sealed partial class MainWindow
     void FillSaveSide(SavesNow now)
     {
         if (now.Entries.Count == 0) { HideSide(); return; }
-        var sig = $"{Lang}|{_light}|{_saveQuery}|{string.Join(',', _collapsed.Order())}|" + string.Join('\n', now.Entries.Select(e => $"{e.Kind}|{e.Key}|{e.Name}|{EntrySub(now, e)}|{e.Points.Count}"));
+        var auto = BackupChoices.Load() is { OnClose: false, BeforePlay: false, Daily: false } ? T("Off") : T("On");
+        var sig = $"{Lang}|{_light}|{auto}|{_saveQuery}|{string.Join(',', _collapsed.Order())}|" + string.Join('\n', now.Entries.Select(e => $"{e.Kind}|{e.Key}|{e.Name}|{EntrySub(now, e)}|{e.Points.Count}"));
         if (_sideOn && sig == _saveSideSig) { SaveSideAt(); return; }
         _saveSideSig = sig;
         var items = new List<FrameworkElement>();
@@ -260,7 +261,7 @@ public sealed partial class MainWindow
             Group("saves:backups", T("Backups"),
             [
                 Place("@all", "archive", T("All backups"), now.Entries.Sum(e => e.Points.Count) is var n && n > 0 ? n.ToString() : "", "SavesAll"),
-                Place("@auto", "calendar-clock", T("Automatic backups"), BackupChoices.Load() is { OnClose: false, BeforePlay: false, Daily: false } ? T("Off") : T("On"), "SaveAutoPage"),
+                Place("@auto", "calendar-clock", T("Automatic backups"), auto, "SaveAutoPage"),
             ]);
         foreach (var (kind, label) in new[] { (SaveKindOf.Here, T("In the game")), (SaveKindOf.Stored, T("Kept out of the game")), (SaveKindOf.Gone, T("Gone from the game")) })
             Group("saves:" + kind, label, now.Entries.Where(e => e.Kind == kind && (_saveQuery.Length == 0 || Has(e.Name) || Has(e.Save) || e.Look is { } l && Has(SavePlace(l.Save, l.Info)))).Select(e => SaveLine(now, e)));

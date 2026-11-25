@@ -18,9 +18,19 @@ public sealed partial class MainWindow
         var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(AppWindow.Id);
         if (await picker.PickSingleFolderAsync() is not { } f) return null;
         var dir = LauncherInstall.FolderFor(f.Path);
-        if (string.Equals(dir, Paths.DefaultInstallDir, StringComparison.OrdinalIgnoreCase) || DryRun || LauncherInstall.CanInstallTo(dir)) return dir;
+        if (string.Equals(dir, Paths.DefaultInstallDir, StringComparison.OrdinalIgnoreCase) || DryRun || await Task.Run(() => LauncherInstall.CanInstallTo(dir))) return dir;
         await Message(T("Choose another folder"), T("Apex Launcher can't keep itself up to date in {0} without administrator permission.", dir));
         return null;
+    }
+
+    // (a folder chosen before on a drive that is not there now: the default again)
+    string InstallTo => _installFolder ?? (Directory.Exists(Path.GetPathRoot(Paths.InstallDir)) ? Paths.InstallDir : Paths.DefaultInstallDir);
+
+    // another copy takes over
+    void Leave()
+    {
+        _tray?.Dispose();
+        Application.Current.Exit();
     }
 
     // where it will be installed, and the way to another folder
@@ -29,7 +39,7 @@ public sealed partial class MainWindow
         var detail = new TextBlock { FontSize = 13, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis };
         void Show()
         {
-            var dir = _installFolder ?? Paths.InstallDir;
+            var dir = InstallTo;
             detail.Text = ShortPath(dir);
             ToolTipService.SetToolTip(detail, dir);
         }
@@ -43,16 +53,17 @@ public sealed partial class MainWindow
     async Task ApplyInstallMode(bool install, string self, string? folder)
     {
         if (DryRun) return; // (a dry run shows the question, changes nothing)
+        if (_busy || _savesBusy) { SayBusy(); return; }
         try
         {
             if (install)
             {
-                LauncherInstall.Install(self, Environment.GetCommandLineArgs().Skip(1), folder: folder);
-                Application.Current.Exit();
+                LauncherInstall.Install(self, LauncherInstall.LastingArgs(Environment.GetCommandLineArgs().Skip(1)), folder: folder);
+                Leave();
                 return;
             }
             var to = LauncherInstall.MakePortable(self, folder);
-            if (!to.Equals(self, StringComparison.OrdinalIgnoreCase)) { Application.Current.Exit(); return; }
+            if (!to.Equals(self, StringComparison.OrdinalIgnoreCase)) { Leave(); return; }
             BuildSettingsIfShown();
         }
         catch (Exception e)
@@ -137,7 +148,7 @@ public sealed partial class MainWindow
                 if (await Confirm(T("Use without installing?"), T("Apex Launcher moves to {0} and leaves the Start menu, the desktop and Installed apps. Your settings stay.", f.Path), T("Move it")))
                     await ApplyInstallMode(false, self, f.Path);
             }))),
-            LauncherMode.Portable => (T("Not installed: running from {0}.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Install it"), () => _ = ApplyInstallMode(true, self, null))),
+            LauncherMode.Portable => (T("Not installed: running from {0}.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Install it"), () => UpgradeShow(Array.IndexOf(UpgradeSteps, T("Where it lives"))))),
             _ => (T("Running from {0}, not installed yet.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Choose"), () => UpgradeShow(0))),
         };
         var (text, action) = row;

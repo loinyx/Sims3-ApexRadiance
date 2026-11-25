@@ -138,6 +138,7 @@ public sealed partial class Segmented : Grid
     readonly Border _mark = new() { CornerRadius = new CornerRadius(Radius.Tag), HorizontalAlignment = HorizontalAlignment.Left };
     readonly List<Button> _all = [];
     int _on;
+    bool _inked;
 
     // fill: the choices share the width there is; otherwise each is as wide as its words
     public Segmented(IReadOnlyList<(string? Icon, string Text)> items, int on, Action<int> pick, bool fill = false)
@@ -151,11 +152,16 @@ public sealed partial class Segmented : Grid
         for (int i = 0; i < items.Count; i++)
         {
             ColumnDefinitions.Add(new ColumnDefinition { Width = fill ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
-            var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.X2 };
+            var s = new Grid { ColumnSpacing = items[i].Icon is null ? 0 : Space.X2 }; // (a grid: the words are cut short with an ellipsis)
+            s.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            s.ColumnDefinitions.Add(new ColumnDefinition());
             if (items[i].Icon is { } icon) s.Children.Add(new LucideIcon { Kind = icon, Size = Size.IconSmall, StrokeWidth = 1.75, Follow = true, VerticalAlignment = VerticalAlignment.Center });
-            s.Children.Add(new TextBlock { Text = items[i].Text, FontSize = TextSize.Small, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
+            var words = new TextBlock { Text = items[i].Text, FontSize = TextSize.Small, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+            SetColumn(words, 1);
+            s.Children.Add(words);
             var b = Parts.Ghost(new Button { Content = s, Padding = new Thickness(fill ? Space.X1 : Space.X4, 0, fill ? Space.X1 : Space.X4, 0), CornerRadius = new CornerRadius(Radius.Tag), MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch });
             AutomationProperties.SetName(b, items[i].Text);
+            if (fill) ToolTipService.SetToolTip(b, items[i].Text);
             var at = i;
             b.Click += (_, _) => { if (_on == at) return; _on = at; Place(true); Tell(); pick(at); };
             SetColumn(b, i);
@@ -171,6 +177,7 @@ public sealed partial class Segmented : Grid
     // (an ink of its own over a picture or a board; null: the app's)
     public void Paint(Windows.UI.Color? ink)
     {
+        _inked = ink is not null;
         Brush Of(byte a, string name) => ink is { } c ? new SolidColorBrush(Windows.UI.Color.FromArgb(a, c.R, c.G, c.B)) : App.Brush("Apex" + name + "Brush");
         (Background, BorderBrush, _mark.Background) = (Of(0x1A, "Card"), Of(0x30, "CardBorder"), Of(0x2E, "Selected"));
         foreach (var b in _all)
@@ -186,7 +193,10 @@ public sealed partial class Segmented : Grid
         Dim();
     }
 
-    void Dim() { for (int i = 0; i < _all.Count; i++) ((UIElement)_all[i].Content).Opacity = i == _on ? 1 : 0.7; }
+    void Dim() { for (int i = 0; i < _all.Count; i++) ((UIElement)_all[i].Content).Opacity = i == _on || _inked ? 1 : 0.7; } // (on a board the mark alone says which: faded ink would not read)
+
+    // the keyboard on the choice that is on, for a switch built again in the place of the one pressed
+    public void FocusWhenShown() => Loaded += (_, _) => _all.ElementAtOrDefault(_on)?.Focus(FocusState.Programmatic);
 
     void Tell()
     {

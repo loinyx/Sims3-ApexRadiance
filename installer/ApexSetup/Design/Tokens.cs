@@ -29,7 +29,7 @@ public static class TextSize
 
 public static class Size
 {
-    public const double ControlSmall = 32, Control = 36, ControlLarge = 40, SidePanel = 368, Row = 68, Tile = 40, Icon = 20, IconSmall = 16, Page = 960, Dialog = 720;
+    public const double ControlSmall = 32, Control = 36, ControlLarge = 40, SidePanel = 368, InstallWidth = 900, InstallHeight = 680, InstallSide = 280, Row = 68, Tile = 40, Icon = 20, IconSmall = 16, Page = 960, Dialog = 720;
 }
 
 public static class Motion

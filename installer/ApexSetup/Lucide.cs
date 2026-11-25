@@ -194,8 +194,17 @@ public static class Lucide
     };
 
     // as a menu or an item of a menu takes it, in the text's colour or the one given
-    public static ImageIcon Element(string name, Brush? brush = null) =>
-        new() { Source = Picture(Paths.ContainsKey(name) ? name : "puzzle", (brush ?? App.Brush("TextFillColorPrimaryBrush")) is SolidColorBrush b ? b.Color : Microsoft.UI.Colors.Gray) };
+    public static ImageIcon Element(string name, Brush? brush = null)
+    {
+        var icon = new ImageIcon { Source = Picture(Paths.ContainsKey(name) ? name : "puzzle", (brush ?? App.Brush("TextFillColorPrimaryBrush")) is SolidColorBrush b ? b.Color : Microsoft.UI.Colors.Gray) };
+        // (a picture does not fade with the item it is in)
+        icon.Loaded += (_, _) =>
+        {
+            for (var up = VisualTreeHelper.GetParent(icon); up is not null; up = VisualTreeHelper.GetParent(up))
+                if (up is MenuFlyoutItem item) { icon.Opacity = item.IsEnabled ? 1 : 0.4; return; }
+        };
+        return icon;
+    }
 
     // the icon as a picture in one colour, for the controls that take no shape of ours (the side pane)
     public static Microsoft.UI.Xaml.Media.Imaging.SvgImageSource Picture(string name, Windows.UI.Color ink, double stroke = 1.75)
@@ -264,6 +273,7 @@ public sealed partial class LucideIcon : Grid
         set
         {
             if (!value) return;
+            Unloaded += (_, _) => Unfollow();
             Loaded += (_, _) =>
             {
                 for (var up = VisualTreeHelper.GetParent(this); up is not null; up = VisualTreeHelper.GetParent(up))
@@ -271,11 +281,14 @@ public sealed partial class LucideIcon : Grid
                     {
                         void Take() { _path.Stroke = host.Foreground; Fill(); }
                         Take();
-                        if (_following != host) { _following = host; host.RegisterPropertyChangedCallback(ContentPresenter.ForegroundProperty, (_, _) => Take()); }
+                        if (_following != host) { Unfollow(); _following = host; _followed = host.RegisterPropertyChangedCallback(ContentPresenter.ForegroundProperty, (_, _) => Take()); }
                         return;
                     }
             };
         }
     }
+    // (let go when it leaves: the host may be the window's own presenter, which outlives every icon)
+    void Unfollow() { _following?.UnregisterPropertyChangedCallback(ContentPresenter.ForegroundProperty, _followed); _following = null; }
     ContentPresenter? _following;
+    long _followed;
 }
