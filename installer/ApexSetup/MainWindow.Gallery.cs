@@ -77,7 +77,7 @@ public sealed partial class MainWindow
         var page = new Grid();
         var albums = new ScrollViewer { Content = GalleryAlbums(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(12, 0, 12, 12) };
         _galSide = albums;
-        var main = new StackPanel { Spacing = 18 };
+        var main = new StackPanel { Spacing = Design.Space.X6 };
         var narrow = new ScrollViewer { MaxHeight = 520 };
         narrow.Content = GalleryAlbums(narrow);
         var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible,
@@ -111,7 +111,7 @@ public sealed partial class MainWindow
         column.RowDefinitions.Add(new RowDefinition());
         picker.Margin = new Thickness(Design.Space.Page, Design.Space.X6, 0, 0);
         column.Children.Add(picker);
-        head.Margin = new Thickness(Design.Space.Page, Design.Space.X6, Design.Space.Page, Design.Space.X2);
+        head.Margin = new Thickness(Design.Space.Page, SideFits ? Design.Space.X6 : Design.Space.X4, Design.Space.Page, Design.Space.X2);
         Grid.SetRow(head, 1);
         column.Children.Add(head);
         var room = new Border();
@@ -379,7 +379,7 @@ public sealed partial class MainWindow
             var menu = new MenuFlyout();
             foreach (var (key, color) in NoteColors)
             {
-                var item = new MenuFlyoutItem { Text = T(char.ToUpperInvariant(key[0]) + key[1..]), Icon = Lucide.Element("circle", new SolidColorBrush(color)) };
+                var item = new MenuFlyoutItem { Text = T(char.ToUpperInvariant(key[0]) + key[1..]), Icon = Lucide.Element("circle", new SolidColorBrush(color), solid: true) };
                 item.Click += (_, _) => AddNote(key);
                 menu.Items.Add(item);
             }
@@ -411,7 +411,7 @@ public sealed partial class MainWindow
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         g.SizeChanged += (_, e) =>
         {
-            var low = e.NewSize.Width < (_galBook ? 640 : 1150);
+            var low = e.NewSize.Width < (_galBook ? 640 : 760);
             Grid.SetRow(tools, low ? 1 : 0);
             Grid.SetColumn(tools, low ? 0 : 1);
             Grid.SetColumnSpan(tools, low ? 3 : 1);
@@ -447,7 +447,7 @@ public sealed partial class MainWindow
 
     UIElement GalleryRows()
     {
-        var s = new StackPanel { Spacing = 26 };
+        var s = new StackPanel { Spacing = Design.Space.Section };
         var pics = InAlbum();
         if (pics.Count == 0 && _galQuery.Length > 0) { s.Children.Add(EmptyPlace("search", T("Nothing found for “{0}”.", _galQuery))); return s; }
         if (pics.Count == 0) { s.Children.Add(EmptyPlace("image", _galAlbum == Gallery.Favourites ? T("No favourites yet: open a picture and add it.") : T("No pictures here yet."))); return s; }
@@ -458,7 +458,7 @@ public sealed partial class MainWindow
         var index = 0;
         foreach (var (key, list) in groups)
         {
-            var block = new StackPanel { Spacing = 10 };
+            var block = new StackPanel { Spacing = Design.Space.SectionToBody };
             var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
             head.Children.Add(new TextBlock { Text = key, FontSize = 16, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
             head.Children.Add(new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 1, 8, 2), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,

@@ -266,7 +266,7 @@ public sealed partial class MainWindow
         if (ok.Any(i => i.Place == AddPlace.Mods && !i.CanReplace) && !FolderLoaded(add.Folder)) body.Children.Add(Warn(T("The game does not load this folder"), null));
         if (ok.Any(i => i.Place == AddPlace.Mods) && !File.Exists(Path.Combine(Docs, "Mods", "Resource.cfg")))
             body.Children.Add(Muted(T("The game isn't set up to load mods yet. The launcher adds the Resource.cfg file it needs.")));
-        body.Children.Add(new ScrollViewer { Content = list, MaxHeight = 400 });
+        body.Children.Add(new ScrollViewer { Content = list, Margin = new Thickness(0, 0, -14, 0), MaxHeight = 400 });
         d.Content = body;
         Changed();
         return await ShowDialog(d) == ContentDialogResult.Primary;

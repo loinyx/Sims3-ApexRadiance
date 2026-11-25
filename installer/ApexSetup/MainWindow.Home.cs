@@ -366,7 +366,7 @@ public sealed partial class MainWindow
         // tiles keep their shape as the window grows; a narrow window: two a row
         grid.SizeChanged += (_, e) =>
         {
-            var two = e.NewSize.Width < 760;
+            var two = e.NewSize.Width < 880; // (a household's name keeps its room)
             while (grid.RowDefinitions.Count < 2) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var cols = two ? 2 : 4;
             while (grid.ColumnDefinitions.Count > cols) grid.ColumnDefinitions.RemoveAt(cols); // (an empty column would still take its gap)

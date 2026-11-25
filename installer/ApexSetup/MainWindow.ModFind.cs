@@ -95,7 +95,7 @@ public sealed partial class MainWindow
         WatchPlaces();
         var query = _findPage is null ? "" : _findSearch.Text;
         // (Tag="dyn": its texts are set here, not translated in place)
-        var page = new Grid { Tag = "dyn", Padding = new Thickness(24, 24, 24, 0), RowSpacing = 14, Background = Res("ApexClearBrush"), AllowDrop = true };
+        var page = new Grid { Tag = "dyn", Padding = new Thickness(Design.Space.Page, Design.Space.X6, Design.Space.Page, 0), RowSpacing = Design.Space.X4, Background = Res("ApexClearBrush"), AllowDrop = true };
         for (var i = 0; i < 4; i++) page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         page.RowDefinitions.Add(new RowDefinition());
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(page, T("Find custom content"));
@@ -205,10 +205,7 @@ public sealed partial class MainWindow
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var icon = Lucide.Icon("scan-search", 20, Res("ApexAccentBrush"), 1.8);
-        icon.HorizontalAlignment = HorizontalAlignment.Center;
-        icon.VerticalAlignment = VerticalAlignment.Center;
-        g.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(10), Background = Res("ApexAccentSoftBrush"), Child = icon, VerticalAlignment = VerticalAlignment.Center });
+        g.Children.Add(Design.IconTile.Of("scan-search"));
         var busy = _findCts is not null;
         var r = _findResult;
         var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
@@ -521,7 +518,7 @@ public sealed partial class MainWindow
         }
         body.Children.Add(total);
         body.Children.Add(Muted(T("A copy is kept until the game closes normally.")));
-        d.Content = new ScrollViewer { Content = body, Padding = new Thickness(0, 0, 14, 0) };
+        d.Content = new ScrollViewer { Content = body, Margin = new Thickness(0, 0, -14, 0), Padding = new Thickness(0, 0, 14, 0) };
         var answer = await ShowDialog(d);
         if (answer == ContentDialogResult.Secondary) { await PutCachesBackAsync(last: false); return; }
         if (answer != ContentDialogResult.Primary) return;

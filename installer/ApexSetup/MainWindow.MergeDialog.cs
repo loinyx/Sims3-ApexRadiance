@@ -92,7 +92,7 @@ public sealed partial class MainWindow
         order.Children.Add(Muted(T("If two mods change the same thing, the top one counts. Drag to change the order, or use the arrows.")));
         order.Children.Add(quick);
         order.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = new SolidColorBrush(Pick(0x0AFFFFFF, 0x06000000)) });
-        var leftOut = new StackPanel { Spacing = 4, Visibility = Visibility.Collapsed };
+        var leftOut = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
         var scriptBox = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
         var scriptHost = new StackPanel { Spacing = 6, Visibility = Visibility.Collapsed };
         scriptHost.Children.Add(scriptBox);
@@ -100,9 +100,9 @@ public sealed partial class MainWindow
         var partsRow = Toggle(null, T("Split into parts of about 1 GB"), T("For very large merges."), false, on => { parts = on; Changed(0); });
         partsRow.Visibility = Visibility.Collapsed;
 
-        var body = new StackPanel { Spacing = 14, Width = 560 };
+        var body = new StackPanel { Spacing = 16, Width = 560 };
         foreach (var e in new UIElement[] { box, status, notices, order, leftOut, scriptHost, partsRow, Muted(T("The originals are kept in {0}. Split puts them back as they were.", ModMerge.ShownFolder)) }) body.Children.Add(e);
-        d.Content = new ScrollViewer { Content = body, MaxHeight = Math.Clamp(Content.XamlRoot.Size.Height - 220, 300, 640), Padding = new Thickness(0, 0, 14, 0) };
+        d.Content = new ScrollViewer { Content = body, MaxHeight = Math.Clamp(Content.XamlRoot.Size.Height - 220, 300, 640), Margin = new Thickness(0, 0, -14, 0), Padding = new Thickness(0, 0, 14, 0) };
 
         // ---- the plan, off the window's thread, a moment after the last change ----
         bool CanRun() => trouble is null && plans.Count > 0 && plans.All(p => p.CanRun) && scripts?.CanRun != false;
@@ -179,6 +179,7 @@ public sealed partial class MainWindow
             line.Text = trouble is not null || inside < 2 ? "" : made == 1 ? // (one mod: no merge yet, and the reason is said below)
                 T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, inside, resources, ModRow.SizeText(bytes))
                 : T("Into {0} · {1} packages · {2} mods · {3} resources · {4}", PlaceTitle(folder).Title, made, inside, resources, ModRow.SizeText(bytes));
+            line.Visibility = line.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             d.PrimaryButtonText = CanRun() ? T("Merge") : T("Check again");
             d.IsPrimaryButtonEnabled = true;
 
@@ -197,8 +198,11 @@ public sealed partial class MainWindow
             leftOut.Children.Clear();
             var gone = choices.Others(plans, scripts);
             if (gone.Count > 0) leftOut.Children.Add(new TextBlock { Text = T("Left out"), FontSize = 14, FontWeight = FontWeights.SemiBold });
-            foreach (var s in gone.Take(30))
-                leftOut.Children.Add(new TextBlock { Text = $"{Path.GetFileNameWithoutExtension(s.Mod.Name)}: {T(s.Reason.Key, s.Reason.Args)}", FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+            // (each reason once, with the mods it holds for)
+            foreach (var why in gone.Take(30).GroupBy(g => T(g.Reason.Key, g.Reason.Args)))
+                leftOut.Children.Add(new StackPanel { Spacing = 2, Children = {
+                    new TextBlock { Text = why.Key, FontSize = 13, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap },
+                    new TextBlock { Text = string.Join(", ", why.Select(g => Path.GetFileNameWithoutExtension(g.Mod.Name))), FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap } } });
             if (gone.Count > 30) leftOut.Children.Add(Muted(T("and {0} more", gone.Count - 30)));
             leftOut.Visibility = gone.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 

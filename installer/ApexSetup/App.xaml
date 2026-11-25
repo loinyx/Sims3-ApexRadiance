@@ -153,8 +153,8 @@
             </Style>
             <Style x:Key="ApexPill" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource ApexPillBrush}" />
-                <Setter Property="CornerRadius" Value="11" />
-                <Setter Property="Padding" Value="9,3" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="8,4" />
                 <Setter Property="VerticalAlignment" Value="Center" />
             </Style>
         </ResourceDictionary>

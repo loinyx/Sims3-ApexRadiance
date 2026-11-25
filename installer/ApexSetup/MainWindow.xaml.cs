@@ -2528,7 +2528,7 @@ public sealed partial class MainWindow : Window
     async Task ReadLicence(string name, string text)
     {
         var body = new TextBlock { Text = text.Trim(), FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Foreground = Res("ApexSoftTextBrush") };
-        var d = new ContentDialog { Title = name, Content = new ScrollViewer { Content = body, MaxHeight = 420, Padding = new Thickness(0, 0, 16, 0) }, CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Title = name, Content = new ScrollViewer { Content = body, MaxHeight = 420, Margin = new Thickness(0, 0, -16, 0), Padding = new Thickness(0, 0, 16, 0) }, CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
         d.Resources["ContentDialogMaxWidth"] = 640.0;
         await ShowDialog(d);
     }

@@ -414,7 +414,7 @@ public sealed partial class MainWindow
         action.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(action, 2);
         g.Children.Add(action);
-        return new Border { Child = g, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(10), Background = Res("ApexAccentSoftBrush"), BorderBrush = Res("ApexAccentLineBrush"), BorderThickness = new Thickness(1) };
+        return new Border { Child = g, Padding = new Thickness(16, 12, 16, 12), CornerRadius = new CornerRadius(Design.Radius.Card), Background = Res("ApexAccentSoftBrush"), BorderBrush = Res("ApexAccentLineBrush"), BorderThickness = new Thickness(1) };
     }
 
     // what becomes of a mod when the change is saved

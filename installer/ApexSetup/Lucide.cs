@@ -194,9 +194,9 @@ public static class Lucide
     };
 
     // as a menu or an item of a menu takes it, in the text's colour or the one given
-    public static ImageIcon Element(string name, Brush? brush = null)
+    public static ImageIcon Element(string name, Brush? brush = null, bool solid = false)
     {
-        var icon = new ImageIcon { Source = Picture(Paths.ContainsKey(name) ? name : "puzzle", (brush ?? App.Brush("TextFillColorPrimaryBrush")) is SolidColorBrush b ? b.Color : Microsoft.UI.Colors.Gray) };
+        var icon = new ImageIcon { Source = Picture(Paths.ContainsKey(name) ? name : "puzzle", (brush ?? App.Brush("TextFillColorPrimaryBrush")) is SolidColorBrush b ? b.Color : Microsoft.UI.Colors.Gray, solid: solid) };
         // (a picture does not fade with the item it is in)
         icon.Loaded += (_, _) =>
         {
@@ -207,10 +207,10 @@ public static class Lucide
     }
 
     // the icon as a picture in one colour, for the controls that take no shape of ours (the side pane)
-    public static Microsoft.UI.Xaml.Media.Imaging.SvgImageSource Picture(string name, Windows.UI.Color ink, double stroke = 1.75)
+    public static Microsoft.UI.Xaml.Media.Imaging.SvgImageSource Picture(string name, Windows.UI.Color ink, double stroke = 1.75, bool solid = false)
     {
         var source = new Microsoft.UI.Xaml.Media.Imaging.SvgImageSource { RasterizePixelWidth = 60, RasterizePixelHeight = 60 };
-        var svg = FormattableString.Invariant($"<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='{Paths[name]}' fill='none' stroke='#{ink.R:X2}{ink.G:X2}{ink.B:X2}' stroke-width='{stroke}' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        var svg = FormattableString.Invariant($"<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='{Paths[name]}' fill='{(solid ? $"#{ink.R:X2}{ink.G:X2}{ink.B:X2}" : "none")}' stroke='#{ink.R:X2}{ink.G:X2}{ink.B:X2}' stroke-width='{stroke}' stroke-linecap='round' stroke-linejoin='round'/></svg>");
         var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
         _ = Fill();
         return source;

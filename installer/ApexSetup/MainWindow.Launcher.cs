@@ -550,7 +550,7 @@ public sealed partial class MainWindow
     static FrameworkElement Chip(string text, string brush)
     {
         var col = ((SolidColorBrush)Res(brush)).Color;
-        return new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 2, 10, 3), VerticalAlignment = VerticalAlignment.Center,
+        return new Border { CornerRadius = new CornerRadius(Design.Radius.Tag), Padding = new Thickness(8, 4, 8, 4), VerticalAlignment = VerticalAlignment.Center,
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, col.R, col.G, col.B)),
             Child = new TextBlock { Text = text, FontSize = 12, Foreground = new SolidColorBrush(col) } };
     }
