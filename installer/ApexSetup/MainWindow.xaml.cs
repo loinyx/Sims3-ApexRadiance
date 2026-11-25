@@ -988,7 +988,7 @@ public sealed partial class MainWindow : Window
 
     // the status bars in a tint of their colour and the window's caption buttons, for the theme in use
     // (one brush each, its colour changed with the theme: what is on screen follows at once)
-    readonly SolidColorBrush QuietBox = new(), _over = new(), _overEdge = new(), _content = new(), _contentEdge = new(), _calm = new(), _calmInk = new();
+    readonly SolidColorBrush QuietBox = new(), _over = new(), _overEdge = new(), _content = new(), _contentEdge = new();
 
     void ThemeChrome()
     {
@@ -1008,13 +1008,6 @@ public sealed partial class MainWindow : Window
         (_content.Color, _contentEdge.Color) = (Tone("Content"), Tone("CardBorder"));
         Nav.Resources["NavigationViewContentBackground"] = _content;
         Nav.Resources["NavigationViewContentGridBorderBrush"] = _contentEdge;
-        // (a list of switches that are nearly all on: quiet ones, so the few that are off and the chosen mods are what stands out)
-        (_calm.Color, _calmInk.Color) = (Tone(_light ? "SoftText" : "InputBorderHover"), Windows.UI.Color.FromArgb(255, 255, 255, 255));
-        foreach (var state in new[] { "", "PointerOver", "Pressed" })
-        {
-            ModList.Resources["ToggleSwitchFillOn" + state] = ModList.Resources["ToggleSwitchStrokeOn" + state] = _calm;
-            ModList.Resources["ToggleSwitchKnobFillOn" + state] = _calmInk;
-        }
         // Mods' two views, as the gallery's: the one in use on a quiet pill
         foreach (var view in new[] { ModsViewList, ModsViewGallery })
             foreach (var state in new[] { "", "PointerOver", "Pressed" })
