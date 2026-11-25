@@ -479,8 +479,9 @@ public sealed partial class MainWindow
         change.Flyout = menu;
         AutomationProperties.SetName(change, T("Change") + ", " + T("Folder"));
         var dir = Saves.BackupDir(docs);
-        page.Children.Add(Row("folder", T("Folder"), now.FolderGone is null ? now.Free is { } free ? T("{0} · {1} free", dir, SaveSize(free)) : dir : T("{0} isn't available", dir),
-            new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Dims(Open()), Dims(change) } }));
+        var place = Row("folder", T("Folder"), now.FolderGone is null ? now.Free is { } free ? T("{0} · {1} free", dir, SaveSize(free)) : dir : T("{0} isn't available", dir),
+            new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Dims(Open()), Dims(change) } });
+        page.Children.Add(place);
         page.Children.Add(Toggle("check", T("Check each backup"), T("Reads everything again after copying"), c.Check, on => ChangeBackups(x => x.Check = on), !DryRun));
         page.Children.Add(Toggle("blocks", T("Remember the mods that are on"), T("Tells you which are missing when you restore"), c.RememberMods, on => ChangeBackups(x => x.RememberMods = on), !DryRun));
         SavesHost.Children.Add(page);

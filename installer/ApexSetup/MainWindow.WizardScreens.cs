@@ -86,6 +86,7 @@ public sealed partial class MainWindow
         _gameAllSet = findings.Count == 0 && !_running && checks.All(c => c.Ok);
 
         var facts = new StackPanel();
+        facts.Children.Add(Fact(null, T("Folder"), g.Root));
         foreach (var (ok, what, value) in checks) facts.Children.Add(Fact(ok, what, value));
         var all = new StackPanel { Children = { head, facts } };
         if (OldCard || OldDriver) all.Children.Add(new TextBlock { Text = BridgeDetail.Text, FontSize = 13, LineHeight = 18, Foreground = Res("ApexWarningTextBrush"), TextWrapping = TextWrapping.Wrap,
@@ -94,17 +95,19 @@ public sealed partial class MainWindow
     }
 
     // something checked: its mark, what it is, and what was found on the right
-    static FrameworkElement Fact(bool ok, string what, string value)
+    // (ok null: a fact, not a check, shown whole)
+    static FrameworkElement Fact(bool? ok, string what, string value)
     {
-        var g = new Grid { ColumnSpacing = Design.Space.X3, Height = 52, Padding = new Thickness(Design.Space.CardPad, 0, Design.Space.CardPad, 0), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
+        var g = new Grid { ColumnSpacing = Design.Space.X3, MinHeight = 52, Padding = new Thickness(Design.Space.CardPad, Design.Space.X3, Design.Space.CardPad, Design.Space.X3), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
         foreach (var w in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star) }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        var mark = Lucide.Icon(ok ? "circle-check" : "triangle-alert", 18, Res(ok ? "ApexSuccessBrush" : "ApexWarningBrush"));
+        var mark = Lucide.Icon(ok switch { null => "folder", true => "circle-check", _ => "triangle-alert" }, 18, Res(ok switch { null => "ApexMutedBrush", true => "ApexSuccessBrush", _ => "ApexWarningBrush" }));
         mark.VerticalAlignment = VerticalAlignment.Center;
         g.Children.Add(mark);
         var name = new TextBlock { Text = what, FontSize = 14, Foreground = Res("ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(name, 1);
         g.Children.Add(name);
         var found = FactText(value);
+        if (ok is null) (found.TextWrapping, found.TextTrimming) = (TextWrapping.Wrap, TextTrimming.None);
         (found.FontSize, found.HorizontalAlignment) = (14, HorizontalAlignment.Right);
         Grid.SetColumn(found, 2);
         g.Children.Add(found);

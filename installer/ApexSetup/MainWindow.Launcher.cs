@@ -566,7 +566,7 @@ public sealed partial class MainWindow
     static string AreaIcon(HealthArea a) => a switch
     {
         HealthArea.ApexRadiance => "sparkles", HealthArea.Loaders => "plug", HealthArea.Graphics => "cpu", HealthArea.GameSettings => "sliders-horizontal",
-        HealthArea.Mods => "layout-grid", HealthArea.Stability => "heart-pulse", HealthArea.Saves => "folder", _ => "hard-drive",
+        HealthArea.Mods => "puzzle", HealthArea.Stability => "activity", HealthArea.Saves => "save", _ => "hard-drive", // (the same as in the side pane)
     };
 
     Button? FindingAction(Health.Item it)
@@ -1057,7 +1057,7 @@ public sealed partial class MainWindow
         g.Children.Add(Lucide.Icon("search", 16, Res("ApexMutedBrush")));
         Grid.SetColumn(b, 1);
         g.Children.Add(b);
-        var box = new Border { Child = g, Height = 36, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), BorderBrush = Res("ApexInputBorderBrush"), Background = Res("ApexCardBrush"), Padding = new Thickness(11, 0, 4, 0) };
+        var box = new Border { Child = g, Height = Design.Size.Control, CornerRadius = new CornerRadius(Design.Radius.Control), BorderThickness = new Thickness(1), BorderBrush = Res("ApexInputBorderBrush"), Background = Res("ApexCardBrush"), Padding = new Thickness(11, 0, 4, 0) };
         b.GotFocus += (_, _) => box.BorderBrush = Res("ApexAccentBrush");
         b.LostFocus += (_, _) => box.BorderBrush = Res("ApexInputBorderBrush");
         return box;

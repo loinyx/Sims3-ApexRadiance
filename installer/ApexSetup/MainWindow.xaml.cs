@@ -515,14 +515,15 @@ public sealed partial class MainWindow : Window
     void RefreshFirstRun()
     {
         FirstGame.Text = _game is not null ? "The Sims 3" : T("The launcher didn't find the game. Choose the game folder.");
-        FirstGameStore.Text = _game is { } g ? (g.Label + " " + g.Version).Trim() : "";
+        FirstGameStore.Text = _game is { } g ? (g.Label + " " + g.Version).Trim() + " · " + g.Root : "";
         FirstGameIcon.Visibility = FirstGameStore.Visibility = _game is null ? Visibility.Collapsed : Visibility.Visible;
         FirstGameIcon.Child = Design.IconTile.Of("gamepad-2");
         FirstSide.Children.Clear();
         FirstSide.Children.Add(SplitSide());
         FirstPoints.Children.Clear();
-        FirstPoints.Children.Add(SplitPoint("gauge", T("Ready in about 2 minutes"), T("With the recommended mods already chosen")));
-        FirstPoints.Children.Add(SplitPoint("shield-check", T("You can undo everything later"), T("Each file comes from its author's GitHub")));
+        FirstPoints.Children.Add(SplitPoint("gauge", T("Ready in about 2 minutes"), T("The recommended mods are already chosen")));
+        FirstPoints.Children.Add(SplitPoint("shield-check", T("You can undo everything later"), T("Each file is copied before it changes")));
+        FirstPoints.Children.Add(SplitPoint("download", T("Straight from who made it"), T("Each mod comes from its author's own page")));
         Steps(StepsGame, 1);
         Steps(StepsComponents, 2);
         Steps(StepsRenderer, 2);

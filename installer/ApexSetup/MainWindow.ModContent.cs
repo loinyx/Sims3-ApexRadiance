@@ -59,8 +59,8 @@ public sealed partial class MainWindow
         if (c.Resources.Count == 0) { panel.Children.Add(Muted(T("The launcher couldn't read this package."))); return; }
         if (c.Parts.Count > 0)
         {
-            var wrap = new WrapPanel { Spacing = 6 };
-            foreach (var (kind, n) in c.Parts) wrap.Children.Add(Pill(PartsText(kind, n), "ApexSoftTextBrush"));
+            var wrap = new WrapPanel { Spacing = 8 };
+            foreach (var (kind, n) in c.Parts) wrap.Children.Add(Design.Parts.Chip(KindIcon(kind.ToString()), PartsText(kind, n)));
             panel.Children.Add(wrap);
         }
         else
@@ -72,11 +72,11 @@ public sealed partial class MainWindow
         if (c.Items.Count > 0)
             panel.Children.Add(ContentSwitch((T("Items {0}", c.Items.Count), !keys), (T("Resources {0}", c.Resources.Count), keys), at => { _contentKeys = at == 1; AgainContent(panel, path, c, ct); }));
 
-        var search = Field(new TextBox { Text = _contentSearch, PlaceholderText = keys ? T("Search by name, type or key") : T("Search by name"), MinHeight = 36 });
+        var search = new TextBox { Text = _contentSearch, PlaceholderText = keys ? T("Search by name, type or key") : T("Search by name") };
         AutomationProperties.SetName(search, search.PlaceholderText);
         var tools = new Grid();
         foreach (var w in new[] { new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) tools.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        tools.Children.Add(search);
+        tools.Children.Add(SearchField(search));
         panel.Children.Add(tools);
         var count = new TextBlock { FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap };
         AutomationProperties.SetLiveSetting(count, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
@@ -181,12 +181,12 @@ public sealed partial class MainWindow
     {
         list.MaxHeight = 320;
         ScrollViewer? pane = null;
-        // (24: the pane's own foot; the rest for the count a search shows)
+        // (20: the pane's own foot)
         void Fit()
         {
             if (pane?.Content is not UIElement content || pane.ViewportHeight <= 0) return;
             var top = list.TransformToVisual(content).TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
-            list.MaxHeight = Math.Max(240, pane.ViewportHeight - top - 24 - 32);
+            list.MaxHeight = Math.Max(240, pane.ViewportHeight - top - 20);
         }
         void Sized(object s, SizeChangedEventArgs e) => Fit();
         list.Loaded += (_, _) =>
@@ -216,7 +216,7 @@ public sealed partial class MainWindow
         // (as many columns as fit, sharing the width)
         void Fit()
         {
-            if (grid.ItemsPanelRoot is ItemsWrapGrid panel && grid.ActualWidth > 60) panel.ItemWidth = Math.Floor((grid.ActualWidth - 1) / Math.Max(2, (int)(grid.ActualWidth / 96)));
+            if (grid.ItemsPanelRoot is ItemsWrapGrid panel && grid.ActualWidth > 60) panel.ItemWidth = grid.ActualWidth / Math.Max(2, (int)(grid.ActualWidth / 96)) - 0.01;
         }
         grid.SizeChanged += (_, _) => Fit();
         var fitted = false;
@@ -228,7 +228,7 @@ public sealed partial class MainWindow
             if (g.Tag is not ItemTile t) g.Tag = t = MakeTile(g);
             if (!fitted) fitted = grid.DispatcherQueue.TryEnqueue(Fit); // (the panel exists from here on)
             (a.ItemContainer.HorizontalContentAlignment, a.ItemContainer.VerticalContentAlignment) = (HorizontalAlignment.Stretch, VerticalAlignment.Stretch);
-            (a.ItemContainer.Margin, a.ItemContainer.Padding) = (new Thickness(0, 0, 8, 8), new Thickness(0));
+            (a.ItemContainer.Margin, a.ItemContainer.Padding, a.ItemContainer.CornerRadius) = (new Thickness(0, 0, 8, 8), new Thickness(0), new CornerRadius(Design.Radius.Card));
             var kind = ItemLabel(item);
             t.Item = item;
             t.Name.Text = item.Name ?? kind;
@@ -267,7 +267,7 @@ public sealed partial class MainWindow
     {
         var icon = new LucideIcon { Size = 26, Stroke = Res("ApexMutedBrush"), StrokeWidth = 1.5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var picture = new Image { Stretch = Stretch.Uniform, Margin = new Thickness(6) };
-        var top = new Grid { Background = Res("ApexPillBrush") };
+        var top = new Grid { Background = Res("ApexTileBrush") };
         top.Children.Add(icon);
         top.Children.Add(picture);
         var name = new TextBlock { FontSize = 12, Margin = new Thickness(8, 0, 8, 2), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -277,7 +277,7 @@ public sealed partial class MainWindow
         rows.Children.Add(top);
         Grid.SetRow(name, 1);
         rows.Children.Add(name);
-        var frame = new Border { Child = rows, CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
+        var frame = new Border { Child = rows, CornerRadius = new CornerRadius(Design.Radius.Card), Background = Res("ApexRaisedBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
         g.Children.Add(frame);
         return new(picture, icon, name);
     }

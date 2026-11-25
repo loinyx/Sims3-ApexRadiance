@@ -2225,9 +2225,7 @@ public static partial class Strings
         ["Everything came with it"] = "Tudo veio junto",
         ["Your games, components, backups and language"] = "Seus jogos, componentes, backups e idioma",
         ["Ready in about 2 minutes"] = "Pronto em uns 2 minutos",
-        ["With the recommended mods already chosen"] = "Com os mods recomendados já escolhidos",
         ["You can undo everything later"] = "Dá para desfazer tudo depois",
-        ["Each file comes from its author's GitHub"] = "Cada arquivo vem do GitHub do autor",
         ["About {0} MB to download · nothing changes until you install"] = "Cerca de {0} MB para baixar · nada muda até você instalar",
         ["Windows colour"] = "Cor do Windows",
         ["{0}, {1}"] = "{0}, {1}",
@@ -2295,5 +2293,9 @@ public static partial class Strings
         ["Your game is ready to play."] = "Seu jogo está pronto.",
         ["Backups of a save named {0} are kept. Choose another name."] = "Há backups de um save chamado {0}. Escolha outro nome.",
         ["This save was played since it was cleaned, so it stays."] = "Este save foi jogado depois da limpeza, então ele fica.",
+        ["The recommended mods are already chosen"] = "Os mods recomendados já vêm escolhidos",
+        ["Each file is copied before it changes"] = "Cada arquivo é copiado antes de mudar",
+        ["Straight from who made it"] = "Direto de quem fez",
+        ["Each mod comes from its author's own page"] = "Cada mod vem da página do próprio autor",
     };
 }

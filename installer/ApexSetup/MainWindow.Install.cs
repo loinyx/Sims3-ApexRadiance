@@ -36,12 +36,11 @@ public sealed partial class MainWindow
     // where it will be installed, and the way to another folder
     Border FolderRow()
     {
-        var detail = new TextBlock { FontSize = 13, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis };
+        var detail = new TextBlock { FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap };
         void Show()
         {
             var dir = InstallTo;
-            detail.Text = ShortPath(dir);
-            ToolTipService.SetToolTip(detail, dir);
+            detail.Text = dir;
         }
         Show();
         var row = Row("folder", T("Folder"), "", Button(T("Change"), async () => { if (await PickInstallFolder() is { } dir) { _installFolder = dir; Show(); } }));

@@ -37,7 +37,7 @@ of its own.
 | Card padding | 20, the same on its four sides |
 | Cards side by side or stacked | 12 |
 | Row | at least 68 high, 20 at both ends, icon tile 40, 16 to the words |
-| Install card | 840 wide, 32 inside, header 64, footer 72 |
+| Install card | 900 wide and up to 680 high at every step; the side with the logo and the steps 280, 32 inside, footer 72 |
 
 Something in a corner of a card stands as far from the top as from the side.
 

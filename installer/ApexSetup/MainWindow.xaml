@@ -782,9 +782,12 @@
                         </Grid>
                         <StackPanel Grid.Row="2" x:Name="ModsNotices" Spacing="12">
                             <!-- what the mods here are, one click each -->
-                            <ScrollViewer x:Name="ModTypesScroll" Margin="0,0,0,12" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
-                                <StackPanel x:Name="ModTypes" Tag="dyn" Orientation="Horizontal" Spacing="8" />
-                            </ScrollViewer>
+                            <Grid>
+                                <ScrollViewer x:Name="ModTypesScroll" Margin="0,0,0,12" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                                    <StackPanel x:Name="ModTypes" Tag="dyn" Orientation="Horizontal" Spacing="8" />
+                                </ScrollViewer>
+                                <Border x:Name="ModTypesMore" Width="48" Margin="0,0,0,12" HorizontalAlignment="Right" IsHitTestVisible="False" Visibility="Collapsed" />
+                            </Grid>
                             <Border x:Name="ModHuntBar" Visibility="Collapsed" Margin="0,0,0,10" Padding="16,14" CornerRadius="8" Background="{ThemeResource ApexAccentSoftBrush}" BorderBrush="{ThemeResource ApexAccentLineBrush}" BorderThickness="1">
                                 <StackPanel x:Name="ModHuntContent" Tag="dyn" Spacing="10" />
                             </Border>

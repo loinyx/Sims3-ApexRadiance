@@ -343,8 +343,9 @@ public sealed partial class MainWindow
         var notes = Field(new TextBox
         {
             Text = text ?? "", PlaceholderText = T("Notes: where it came from, what it changes"), AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap, MinHeight = height,
+            TextWrapping = TextWrapping.Wrap, MinHeight = height, CornerRadius = new CornerRadius(Design.Radius.Card),
         });
+        notes.Padding = new Thickness(15, 11, 15, 11);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(notes, T("Notes"));
         notes.LostFocus += (_, _) =>
         {

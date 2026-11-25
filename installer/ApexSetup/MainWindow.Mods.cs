@@ -951,6 +951,14 @@ public sealed partial class MainWindow
         ModTypes.Children.Clear();
         var all = inPlace.Where(r => r.Kinds.Count > 0).GroupBy(r => r.Kinds[0]).OrderByDescending(x => x.Count()).ThenBy(x => KindLabel(x.Key)).Take(7).ToList();
         ModTypesScroll.Visibility = all.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (!_typesWatched)
+        {
+            _typesWatched = true;
+            ModTypesScroll.ViewChanged += (_, _) => TypesMore();
+            ModTypesScroll.SizeChanged += (_, _) => TypesMore();
+            ModTypes.SizeChanged += (_, _) => TypesMore();
+        }
+        TypesMore();
         _typesShown.Clear();
         if (all.Count < 2) return;
         _typesShown.AddRange(all.Select(x => x.Key));
@@ -971,6 +979,16 @@ public sealed partial class MainWindow
             b.Click += (_, _) => { pick(); FillMods(); DispatcherQueue.TryEnqueue(() => ModTypes.Children.OfType<Button>().FirstOrDefault(x => Equals(x.Tag, text))?.Focus(FocusState.Programmatic)); };
             ModTypes.Children.Add(b);
         }
+    }
+
+    // the pills fade into the page where there are more of them to the right
+    bool _typesWatched;
+    void TypesMore()
+    {
+        var more = ModTypesScroll.Visibility == Visibility.Visible && ModTypesScroll.HorizontalOffset < ModTypesScroll.ScrollableWidth - 1;
+        ModTypesMore.Visibility = more ? Visibility.Visible : Visibility.Collapsed;
+        if (!more) return;
+        ModTypesMore.Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(1, 0), GradientStops = { new GradientStop { Color = Tone("Content", 0), Offset = 0 }, new GradientStop { Color = Tone("Content"), Offset = 1 } } };
     }
 
     // the chips in the search box: every filter in use, each with a button that takes it away
