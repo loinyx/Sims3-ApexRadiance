@@ -110,7 +110,12 @@ public sealed class ModRow : INotifyPropertyChanged
         _ => "puzzle",
     };
 
-    public static string SizeText(long n) => n >= 1L << 30 ? $"{n / (1024.0 * 1024 * 1024):0.#} GB" : n >= 1 << 20 ? $"{n / (1024.0 * 1024):0.#} MB" : $"{Math.Max(1, n / 1024)} KB";
+    // in the launcher's language; whole MB from 10 on
+    public static string SizeText(long n)
+    {
+        var (v, unit) = n >= 1L << 30 ? (n / (1024.0 * 1024 * 1024), "GB") : n >= 1 << 20 ? (n / (1024.0 * 1024), "MB") : (Math.Max(1, n / 1024), "KB");
+        return v.ToString(unit == "GB" || v < 10 ? "0.#" : "0", MainWindow.LangCulture()) + " " + unit;
+    }
 
     // where a mod is, as the side pane names it ("Packages › NRaas"); the game folder
     public static string Place(ModFile f) => f.FileType switch

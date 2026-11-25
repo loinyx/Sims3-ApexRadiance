@@ -104,7 +104,7 @@ public sealed partial class MainWindow
         var mode = LauncherInstall.Mode;
         var (text, action) = mode switch
         {
-            LauncherMode.Installed => (T("Installed for this Windows account."), Button(T("Use without installing…"), async () =>
+            LauncherMode.Installed => (T("Installed for this Windows account."), Button(T("Use without installing"), async () =>
             {
                 var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(AppWindow.Id);
                 if (await picker.PickSingleFolderAsync() is not { } f) return;
@@ -112,7 +112,7 @@ public sealed partial class MainWindow
                     await ApplyInstallMode(false, self, f.Path);
             })),
             LauncherMode.Portable => (T("Not installed: running from {0}.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Install it"), () => _ = ApplyInstallMode(true, self, null))),
-            _ => (T("Running from {0}, not installed yet.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Choose…"), () => UpgradeShow(0))),
+            _ => (T("Running from {0}, not installed yet.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Choose"), () => UpgradeShow(0))),
         };
         return Row("hard-drive", T("This copy of the launcher"), text, DryRun ? null : action);
     }

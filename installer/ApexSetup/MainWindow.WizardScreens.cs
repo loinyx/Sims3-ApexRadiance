@@ -21,12 +21,14 @@ public sealed partial class MainWindow
         _gameAllSet = false;
         if (!wizard)
         {
+            BackOnce(GameHead);
             GameTitle.Text = T("Choose your game");
             GameSub.Text = T("The launcher found these installs. Pick the one you play.");
             GameList.Visibility = GameBrowse.Visibility = Visibility.Visible;
             GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;
             return;
         }
+        if (GameHead.Children[0] is Button) GameHead.Children.RemoveAt(0);
         NoGames.Visibility = Visibility.Collapsed;
         if (_games.Count == 0)
         {
@@ -70,8 +72,8 @@ public sealed partial class MainWindow
         change.Click += OnBrowse;
         Grid.SetColumn(change, 2); head.Children.Add(change);
 
-        var body = new StackPanel { Padding = new Thickness(18, 4, 18, 10), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
-        var path = new TextBlock { Text = g.Root, FontFamily = new FontFamily("Consolas"), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 10, 0, 2) };
+        var body = new StackPanel { Padding = new Thickness(18, 10, 18, 10), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
+        var path = new TextBlock { Text = g.Root, FontSize = 13, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 10, 0, 2) };
         ToolTipService.SetToolTip(path, g.Root);
         body.Children.Add(path);
         var findings = _state is { } s ? GpuFindings(s).Concat(_found.Where(x => x.Suggest is null)).ToList() : [];

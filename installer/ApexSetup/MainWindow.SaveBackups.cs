@@ -65,7 +65,7 @@ public sealed partial class MainWindow
             var mark = Lucide.Icon(_saveAllBackups ? "chevron-up" : "chevron-down", 16, Res("ApexSoftTextBrush"));
             mark.HorizontalAlignment = HorizontalAlignment.Right;
             line.Children.Add(mark);
-            var all = new Button { Content = line, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, MinHeight = 44, Padding = new Thickness(20, 0, 20, 0), CornerRadius = new CornerRadius(8),
+            var all = new Button { Content = line, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, MinHeight = 44, Padding = new Thickness(20, 0, 22, 0), CornerRadius = new CornerRadius(8),
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Pick(0xFF212121, 0xFFE4E4E4)) };
             all.Click += (_, _) => { _saveAllBackups = !_saveAllBackups; SavesAgain(); };
             AutomationProperties.SetName(all, text.Text);
@@ -77,17 +77,15 @@ public sealed partial class MainWindow
 
     Border BackupRow(SaveEntry e, SavePoint p)
     {
-        var g = new Grid { ColumnSpacing = 14, VerticalAlignment = VerticalAlignment.Center };
+        var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto, GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         var (title, sub) = (BackupTitle(p), BackupSub(p));
-        if (p.Pinned)
-        {
-            var pin = Lucide.Icon("pin", 16, Res("ApexAccentBrush"));
-            ToolTipService.SetToolTip(pin, T("Pinned: never deleted by itself"));
-            g.Children.Add(pin);
-        }
+        // why it was made, at a glance; a pinned one says that instead
+        var mark = RowIcon(p.Pinned ? "pin" : WhyId(p) switch { "auto" => "calendar-clock", "clean" => "sparkles", "restore" => "undo-2", "game" => "gamepad-2", _ => "copy" });
+        if (p.Pinned) { mark.Child = Lucide.Icon("pin", 18, Res("ApexAccentBrush")); ToolTipService.SetToolTip(mark, T("Pinned: never deleted by itself")); }
+        g.Children.Add(mark);
         var words = (StackPanel)Col(SaveText(title, 14, strong: true), SaveText(sub, 12, "ApexMutedBrush"));
-        (words.Spacing, words.VerticalAlignment, words.Margin) = (2, VerticalAlignment.Center, new Thickness(p.Pinned ? 0 : -14, 0, 0, 0));
+        (words.Spacing, words.VerticalAlignment) = (2, VerticalAlignment.Center);
         ToolTipService.SetToolTip(words, title + "\n" + sub);
         var size = SaveText(SaveSize(p.Stored), 13, "ApexSoftTextBrush");
         size.VerticalAlignment = VerticalAlignment.Center;
@@ -100,7 +98,7 @@ public sealed partial class MainWindow
         var more = MoreButton(T("More options") + ", " + title, BackupMenu(e, p));
         Grid.SetColumn(more, 4);
         g.Children.Add(more);
-        var card = new Border { Child = g, CornerRadius = new CornerRadius(8), Padding = new Thickness(20, 8, 10, 8), MinHeight = 64, ContextFlyout = BackupMenu(e, p) };
+        var card = new Border { Child = g, CornerRadius = new CornerRadius(8), Padding = new Thickness(20, 8, 12, 8), MinHeight = 68, ContextFlyout = BackupMenu(e, p) };
         Soft(card);
         return card;
     }
@@ -164,7 +162,7 @@ public sealed partial class MainWindow
         (change.VerticalAlignment, change.IsEnabled) = (VerticalAlignment.Center, !DryRun);
         AutomationProperties.SetName(change, T("Adjust") + ", " + T("Automatic backups of this save"));
         var row = Row("shield-check", T("Automatic backups of this save"), text, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children = { change, sw } });
-        row.Padding = new Thickness(20, 10, 16, 10);
+        row.Padding = new Thickness(20, 10, 20, 10);
         return row;
     }
 
@@ -438,11 +436,7 @@ public sealed partial class MainWindow
 
     StackPanel SavesSubHead(string title, string sub, FrameworkElement? act = null)
     {
-        var back = new Button { Content = Labeled("chevron-left", T("Saves")), Padding = new Thickness(8, 6, 12, 6), Margin = new Thickness(-11, 0, 0, 6), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left,
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-        back.Click += (_, _) => SavesGo("");
-        AutomationProperties.SetAutomationId(back, "SavesBack");
-        AutomationProperties.SetName(back, T("Back to {0}", T("Saves")));
+        var back = BackButtonTo(T("Saves"), () => SavesGo(""), "SavesBack");
         return new StackPanel { Spacing = 4, Children = { back, PageHead(title, sub, act) } };
     }
 

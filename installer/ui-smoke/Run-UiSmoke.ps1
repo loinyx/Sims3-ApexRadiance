@@ -266,8 +266,16 @@ function OneRun([int]$run) {
         }
         # About and licences: each licence (the GitHub links open a browser: left alone)
         Open 'About and licences'
-        $reads = @(Buttons | Where-Object { $_.Current.Name -eq 'Read' })
-        for ($k = 0; $k -lt $reads.Count; $k++) { Step "licence $k" { (@(Buttons | Where-Object { $_.Current.Name -eq 'Read' }))[$k] | ForEach-Object { Invoke $_ } } }
+        $reads = @(Buttons | Where-Object { $_.Current.Name -like 'Read, *' })
+        for ($k = 0; $k -lt $reads.Count; $k++) {
+            Step "licence $k" {
+                (@(Buttons | Where-Object { $_.Current.Name -like 'Read, *' }))[$k] | ForEach-Object { Invoke $_ }
+                Start-Sleep -Milliseconds 700
+                $close = Buttons | Where-Object { $_.Current.AutomationId -eq 'CloseButton' } | Select-Object -First 1
+                if (-not $close) { throw 'the licence did not open' }
+                Invoke $close
+            }
+        }
         # every language on the Components step, then English
         if (-not $Quick) {
             Nav 'NavComponents'

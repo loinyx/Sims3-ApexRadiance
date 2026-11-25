@@ -442,7 +442,7 @@ public sealed partial class MainWindow : Window
         // the aurora moves only while it shows, and not when Windows' animation effects are off
         FirstAurora.Run(FirstRun.Visibility == Visibility.Visible);
         WizardAurora.Run(Wizard);
-        BackButton.Visibility = _step is GameStep or RendererStep or WizardSettings || _step == ComponentsStep && FirstInstall || _step == InstallStep && Wizard && _busy
+        BackButton.Visibility = _step is RendererStep or WizardSettings || _step == GameStep && (Wizard || FirstInstall) || _step == ComponentsStep && FirstInstall || _step == InstallStep && Wizard && _busy
             ? Visibility.Visible : Visibility.Collapsed; // (in the launcher Components has no step before it; the install's own step can be cancelled)
         BackButton.Content = _step == InstallStep ? (_failChoice is not null ? (_failDxvk ? T("Install with DXVK") : T("Back")) : T("Cancel and undo")) : T("Back");
         if (_step == InstallStep && _failChoice is not null) BackButton.Visibility = Visibility.Visible;
@@ -450,7 +450,7 @@ public sealed partial class MainWindow : Window
         if (_step != InstallStep) BackButton.IsEnabled = true;
         // a game with Apex and nothing to update: the status card's own buttons are the actions, no wizard to go into
         var settled = _step == Welcome && _state?.ApexVersion is not null && _game is not null && WelcomeUpdates().Count == 0 && _updated is null;
-        NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or WizardSettings or GameSettingsScreen or DoneStep or RendererStep || _step == InstallStep && _failChoice is not null ? Visibility.Visible : Visibility.Collapsed;
+        NextButton.Visibility = !settled && _step is Welcome || _step == GameStep && (Wizard || FirstInstall) || _step is ComponentsStep or WizardSettings or GameSettingsScreen or DoneStep or RendererStep || _step == InstallStep && _failChoice is not null ? Visibility.Visible : Visibility.Collapsed;
         var (wa, wd) = _step == ComponentsStep ? Plan() : (new List<string>(), new List<string>());
         var settings = _step == ComponentsStep ? SettingChanges().Select(c => c.Label).ToList() : new List<string>();
         var work = wa.Concat(wd).Concat(settings).ToList();
@@ -551,7 +551,7 @@ public sealed partial class MainWindow : Window
         ContentFrame.BorderBrush = on ? Res("ApexCardBorderBrush") : null;
         ContentFrame.Background = on ? Res("ApexCardBrush") : null;
         ContentFrame.MaxHeight = on && Nav.ActualHeight > 0 ? Math.Max(320, Nav.ActualHeight - 48) : double.PositiveInfinity;
-        Footer.Padding = new Thickness(on ? 28 : 32, 0, on ? 28 : 32, 0);
+        BackButton.MinHeight = NextButton.MinHeight = on ? 40 : 36; // (one height through the install, the welcome and the move)
         if (on) Scroller.Padding = new Thickness(32, 24, 32, 0);
         // the card's own header: Apex Radiance, its version and the steps (each screen's own steps row then stays hidden)
         WizardBrand.Visibility = on && !(_step == DoneStep && _doneClean) ? Visibility.Visible : Visibility.Collapsed; // (the install's end has its own logo)
@@ -665,7 +665,7 @@ public sealed partial class MainWindow : Window
         static void Tight(Grid g) => g.SizeChanged += (_, e) =>
         {
             var tight = e.NewSize.Width < 700;
-            g.ColumnDefinitions[2].Width = new GridLength(tight ? 128 : 180);
+            g.ColumnDefinitions[2].Width = new GridLength(tight ? 128 : 152);
             g.ColumnDefinitions[3].Width = tight ? GridLength.Auto : new GridLength(200);
         };
         Border Card(UIElement child, double pad)
@@ -681,7 +681,7 @@ public sealed partial class MainWindow : Window
             var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(wizard ? 0 : 180) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(wizard ? 0 : 152) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
             icon.VerticalAlignment = VerticalAlignment.Center;
             g.Children.Add(icon);
@@ -695,7 +695,7 @@ public sealed partial class MainWindow : Window
                     Child = new TextBlock { Text = pill, FontSize = 11, FontWeight = wizard ? FontWeights.SemiBold : FontWeights.Normal, Foreground = Res(wizard ? "ApexAccentTextBrush" : "ApexMutedBrush") },
                 });
             words.Children.Add(title);
-            var line = new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 };
+            var line = new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2 };
             ToolTipService.SetToolTip(line, text);
             words.Children.Add(line);
             Grid.SetColumn(words, 1);
@@ -1184,7 +1184,7 @@ public sealed partial class MainWindow : Window
             Make(T("Install the official {0}", apexRelease.Version), () => InstallAsync(new List<string> { Components.Apex }), needsNet: true);
         Make(T("Check installation"), () =>
         {
-            _checkedAt = DateTime.Now.ToString("HH:mm");
+            _checkedAt = DateTime.Now.ToString("t", LangCulture());
             RefreshAll(); // (scans the game again, then Verify and Compat on what is there now)
             return Task.CompletedTask;
         });
@@ -1300,7 +1300,7 @@ public sealed partial class MainWindow : Window
             ProblemList.Children.Add(bar);
         }
         // (the fixes run with Install / Apply, or Fix settings when nothing else changes)
-        if (found.Count == 0)
+        if (found.Count == 0 && Wizard)
             ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = App.Brush("ApexSuccessBrush") });
         SuggestList.Children.Clear();
         FillSuggestions(SuggestList, GraphicsInfo, onStatus: false);
@@ -2200,7 +2200,7 @@ public sealed partial class MainWindow : Window
             InstallPercent.Visibility = Visibility.Collapsed;
             InstallEta.Text = T("Your game is as it was");
             InstallTitle.Text = T("Nothing was changed");
-            InstallSub.Text = text + " " + T("The launcher undid what it had done.");
+            InstallSub.Text = string.Join('\n', text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0)) + " " + T("The launcher undid what it had done.");
             InstallCopy.Click -= OnCopyFailure;
             InstallCopy.Click += OnCopyFailure;
             _failText = text;
@@ -2312,7 +2312,7 @@ public sealed partial class MainWindow : Window
                 var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
                 chip.Children.Add(Lucide.Icon("check", 12, App.Brush("ApexSuccessBrush"), 3));
                 chip.Children.Add(new TextBlock { Text = Name(c) + (c == Components.Apex && _state?.ApexVersion is { } v ? " " + v : ""), FontSize = 12, Foreground = App.Brush("ApexSoftTextBrush") });
-                DoneChips.Children.Add(new Border { Child = chip, Background = App.Brush("ApexPillBrush"), CornerRadius = new CornerRadius(999), Padding = new Thickness(12, 5, 12, 6) });
+                DoneChips.Children.Add(new Border { Child = chip, Background = App.Brush("ApexPillBrush"), CornerRadius = new CornerRadius(14), Padding = new Thickness(12, 5, 12, 6) });
             }
         }
         else DoneTitle.FontSize = 28;
@@ -2330,66 +2330,71 @@ public sealed partial class MainWindow : Window
     void RefreshManage()
     {
         if (_step == DoneStep) RefreshDone();
+        BackOnce(ManageHead);
         ManageList.Children.Clear();
         RestoreList.Children.Clear();
         if (_game is not { } g || _state is not { } s) { ManageIntro.Text = T("Choose your game first."); return; }
         ManageIntro.Text = T("The Sims 3 \u00b7 {0}", g.Label);
         var m = s.Manifest;
-        ManageRow(T("Repair or update"), T("Downloads and reinstalls everything installed here. Your settings are kept."), T("Repair"), Repair);
+        ManageRow("hammer", T("Repair or update"), T("Downloads and reinstalls everything installed here. Your settings are kept."), T("Repair"), Repair);
         if (s.ApexVersion is not null)
-            ManageRow("Apex Radiance " + s.ApexVersion, T("Removes ApexRadiance.asi. Your settings in Documents are kept."), T("Remove"), () => RemoveAsync(Components.Apex));
+            ManageRow("sparkles", "Apex Radiance " + s.ApexVersion, T("Removes ApexRadiance.asi. Your settings in Documents are kept."), T("Remove"), () => RemoveAsync(Components.Apex));
         if (s.Layer == Layer.Bridge)
         {
             bool backup = m.Files.Any(f => f.Component == Components.Bridge && f.Backup is not null && System.IO.Path.GetFileName(f.Path) == "d3d9.dll");
-            ManageRow(T("RTX Remix bridge"), GraphicsRemoval(backup), T("Remove"), () => RemoveAsync(Components.Bridge));
+            ManageRow("monitor", T("RTX Remix bridge"), GraphicsRemoval(backup), T("Remove"), () => RemoveAsync(Components.Bridge));
         }
         if (s.Layer == Layer.Dxvk)
-            ManageRow("DXVK", GraphicsRemoval(m.Files.Any(f => f.Component == Components.Dxvk && f.Backup is not null)), T("Remove"), () => RemoveAsync(Components.Dxvk));
-        if (S3ppPresent) ManageRow("Sims 3 Performance Patch", T("Removes Sims3Performance.asi and its .ini."), T("Remove"), () => RemoveAsync(Components.S3pp));
-        if (s.MonoPatcher) ManageRow("MonoPatcher", T("Removes MonoPatcher.asi and its package."), T("Remove"), () => RemoveAsync(Components.MonoPatcher));
-        if (s.S3ss) ManageRow("Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
-        if (s.RestartHost) ManageRow(T("TS3Wrap"), T("Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."), T("Remove"), () => RemoveAsync(Components.RestartHost));
-        if (s.Modernization) ManageRow("Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
-        ManageRow(T("Uninstall everything"), T("Removes what the launcher installed, and Apex Radiance, and puts back every file the launcher replaced."), T("Uninstall"), UninstallAll, danger: true);
+            ManageRow("monitor", "DXVK", GraphicsRemoval(m.Files.Any(f => f.Component == Components.Dxvk && f.Backup is not null)), T("Remove"), () => RemoveAsync(Components.Dxvk));
+        if (S3ppPresent) ManageRow("zap", "Sims 3 Performance Patch", T("Removes Sims3Performance.asi and its .ini."), T("Remove"), () => RemoveAsync(Components.S3pp));
+        if (s.MonoPatcher) ManageRow("file-code", "MonoPatcher", T("Removes MonoPatcher.asi and its package."), T("Remove"), () => RemoveAsync(Components.MonoPatcher));
+        if (s.S3ss) ManageRow("sliders-horizontal", "Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
+        if (s.RestartHost) ManageRow("rotate-ccw", T("TS3Wrap"), T("Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."), T("Remove"), () => RemoveAsync(Components.RestartHost));
+        if (s.Modernization) ManageRow("wrench", "Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
+        ManageRow("trash-2", T("Uninstall everything"), T("Removes what the launcher installed, and Apex Radiance, and puts back every file the launcher replaced."), T("Uninstall"), UninstallAll, danger: true);
 
         foreach (var p in RestorePoints.List(g.Bin))
         {
-            var when = p.Created.ToLocalTime().ToString("g", LangCulture());
-            ManageRow(T("Before: {0}", T(p.Label, TArgs(p.Args))), p.FileCount == 1 ? T("{0} \u00b7 1 file", when) : T("{0} \u00b7 {1} files", when, p.FileCount),
+            var when = Day(p.Created.ToLocalTime(), hour: true);
+            ManageRow("undo-2", T("Before: {0}", T(p.Label, TArgs(p.Args))), p.FileCount == 1 ? T("{0} \u00b7 1 file", when) : T("{0} \u00b7 {1} files", when, p.FileCount),
                 T("Restore"), () => RestoreAsync(p), list: RestoreList);
         }
         if (RestoreList.Children.Count == 0)
-            RestoreList.Children.Add(new TextBlock { Text = T("No restore points yet. The launcher makes one before every change."), Margin = new Thickness(18, 14, 18, 14),
-                FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = App.Brush("ApexMutedBrush") });
+            RestoreList.Children.Add(Row("undo-2", T("No restore points yet"), T("The launcher makes one before every change."), null));
     }
 
     // dates in Setup's language, not the format Windows uses
-    System.Globalization.CultureInfo LangCulture()
+    internal static System.Globalization.CultureInfo LangCulture()
     {
         try { return System.Globalization.CultureInfo.GetCultureInfo(Bcp47(Lang)); }
         catch (System.Globalization.CultureNotFoundException) { return System.Globalization.CultureInfo.CurrentCulture; }
     }
 
+    // the day as every list says it: "Nov 24", "24 de nov.", with the year when it is not this one; hour: and the time
+    internal static string MonthDay(DateTime t) => t.ToString(LangCulture().DateTimeFormat.MonthDayPattern.Replace("MMMM", "MMM"), LangCulture());
+    internal static string Day(DateTime t, bool hour = false)
+    {
+        var day = t.Date == DateTime.Today ? T("Today") : t.Year == DateTime.Today.Year ? MonthDay(t) : t.ToString("d", LangCulture());
+        return hour ? day + ", " + t.ToString("t", LangCulture()) : day;
+    }
+
     string GraphicsRemoval(bool backup) => backup ? T("Puts back the graphics files you had before.")
         : T("Goes back to the game's default graphics. Your in-game graphics settings may reset once.");
 
-    void ManageRow(string title, string desc, string action, Func<Task> run, bool danger = false, Panel? list = null)
+    void ManageRow(string icon, string title, string desc, string action, Func<Task> run, bool danger = false, Panel? list = null)
     {
         var restore = list is not null;
-        list ??= ManageList;
-        var row = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 14, BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
-        row.ColumnDefinitions.Add(new ColumnDefinition());
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var text = new StackPanel { Spacing = 2 };
-        text.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        text.Children.Add(new TextBlock { Text = desc, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = App.Brush("ApexMutedBrush") });
-        var b = new Button { Content = action, MinWidth = 96, VerticalAlignment = VerticalAlignment.Center, IsEnabled = !_running && !_busy };
+        var b = Button(action, run, danger: danger);
+        (b.MinWidth, b.IsEnabled) = (96, !_running && !_busy);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, action + " " + title + (restore ? ", " + desc : "")); // (two points can share a title)
-        if (danger) { b.Background = Res("ApexDangerSoftBrush"); b.Foreground = Res("ApexDangerTextBrush"); }
-        b.Click += async (_, _) => await run();
-        Grid.SetColumn(b, 1);
-        row.Children.Add(text); row.Children.Add(b);
-        list.Children.Add(row);
+        (list ?? ManageList).Children.Add(Row(icon, title, desc, b));
+    }
+
+    // the pages Settings opens have their way back to it
+    void BackOnce(StackPanel head)
+    {
+        if (head.Children[0] is Button) head.Children.RemoveAt(0); // (made again: the language may have changed)
+        head.Children.Insert(0, BackButtonTo(T("Settings"), () => Show(SettingsScreen), "SettingsBack"));
     }
 
     // the point and every newer one, back as they were; the result on the bar of the screen it was started from
@@ -2492,28 +2497,25 @@ public sealed partial class MainWindow : Window
 
     void RefreshAbout()
     {
+        BackOnce(AboutHead);
         if (LicenceList.Children.Count > 0) return;
         foreach (var (name, lic, file, url) in Credits)
         {
-            var row = new Grid { Padding = new Thickness(18, 8, 12, 8), ColumnSpacing = 8, BorderBrush = App.Brush("ApexCardBorderBrush"), BorderThickness = new Thickness(0, LicenceList.Children.Count == 0 ? 0 : 1, 0, 0) };
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = T(name), FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
-            var l = new TextBlock { Text = lic, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = App.Brush("ApexMutedBrush") };
-            Grid.SetColumn(l, 1); row.Children.Add(l);
-            if (file is not null)
-            {
-                var view = new HyperlinkButton { Content = T("Read") };
-                view.Click += (_, _) => LicenceText.Text = Licence(file);
-                Grid.SetColumn(view, 2); row.Children.Add(view);
-            }
-            var src = new HyperlinkButton { Content = "GitHub", NavigateUri = new Uri(url) };
-            Grid.SetColumn(src, 3); row.Children.Add(src);
-            LicenceList.Children.Add(row);
+            // (Read, then GitHub, each in its own place from row to row)
+            var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            if (file is not null) acts.Children.Add(Named(Button(T("Read"), () => ReadLicence(T(name), Licence(file))), T("Read") + ", " + T(name)));
+            acts.Children.Add(Named(Button("GitHub", () => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })), "GitHub, " + T(name)));
+            LicenceList.Children.Add(Row("file-code", T(name), lic.Length > 0 ? T("{0} licence", lic) : file is null ? T("Its terms are on GitHub") : T("The notices of the parts it includes"), acts));
         }
-        LicenceText.Text = Licence("RTX-Remix-bridge-LICENSE.txt");
+        static Button Named(Button b, string name) { b.MinWidth = 84; Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name); return b; }
+    }
+
+    async Task ReadLicence(string name, string text)
+    {
+        var body = new TextBlock { Text = text.Trim(), FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Foreground = Res("ApexSoftTextBrush") };
+        var d = new ContentDialog { Title = name, Content = new ScrollViewer { Content = body, MaxHeight = 420, Padding = new Thickness(0, 0, 16, 0) }, CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
+        d.Resources["ContentDialogMaxWidth"] = 640.0;
+        await ShowDialog(d);
     }
 
     static string Licence(string file)

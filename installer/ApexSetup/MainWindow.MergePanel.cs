@@ -772,7 +772,7 @@ public sealed partial class MainWindow
 
         var (who, guessed) = o.Note?.Creator is { } set ? (set, false) : (ModCreators.Guess(_mods.Append(row.File)).GetValueOrDefault(row.File.Path), true);
         var written = guessed ? "" : who ?? "";
-        host.Children.Add(Facts((T("Size"), FactText(row.Size)), (T("Added"), FactText(Added(row.File).ToString("d"))),
+        host.Children.Add(Facts((T("Size"), FactText(row.Size)), (T("Added"), FactText(Day(Added(row.File)))),
             (T("Creator"), CreatorBox(who, guessed, mine, name => { if (name.Trim() != written) { write(n => n.Creator = name); written = name.Trim(); } }))));
         if (row.Defaults.Replaced > 0) host.Children.Add(Note("replace", "ApexAccentBrush", ReplacesSummary(row.Defaults)));
 

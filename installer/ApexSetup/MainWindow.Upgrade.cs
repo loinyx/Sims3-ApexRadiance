@@ -63,7 +63,7 @@ public sealed partial class MainWindow
     // the header: the launcher, its version and the steps, the one shown in the accent colour and the ones done ticked
     FrameworkElement UpgradeHeader(string[] steps, int current)
     {
-        var g = new Grid { Padding = new Thickness(28, 18, 28, 18), ColumnSpacing = 12, BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Res("ApexHairlineBrush") };
+        var g = new Grid { Padding = new Thickness(32, 18, 32, 18), ColumnSpacing = 12, BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Res("ApexHairlineBrush") };
         for (int i = 0; i < 4; i++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = i == 3 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
         g.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 30, Height = 30, VerticalAlignment = VerticalAlignment.Center });
         var title = new TextBlock { Text = "Apex Launcher", FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
@@ -100,13 +100,13 @@ public sealed partial class MainWindow
     // the footer: a note on the left, the buttons on the right
     static FrameworkElement UpgradeFooter(FrameworkElement note, params Button[] buttons)
     {
-        var g = new Grid { Padding = new Thickness(40, 16, 40, 16), ColumnSpacing = 12, BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush"), Background = Res("ApexFooterBrush") };
+        var g = new Grid { Padding = new Thickness(32, 12, 32, 12), ColumnSpacing = 12, BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush"), Background = Res("ApexFooterBrush") };
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         note.VerticalAlignment = VerticalAlignment.Center;
         g.Children.Add(note);
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        foreach (var b in buttons) { b.Height = 46; b.FontSize = 15; b.MinWidth = b.Style == (Style)Application.Current.Resources["AccentButtonStyle"] ? 170 : 110; row.Children.Add(b); }
+        foreach (var b in buttons) { b.Height = 40; b.FontWeight = b.Style == (Style)Application.Current.Resources["AccentButtonStyle"] ? FontWeights.SemiBold : FontWeights.Normal; b.MinWidth = b.Style == (Style)Application.Current.Resources["AccentButtonStyle"] ? 140 : 96; row.Children.Add(b); }
         Grid.SetColumn(row, 1);
         g.Children.Add(row);
         return g;
@@ -139,7 +139,7 @@ public sealed partial class MainWindow
 
     void FillUpgradeNews(StackPanel card)
     {
-        var top = new StackPanel { Padding = new Thickness(40, 34, 40, 6), Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center };
+        var top = new StackPanel { Padding = new Thickness(32, 34, 32, 6), Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center };
         top.Children.Add(Logo(96));
         top.Children.Add(new TextBlock { Text = T("Apex Radiance Setup is now Apex Launcher"), FontSize = 30, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center });
         top.Children.Add(new TextBlock { Text = T("It still installs and updates Apex Radiance. Now it also starts the game, checks it, and keeps your mods, saves and pictures in one place."),
@@ -162,7 +162,7 @@ public sealed partial class MainWindow
         lines.Children.Add(_state?.ApexVersion is { } av ? CheckLine(T("Apex Radiance {0} and its components", av), T("as they are")) : CheckLine(T("Apex Radiance and its components"), T("as they are")));
         lines.Children.Add(CheckLine(T("Restore points, backups and your language")));
         came.Children.Add(lines);
-        card.Children.Add(new Border { Margin = new Thickness(40, 18, 40, 22), CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"),
+        card.Children.Add(new Border { Margin = new Thickness(32, 18, 32, 22), CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"),
             Background = Res("ApexHairlineBrush"), Child = came });
         var next = Button(T("Continue"), () => UpgradeShow(1), accent: true);
         card.Children.Add(UpgradeFooter(Note(T("Nothing in your game changes in this step."), "shield-check"), next));
@@ -206,7 +206,7 @@ public sealed partial class MainWindow
             if (badge is not null) t.Children.Add(Chip(badge, "ApexSuccessBrush"));
             s.Children.Add(t);
             s.Children.Add(new TextBlock { Text = text, FontSize = 13, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap });
-            s.Children.Add(new TextBlock { Text = where, FontSize = 12, FontFamily = new FontFamily("Cascadia Mono, Consolas"), Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+            s.Children.Add(new TextBlock { Text = where, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
             Grid.SetColumn(s, 1);
             g.Children.Add(s);
             var check = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(11), BorderThickness = new Thickness(1.5), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 0, 0),
@@ -264,7 +264,7 @@ public sealed partial class MainWindow
     void FillUpgradeReady(StackPanel card, string[] steps)
     {
         card.Children.Add(UpgradeHeader(steps, steps.Length - 1));
-        var top = new StackPanel { Padding = new Thickness(40, 30, 40, 6), Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center };
+        var top = new StackPanel { Padding = new Thickness(32, 30, 32, 6), Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center };
         // the logo with a tick on its corner
         var badge = new Grid { Width = 96, Height = 96, HorizontalAlignment = HorizontalAlignment.Center };
         badge.Children.Add(Logo(96));
@@ -297,11 +297,11 @@ public sealed partial class MainWindow
             var box = new CheckBox { IsChecked = _upgradeDelete, MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
             var label = new StackPanel { Spacing = 2 };
             label.Children.Add(new TextBlock { Text = T("Delete the old copy in {0}", Path.GetFileName(Path.GetDirectoryName(old) ?? "")), FontSize = 14 });
-            label.Children.Add(new TextBlock { Text = old, FontSize = 12, FontFamily = new FontFamily("Cascadia Mono, Consolas"), Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+            label.Children.Add(new TextBlock { Text = old, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
             box.Content = label;
             box.Checked += (_, _) => _upgradeDelete = true;
             box.Unchecked += (_, _) => _upgradeDelete = false;
-            card.Children.Add(new Border { Margin = new Thickness(40, 18, 40, 22), Padding = new Thickness(16, 12, 16, 12), CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1),
+            card.Children.Add(new Border { Margin = new Thickness(32, 18, 32, 22), Padding = new Thickness(16, 12, 16, 12), CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1),
                 BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexHairlineBrush"), Child = box });
         }
         else top.Margin = new Thickness(0, 0, 0, 22);

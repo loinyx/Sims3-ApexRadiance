@@ -254,12 +254,12 @@ public sealed partial class MainWindow
         var (who, guessed) = ModCreators.Of(m, _modCreatorGuess);
         var creator = CreatorBox(who, guessed, mine, name => ModNotes.SetCreator(r.File.Rel, name));
         if (m.Locked) host.Children.Add(Note("lock", "ApexMutedBrush", ModRow.LockText(m)));
-        host.Children.Add(Facts((T("Size"), FactText(r.Size)), (T("Added"), FactText(Added(m).ToString("d"))), (T("Creator"), creator)));
+        host.Children.Add(Facts((T("Size"), FactText(r.Size)), (T("Added"), FactText(Day(Added(m)))), (T("Creator"), creator)));
         if (merge is not null)
         {
             var notes = new StackPanel { Spacing = 10 };
             notes.Children.Add(Note("lightbulb", "ApexAccentBrush", T("The game loads this as one file instead of {0}, so it starts faster. The {0} mods are kept as they were, and you can take any of them out.", merge.Originals.Count)));
-            notes.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked on {0}, when it was made: every resource matched.", merge.Created.ToLocalTime().ToString("d"))));
+            notes.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked on {0}, when it was made: every resource matched.", Day(merge.Created.ToLocalTime()))));
             host.Children.Add(PaneCard(notes, new Thickness(14, 12, 14, 13)));
         }
         if (!m.Enabled && !m.Locked && HasItems(r))

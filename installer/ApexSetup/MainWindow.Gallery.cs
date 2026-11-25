@@ -175,7 +175,7 @@ public sealed partial class MainWindow
     {
         bool Has(string? text) => text is { Length: > 0 } && text.Contains(_galQuery, StringComparison.CurrentCultureIgnoreCase);
         var culture = LangCulture();
-        return Has(Gallery.Peek(_gal!, p.Path).Caption) || Has(Gallery.HouseholdOf(p, _gal!, _galSaves)) || Has(Path.GetFileNameWithoutExtension(p.Path))
+        return Has(Gallery.Peek(_gal!, p.Path).Caption) || Gallery.HouseholdOf(p, _gal!, _galSaves) is { } house && (Has(house) || Has(HouseTitle(house))) || Has(Path.GetFileNameWithoutExtension(p.Path))
             || Has(p.Taken.ToString("D", culture)) || Has(p.Taken.ToString("MMMM yyyy", culture))
             || _gal!.Custom.Any(c => Has(c.Name) && c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase));
     }
@@ -183,7 +183,7 @@ public sealed partial class MainWindow
     // the search box over the albums: kept while the list and the pictures under it are laid again as it is typed in
     FrameworkElement GallerySearch()
     {
-        var box = Field(new TextBox { PlaceholderText = T("Search pictures"), Text = _galQuery, Margin = new Thickness(0, 0, 0, 12) });
+        var box = new TextBox { PlaceholderText = T("Search"), Text = _galQuery };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Search pictures"));
         var typed = 0;
         box.TextChanged += (_, _) =>
@@ -199,10 +199,25 @@ public sealed partial class MainWindow
             });
         };
         box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Escape && box.Text.Length > 0) { box.Text = ""; e.Handled = true; } };
-        return box;
+        var field = SearchField(box);
+        field.Margin = new Thickness(0, 0, 0, 14);
+        return field;
     }
     string AlbumName(string a) => a == Gallery.All ? T("All pictures") : a == Gallery.Favourites ? T("Favourites")
-        : Gallery.CustomOf(_gal!, a) is { } c ? c.Name : a;
+        : Gallery.CustomOf(_gal!, a) is { } c ? c.Name : HouseTitle(a);
+    // a household by its family, as Home and Saves name it (two of one family: the save's name too)
+    // (brief: the narrow list, where the save's name alone tells the two apart)
+    string HouseTitle(string save, bool brief)
+    {
+        var full = HouseTitle(save);
+        return brief && full.EndsWith(" · " + save, StringComparison.OrdinalIgnoreCase) ? save : full;
+    }
+    string HouseTitle(string save)
+    {
+        if (_galSaves.FirstOrDefault(x => x.Name.Equals(save, StringComparison.OrdinalIgnoreCase)) is not { } s) return save;
+        var name = FamilyName(s, SaveInfo.Of(s));
+        return name != s.Name && _galSaves.Count(x => FamilyName(x, SaveInfo.Of(x)) == name) > 1 ? name + " · " + s.Name : name;
+    }
 
     // ---------- the albums ----------
 
@@ -210,7 +225,7 @@ public sealed partial class MainWindow
     {
         var t = Eyebrow(text);
         t.VerticalAlignment = VerticalAlignment.Center;
-        return new Grid { Children = { t }, Height = 30, Margin = new Thickness(10, first ? 0 : 12, 0, 2) };
+        return new Grid { Children = { t }, Height = 30, Margin = new Thickness(10, first ? 0 : 14, 0, 2) };
     }
 
     // a picture dragged onto an album of the side pane: the tile is dragged by the system, a card on the board by the pointer
@@ -303,7 +318,7 @@ public sealed partial class MainWindow
         var i = 0;
         foreach (var save in _galSaves)
         {
-            var hb = Album(save.Name, save.Name, found.Count(p => Gallery.InAlbum(p, save.Name, _gal!, _galSaves)), dots[i++ % dots.Length]);
+            var hb = Album(save.Name, HouseTitle(save.Name, brief: true), found.Count(p => Gallery.InAlbum(p, save.Name, _gal!, _galSaves)), dots[i++ % dots.Length]);
             var here = new MenuFlyoutItem { Text = T("New album in {0}", save.Name), Icon = new FontIcon { Glyph = "\uE710" } };
             var home = save.Name;
             here.Click += async (_, _) => { if (await AlbumDialog(null, home) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
@@ -336,7 +351,7 @@ public sealed partial class MainWindow
             b.ContextFlyout = menu;
             return b;
         }
-        var mine = new Grid { Margin = new Thickness(10, 12, 2, 2), Height = 30 };
+        var mine = new Grid { Margin = new Thickness(10, 14, 2, 2), Height = 30 };
         mine.ColumnDefinitions.Add(new ColumnDefinition());
         mine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var mineHead = Eyebrow(T("Albums"));
@@ -350,13 +365,7 @@ public sealed partial class MainWindow
         mine.Children.Add(make);
         s.Children.Add(mine);
         foreach (var c in loose) s.Children.Add(Mine(c, false));
-        if (_gal.Custom.Count == 0)
-        {
-            var hint = new HyperlinkButton { Content = T("+ an album of your own, like a trip"), FontSize = 13, Padding = new Thickness(10, 4, 0, 4) };
-            hint.Click += async (_, _) => { if (await AlbumDialog(null) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
-            s.Children.Add(hint);
-        }
-        var note = Muted(T("Pictures go to the household you saved right after taking them. To change it, open the picture. Albums are inside their household."));
+        var note = Muted(T("A picture goes to the household you saved next. Open it to change that."));
         note.TextWrapping = TextWrapping.Wrap;
         note.FontSize = 12;
         note.Margin = new Thickness(10, 16, 10, 0);
@@ -423,14 +432,14 @@ public sealed partial class MainWindow
         else
         {
             if (pick is not null) { pick.Height = 36; tools.Children.Add(pick); }
-            var by = new ComboBox { MinWidth = 150 };
+            var by = new ComboBox { Width = 160 };
             by.Items.Add(T("By day"));
             by.Items.Add(T("By household"));
             by.SelectedIndex = _galByHome ? 1 : 0;
             by.SelectionChanged += (_, _) => { _galByHome = by.SelectedIndex == 1; DispatcherQueue.TryEnqueue(BuildGallery); }; // (later: the build removes this box)
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(by, T("Group"));
             tools.Children.Add(by);
-            tools.Children.Add(Button(T("Screenshots folder"), () => OpenFolder(Gallery.Folder(Docs))));
+            tools.Children.Add(Button(T("Open folder"), () => OpenFolder(Gallery.Folder(Docs))));
             if (_galPics.Any(pc => pc.Video)) tools.Children.Add(Button(T("Videos folder"), () => OpenFolder(Gallery.VideoFolder(Docs))));
         }
         Grid.SetColumn(tools, 1);
@@ -494,7 +503,7 @@ public sealed partial class MainWindow
         if (pics.Count == 0) { s.Children.Add(EmptyPlace("image", _galAlbum == Gallery.Favourites ? T("No favourites yet: open a picture and add it.") : T("No pictures here yet."))); return s; }
         var shown = pics.Take(_galLimit).ToList();
         var groups = _galByHome
-            ? shown.GroupBy(p => Gallery.HouseholdOf(p, _gal!, _galSaves) ?? T("Not sorted yet")).Select(x => (Key: x.Key, List: x.ToList()))
+            ? shown.GroupBy(p => Gallery.HouseholdOf(p, _gal!, _galSaves) is { } h ? HouseTitle(h) : T("Not sorted yet")).Select(x => (Key: x.Key, List: x.ToList()))
             : shown.GroupBy(p => p.Taken.Date).Select(x => (Key: x.Key.ToString("D", LangCulture()), List: x.ToList()));
         var index = 0;
         foreach (var (key, list) in groups)
@@ -504,7 +513,7 @@ public sealed partial class MainWindow
             head.Children.Add(new TextBlock { Text = key, FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
             head.Children.Add(new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 1, 8, 2), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock { Text = list.Count.ToString(), FontSize = 12, Foreground = Res("ApexSoftTextBrush") } });
-            if (!_galByHome && string.Join(" · ", list.Select(p => Gallery.HouseholdOf(p, _gal!, _galSaves)).OfType<string>().Distinct()) is { Length: > 0 } homes)
+            if (!_galByHome && string.Join(" · ", list.Select(p => Gallery.HouseholdOf(p, _gal!, _galSaves)).OfType<string>().Distinct().Select(HouseTitle)) is { Length: > 0 } homes)
                 head.Children.Add(new TextBlock { Text = homes, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
             block.Children.Add(head);
             var wrap = new CardGrid { MinItemWidth = 250, Spacing = 10, Aspect = 9.0 / 16, ChildrenTransitions = new TransitionCollection { new EntranceThemeTransition { IsStaggeringEnabled = true, FromVerticalOffset = 30 } } };
@@ -681,7 +690,7 @@ public sealed partial class MainWindow
         g.Children.Add(image);
         var when = new Border { VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(12, 18, 12, 9), Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) },
             Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(0, 1), GradientStops = { new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0xB3, 0, 0, 0), Offset = 1 } } },
-            Child = new TextBlock { Text = p.Taken.ToString("t", LangCulture()) + "  ·  " + (Gallery.HouseholdOf(p, _gal!, _galSaves) ?? ""), FontSize = 12, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), TextTrimming = TextTrimming.CharacterEllipsis } };
+            Child = new TextBlock { Text = p.Taken.ToString("t", LangCulture()) + "  ·  " + (Gallery.HouseholdOf(p, _gal!, _galSaves) is { } own ? HouseTitle(own) : ""), FontSize = 12, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), TextTrimming = TextTrimming.CharacterEllipsis } };
         g.Children.Add(when);
         if (Gallery.Peek(_gal!, p.Path).Favourite)
             g.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Margin = new Thickness(8), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
@@ -2196,7 +2205,7 @@ public sealed partial class MainWindow
             var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 12, Height = 12, Fill = ink };
             Canvas.SetLeft(dot, dx - 6); Canvas.SetTop(dot, mid - 5); Canvas.SetZIndex(dot, 800);
             var label = new Border { Background = pill, CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 0, 10, 2),
-                Child = new TextBlock { Text = day.ToString("d MMM", LangCulture()), FontFamily = new FontFamily(look.Font), FontSize = 22 * Math.Max(0.85, s), Foreground = ink } };
+                Child = new TextBlock { Text = MonthDay(day), FontFamily = new FontFamily(look.Font), FontSize = 22 * Math.Max(0.85, s), Foreground = ink } };
             Canvas.SetLeft(label, dx + 12); Canvas.SetTop(label, mid + 8); Canvas.SetZIndex(label, 800);
             canvas.Children.Add(dot);
             canvas.Children.Add(label);
@@ -2458,10 +2467,10 @@ public sealed partial class MainWindow
                 Canvas.SetLeft(tick, at); Canvas.SetTop(tick, 23);
                 track.Children.Add(tick);
                 if (at < lastRight + 8) continue;  // (labels that would touch stay ticks)
-                var label = new TextBlock { Text = d.ToString("d MMM", LangCulture()), FontSize = 11, Foreground = ink, Opacity = 0.75 };
+                var label = new TextBlock { Text = MonthDay(d), FontSize = 11, Foreground = ink, Opacity = 0.75 };
                 Canvas.SetLeft(label, at - 2); Canvas.SetTop(label, 2);
                 track.Children.Add(label);
-                lastRight = at + 5 + d.ToString("d MMM", LangCulture()).Length * 6.5;
+                lastRight = at + 5 + MonthDay(d).Length * 6.5;
             }
             track.Children.Add(window);
             Place();
@@ -3548,11 +3557,11 @@ public sealed partial class MainWindow
             var house = Gallery.HouseholdOf(p, _gal!, _galSaves);
             var who = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             who.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 8, Height = 8, Fill = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center });
-            who.Children.Add(new TextBlock { Text = house ?? T("No household"), FontSize = 12 });
+            who.Children.Add(new TextBlock { Text = house is null ? T("No household") : HouseTitle(house), FontSize = 12 });
             var homeMenu = new MenuFlyout();
             foreach (var n in names)
             {
-                var item = new ToggleMenuFlyoutItem { Text = n, IsChecked = string.Equals(n, house, StringComparison.OrdinalIgnoreCase) };
+                var item = new ToggleMenuFlyoutItem { Text = HouseTitle(n), IsChecked = string.Equals(n, house, StringComparison.OrdinalIgnoreCase) };
                 var chosen = n;
                 item.Click += (_, _) => { Gallery.Info(_gal!, p.Path).Household = chosen == guess ? null : chosen; Keep(); Fill(); };
                 homeMenu.Items.Add(item);

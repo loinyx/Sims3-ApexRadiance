@@ -72,9 +72,9 @@ public sealed partial class MainWindow
     {
         var c = LangCulture();
         var days = (DateTime.Today - t.Date).Days;
-        return days <= 0 ? T("Saved today at {0}", t.ToString("HH:mm", c))
-            : days == 1 ? T("Saved yesterday at {0}", t.ToString("HH:mm", c))
-            : t.ToString("d MMM", c);
+        return days <= 0 ? T("Saved today at {0}", t.ToString("t", c))
+            : days == 1 ? T("Saved yesterday at {0}", t.ToString("t", c))
+            : Day(t);
     }
 
     // how long a session was, in words
@@ -319,6 +319,7 @@ public sealed partial class MainWindow
 
     // ---------- the newest saves: a row of tiles, each with its household and its own Play ----------
 
+    readonly Dictionary<string, string> _homeNames = new(); // (a tile made again shows its family at once)
     UIElement HomeSaves(List<Save> saves)
     {
         var s = new StackPanel { Spacing = 10 };
@@ -327,7 +328,7 @@ public sealed partial class MainWindow
         for (int i = 0; i < 4; i++) grid.ColumnDefinitions.Add(new ColumnDefinition());
         var docs = Docs;
         var white = new SolidColorBrush(Microsoft.UI.Colors.White);
-        var rows = new List<(Save Save, Grid Photo, TextBlock Meta)>();
+        var rows = new List<(Save Save, Grid Photo, TextBlock Title, TextBlock Meta)>();
         var tiles = new List<Grid>();
         for (int i = 0; i < saves.Count; i++)
         {
@@ -338,9 +339,9 @@ public sealed partial class MainWindow
             var photo = new Grid();
             tile.Children.Add(photo);
             var foot = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16, 0, 72, 14), Spacing = 1 };
-            foot.Children.Add(new TextBlock { Text = name, FontSize = 15, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-            var day = save.LastPlayed.Date == DateTime.Today ? T("Today") : save.LastPlayed.ToString("d MMM", LangCulture());
-            var meta = Muted(day);
+            var title = new TextBlock { Text = _homeNames.GetValueOrDefault(save.Dir) ?? name, FontSize = 15, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+            foot.Children.Add(title);
+            var meta = Muted(Day(save.LastPlayed));
             meta.TextWrapping = TextWrapping.NoWrap;
             meta.TextTrimming = TextTrimming.CharacterEllipsis;
             foot.Children.Add(meta);
@@ -365,7 +366,7 @@ public sealed partial class MainWindow
             Grid.SetColumn(cell, i);
             grid.Children.Add(cell);
             tiles.Add(tile);
-            rows.Add((save, photo, meta));
+            rows.Add((save, photo, title, meta));
         }
         // tiles keep their shape as the window grows; a narrow window: two a row
         grid.SizeChanged += (_, e) =>
@@ -384,17 +385,20 @@ public sealed partial class MainWindow
         s.Children.Add(backup);
 
         // the photos, sizes and backups read off the UI thread
-        _ = Task.Run(() => (SaveHealth.Check(docs, record: false), saves.Select(Saves.Photo).ToList())).ContinueWith(async t =>
+        _ = Task.Run(() => (SaveHealth.Check(docs, record: false), saves.Select(Saves.Photo).ToList(), saves.Select(x => FamilyName(x, SaveInfo.Of(x))).ToList())).ContinueWith(async t =>
         {
             if (t.IsFaulted) return;
-            var (reports, photos) = t.Result;
+            var (reports, photos, names) = t.Result;
             var bare = new List<Save>();
             for (int i = 0; i < rows.Count; i++)
             {
-                var (save, photo, meta) = rows[i];
+                var (save, photo, title, meta) = rows[i];
+                // (two saves of one household differ by the save's name, said where the size would be)
+                title.Text = _homeNames[save.Dir] = names[i];
+                var same = names.Count(n => n == names[i]) > 1;
                 if (reports.FirstOrDefault(r => r.Save.Dir == save.Dir) is { } r)
                 {
-                    meta.Text += " · " + ModRow.SizeText(r.Bytes);
+                    meta.Text = Day(save.LastPlayed) + " · " + (same ? save.Name : ModRow.SizeText(r.Bytes));
                     if (r.LastBackup is null) bare.Add(save);
                 }
                 if (await SaveCard.SimsOf(photos[i]) is { } img) photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 16, 0, 58) });
@@ -554,7 +558,7 @@ public sealed partial class MainWindow
             // under the pointer: when it was taken, and a way to put it on top of Home
             var over = new Grid { Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) } };
             over.Children.Add(new Border { Background = Fade(Windows.UI.Color.FromArgb(255, 12, 12, 12), [(0, 0xD0), (0.6, 0)]), IsHitTestVisible = false });
-            over.Children.Add(new TextBlock { Text = p.Taken.ToString("d MMM · HH:mm", culture), FontSize = 12, Foreground = white, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(10, 0, 10, 8) });
+            over.Children.Add(new TextBlock { Text = Day(p.Taken, hour: true), FontSize = 12, Foreground = white, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(10, 0, 10, 8) });
             g.Children.Add(over);
             var isTop = _gal?.HomePicture == p.Path || (_gal?.HomePicture is null && i == 0);
             var pin = new Button
@@ -581,7 +585,7 @@ public sealed partial class MainWindow
                 HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, Background = Res("ApexPillBrush"),
             };
             b.Click += (_, _) => OpenViewer(all, at); // (no flight from the small copy: the viewer waits for the picture, then fades it in)
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, p.Taken.ToString("d MMM yyyy HH:mm", culture));
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, Day(p.Taken, hour: true));
             var cell = new Grid();
             cell.Children.Add(b);
             cell.Children.Add(pin);

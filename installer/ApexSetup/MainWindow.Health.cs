@@ -74,31 +74,31 @@ public sealed partial class MainWindow
     // ---------- the look of its parts ----------
 
     // a surface the light behind it reaches through a little
-    static Border Glass(UIElement child, double radius = 12)
+    static Border Glass(UIElement child, double radius = 8)
     {
         return new Border { Child = child, CornerRadius = new CornerRadius(radius), BorderThickness = new Thickness(1), Background = new SolidColorBrush(Pick(0xE0171717, 0xEBFFFFFF)),
             BorderBrush = new SolidColorBrush(Pick(0x12FFFFFF, 0x14000000)) };
     }
 
-    static TextBlock SectionTitle(string text) => new() { Text = text, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) };
+    static TextBlock SectionTitle(string text) => new() { Text = text, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) };
 
     static FrameworkElement IconTile(string icon, Windows.UI.Color tint) => new Border
     {
-        Width = 40, Height = 40, CornerRadius = new CornerRadius(10), VerticalAlignment = VerticalAlignment.Center,
-        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x24, tint.R, tint.G, tint.B)), Child = Lucide.Icon(icon, 20, new SolidColorBrush(tint)),
+        Width = 36, Height = 36, CornerRadius = new CornerRadius(8), VerticalAlignment = VerticalAlignment.Center,
+        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x24, tint.R, tint.G, tint.B)), Child = Lucide.Icon(icon, 18, new SolidColorBrush(tint)),
     };
 
     // an icon, a title with a line under it, and an action on the right
-    static Grid Line(FrameworkElement? icon, string title, string detail, FrameworkElement? action, double pad = 16)
+    static Grid Line(FrameworkElement? icon, string title, string detail, FrameworkElement? action, double pad = 10)
     {
-        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(18, pad, 18, pad) };
+        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(20, pad, 20, pad), MinHeight = 66 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         if (icon is not null) g.Children.Add(icon);
-        var text = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        if (detail.Length > 0) text.Children.Add(new TextBlock { Text = detail, FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        if (detail.Length > 0) text.Children.Add(new TextBlock { Text = detail, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
         Grid.SetColumn(text, 1);
         g.Children.Add(text);
         if (action is not null) { Grid.SetColumn(action, 2); action.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(action); }
@@ -107,7 +107,7 @@ public sealed partial class MainWindow
 
     static Button PillButton(UIElement content, string name, Action click)
     {
-        var b = new Button { Content = content, CornerRadius = new CornerRadius(18), Height = 36, MinWidth = 36, Padding = new Thickness(16, 0, 18, 0), BorderThickness = new Thickness(1),
+        var b = new Button { Content = content, Height = 36, MinWidth = 36, Padding = new Thickness(14, 0, 14, 0), BorderThickness = new Thickness(1),
             Background = new SolidColorBrush(Pick(0x12FFFFFF, 0x0A000000)), BorderBrush = new SolidColorBrush(Pick(0x1FFFFFFF, 0x1F000000)) };
         b.Click += (_, _) => click();
         AutomationProperties.SetName(b, name);
@@ -158,7 +158,7 @@ public sealed partial class MainWindow
         var needs = _health.Where(i => i.Finding.Severity != Severity.Info && !i.Conflict).ToList();
         if (mine.Count + needs.Count > 0)
         {
-            var list = new StackPanel { Spacing = 8 };
+            var list = new StackPanel { Spacing = 4 };
             list.Children.Add(SectionTitle(T("Needs your attention")));
             if (mine.Count > 0)
             {
@@ -175,9 +175,9 @@ public sealed partial class MainWindow
             body.Children.Add(list);
         }
 
-        var checks = new StackPanel { Spacing = 8 };
+        var checks = new StackPanel { Spacing = 4 };
         checks.Children.Add(SectionTitle(T("Checks")));
-        var grid = new CardGrid { MinItemWidth = 310, Spacing = 8 };
+        var grid = new CardGrid { MinItemWidth = 310, Spacing = 4 };
         foreach (var a in HealthAreas) grid.Children.Add(AreaTile(a));
         checks.Children.Add(grid);
         body.Children.Add(checks);
@@ -206,15 +206,15 @@ public sealed partial class MainWindow
         var unread = bad == 0 && area == HealthArea.Mods && ModsUnread;
         if (unread) brush = "ApexMutedBrush";
         var state = unread ? T("Not checked") : bad == 0 ? gone == 0 ? T("All good") : gone == 1 ? T("1 ignored") : T("{0} ignored", gone) : bad == 1 ? T("1 to look at") : T("{0} to look at", bad);
-        var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(16, 0, 14, 0), Height = 58 };
+        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(20, 0, 16, 0), Height = 66 };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        var icon = Lucide.Icon(AreaIcon(area), 18, Res("ApexSoftTextBrush"));
+        var icon = RowIcon(AreaIcon(area));
         var name = new TextBlock { Text = AreaName(area), FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
         var how = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
         how.Children.Add(bad == 0 && !unread ? Lucide.Icon("check", 14, Res(brush)) : new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Res(brush), VerticalAlignment = VerticalAlignment.Center });
         how.Children.Add(new TextBlock { Text = state, FontSize = 13, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Center });
         var go = Lucide.Icon("chevron-right", 14, Res("ApexMutedBrush"));
-        foreach (var (e, i) in new[] { (icon, 0), (name, 1), ((FrameworkElement)how, 2), (go, 3) }) { Grid.SetColumn(e, i); e.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(e); }
+        foreach (var (e, i) in new (FrameworkElement, int)[] { (icon, 0), (name, 1), (how, 2), (go, 3) }) { Grid.SetColumn(e, i); e.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(e); }
         var b = new Button { Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = new SolidColorBrush(Pick(0xE0171717, 0xEBFFFFFF)), BorderBrush = new SolidColorBrush(Pick(0x12FFFFFF, 0x14000000)) };
         b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Pick(0xF0202020, 0xFFF6F6F6));
@@ -230,11 +230,7 @@ public sealed partial class MainWindow
 
     void HealthHead(StackPanel body, string title, string sub)
     {
-        var back = new Button { Content = Labeled("chevron-left", T("Health")), Padding = new Thickness(8, 6, 12, 6), Margin = new Thickness(-11, 0, 0, 6), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-        back.Click += (_, _) => HealthGo("");
-        AutomationProperties.SetAutomationId(back, "HealthBack");
-        AutomationProperties.SetName(back, T("Back to {0}", T("Health")));
+        var back = BackButtonTo(T("Health"), () => HealthGo(""), "HealthBack");
         var head = new StackPanel { Spacing = 4 };
         head.Children.Add(back);
         head.Children.Add(PageHead(title, sub.Length > 0 ? char.ToUpper(sub[0], LangCulture()) + sub[1..] : null));
@@ -276,20 +272,20 @@ public sealed partial class MainWindow
         return Glass(s);
     }
 
-    // rows of one panel, divided by hairlines
-    static Border Rows(IEnumerable<UIElement> rows)
+    // a card for each, as the rows of Settings
+    static StackPanel Rows(IEnumerable<UIElement> rows)
     {
-        var s = new StackPanel();
+        var s = new StackPanel { Spacing = 4 };
         foreach (var r in rows)
-            s.Children.Add(new Border { Child = r, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, s.Children.Count == 0 ? 0 : 1, 0, 0) });
-        return Glass(s);
+            s.Children.Add(Glass(r));
+        return s;
     }
 
     Grid FindingLine(Health.Item it)
     {
         var (t, d) = Sentences(T(it.Finding.Text, it.Finding.Args));
         var brush = it.Finding.Severity switch { Severity.Error => "ApexErrorBrush", Severity.Warning => "ApexWarningBrush", _ => "ApexMutedBrush" };
-        return Line(IconTile(it.Finding.Severity == Severity.Info ? "info" : "triangle-alert", ((SolidColorBrush)Res(brush)).Color), t, d, FindingButtons(it), 14);
+        return Line(IconTile(it.Finding.Severity == Severity.Info ? "info" : "triangle-alert", ((SolidColorBrush)Res(brush)).Color), t, d, FindingButtons(it));
     }
 
     // what can be done about a finding, and Ignore; an ignored one only comes back
@@ -481,7 +477,7 @@ public sealed partial class MainWindow
         {
             var (party, file) = files[i];
             var info = c.InUse is { } w ? (w == c.Labels[i] ? T("In use") : c.Alike.Contains(c.Labels[i]) ? T("Same as the one in use") : c.Dead.Contains(c.Labels[i]) ? T(c.Level == ConflictLevel.Look ? "Likely does nothing" : "Does nothing") : T("Replaced by the other"))
-                : c.Title == "Two versions of the same mod" && dates[i] is { } d ? (d == newest ? T("Newest, from {0}", d.ToString("d MMM yyyy", LangCulture())) : T("From {0}", d.ToString("d MMM yyyy", LangCulture()))) : "";
+                : c.Title == "Two versions of the same mod" && dates[i] is { } d ? (d == newest ? T("Newest, from {0}", Day(d)) : T("From {0}", Day(d))) : "";
             var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(14, 8, 8, 8), MinHeight = 48, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -587,7 +583,7 @@ public sealed partial class MainWindow
             var b = Button(fix ? T("Undo") : T("Go back"), async () => { await RestoreAsync(p); _ = CheckHealth(); BuildHealth(); });
             b.IsEnabled = !_running && !_busy;
             b.MinWidth = 88;
-            return (UIElement)Line(IconTile(fix ? "wrench" : "rotate-ccw", ((SolidColorBrush)Res("ApexMutedBrush")).Color), T(p.Label, p.Args), p.Created.ToLocalTime().ToString("d MMM, HH:mm", LangCulture()), b, 12);
+            return (UIElement)Line(IconTile(fix ? "wrench" : "rotate-ccw", ((SolidColorBrush)Res("ApexMutedBrush")).Color), T(p.Label, p.Args), Day(p.Created.ToLocalTime(), hour: true), b);
         })));
     }
 }

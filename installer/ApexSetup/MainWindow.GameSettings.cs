@@ -120,12 +120,12 @@ public sealed partial class MainWindow
         var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(list.Wizard ? 0 : 96) });
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.Children.Add(icon is null ? new Border { Width = 36 } : RowIcon(icon));
         var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         words.Children.Add(new TextBlock { Text = name, FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-        var line = new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 };
+        var line = new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2 };
         ToolTipService.SetToolTip(line, text);
         words.Children.Add(line);
         Grid.SetColumn(words, 1);
@@ -296,7 +296,7 @@ public sealed partial class MainWindow
         var text = SetterSettings.Read(Docs);
         var (on, off) = SetterSettings.Differences(text);
         if (on.Count + off.Count == 0) { SettingRow(l, "sliders-horizontal", title, T("Already in use."), null, State(true)); return; }
-        var b = Button(T("Review…"), SuggestSetter);
+        var b = Button(T("Review"), SuggestSetter);
         b.IsEnabled = !_busy && !_running;
         SettingRow(l, "sliders-horizontal", title, T("For Apex Radiance: {0} to turn on, {1} to turn off.", on.Count, off.Count), null, b);
     }

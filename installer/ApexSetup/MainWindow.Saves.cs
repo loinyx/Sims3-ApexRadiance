@@ -115,7 +115,7 @@ public sealed partial class MainWindow
         SavesHost.Children.Clear();
         SavesBar.Visibility = Visibility.Collapsed;
         SavesNote.Margin = new Thickness(24, 0, 24, 16);
-        ScreenSaves.MaxWidth = _savesPage == "auto" ? 920 : 1240;
+        ScreenSaves.MaxWidth = _savesPage == "auto" ? 920 : double.PositiveInfinity;
         if (_savesPage == "auto") { DrawAutomatic(now); return; }
         if (_savesPage == "all") { DrawAllBackups(now); return; }
 
@@ -127,10 +127,10 @@ public sealed partial class MainWindow
         var auto = Id(Button("", () => SavesGo("auto")), "SaveAutoPage");
         auto.Content = Labeled("calendar-clock", T("Automatic backups"));
         var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        foreach (var b in new[] { several, import, auto }) acts.Children.Add(Dims(b));
-        SavesHost.Children.Add(PageHead(T("Saves"), now.Here.Count switch { 0 => T("No saves yet. They show here after you save a game."), 1 => T("1 save"), var n => T("{0} saves", n) } + (now.Here.Count > 0 ? ", " + SaveSize(now.Here.Sum(l => l.Info.Bytes)) : ""), acts));
+        foreach (var b in new[] { several, import, auto }) if (now.Here.Count > 0 || b != several) acts.Children.Add(Dims(b));
+        SavesHost.Children.Add(PageHead(T("Saves"), now.Here.Count switch { 0 => "", 1 => T("1 save"), var n => T("{0} saves", n) } + (now.Here.Count > 0 ? ", " + SaveSize(now.Here.Sum(l => l.Info.Bytes)) : ""), acts));
         if (SavesBlocked() is { } why && now.Here.Count > 0) SavesHost.Children.Add(Warn(why, null));
-        if (now.Entries.Count == 0) return;
+        if (now.Entries.Count == 0) { SavesHost.Children.Add(EmptyPlace("users", T("No saves yet. They show here after you save a game."))); return; }
 
         var at = now.Entries.First(e => e.Key.Equals(_savePick, StringComparison.OrdinalIgnoreCase));
         var page = new Grid { RowSpacing = 18 };
@@ -210,20 +210,9 @@ public sealed partial class MainWindow
         return place.Length == 0 ? s.Name : w.Any(n => n.StartsWith(s.Name, StringComparison.OrdinalIgnoreCase)) ? place : s.Name + " · " + place;
     }
 
-    string SaveDay(DateTime t, bool hour = false)
-    {
-        var c = LangCulture();
-        var day = t.Date == DateTime.Today ? T("Today") : t.ToString(t.Year == DateTime.Today.Year ? "M" : "d", c);
-        return hour ? day + ", " + t.ToString("t", c) : day;
-    }
+    static string SaveDay(DateTime t, bool hour = false) => Day(t, hour);
 
-    // whole MB from 10 on
-    string SaveSize(long bytes)
-    {
-        var c = LangCulture();
-        var mb = Math.Max(0, bytes) / (1024.0 * 1024);
-        return mb >= 1024 ? (mb / 1024).ToString("0.#", c) + " GB" : mb.ToString(mb >= 10 ? "0" : "0.#", c) + " MB";
-    }
+    static string SaveSize(long bytes) => bytes < 1 << 20 ? (Math.Max(0, bytes) / 1048576.0).ToString("0.#", LangCulture()) + " MB" : ModRow.SizeText(bytes);
 
     static TextBlock SaveText(string text, double size, string brush = "TextFillColorPrimaryBrush", bool strong = false) => new()
     {
@@ -271,7 +260,7 @@ public sealed partial class MainWindow
 
     ListView SaveList(SavesNow now)
     {
-        var list = new ListView { SelectionMode = ListViewSelectionMode.Single, VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(0, 0, 24, 0), MaxHeight = Math.Max(320, Scroller.ActualHeight - 150) };
+        var list = new ListView { Margin = new Thickness(-4, -2, 0, 0), SelectionMode = ListViewSelectionMode.Single, VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(0, 0, 24, 0), MaxHeight = Math.Max(320, Scroller.ActualHeight - 150) };
         AutomationProperties.SetName(list, T("Your saves"));
         AutomationProperties.SetAutomationId(list, "SaveList");
         list.ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection();
@@ -406,11 +395,11 @@ public sealed partial class MainWindow
 
     // ---------- what goes ----------
 
-    static readonly (CleanParts Parts, string Name, string Info)[] CleanOptions =
+    static readonly (CleanParts Parts, string Name, string Info, string Icon)[] CleanOptions =
     [
-        (CleanParts.Portraits | CleanParts.Thumbnails, "Portraits and thumbnails", "The game makes them again as you play"),
-        (CleanParts.RepeatedMemories, "Repeated memories", "One of each picture stays"),
-        (AllPictures, "All memories and photos", "These pictures are gone for good"),
+        (CleanParts.Portraits | CleanParts.Thumbnails, "Portraits and thumbnails", "The game makes them again as you play", "users"),
+        (CleanParts.RepeatedMemories, "Repeated memories", "One of each picture stays", "layers"),
+        (AllPictures, "All memories and photos", "These pictures are gone for good", "image"),
     ];
 
     void CleanPart(StackPanel host, SavesNow now, SaveLook l)
@@ -421,19 +410,13 @@ public sealed partial class MainWindow
         host.Children.Add(Section(T("Clean"), new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children = { keep, Dims(clean) } }));
         var note = PageSub(T("A backup is made first, and you can undo it."));
         note.Margin = new Thickness(0, 8, 0, 0);
-        var rows = new StackPanel();
+        var rows = new StackPanel { Spacing = 4 };
+        AutomationProperties.SetName(rows, T("Clean"));
         var says = new List<Action<SaveRead?, bool>>();
-        foreach (var (parts, title, info) in CleanOptions)
+        foreach (var (parts, title, info, icon) in CleanOptions)
         {
-            var g = new Grid { ColumnSpacing = 20, VerticalAlignment = VerticalAlignment.Center };
-            foreach (var w in new[] { new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-            var about = SaveText(T(info), 12, "ApexMutedBrush");
-            about.TextWrapping = TextWrapping.Wrap;
-            g.Children.Add(new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { SaveText(T(title), 14, strong: true), about } });
             var size = SaveText("", 13, "ApexMutedBrush");
             size.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(size, 1);
-            g.Children.Add(size);
             var sw = new ToggleSwitch { IsOn = (_saveParts & parts) == parts, OnContent = "", OffContent = "", MinWidth = 0, Width = 40, VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(sw, T(title) + ". " + T(info));
             sw.Toggled += (_, _) =>
@@ -444,9 +427,7 @@ public sealed partial class MainWindow
                 else if ((_saveParts & parts) == parts) _saveParts &= parts == CleanParts.RepeatedMemories ? ~AllPictures : parts == AllPictures ? ~(CleanParts.Memories | CleanParts.Generated) : ~parts;
                 if (was != _saveParts) Say();
             };
-            Grid.SetColumn(sw, 2);
-            g.Children.Add(sw);
-            rows.Children.Add(new Border { Child = g, MinHeight = 56, Padding = new Thickness(20, 8, 16, 8), BorderThickness = new Thickness(0, rows.Children.Count > 0 ? 1 : 0, 0, 0), BorderBrush = Res("ApexHairlineBrush") });
+            rows.Children.Add(Row(icon, T(title), T(info), new StackPanel { Orientation = Orientation.Horizontal, Spacing = 20, Children = { size, sw } }));
             var only = parts == AllPictures ? CleanParts.Memories | CleanParts.Generated : parts;
             says.Add((read, done) =>
             {
@@ -457,9 +438,7 @@ public sealed partial class MainWindow
                 size.Foreground = Res(on && bytes > 0 ? "ApexSuccessBrush" : "ApexMutedBrush");
             });
         }
-        var card = new Border { Child = rows, CornerRadius = new CornerRadius(8), Background = Res("ApexCardBrush"), BorderBrush = new SolidColorBrush(Pick(0xFF212121, 0xFFE4E4E4)), BorderThickness = new Thickness(1) };
-        AutomationProperties.SetName(card, T("Clean"));
-        host.Children.Add(card);
+        host.Children.Add(rows);
         host.Children.Add(note);
         // (this one first; the rest is read for the window that cleans several)
         _ = Read();

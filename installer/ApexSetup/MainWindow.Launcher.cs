@@ -478,7 +478,7 @@ public sealed partial class MainWindow
                 if (e.Culprit is null && e.Why is null) chipBrush = "ApexMutedBrush";
                 if (e.Earlier)
                 {
-                    body = e.Replaced is { } r ? T("That version was replaced on {0}. No crash in it since.", r.ToString("d MMM", c)) : T("That version was replaced since. No crash in it since.");
+                    body = e.Replaced is { } r ? T("That version was replaced on {0}. No crash in it since.", MonthDay(r)) : T("That version was replaced since. No crash in it since.");
                     chip = T("Fixed by an update"); chipBrush = "ApexSuccessBrush";
                 }
                 break;
@@ -487,12 +487,12 @@ public sealed partial class MainWindow
 
         // one line: the day and time, a dot (green closed well, amber crashed or froze, faint when an update fixed it, grey
         // closed without a report), what happened with its cause, and the details on demand
-        var row = new Grid { ColumnSpacing = 16, Padding = new Thickness(18, 12, 14, 12), MinHeight = 60 };
-        foreach (var w in new[] { new GridLength(96), GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        var day = e.Count > 1 && e.First.Date != e.When.Date ? $"{e.First.ToString("d MMM", c)} – {e.When.ToString("d MMM", c)}" : e.When.Date == DateTime.Today ? T("Today") : e.When.ToString("d MMM", c);
+        var row = new Grid { ColumnSpacing = 16, Padding = new Thickness(20, 10, 16, 10), MinHeight = 66 };
+        foreach (var w in new[] { new GridLength(104), GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+        var day = e.Count > 1 && e.First.Date != e.When.Date ? $"{MonthDay(e.First)} – {MonthDay(e.When)}" : Day(e.When);
         var time = e.Count > 1 ? T("{0} crashes", e.Count) : e.Played is { } p && p.TotalMinutes >= 1 ? $"{e.When.ToString("t", c)} · {T("{0} min", (int)p.TotalMinutes)}" : e.When.ToString("t", c);
         var when = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        when.Children.Add(new TextBlock { Text = day, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+        when.Children.Add(new TextBlock { Text = day, FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         when.Children.Add(new TextBlock { Text = time, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
         row.Children.Add(when);
         var dot = e.End switch { CrashTimeline.Ending.Normal => "ApexSuccessBrush", CrashTimeline.Ending.NoReport => "ApexMutedBrush", _ => "ApexWarningBrush" };
@@ -648,7 +648,7 @@ public sealed partial class MainWindow
             var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
             head.Children.Add(new TextBlock { Text = r.Version, FontSize = 20, FontWeight = FontWeights.SemiBold });
             var same = installed is { Length: > 0 } && installed.TrimStart('v', 'V') == r.Version.TrimStart('v', 'V');
-            head.Children.Add(Pill(same ? T("Installed") : installed is not { Length: > 0 } ? T("Latest") : T("Newer than yours"), same ? "ApexSuccessBrush" : "ApexAccentBrush"));
+            head.Children.Add(Pill(same ? T("Installed") : installed is not { Length: > 0 } ? T("Latest") : Newer(r.Version, installed) ? T("Newer than yours") : T("Latest"), same ? "ApexSuccessBrush" : "ApexAccentBrush"));
             notes.Children.Add(head);
             var lines = NotesLines(r.Body ?? T("The notes didn't load. You can read them on GitHub."), r.Version).ToList();
             // (long notes show about their first screen; the rest opens in place)
@@ -660,16 +660,18 @@ public sealed partial class MainWindow
                 (used < Budget ? notes : more).Children.Add(l);
                 used += (l as TextBlock ?? (l as Grid)?.Children[1] as TextBlock)?.Text.Length ?? 0;
             }
+            var links = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 20, Margin = new Thickness(0, 8, 0, 0) };
             if (more.Children.Count > 0)
             {
                 notes.Children.Add(more);
-                var toggle = new HyperlinkButton { Content = T("Show all"), Padding = new Thickness(0), FontSize = 13 };
+                var toggle = new HyperlinkButton { Content = T("Show all"), Padding = new Thickness(0) };
                 toggle.Click += (_, _) => { var open = more.Visibility != Visibility.Visible; more.Visibility = open ? Visibility.Visible : Visibility.Collapsed; toggle.Content = open ? T("Show less") : T("Show all"); };
-                notes.Children.Add(toggle);
+                links.Children.Add(toggle);
             }
             var repo = r.Repo;
             var tag = r.Tag;
-            notes.Children.Add(Link(T("Open on GitHub"), () => Process.Start(new ProcessStartInfo($"https://github.com/{repo}/releases/tag/{Uri.EscapeDataString(tag)}") { UseShellExecute = true })));
+            links.Children.Add(Link(T("Open on GitHub"), () => Process.Start(new ProcessStartInfo($"https://github.com/{repo}/releases/tag/{Uri.EscapeDataString(tag)}") { UseShellExecute = true })));
+            notes.Children.Add(links);
             host.Children.Add(Card(notes));
         }
     }
@@ -737,32 +739,32 @@ public sealed partial class MainWindow
             on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
         host.Children.Add(InstallModeRow());
         host.Children.Add(Section(T("Home")));
-        var picture = new ComboBox { MinWidth = 200 };
+        var picture = new ComboBox { Width = 232 };
         string[] kinds = ["gallery", "household", "none"];
         foreach (var k in kinds) picture.Items.Add(k switch { "gallery" => T("A picture from the gallery"), "household" => T("The household's photo"), _ => T("No picture") });
         picture.SelectedIndex = Math.Max(0, Array.IndexOf(kinds, _settings.HomePicture));
         picture.SelectionChanged += (_, _) => { _settings.HomePicture = kinds[Math.Max(0, picture.SelectedIndex)]; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picture, T("Picture on top"));
-        host.Children.Add(Row("image", T("Picture on top"), T("The gallery picture you chose there or the newest one, the photo the game keeps of the household, or none."), picture));
+        host.Children.Add(Row("image", T("Picture on top"), T("What shows at the top of Home."), picture));
         var chosen = (_gal ??= LoadGallery()).HomePicture is { } hp && File.Exists(hp);
         var choose = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         choose.Children.Add(Button(T("Choose in the gallery"), () => Show(GalleryScreen)));
         if (chosen) choose.Children.Add(Button(T("Use the newest"), () => { _gal!.HomePicture = null; Gallery.Save(_gal); BuildSettings(); }));
         host.Children.Add(Row("image-plus", T("Gallery picture"), chosen ? T("The one you chose in the gallery (Use on Home).") : T("The newest picture you took. In the gallery, Use on Home keeps one."), choose));
         int[] heights = [240, 330, 440];
-        var height = new ComboBox { MinWidth = 200 };
+        var height = new ComboBox { Width = 232 };
         foreach (var label in new[] { T("Low"), T("Medium"), T("Tall") }) height.Items.Add(label);
         height.SelectedIndex = Math.Max(0, Array.IndexOf(heights, _settings.HomePictureHeight) is var hi && hi >= 0 ? hi : 1);
         height.SelectionChanged += (_, _) => { _settings.HomePictureHeight = heights[Math.Max(0, height.SelectedIndex)]; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(height, T("Picture height"));
         host.Children.Add(Row("arrow-up-down", T("Picture height"), T("How much of the page the picture takes."), height));
-        var strength = new Slider { Minimum = 30, Maximum = 100, StepFrequency = 5, Width = 200, Value = Math.Clamp(_settings.HomePictureStrength, 30, 100) };
+        var strength = new Slider { Minimum = 30, Maximum = 100, StepFrequency = 5, Width = 232, Value = Math.Clamp(_settings.HomePictureStrength, 30, 100) };
         strength.ValueChanged += (_, e) => { _settings.HomePictureStrength = (int)e.NewValue; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(strength, T("Picture strength"));
         host.Children.Add(Row("sliders-horizontal", T("Picture strength"), T("Lower it for a quieter picture behind the save's name."), strength));
         host.Children.Add(Section(T("Window")));
         string[] backs = ["mica", "micaalt", "acrylic", "solid"];
-        var back = new ComboBox { MinWidth = 200 };
+        var back = new ComboBox { Width = 232 };
         foreach (var label in new[] { T("Mica (Windows default)"), T("Mica, stronger"), T("Acrylic"), T("Solid colour") }) back.Items.Add(label);
         back.SelectedIndex = Math.Max(0, Array.IndexOf(backs, _settings.Backdrop));
         back.SelectionChanged += (_, _) => { _settings.Backdrop = backs[Math.Max(0, back.SelectedIndex)]; _settings.Save(); ApplyBackdrop(); };
@@ -775,7 +777,7 @@ public sealed partial class MainWindow
         host.Children.Add(Row("wrench", T("Repair or remove"), T("Repair the files, remove a component, or go back to a restore point."), Id(Button(T("Open"), () => Show(Manage)), "SettingsManage")));
         host.Children.Add(Section(T("Uninstall")));
         host.Children.Add(Row("trash-2", T("Uninstall Apex Launcher"), T("Removes Apex Radiance and everything the launcher installed, puts back every file it replaced, then the launcher itself. Your saves and your own mods stay."),
-            Id(Button(T("Uninstall…"), async () => await UninstallAsync(), danger: true), "SettingsUninstall")));
+            Id(Button(T("Uninstall"), async () => await UninstallAsync(), danger: true), "SettingsUninstall")));
         host.Children.Add(Section(T("About and licences")));
         host.Children.Add(Row("info", T("Credits and licences"), T("Apex Radiance by loinyx, and the authors of every component the launcher installs."), Id(Button(T("Open"), () => Show(About)), "SettingsAbout")));
     }
@@ -968,6 +970,16 @@ public sealed partial class MainWindow
         if (act is not null) { Grid.SetColumn(act, 1); act.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(act); }
         return g;
     }
+    // the way back from a page of a screen, over its title (the chevron stands on the title's edge)
+    static Button BackButtonTo(string name, Action go, string id)
+    {
+        var back = new Button { Content = Labeled("chevron-left", name), Padding = new Thickness(8, 6, 12, 6), Margin = new Thickness(-11, 0, 0, 6), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        back.Click += (_, _) => go();
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(back, id);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(back, T("Back to {0}", name));
+        return back;
+    }
     static TextBlock PageSub(string t) { var s = Muted(t); s.FontSize = 13; return s; }
 
     // a section's title, with what acts on the section on the right
@@ -999,6 +1011,25 @@ public sealed partial class MainWindow
         b.Resources["TextControlBorderBrushFocused"] = Res("ApexAccentBrush");
         b.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(1);
         return b;
+    }
+
+    // a field to search in with its glass, as the Mods page draws both of its own: the line turns to the accent with the keyboard in it
+    static Border SearchField(TextBox b)
+    {
+        var none = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        (b.Background, b.BorderThickness, b.Padding, b.MinWidth, b.VerticalAlignment) = (none, new Thickness(0), new Thickness(0, 5, 0, 6), 0, VerticalAlignment.Center);
+        foreach (var k in new[] { "TextControlBackgroundFocused", "TextControlBackgroundPointerOver", "TextControlBorderBrushFocused", "TextControlBorderBrushPointerOver" }) b.Resources[k] = none;
+        b.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        var g = new Grid { ColumnSpacing = 12 };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.Children.Add(Lucide.Icon("search", 16, Res("ApexMutedBrush")));
+        Grid.SetColumn(b, 1);
+        g.Children.Add(b);
+        var box = new Border { Child = g, Height = 36, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), BorderBrush = Res("ApexInputBorderBrush"), Background = Res("ApexCardBrush"), Padding = new Thickness(11, 0, 4, 0) };
+        b.GotFocus += (_, _) => box.BorderBrush = Res("ApexAccentBrush");
+        b.LostFocus += (_, _) => box.BorderBrush = Res("ApexInputBorderBrush");
+        return box;
     }
 
     // a place with nothing in it yet

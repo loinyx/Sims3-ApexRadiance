@@ -1592,7 +1592,7 @@ public sealed partial class MainWindow
     // an icon button that is off reads as off: its icon keeps a fixed colour, so the whole button fades
     static T Dims<T>(T b) where T : Control
     {
-        void Show() => b.Opacity = b.IsEnabled ? 1 : 0.35;
+        void Show() => b.Opacity = b.IsEnabled ? 1 : 0.5;
         b.IsEnabledChanged += (_, _) => Show();
         Show();
         return b;
