@@ -112,7 +112,8 @@ public static class GameCaches
     }
 
     static string? DocsOf(string backup) => Path.Combine(backup, "docs.txt") is var f && File.Exists(f) ? File.ReadAllText(f).Trim() : null;
-    static IEnumerable<string> Kept(string backup) => Directory.EnumerateFiles(backup, "*", SearchOption.AllDirectories).Where(f => Path.GetRelativePath(backup, f) != "docs.txt");
+    static IEnumerable<string> Kept(string backup) => Directory.EnumerateFiles(backup, "*", SearchOption.AllDirectories)
+        .Where(f => Path.GetRelativePath(backup, f) != "docs.txt" && !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)); // (what an antivirus adds for a moment; no cache ends so)
 
     // puts every backup back over whatever the game rebuilt since, the newest one last (last: only that one, to undo the last
     // Clean); false when there is none
