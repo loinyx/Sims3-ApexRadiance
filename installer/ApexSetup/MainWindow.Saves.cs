@@ -326,7 +326,7 @@ public sealed partial class MainWindow
             family.MaxWidth = Math.Max(120, w * 0.42);
             family.Margin = new Thickness(0, 0, w * 0.04, 22);
             words.MaxWidth = wide ? Math.Min(560, w * 0.62) : w;
-            foreach (var e in words.Children.OfType<FrameworkElement>().Where(e => e != acts)) (e.MaxWidth, e.HorizontalAlignment) = (wide ? Math.Min(500, w * 0.5 - 16) : w, HorizontalAlignment.Left);
+            foreach (var e in words.Children.OfType<FrameworkElement>().Where(e => e != acts)) (e.MaxWidth, e.HorizontalAlignment) = (wide ? Math.Min(500, w * 0.5 - 16) : Math.Min(420, w * 0.56), HorizontalAlignment.Left);
         }
         Fit(640);
         card.SizeChanged += (_, e) => { if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 0.5) Fit(e.NewSize.Width); };
