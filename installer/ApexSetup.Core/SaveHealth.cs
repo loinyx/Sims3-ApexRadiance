@@ -95,7 +95,7 @@ public static class SaveHealth
         {
             var mb = (r.Bytes >> 20).ToString();
             if (r.Incomplete is { } why)
-                f.Add(new(Severity.Warning, "The save {0} looks incomplete ({1}). If the game can't open it, load a backup of it.", [r.Save.Name, why]));
+                f.Add(new(Severity.Warning, "The save {0} looks incomplete ({1}). If the game can't open it, go back to a copy of it.", [r.Save.Name, why]));
             if (r.Bytes >= LargeBytes)
                 f.Add(new(Severity.Info, "The save {0} is {1} MB. Saves this large load and save slowly. NRaas Overwatch or moving out unused households makes it smaller.", [r.Save.Name, mb]));
             if (r.History.FirstOrDefault(p => p.When >= DateTime.Now.AddDays(-GrowthDays)) is { Bytes: > 0 } first && r.Bytes > first.Bytes * (1 + FastGrowth) && r.Bytes - first.Bytes > 20L << 20)
@@ -104,8 +104,8 @@ public static class SaveHealth
             if (r.Incomplete is null && !RecentCopy(r.LastBackup, r.Save))
             {
                 var save = r.Save;
-                f.Add(new(Severity.Info, r.LastBackup is null ? "The save {0} has no backup yet." : "The save {0} was last backed up {1} days ago.",
-                    [save.Name, r.LastBackup is { } d ? ((int)(DateTime.Now - d).TotalDays).ToString() : ""], () => Saves.Backup(save, docs), Suggest: "Back up the save"));
+                f.Add(new(Severity.Info, r.LastBackup is null ? "The save {0} has no copy yet." : "The newest copy of the save {0} is {1} days old.",
+                    [save.Name, r.LastBackup is { } d ? ((int)(DateTime.Now - d).TotalDays).ToString() : ""], () => Saves.Backup(save, docs), Suggest: "Copy the save"));
             }
         }
         return f;

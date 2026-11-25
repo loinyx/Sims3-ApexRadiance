@@ -220,8 +220,8 @@ static class HealthTests
               && r.First(x => x.Save.Name == "Empty").Incomplete!.Contains("empty"), "saves: complete, missing .nhd and zero-size parts are told apart");
 
         var f = SaveHealth.Findings(r, docs);
-        check(f.Count(x => x.Text.Contains("incomplete")) == 2 && f.Any(x => x.Text.Contains("no backup") && x.Args[0] == "Good" && x.CanApply), "saves: findings, with a backup offered");
-        f.First(x => x.Text.Contains("no backup") && x.Args[0] == "Good").Fix!();
+        check(f.Count(x => x.Text.Contains("incomplete")) == 2 && f.Any(x => x.Text.Contains("no copy") && x.Args[0] == "Good" && x.CanApply), "saves: findings, with a backup offered");
+        f.First(x => x.Text.Contains("no copy") && x.Args[0] == "Good").Fix!();
         Write(Path.Combine(good, "Riverview_0x00000000.nhd"), new string('w', 40 << 20));
         var again = SaveHealth.Check(docs).First(x => x.Save.Name == "Good");
         check(again.LastBackup is not null && again.History.Count == 2 && File.Exists(Path.Combine(Paths.Data, "save-sizes.json")),

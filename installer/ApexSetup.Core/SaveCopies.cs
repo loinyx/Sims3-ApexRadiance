@@ -175,7 +175,7 @@ public static class SaveCopies
                 File.SetLastWriteTime(path, z.Entries[i].LastWriteTime.DateTime); // (the save is as old as the copy says)
             }
         }
-        catch (InvalidDataException e) { throw Bad(e.Message); }
+        catch (InvalidDataException e) { Engine.Log(e); throw Bad("the file is damaged"); }
     }
 
     // a folder copied whole, each file read back and compared
