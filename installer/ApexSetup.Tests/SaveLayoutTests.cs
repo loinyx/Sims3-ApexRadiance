@@ -10,7 +10,8 @@ static class SaveLayoutTests
             var cells = SaveLayout.Mosaic(n, cols);
             var used = cells.SelectMany(c => Enumerable.Range(0, c.Span * c.Span).Select(k => (c.Col + k % c.Span, c.Row + k / c.Span))).ToList();
             check(cells.Count == n && used.Distinct().Count() == used.Count && used.All(u => u.Item1 >= 0 && u.Item1 < cols)
-                  && cells.Count(c => c.Span == 2) == (cols > 1 ? (n + 10) / 11 : 0), $"mosaic of {n} in {cols} columns: none over another, none outside");
+                  && cells.Count(c => c.Span == 2) == (cols > 1 ? Enumerable.Range(0, n).Count(i => i % 11 == 0 && (i == 0 || n - i > cols * 2)) : 0)
+                  && cells.Skip(1).TakeLast(cols * 2).All(c => c.Span == 1), $"mosaic of {n} in {cols} columns: none over another, none outside, no large one at the end");
         }
         check(SaveLayout.Mosaic(5, 4).SequenceEqual(new[] { (0, 0, 2), (2, 0, 1), (3, 0, 1), (2, 1, 1), (3, 1, 1) }), "mosaic: the small ones sit beside the large one");
 

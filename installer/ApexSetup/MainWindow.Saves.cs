@@ -294,7 +294,6 @@ public sealed partial class MainWindow
         if (l.Info.Description.Trim() is { Length: > 0 } about)
         {
             var text = White(about, 14, 0xCC, 4);
-            (text.MaxWidth, text.HorizontalAlignment) = (420, HorizontalAlignment.Left);
             ToolTipService.SetToolTip(text, about);
             words.Children.Add(text);
         }
@@ -318,14 +317,16 @@ public sealed partial class MainWindow
         g.Children.Add(words);
 
         var card = new Border { Child = g, CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), RequestedTheme = ElementTheme.Dark, ContextFlyout = SaveMenu(l) };
-        // (the Sims stand clear of the words; in a narrow window they are smaller and the words keep half of it)
+        // (the Sims stand clear of the words, and the buttons may reach a little further to stay in one row; in a narrow
+        // window the Sims are smaller and the words keep half of it)
         void Fit(double w)
         {
             var wide = w >= 700;
             family.Height = wide ? 350 : 250;
             family.MaxWidth = Math.Max(120, w * 0.42);
             family.Margin = new Thickness(0, 0, w * 0.04, 22);
-            words.MaxWidth = wide ? Math.Min(500, w * 0.5 - 16) : w;
+            words.MaxWidth = wide ? Math.Min(560, w * 0.62) : w;
+            foreach (var e in words.Children.OfType<FrameworkElement>().Where(e => e != acts)) (e.MaxWidth, e.HorizontalAlignment) = (wide ? Math.Min(500, w * 0.5 - 16) : w, HorizontalAlignment.Left);
         }
         Fit(640);
         card.SizeChanged += (_, e) => { if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 0.5) Fit(e.NewSize.Width); };

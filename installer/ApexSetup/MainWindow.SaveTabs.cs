@@ -60,7 +60,10 @@ public sealed partial class MainWindow
     {
         if (p.Memories.Count == 0)
         {
-            p.Host.Children.Add(Muted(T("No memories in this save yet. The game takes these pictures by itself at moments of your Sims' lives.")));
+            var icon = Lucide.Icon("image", 44, Res("ApexIconMutedBrush"), 1.4);
+            var none = Body(T("No memories in this save yet. The game takes these pictures by itself at moments of your Sims' lives."));
+            (icon.HorizontalAlignment, none.TextAlignment) = (HorizontalAlignment.Center, TextAlignment.Center);
+            p.Host.Children.Add(new StackPanel { Spacing = 14, MaxWidth = 440, Margin = new Thickness(0, 64, 0, 64), HorizontalAlignment = HorizontalAlignment.Center, Children = { icon, none } });
             return;
         }
         var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -647,7 +650,7 @@ public sealed partial class MainWindow
             {
                 Canvas.SetLeft(dots[i].Button, xs[i] - 22);
                 Canvas.SetTop(dots[i].Button, Y(points[i].Bytes) - 22);
-                var l = Muted(points[i].Kind == CopyKind.Now ? T("Today") : points[i].When.ToString("d MMM", culture));
+                var l = Muted(points[i].Kind == CopyKind.Now ? T("Today") : points[i].When.ToString(points[i].When.Date == DateTime.Today ? "t" : "d MMM", culture)); // (today's copies by their hour)
                 l.Measure(new Size(200, 40));
                 var left = Math.Clamp(xs[i] - l.DesiredSize.Width / 2, 0, Math.Max(0, e.NewSize.Width - l.DesiredSize.Width));
                 if (left + l.DesiredSize.Width > free) continue;
