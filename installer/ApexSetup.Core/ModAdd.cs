@@ -18,6 +18,7 @@ public sealed class AddItem
     public string Sha { get; set; } = "";
     public string? Problem { get; set; }            // why it is not added
     public string? Warning { get; set; }
+    public string? Also { get; set; }               // a warning besides it
     public bool Doubt { get; set; }                 // Warning says it looks damaged: added only when the player ticks it
     public string? SameAs { get; set; }             // the same bytes are already there: that file's name, or the merge's (SameInMerge)
     public bool SameInMerge { get; set; }
@@ -127,7 +128,7 @@ public sealed class ModAdd : IDisposable
             if (!i.Ok) return i;
             if (ext == ".package")
             {
-                i.Warning ??= warnings.FirstOrDefault();
+                if (i.Doubt) i.Also = warnings.FirstOrDefault(); else i.Warning = warnings.FirstOrDefault();
                 var index = Dbpf.Index(path);
                 i.Kind = Mods.KindOf(index.GroupBy(e => e.Type).ToDictionary(x => x.Key, x => x.Count()));
                 if (IsLibrary(index))
@@ -288,7 +289,7 @@ public sealed class ModAdd : IDisposable
                 // ways to change)
                 i.CanReplace = i.Place != AddPlace.Worlds && i.OtherMod?.Locked != true && !merges.Any(r => i.OtherMod is { } o && Same(r.Merged, o.Rel));
                 // (a mod of the same name is taken for the same mod when the two share game resources)
-                i.Replace = i.CanReplace && i.Place == AddPlace.Mods && SharesResources(i.File, other);
+                i.Replace = i.CanReplace && !i.Doubt && i.Place == AddPlace.Mods && SharesResources(i.File, other); // (a whole version never goes for one that looks damaged unless asked)
                 if (i.CanReplace) claimed.Add(other);
                 if (i.Place == AddPlace.Worlds || i.OtherMod?.Locked == true) i.Add = false;
             }
@@ -322,6 +323,7 @@ public sealed class ModAdd : IDisposable
     public void Add(AddItem i)
     {
         Engine.CheckWritable();
+        ModMerge.Fresh(); // (a merge being planned reads it again)
         if (!i.Ok || i.Place == AddPlace.Worlds) throw new InvalidOperationException(i.Name);
         var replace = i.Replace && i.CanReplace && File.Exists(i.Other);
         var dir = replace ? Path.GetDirectoryName(i.Other!)! : Dir(i.Place);

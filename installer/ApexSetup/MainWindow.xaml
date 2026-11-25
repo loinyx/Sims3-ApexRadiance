@@ -13,7 +13,7 @@
             <!-- a mod's row in Mods (list view): picture or kind icon, name with its New mark, tags and a line (what needs a look,
                  notes, or where it is), what it is with its icon, size, on/off -->
             <DataTemplate x:Key="ModRowTemplate" x:DataType="local:ModRow">
-                <Grid ColumnSpacing="16" Height="60" Background="Transparent" ToolTipService.ToolTip="{x:Bind FullName, Mode=OneWay}">
+                <Grid ColumnSpacing="16" MinHeight="60" Background="Transparent" ToolTipService.ToolTip="{x:Bind FullName, Mode=OneWay}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="76" />
                         <ColumnDefinition Width="*" />
@@ -678,7 +678,7 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <!-- which mods are on, under a name (MainWindow.ModProfiles.cs) -->
-                        <Button x:Name="ModsProfile" Tag="dyn" Margin="16,0,16,10" Padding="11,0" Height="54" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        <Button x:Name="ModsProfile" Tag="dyn" Margin="16,0,16,10" Padding="11,6" MinHeight="54" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                 CornerRadius="8" Background="{ThemeResource ApexCardBrush}" BorderBrush="{ThemeResource ApexCardBorderBrush}" Click="OnModsProfile" />
                         <!-- the places, narrowed as you type (like the gallery's albums) -->
                         <Border x:Name="ModSideBox" Grid.Row="1" Margin="16,0,16,4" Height="36" CornerRadius="6" BorderThickness="1" BorderBrush="{ThemeResource ApexInputBorderBrush}" Background="{ThemeResource ApexCardBrush}" Padding="11,0,4,0">
@@ -855,17 +855,17 @@
                                 <ColumnDefinition Width="76" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition x:Name="ModHeadKind" Width="132" />
-                                <ColumnDefinition x:Name="ModHeadSize" Width="72" />
+                                <ColumnDefinition x:Name="ModHeadSize" Width="80" />
                                 <ColumnDefinition Width="44" />
                             </Grid.ColumnDefinitions>
                             <CheckBox x:Name="ModsPickAll" MinWidth="0" Width="20" Padding="0" VerticalAlignment="Center" HorizontalAlignment="Left" Click="OnModsPickAll" AutomationProperties.Name="Select all" ToolTipService.ToolTip="Select all" />
-                            <Button x:Name="ModHeadName" Grid.Column="1" Style="{StaticResource ModColumn}" HorizontalAlignment="Left" Click="OnModColumn" Tag="0">
+                            <Button x:Name="ModHeadName" AutomationProperties.Name="Name" Grid.Column="1" Style="{StaticResource ModColumn}" HorizontalAlignment="Left" Click="OnModColumn" Tag="0">
                                 <StackPanel Orientation="Horizontal" Spacing="6"><TextBlock x:Name="ModHeadNameText" Text="Name" FontSize="12" VerticalAlignment="Center" /><local:LucideIcon x:Name="ModHeadNameMark" Kind="chevron-up" Size="13" VerticalAlignment="Center" /></StackPanel>
                             </Button>
-                            <Button x:Name="ModHeadKindButton" Grid.Column="2" Style="{StaticResource ModColumn}" HorizontalAlignment="Left" Click="OnModColumn" Tag="2">
+                            <Button x:Name="ModHeadKindButton" AutomationProperties.Name="Type" Grid.Column="2" Style="{StaticResource ModColumn}" HorizontalAlignment="Left" Click="OnModColumn" Tag="2">
                                 <StackPanel Orientation="Horizontal" Spacing="6"><TextBlock x:Name="ModHeadKindText" Text="Type" FontSize="12" VerticalAlignment="Center" /><local:LucideIcon x:Name="ModHeadKindMark" Kind="chevron-up" Size="13" VerticalAlignment="Center" /></StackPanel>
                             </Button>
-                            <Button x:Name="ModHeadSizeButton" Grid.Column="3" Style="{StaticResource ModColumn}" HorizontalAlignment="Right" Click="OnModColumn" Tag="1">
+                            <Button x:Name="ModHeadSizeButton" AutomationProperties.Name="Size" Grid.Column="3" Style="{StaticResource ModColumn}" HorizontalAlignment="Right" Click="OnModColumn" Tag="1">
                                 <StackPanel Orientation="Horizontal" Spacing="6"><local:LucideIcon x:Name="ModHeadSizeMark" Kind="chevron-down" Size="13" VerticalAlignment="Center" /><TextBlock x:Name="ModHeadSizeText" Text="Size" FontSize="12" VerticalAlignment="Center" /></StackPanel>
                             </Button>
                             <!-- (a longer word than the switch is wide, as in Portuguese, reaches into the gap on its left) -->

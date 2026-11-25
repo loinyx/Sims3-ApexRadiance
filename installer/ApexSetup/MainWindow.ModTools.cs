@@ -12,10 +12,10 @@ public sealed partial class MainWindow
 {
     // ---------- merge ----------
 
-    // one package to write: its file's name, the work, and where its log is once it started
-    sealed record MergeJob(string File, Func<IProgress<MergeProgress>, CancellationToken, MergeResult> Run, Func<string?> Log);
+    // one package to write: its file's name, about how big it is (its share of the bar), the work, and where its log is once it started
+    sealed record MergeJob(string File, long Bytes, Func<IProgress<MergeProgress>, CancellationToken, MergeResult> Run, Func<string?> Log);
 
-    // the run, one package after the other: a step list with a bar and the time, the log as it is written, Cancel until the
+    // the run, one package after the other: a step list with a bar and the time left, Cancel until the
     // originals start moving. The packages already done stay done when a later one fails or is stopped.
     async Task<(List<MergeResult> Done, Exception? Error)> MergeRunDialog(List<MergeJob> jobs, Func<List<MergeResult>, string>? title = null)
     {
@@ -33,7 +33,7 @@ public sealed partial class MainWindow
             var iconHost = new Grid();
             iconHost.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 14, Height = 14, Stroke = Res("ApexMutedBrush"), StrokeThickness = 1.5 });
             g.Children.Add(iconHost);
-            var t = new TextBlock { Text = label, FontSize = 13, Foreground = Res("ApexMutedBrush") };
+            var t = new TextBlock { Text = label, FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap };
             Grid.SetColumn(t, 1);
             g.Children.Add(t);
             var det = new TextBlock { FontSize = 12, Foreground = Res("ApexMutedBrush") };
@@ -83,14 +83,16 @@ public sealed partial class MainWindow
             text.Foreground = Res(state == "wait" ? "ApexMutedBrush" : "ApexSoftTextBrush");
         }
         var job = 0;
+        var weights = jobs.Select(j => Math.Max(1.0, j.Bytes)).ToArray();
         Progress<MergeProgress> Follow(int mine) => new(p =>
         {
             if (mine != job) return; // (said late, by the package before)
             if (p.Step != current) { foreach (var (s, _) in steps.TakeWhile(x => x.Item1 != p.Step)) Mark(s, "done"); current = p.Step; Mark(p.Step, "now"); }
             var (_, _, det) = rows[p.Step];
             det.Text = p.Total <= 0 || p.Step == MergeStep.Finish ? "" : p.Step == MergeStep.Move ? $"{p.Done} / {p.Total}" : $"{ModRow.SizeText(p.Done)} / {ModRow.SizeText(p.Total)}";
+            var before = weights.Take(job).Sum();
             var (from, share) = p.Step switch { MergeStep.Check => (0.0, 0.02), MergeStep.Write => (0.02, 0.56), MergeStep.Verify => (0.58, 0.28), MergeStep.Move => (0.86, 0.13), _ => (0.99, 0.01) }; // (what each one takes of the time)
-            bar.Value = (job + from + (p.Total > 0 ? share * p.Done / p.Total : 0)) / jobs.Count;
+            bar.Value = (before + weights[job] * (from + (p.Total > 0 ? share * p.Done / p.Total : 0))) / weights.Sum();
             far.Text = $"{Math.Floor(bar.Value * 100):0}%";
         });
         var timer = DispatcherQueue.CreateTimer();

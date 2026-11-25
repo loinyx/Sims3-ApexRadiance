@@ -149,7 +149,7 @@ static class ModConflictsTests
         var notes = In("IniSame", ("Packages/a.package", IniPkg(Ini("1.0f", "mine"))), ("Packages/b.package", IniPkg(Ini("1", "was 2"))));
         var lights = In("IniOther", ("Packages/a.package", IniPkg(Ini("1.35"), more: true)), ("Packages/b.package", IniPkg(Ini("1.5"))));
         check(notes.Count == 0 && lights is [{ Kind: "resource key" } li] && li.Values.SequenceEqual(["Lighting > SunlightScale", "1.35", "1.5"])
-              && Of(li) is { Level: ConflictLevel.Look, Title: "A mod that does nothing", SayArgs: ["b", "a"], Dead: ["Mods/Packages/b.package"], Finding: not null } lo && lo.Values is [("Lighting > SunlightScale", "1.35", "1.5")],
+              && Of(li) is { Level: ConflictLevel.Look, Title: "A mod that likely does nothing", SayArgs: ["b", "a"], Dead: ["Mods/Packages/b.package"], Finding: not null } lo && lo.Values is [("Lighting > SunlightScale", "1.35", "1.5")],
             $"mod conflicts: settings files are compared by their values, and a mod that loses all of itself does nothing ({string.Join(" / ", lights.Select(c => c.Text))})");
         check(ModConflicts.ValuesThatDiffer(ModConflicts.TypeXml, U("<base><kCar><Speed value=\"13\"/><Pace value=\"1\"/></kCar></base>"), U("<base><kCar><Speed value=\"25\"/><Pace value=\"1.0\"/></kCar></base>")) is [("kCar > Speed", "13", "25")],
             "mod conflicts: the values two tunings set differently are told");

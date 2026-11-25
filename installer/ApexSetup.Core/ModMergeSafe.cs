@@ -86,6 +86,14 @@ public static partial class ModMerge
             new SortedSet<string>(g.SelectMany(i => outside.GetValueOrDefault(i) ?? []), StringComparer.OrdinalIgnoreCase), g.SelectMany(i => keys[i]).Distinct().Count(), keys, pairs, outside)).ToList();
     }
 
+    // What was read of the files is forgotten: each merge dialog, each draft and each search for newer versions reads them
+    // again (a file put in another one's place can have its size and its date).
+    public static void Fresh()
+    {
+        _probes.Clear();
+        Contents.Forget();
+    }
+
     // resources compared by content, each file opened once
     sealed class Contents : IDisposable
     {
@@ -112,7 +120,7 @@ public static partial class ModMerge
             if (ea.MemSize != eb.MemSize && Math.Max(ea.MemSize, eb.MemSize) > ModConflicts.MeaningCap) return false;
             try
             {
-                var key = (a, Stamp(a), ea.Offset, b, Stamp(b), eb.Offset);
+                var key = (a, Stamp(a), ea, b, Stamp(b), eb); // (the whole entry: an empty resource starts where the next one does)
                 if (_same.TryGetValue(key, out var known)) return known;
                 if (_same.Count > 500_000) _same.Clear();
                 return _same[key] = Compare(a, ea, b, eb);
@@ -122,7 +130,8 @@ public static partial class ModMerge
 
         // two resources compared once are not compared again while their files stay as they are (the merge is planned again at
         // each choice, and reading and unpacking the same pairs took most of it)
-        static readonly ConcurrentDictionary<(string, (long, long), uint, string, (long, long), uint), bool> _same = new();
+        static readonly ConcurrentDictionary<(string, (long, long), ModConflicts.Entry, string, (long, long), ModConflicts.Entry), bool> _same = new();
+        public static void Forget() => _same.Clear();
         readonly Dictionary<string, (long, long)> _stamps = new(StringComparer.OrdinalIgnoreCase);
         (long, long) Stamp(string path)
         {

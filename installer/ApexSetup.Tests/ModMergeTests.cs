@@ -133,6 +133,22 @@ static class ModMergeTests
         var v2 = Path.Combine(downloads, "e3 v2.package");
         Pkg(v2, Raw(102, 102, "e3 new"), Raw(105, 105, "more"));
         ModNotes.SetNotes(Rel("e1"), "n1");
+        // ---- what is kept of the files between plans ----
+        // an empty resource starts where the next one does: its "same in both" is not the next one's
+        Make("z1", Raw(0x2F7D0004, 900, ""), Raw(0x0333406C, 901, "<a value=\"1\"/>"));
+        Make("z2", Raw(0x2F7D0004, 900, ""), Raw(0x0333406C, 901, "<a value=\"9\"/>"));
+        check(ModMerge.Plan(docs, [M("z1"), M("z2")], "Zero", Folder, false).Clashes.Count == 1, "plan: an empty resource at the place of the next one does not hide that the next one differs");
+        // a file put in another's place, of the same size and date: a new dialog reads it, and a plan made before it never copies from it
+        Make("z3", Raw(0x0333406C, 902, "<a value=\"1\"/>"));
+        Make("z4", Raw(0x0333406C, 902, "<a value=\"1\"/>"), Raw(0x0333406C, 903, "<b value=\"1\"/>"));
+        var alike = ModMerge.Plan(docs, [M("z3"), M("z4")], "Stale", Folder, false);
+        var was = File.GetLastWriteTimeUtc(M("z4").Path);
+        Make("z4", Raw(0x0333406C, 904, "<a value=\"9\"/>"), Raw(0x0333406C, 902, "<b value=\"9\"/>"));
+        File.SetLastWriteTimeUtc(M("z4").Path, was);
+        check(alike.CanRun && Throws<SetupException>(() => ModMerge.Run(alike, null, default)) && File.Exists(M("z4").Path), "run: a file replaced by one of its size and date is not merged from the old one's index");
+        _ = new MergeChoices();
+        check(ModMerge.Plan(docs, [M("z3"), M("z4")], "Stale", Folder, false).Clashes.Count == 1, "plan: a new dialog reads a file replaced by one of its size and date");
+        foreach (var n in new[] { "z1", "z2", "z3", "z4" }) File.Delete(M(n).Path);
         var start = Snap(docs);
 
         // ---- one order ----

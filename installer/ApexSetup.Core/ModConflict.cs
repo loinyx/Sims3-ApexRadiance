@@ -31,7 +31,7 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
     // resources that only look or read differently: texts, pictures, icons, sounds and videos
     static readonly HashSet<string> LooksOnly = new(StringComparer.OrdinalIgnoreCase)
         { "STBL", "_IMG", "PNG", "ICON", "0xb1cc1af6", "0x01a527db", "0x01eef63a", "0x8070223d" };
-    static readonly Regex Types = new(@"different content \(([^)]*)\)"), Type = new(@"(\w+) \d+"), Texts = new(@"; (\d+) texts differ\)"), Same = new(@"; same copy as the winner: ([^;]+)"), NoEffect = new(@"; no effect: ([^;]+)$"), Used = new(@"likely winner: ([^;]+)"),
+    static readonly Regex Types = new(@"different content \(([^)]*)\)"), Type = new(@"(\w+) \d+"), Texts = new(@"; (\d+) texts differ\)"), Same = new(@"; same copy as the winner: (.+?)(?:; no effect: .*)?$"), NoEffect = new(@"; no effect: (.+)$"), Used = new(@"likely winner: ([^;]+)"),
         Version = new(@"[\s_\-.]*\(?(v\.?\s*\d+([._]\d+)*|\d+([._]\d+)+)\)?$", RegexOptions.IgnoreCase); // ("V.1.2", "_v130", "1.2": not a bare number, which is part of a name)
 
     public static ModConflict Of(ConflictEntry c, string[] files)
@@ -61,19 +61,21 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
         var used = Used.Match(c.Text) is { Success: true } u ? u.Groups[1].Value.Trim() : null;
         var winner = Array.IndexOf(c.Labels, used) is >= 0 and var at ? names[at] : c.Winner;
         var dead = NoEffect.Match(c.Text) is { Success: true } gone ? gone.Groups[1].Value.Split(" | ") : [];
-        if (dead.Length == 1 && winner is { } by && Array.IndexOf(c.Labels, dead[0]) is >= 0 and var none && c.Kind is "resource key" or "decided")
+        if (dead.Length == 1 && c.Labels.Length == 2 && winner is { } by && Array.IndexOf(c.Labels, dead[0]) is >= 0 and var none && c.Kind is "resource key" or "decided")
         {
-            if (level == ConflictLevel.Look) title = "A mod that does nothing";
-            if (level == ConflictLevel.Look || c.Kind == "decided") say = "{0} does nothing: {1} replaces all of it.";
+            // (which of two in one folder is loaded last is likely, not verified in game)
+            if (level == ConflictLevel.Look) (title, say) = ("A mod that likely does nothing", "{0} likely does nothing: {1} replaces all of it.");
+            else if (c.Kind == "decided") say = "{0} does nothing: {1} replaces all of it.";
         }
-        string[] args = say.StartsWith("{0} does nothing", StringComparison.Ordinal) ? [names[Array.IndexOf(c.Labels, dead[0])], winner!] : c.Kind is "translation" or "add-on" ? names[..2]
+        var idle = say.Contains("does nothing: {1}", StringComparison.Ordinal);
+        string[] args = idle ? [names[Array.IndexOf(c.Labels, dead[0])], winner!] : c.Kind is "translation" or "add-on" ? names[..2]
             : say.StartsWith("Texts", StringComparison.Ordinal) ? (winner is { } first ? [first, texts!] : [texts!])
             : say.Contains("{0}") && winner is { } w ? [w] : [];
         var what = c.Kind == "interaction" ? c.Text[(c.Text.IndexOf("replace ", StringComparison.Ordinal) + 8)..].Split(' ')[0] : "";
         // (one id whatever the scan calls two mods with the same data, so one the player ignored stays ignored)
         var id = string.Join("|", c.Parties.Select(Plain).Order(StringComparer.Ordinal).Prepend(what).Prepend(c.Kind is "translation" or "add-on" or "decided" ? "resource key" : c.Kind));
         var finding = level == ConflictLevel.Small ? null
-            : say.StartsWith("{0} does nothing", StringComparison.Ordinal) ? new Finding(Severity.Warning, "{0} does nothing. {1} replaces all of it.", args)
+            : idle ? new Finding(Severity.Warning, "{0} likely does nothing. {1} replaces all of it.", args)
             : winner is { } win ? new Finding(Severity.Warning, "{0} change the same game data. {1} likely wins and the others' changes are lost.", [string.Join(", ", names), win])
             : new Finding(Severity.Warning, title, []);
         return new(id, level, title, say, args, c.Parties, c.Winner, files, $"{c.Kind}: {c.Text}") { Finding = finding, CanOrder = level != ConflictLevel.Fix && c.Kind != "interaction",

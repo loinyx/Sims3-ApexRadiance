@@ -119,6 +119,7 @@ public sealed partial class MainWindow
             want++;
             d.IsPrimaryButtonEnabled = false;
             (busy.IsIndeterminate, busy.Opacity) = (true, 1);
+            AutomationProperties.SetAccessibilityView(busy, AccessibilityView.Content);
             Rows();
             timer.Stop();
             timer.Interval = TimeSpan.FromMilliseconds(Math.Max(1, wait));
@@ -173,6 +174,7 @@ public sealed partial class MainWindow
             var bytes = plans.Sum(p => p.OutputBytes) + (scripts?.OutputBytes ?? 0);
             var made = plans.Count + (scripts is null ? 0 : 1);
             (busy.IsIndeterminate, busy.Opacity) = (false, 0);
+            AutomationProperties.SetAccessibilityView(busy, AccessibilityView.Raw);
             d.Title = inside == mods.Count ? T("Merge {0} mods", inside) : T("Merge {0} of the {1} mods chosen", inside, mods.Count);
             line.Text = trouble is not null || inside < 2 ? "" : made == 1 ? // (one mod: no merge yet, and the reason is said below)
                 T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, inside, resources, ModRow.SizeText(bytes))
@@ -338,14 +340,14 @@ public sealed partial class MainWindow
         closed = true;
         timer.Stop();
         if (answer != ContentDialogResult.Primary || !Ready()) return null;
-        var jobs = plans.Select(p => new MergeJob(Path.GetFileName(p.TargetRel), (progress, ct) => ModMerge.Run(p, progress, ct), () => p.LogPath)).ToList();
+        var jobs = plans.Select(p => new MergeJob(Path.GetFileName(p.TargetRel), p.OutputBytes, (progress, ct) => ModMerge.Run(p, progress, ct), () => p.LogPath)).ToList();
         if (scripts is { } own)
         {
             // (planned again, from the mods shown, once the first merge is in place: only then is their order against it
             // known, and a mod that conflicts with it and was not put in stays out)
             var (from, put) = (own.Inputs.ToList(), choices.Rows.Where(r => r.Pick == true).Select(r => r.Mod.Rel).ToList());
             MergePlan? late = null;
-            jobs.Add(new MergeJob(Path.GetFileName(own.TargetRel), (progress, ct) =>
+            jobs.Add(new MergeJob(Path.GetFileName(own.TargetRel), own.OutputBytes, (progress, ct) =>
             {
                 late = ModMerge.Plan(docs, from, own.Name, folder, true, put);
                 if (late.Refusals.FirstOrDefault() is { } no) throw new SetupException(no.Key, no.Args);
@@ -461,7 +463,7 @@ public sealed partial class MainWindow
         var jobs = updates.GroupBy(u => u.Merged.Rel, StringComparer.OrdinalIgnoreCase).Select(g =>
         {
             MergeEditPlan? plan = null;
-            return new MergeJob(g.First().Merged.Name, (progress, ct) =>
+            return new MergeJob(g.First().Merged.Name, g.First().Merged.Size, (progress, ct) =>
             {
                 var edit = new MergeEdit();
                 foreach (var u in g) edit.Replace[u.Original.Rel] = u.Newer;

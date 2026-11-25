@@ -112,7 +112,7 @@ public static partial class ModConflicts
         var section = "";
         foreach (var raw in text.Split('\n'))
         {
-            var l = raw.Split(';')[0].Trim();
+            var l = Uncommented(raw).Trim();
             if (l.Length == 0 || l.StartsWith("//", StringComparison.Ordinal)) continue;
             if (l[0] == '[' && l[^1] == ']') { section = l[1..^1].Trim(); continue; }
             if (l.IndexOf('=') is not (> 0 and var at)) return null;
@@ -122,8 +122,21 @@ public static partial class ModConflicts
         return o;
     }
 
+    // a line without its comment (a ; inside quotes is part of the value)
+    static string Uncommented(string line)
+    {
+        var quoted = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            if (line[i] == '"') quoted = !quoted;
+            else if (line[i] == ';' && !quoted) return line[..i];
+        }
+        return line;
+    }
+
+    // (only what a double holds to the last digit: two longer numbers that differ must not read alike)
     static string? Number(string v) =>
-        double.TryParse(v.EndsWith('f') || v.EndsWith('F') ? v[..^1] : v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n)
+        v.Count(char.IsAsciiDigit) <= 15 && double.TryParse(v.EndsWith('f') || v.EndsWith('F') ? v[..^1] : v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) && double.IsFinite(n)
             ? n.ToString("R", System.Globalization.CultureInfo.InvariantCulture) : null;
 
     // The values of an XML tuning by where they are ("kCarTuning > Speed"), null when it is not one.

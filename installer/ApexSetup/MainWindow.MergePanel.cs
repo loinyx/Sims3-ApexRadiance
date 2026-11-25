@@ -63,6 +63,7 @@ public sealed partial class MainWindow
     void DraftFor(ModRow r, MergeRecord merge)
     {
         if (_draft is { } d && d.Dir.Equals(merge.Dir, StringComparison.OrdinalIgnoreCase) && d.Sha256 == merge.Sha256) { d.Rel = r.File.Rel; return; }
+        ModMerge.Fresh();
         (_draft, _draftPlan, _mergeOpen) = (new MergeDraft(merge), null, null);
         _draftRun++;
     }

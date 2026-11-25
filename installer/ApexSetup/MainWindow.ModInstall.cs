@@ -164,7 +164,8 @@ public sealed partial class MainWindow
     {
         if (!i.Ok) return T(i.Problem!);
         if (i.SameAs is { } same) return i.SameInList ? T("The same file as {0}", same) : i.SameInMerge ? T("Already inside the merge {0}", same) : T("Already installed as {0}", same) + (i.OtherMod?.Enabled == false ? " (" + T("Turned off") + ")" : "");
-        if (i is { Doubt: true, Warning: { } doubt }) return T(doubt) + " " + T("Tick it to add it anyway.");
+        if (i is { Doubt: true, Warning: { } doubt })
+            return T(doubt) + " " + T("Tick it to add it anyway.") + (i.Also is { } also ? " " + T(also) : "") + (i.OtherMod is { } there ? " " + T("Another version is installed: {0}", ModRow.Place(there)) : "");
         if (i.Place == AddPlace.Worlds && i.Other is not null) return T("Another world has this name. Your saves keep using that one.");
         if (i.OtherMod is { } o) return T("Another version is installed: {0}", ModRow.Place(o)) + (o.Enabled ? "" : " (" + T("Turned off") + ")");
         if (i.Other is not null) return T("Another file with this name is there");
@@ -239,7 +240,7 @@ public sealed partial class MainWindow
     async Task<bool> AddPlanDialog(ModAdd add, List<string> paths)
     {
         // (the ones with a choice to make first, so each has its row; one past the last row replaces nothing unseen)
-        var ok = add.Items.Where(i => i.Ok).OrderByDescending(i => i.CanReplace).ToList();
+        var ok = add.Items.Where(i => i.Ok).OrderByDescending(i => i.Doubt).ThenByDescending(i => i.CanReplace).ToList();
         foreach (var i in ok.Skip(200)) i.Replace = false;
         var width = AddWidth(560);
         var d = new ContentDialog

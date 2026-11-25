@@ -525,15 +525,37 @@ public static partial class ModMerge
         }
     }
 
-    const long WholeBytes = 64 << 20, AheadBytes = 256 << 20;
+    const long WholeBytes = 32 << 20, AheadBytes = 128 << 20;
 
-    // a source's bytes with their hash; one too big to hold is only hashed, and read again where it is copied
+    // A source's bytes (in a buffer to give back) with their hash; one too big to hold is only hashed, and read again where it
+    // is copied. Its index must hold what the plan copies from it: a file put in its place can have its size and its date.
     static (byte[]? Bytes, string Sha) Load(MergeSource s, CancellationToken ct)
     {
-        if (s.Size > WholeBytes) return (null, Sha(s.Mod.Path, ct));
         ct.ThrowIfCancellationRequested();
-        var b = File.ReadAllBytes(s.Mod.Path);
-        return (b, Convert.ToHexString(SHA256.HashData(b)).ToLowerInvariant());
+        void Check(List<ModConflicts.Entry>? now)
+        {
+            var have = now?.ToHashSet();
+            if (have is null || !s.Keep.All(have.Contains)) throw new SetupException("{0} changed since the merge was planned. Plan it again.", s.Mod.Rel);
+        }
+        if (s.Size > WholeBytes)
+        {
+            Check(ProbeNow(s.Mod.Path).Item1);
+            return (null, Sha(s.Mod.Path, ct));
+        }
+        var b = System.Buffers.ArrayPool<byte>.Shared.Rent((int)s.Size);
+        try
+        {
+            using (var f = new FileStream(s.Mod.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan))
+            {
+                if (f.Length != s.Size) throw new SetupException("{0} changed since the merge was planned. Plan it again.", s.Mod.Rel);
+                f.ReadExactly(b, 0, (int)s.Size);
+            }
+            var bytes = b.AsSpan(0, (int)s.Size);
+            uint at = U32(b, 64), size = U32(b, 44);
+            Check((long)at + size <= s.Size ? ModConflicts.ReadIndex(bytes[..96].ToArray(), bytes.Slice((int)at, (int)size).ToArray()) : null);
+            return (b, Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
+        }
+        catch { System.Buffers.ArrayPool<byte>.Shared.Return(b); throw; }
     }
 
     // The header first (every offset is known from the plan), then each resource's stored bytes, then the index. Each source
@@ -580,7 +602,7 @@ public static partial class ModMerge
                     ct.ThrowIfCancellationRequested();
                     if (bytes is not null)
                     {
-                        if ((long)e.Offset + e.FileSize > bytes.Length) throw new InvalidDataException($"{s.Mod.Rel} ended inside a resource");
+                        if ((long)e.Offset + e.FileSize > s.Size) throw new InvalidDataException($"{s.Mod.Rel} ended inside a resource");
                         Put(bytes.AsSpan((int)e.Offset, e.FileSize));
                     }
                     else
@@ -600,6 +622,7 @@ public static partial class ModMerge
                     progress?.Report(new(MergeStep.Write, read, all + 1)); // (+1: the end is said once the index is in)
                     if (written.Count == 1) FailPoint("write");
                 }
+                if (bytes is not null) System.Buffers.ArrayPool<byte>.Shared.Return(bytes);
                 read += s.Size - s.Keep.Sum(e => (long)e.FileSize);
                 progress?.Report(new(MergeStep.Write, read, all + 1));
             }

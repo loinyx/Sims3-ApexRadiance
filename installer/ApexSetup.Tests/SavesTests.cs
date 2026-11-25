@@ -433,7 +433,7 @@ static class SavesTests
         var bad = SaveCopies.Timeline(docs, s).First(p => p.Path == evil);
         File.WriteAllText(Path.Combine(Saves.BackupDir(docs), "Town 2020-01-02 00.00.00.zip"), "not a zip");
         check(Throws<SetupException>(() => SaveCopies.Restore(docs, s, bad)) && Same(played, Snap(s.Dir)) && !Directory.EnumerateFiles(Path.GetDirectoryName(docs)!, "evil.txt", SearchOption.AllDirectories).Any()
-              && SaveCopies.Timeline(docs, s).Count == 5 && Directory.GetFiles(Saves.BackupDir(docs)).Length == zips + 2,
+              && SaveCopies.Timeline(docs, s).Count == 5 && Directory.GetFiles(Saves.BackupDir(docs), "*.zip").Length == zips + 2, // (not what an antivirus puts beside one)
             "copies: a copy whose file names point outside the save is refused whole; a file that is not a zip is not offered");
         File.Delete(evil);
         File.Delete(Path.Combine(Saves.BackupDir(docs), "Town 2020-01-02 00.00.00.zip"));

@@ -445,11 +445,11 @@ public sealed partial class MainWindow
     // what two mods set to something else: each name with its value in use and the other mod's
     static FrameworkElement ConflictValues(ModConflict c)
     {
-        var g = new Grid { ColumnSpacing = 24, RowSpacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
-        foreach (var w in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+        var g = new Grid { ColumnSpacing = 24, RowSpacing = 6 };
+        foreach (var (share, most) in new[] { (2.0, 280.0), (1, 160), (1, 160) }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(share, GridUnitType.Star), MaxWidth = most });
         void Cell(string text, int col, int row, string brush, bool strong = false)
         {
-            var t = new TextBlock { Text = text, FontSize = 12, Foreground = Res(brush), FontWeight = strong ? FontWeights.SemiBold : FontWeights.Normal, MaxWidth = 280, TextTrimming = TextTrimming.CharacterEllipsis };
+            var t = new TextBlock { Text = text, FontSize = 12, Foreground = Res(brush), FontWeight = strong ? FontWeights.SemiBold : FontWeights.Normal, TextTrimming = TextTrimming.CharacterEllipsis };
             ToolTipService.SetToolTip(t, text);
             Grid.SetColumn(t, col);
             Grid.SetRow(t, row);
@@ -480,7 +480,7 @@ public sealed partial class MainWindow
         for (int i = 0; i < files.Count; i++)
         {
             var (party, file) = files[i];
-            var info = c.InUse is { } w ? (w == c.Labels[i] ? T("In use") : c.Alike.Contains(c.Labels[i]) ? T("Same as the one in use") : c.Dead.Contains(c.Labels[i]) ? T("Does nothing") : T("Replaced by the other"))
+            var info = c.InUse is { } w ? (w == c.Labels[i] ? T("In use") : c.Alike.Contains(c.Labels[i]) ? T("Same as the one in use") : c.Dead.Contains(c.Labels[i]) ? T(c.Level == ConflictLevel.Look ? "Likely does nothing" : "Does nothing") : T("Replaced by the other"))
                 : c.Title == "Two versions of the same mod" && dates[i] is { } d ? (d == newest ? T("Newest, from {0}", d.ToString("d MMM yyyy", LangCulture())) : T("From {0}", d.ToString("d MMM yyyy", LangCulture()))) : "";
             var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(14, 8, 8, 8), MinHeight = 48, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition());

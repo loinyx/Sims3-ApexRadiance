@@ -593,20 +593,16 @@ public sealed partial class MainWindow
         f.Equals(m.Path, StringComparison.OrdinalIgnoreCase) || f.Replace('/', '\\').EndsWith(m.Rel, StringComparison.OrdinalIgnoreCase)
         || f.Equals(m.Name, StringComparison.OrdinalIgnoreCase))).ToList();
 
-    // Mods, opened on those mods: one found by name and chosen, several listed in Needs a look
+    // Mods, opened on those mods alone (a filter the player can take away) and chosen, whatever was searched or filtered there
     void ShowInMods(List<ModFile> hits)
     {
         CloseFind();
-        _modPlace = hits.Count == 1 ? (hits[0].FileType == "asi" ? AsiMods : AllMods) : LookMods;
-        ModSearch.Text = hits.Count == 1 ? Path.GetFileNameWithoutExtension(hits[0].Name) : "";
+        ClearFilters();
+        ModSearch.Text = "";
+        (_fOnly, _pickOnce) = (hits.Select(h => h.Rel).ToHashSet(StringComparer.OrdinalIgnoreCase), true);
+        _modPlace = hits.All(h => h.FileType == "asi") ? AsiMods : AllMods;
         _folderSig = "";
         Show(ModsScreen);
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-        {
-            var list = _modsGrid ? (ListViewBase)ModGrid : ModList;
-            foreach (var row in _modShown.Where(r => hits.Any(h => h.Path.Equals(r.File.Path, StringComparison.OrdinalIgnoreCase))))
-                list.SelectedItems.Add(row);
-        });
     }
 
     void CopyReport()

@@ -211,7 +211,7 @@ public static class ModKinds
             var md = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
             return md.IsAssembly ? md.GetString(md.GetAssemblyDefinition().Name) : null;
         }
-        catch (Exception e) when (e is ArgumentException or InvalidDataException or BadImageFormatException or IndexOutOfRangeException or InvalidOperationException) { return null; }
+        catch (Exception e) when (e is not OutOfMemoryException) { return null; } // (bytes of a file: whatever a damaged one throws)
     }
 
     // the catalog thumbnail of an item in the package: a THUM (0x0580A2B4..B6) of the item's own instance, as EA's

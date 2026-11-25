@@ -93,6 +93,7 @@ public static partial class ModMerge
     // resources are all in the mod unchanged, comes back as Same. One candidate per mod, the newest. Unsure: nothing.
     public static List<MergeUpdate> Updates(string docs, IEnumerable<ModFile> candidates, GameIndex? game = null)
     {
+        Fresh();
         var found = new List<(MergeUpdate U, int[]? Version, DateTime Written)>();
         var kept = new List<(ModFile Merged, MergeRecord Rec, MergeOriginal O, string Path, string Name)>();
         foreach (var r in Records(docs).ToList())

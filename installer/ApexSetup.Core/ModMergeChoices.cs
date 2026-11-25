@@ -40,6 +40,7 @@ public sealed class MergeRows : ObservableCollection<MergeChoice>
 public sealed class MergeChoices
 {
     public MergeRows Rows { get; } = new();
+    public MergeChoices() => ModMerge.Fresh(); // (a new dialog: the files as they are now)
     readonly Dictionary<string, MergeChoice> _known = new(StringComparer.OrdinalIgnoreCase); // (a mod that goes and comes back keeps its choice)
 
     public List<string> Order => Rows.Where(r => r.In).Select(r => r.Mod.Rel).ToList();

@@ -69,7 +69,7 @@ public sealed class ModRow : INotifyPropertyChanged
 
     // the list's columns, narrowed on a small window (set before the rows are shown)
     public static GridLength KindColumn { get; set; } = new(132);
-    public static GridLength SizeColumn { get; set; } = new(72);
+    public static GridLength SizeColumn { get; set; } = new(80);
 
     // the screen's handler: switch the file and return the moved file, or null when it stayed (the reason shown there)
     public static Func<ModRow, bool, ModFile?>? Toggle;

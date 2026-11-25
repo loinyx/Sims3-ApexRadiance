@@ -98,7 +98,7 @@ Repeat until the tester stops you or a round finds nothing new three times in a 
 - On and off for one mod, many mods, a whole folder; turning a mod with items off warns about saves.
 - Folders: make, rename, drag a mod or a folder into another, delete an empty one; a folder that cannot be deleted
   says why.
-- Merge: the plan, the run with its log, the check of the result, splitting back, taking one mod out of a merge; the
+- Merge: the plan, the run with its progress and its log at the end, the check of the result, splitting back, taking one mod out of a merge; the
   originals come back identical (compare file hashes).
 - Profiles (the button on top of the side pane): save what is on, switch, Undo, rename, copy, update, delete; a mod added
   later stays as it is, a mod moved or renamed in the launcher follows, a mod held open by another program leaves every

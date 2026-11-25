@@ -2133,9 +2133,7 @@ public static partial class Strings
         ["{0} of {1} saves put back"] = "{0} de {1} saves voltaram",
         ["That did not work"] = "Não deu certo",
         ["Which save"] = "Qual save",
-        ["A mod that does nothing"] = "Um mod sem efeito",
         ["{0} does nothing: {1} replaces all of it."] = "{0} não faz nada: {1} substitui tudo o que ele tem.",
-        ["{0} does nothing. {1} replaces all of it."] = "{0} não faz nada. {1} substitui tudo o que ele tem.",
         ["What differs"] = "O que muda",
         ["The other"] = "No outro",
         ["Does nothing"] = "Não faz nada",
@@ -2145,5 +2143,9 @@ public static partial class Strings
         ["About {0} s left"] = "Cerca de {0} s restantes",
         ["About {0} min left"] = "Cerca de {0} min restantes",
         ["Tick it to add it anyway."] = "Marque para adicionar mesmo assim.",
+        ["A mod that likely does nothing"] = "Um mod provavelmente sem efeito",
+        ["{0} likely does nothing: {1} replaces all of it."] = "{0} provavelmente não faz nada: {1} substitui tudo o que ele tem.",
+        ["{0} likely does nothing. {1} replaces all of it."] = "{0} provavelmente não faz nada. {1} substitui tudo o que ele tem.",
+        ["Likely does nothing"] = "Provavelmente não faz nada",
     };
 }

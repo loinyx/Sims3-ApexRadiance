@@ -313,7 +313,7 @@ public static partial class ScriptErrors
                     using var pe = new PEReader(ImmutableArray.Create(img));
                     if (pe.HasMetadata) list.Add(read(pe.GetMetadataReader()));
                 }
-                catch (Exception x) when (x is BadImageFormatException or InvalidDataException or IndexOutOfRangeException or ArgumentException or InvalidOperationException) { }
+                catch (Exception x) when (x is BadImageFormatException or InvalidDataException or IndexOutOfRangeException or ArgumentException or InvalidOperationException or OverflowException or InvalidCastException) { }
         }
         catch (Exception e) when (e is InvalidDataException or IOException or ArgumentException or IndexOutOfRangeException) { }
         return list;

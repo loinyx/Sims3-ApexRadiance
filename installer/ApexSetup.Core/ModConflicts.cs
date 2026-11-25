@@ -120,7 +120,7 @@ public static partial class ModConflicts
     static uint U32(ReadOnlySpan<byte> b, int p) => BinaryPrimitives.ReadUInt32LittleEndian(b[p..]);
 
     // head: the 96-byte header; index: the index block it points at
-    static List<Entry> ReadIndex(byte[] head, byte[] index)
+    internal static List<Entry> ReadIndex(byte[] head, byte[] index)
     {
         if (head.Length < 96 || Encoding.Latin1.GetString(head, 0, 4) != "DBPF") throw new InvalidDataException("not DBPF");
         var count = U32(head, 36);
@@ -696,7 +696,7 @@ public static partial class ModConflicts
         if (l[0].E.Type == TypeLayout)
             try { var first = sorted[0].Rec.Pkg.Read(sorted[0].E); return sorted.Skip(1).All(x => Resized(first, x.Rec.Pkg.Read(x.E))); }
             catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { return false; }
-        var builds = l.Select(x => { try { return Build(x.Rec.Pkg.Read(x.E)); } catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { return null; } }).ToList();
+        var builds = l.Select(x => { try { return Build(x.Rec.Pkg.Read(x.E)); } catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException or OverflowException) { return null; } }).ToList();
         return builds[0] is not null && builds.All(b => b == builds[0]);
     }
 
@@ -712,7 +712,7 @@ public static partial class ModConflicts
             var m = r.GetModuleDefinition();
             return r.GetString(m.Name) + " " + r.GetGuid(m.Mvid);
         }
-        catch (Exception e) when (e is BadImageFormatException or InvalidDataException or InvalidOperationException or IndexOutOfRangeException or ArgumentException) { return null; }
+        catch (Exception e) when (e is BadImageFormatException or InvalidDataException or InvalidOperationException or IndexOutOfRangeException or ArgumentException or OverflowException or InvalidCastException) { return null; }
     }
 
     static byte[]? Image(byte[] s3sa) => PeImage(s3sa) ?? PeImage(DecryptS3sa(s3sa));
@@ -896,7 +896,7 @@ public static partial class ModConflicts
                     if (Image(pkg.Read(e)) is { } img) DoAsm(p, img, label);
                     else p.Unknown.Add($"{label}: S3SA {e.Instance:x} without a PE image");
                 }
-                catch (Exception x) when (x is InvalidDataException or IOException or ArgumentException or IndexOutOfRangeException) { p.Unknown.Add($"{label}: S3SA not read ({x.Message})"); }
+                catch (Exception x) when (x is not (OutOfMemoryException or OperationCanceledException)) { p.Unknown.Add($"{label}: S3SA not read ({x.Message})"); } // (a damaged one fails in any of a dozen ways, and must not stop the check of the others)
             if (o.Describe)
                 foreach (var e in pkg.Entries.Where(e => (e.Type == TypeXml || e.Type == TypeStbl) && e.MemSize < 262144))
                     try
@@ -1025,7 +1025,7 @@ public static partial class ModConflicts
             var used = sorted.Count > 0 ? l.IndexOf(sorted[0]) : 0;
             for (var i = 0; i < l.Count; i++)
                 if (side[i] != side[used]) g.Unlike.Add(l[i].Rec);
-            if (sorted.Count == 2 && l.Count == 2 && g.Values.Count < 24 && l.All(x => x.E.MemSize < 1 << 20))
+            if (l[0].E.Type is (TypeXml or TypeIni or 0x03B33DDF /* ITUN */) && sorted.Count == 2 && l.Count == 2 && g.Values.Count < 24 && l.All(x => x.E.MemSize < 1 << 20))
                 try { foreach (var v in ValuesThatDiffer(l[0].E.Type, sorted[0].Rec.Pkg.Read(sorted[0].E), sorted[1].Rec.Pkg.Read(sorted[1].E)).Take(8)) if (g.Values.Count < 24) g.Values.AddRange([v.Name, v.First, v.Second]); }
                 catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { }
             if (l[0].E.Type == TypeStbl && g.Texts is not null)
