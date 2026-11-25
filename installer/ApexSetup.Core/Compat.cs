@@ -204,7 +204,7 @@ public static class Compat
                 return;
             }
         }
-        var log = Path.Combine(docs, "Apex Radiance", "ApexRadiance_LOG.txt");
+        var log = Path.Combine(Scan.ApexDir(docs), "ApexRadiance_LOG.txt");
         if (File.Exists(log) && StandDownModule(Scan.ReadShared(log)) is { } file && !file.Equals("Sims3Performance.asi", StringComparison.OrdinalIgnoreCase)
             && (Scan.FindAsi(bin, file) ?? (File.Exists(Path.Combine(bin, file)) ? Path.Combine(bin, file) : null)) is { } path)
             f.Add(new(Severity.Warning, "Faster text lookups was off in the last game because {0} changes the same code. To use it, turn off the part of that mod that changes text lookups, or remove {0}.",
@@ -230,7 +230,7 @@ public static class Compat
         if (File.Exists(options) && Values(File.ReadAllText(options), "options", "edgesmoothing").LastOrDefault() is { } aa)
         {
             if (!int.TryParse(aa, out var level)) f.Add(Unreadable("Options.ini", "edgesmoothing", aa));
-            else if (level != 0 && ApexEffectsBlockedByMsaa(f, Path.Combine(docs, "Apex Radiance", "ApexRadiance.toml")) is { Count: > 0 } effects)
+            else if (level != 0 && ApexEffectsBlockedByMsaa(f, Path.Combine(Scan.ApexDir(docs), "ApexRadiance.toml")) is { Count: > 0 } effects)
                 f.Add(new(Severity.Warning, "Options.ini has edgesmoothing = {0}. The game's Edge Smoothing stops these Apex effects you turned on: {1}. Apply sets it to 0 and keeps a copy as Options.ini.apex-backup.",
                     new[] { aa, string.Join(", ", effects) }, () => Rewrite(options, t => Set(t, "options", new[] { "edgesmoothing" }, v => v != "0", "0")),
                     Suggest: "Turn off the game's Edge Smoothing"));

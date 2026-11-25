@@ -158,7 +158,7 @@ public static partial class ScriptErrors
     {
         try
         {
-            var path = Path.Combine(docs, "Apex Radiance", "ApexRadiance_Crash.txt");
+            var path = Path.Combine(Scan.ApexDir(docs), "ApexRadiance_Crash.txt");
             if (!File.Exists(path)) return null;
             var text = File.ReadAllText(path);
             var when = Regex.Match(text, @"crash report, (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)");

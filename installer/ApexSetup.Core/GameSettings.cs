@@ -128,13 +128,18 @@ public static class GameSettings
     // ---------- the copies and Restore my files ----------
 
     static string BinCopies(string bin) => Path.Combine(Manifest.DirOf(bin), "game settings");
+    // (not in Scan.ApexDir, which changes with the installed ASI)
     static string DocsCopies(string docs) => Path.Combine(docs, "Apex Radiance", "game settings");
     internal static void KeepBin(string path, string bin) => Keep(path, BinCopies(bin));
-    // a file of Game\Bin, and what was written: one that is something else at the restore was edited since
+    // a file of Game\Bin, and what was written: one that is something else at the restore was edited since, as is one that
+    // was something else before a later write (no note of it then)
     internal static void WriteBin(string path, string text, string bin)
     {
+        var copy = Path.Combine(BinCopies(bin), Path.GetFileName(path));
+        var ours = Hash(path) == (File.Exists(copy + Last) ? File.ReadAllText(copy + Last) : Hash(copy));
+        File.Delete(copy + Last); // (first: a write cut short is not ours)
         WriteText(path, text);
-        File.WriteAllText(Path.Combine(BinCopies(bin), Path.GetFileName(path) + Last), Hash(path));
+        if (ours) File.WriteAllText(copy + Last, Hash(path));
     }
     const string Last = ".last";
     static string Hash(string path) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)));

@@ -47,12 +47,17 @@ public static class Uninstall
     // Screenshots and Videos folders, and any folder its settings send captures to), and so does the folder holding them
     public static List<string> ApexSettings(string docs)
     {
-        var left = new List<string>();
-        var apex = Path.Combine(docs, "Apex Radiance");
-        if (!Directory.Exists(apex) || File.GetAttributes(apex).HasFlag(FileAttributes.ReparsePoint)) return left;
-        var keep = Gallery.PictureFolders(docs).Concat(Gallery.VideoFolders(docs))
-            .Append(Path.Combine(apex, "Screenshots")).Append(Path.Combine(apex, "Videos"))
+        // (also where an ASI that never moved it left it; what stays is known before the settings that say it go)
+        var all = new[] { Scan.ApexDir(docs), Path.Combine(docs, "Apex Radiance") }.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var keep = Gallery.PictureFolders(docs).Concat(Gallery.VideoFolders(docs)).Concat(all.SelectMany(d => new[] { Path.Combine(d, "Screenshots"), Path.Combine(d, "Videos") }))
             .Select(f => Path.GetFullPath(f).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar).ToList();
+        return all.SelectMany(d => ApexSettings(d, keep)).ToList();
+    }
+
+    static List<string> ApexSettings(string apex, List<string> keep)
+    {
+        var left = new List<string>();
+        if (!Directory.Exists(apex) || File.GetAttributes(apex).HasFlag(FileAttributes.ReparsePoint)) return left;
         bool Holds(string entry)
         {
             var e = Path.GetFullPath(entry).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;

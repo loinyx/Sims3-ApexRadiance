@@ -720,7 +720,7 @@ public static class Engine
 
     // ---------- the restart host's switch: [ui] restart_host in Apex's own settings ----------
 
-    public static string ApexToml(string docs) => Path.Combine(docs, "Apex Radiance", "ApexRadiance.toml");
+    public static string ApexToml(string docs) => Path.Combine(Scan.ApexDir(docs), "ApexRadiance.toml");
 
     // What Setup writes when the game has not made the file yet. [ui] alone would read as an older install and skip Apex's
     // welcome page (apex_config.cpp: a [ui] without start_profile_done counts as true).
@@ -731,8 +731,8 @@ public static class Engine
     public static bool RestartHostWaits(string docs)
     {
         if (File.Exists(ApexToml(docs))) return false;
-        if (File.Exists(Path.Combine(docs, "S3SS", "Apex", "Apex.toml"))) return true;
         var s3ss = Scan.SetterFile(docs);
+        if (File.Exists(Path.Combine(Path.GetDirectoryName(s3ss)!, "Apex", "Apex.toml"))) return true;
         try
         {
             return File.Exists(s3ss) && Regex.IsMatch(File.ReadAllText(s3ss),

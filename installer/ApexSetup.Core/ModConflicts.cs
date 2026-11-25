@@ -25,7 +25,10 @@ namespace ApexSetup;
 // Ported from sims3-modernization's compat-scan (tools/mod-conflicts.ts), same rules and rule table.
 public static partial class ModConflicts
 {
-    public sealed record Conflict(string Kind, string Text, string[] Parties, string[] Evidence);
+    public sealed record Conflict(string Kind, string Text, string[] Parties, string[] Evidence)
+    {
+        public string[] Labels { get; init; } = []; // each party's file
+    }
     public sealed record WarningParty(string Name, string[] Calls);
     public sealed record AreaWarning(string Area, string Label, string Risk, WarningParty[] Parties);
     public sealed record Note(string Party, string Text);
@@ -144,6 +147,7 @@ public static partial class ModConflicts
         if ((flags & 0x01) != 0) p += sb;
         var size = 0;
         for (var i = 0; i < sb; i++) size = size * 256 + src[p++];
+        if (size < 0 || size > src.Length * 258L) throw new InvalidDataException("a size no RefPack data unpacks to"); // (4 bytes give 1028 at most)
         var o = 0;
         var dst = new byte[size];
         for (;;)
@@ -184,6 +188,7 @@ public static partial class ModConflicts
 
         static byte[] ReadAt(FileStream fs, long pos, int len)
         {
+            if (len < 0 || len > fs.Length - pos) throw new InvalidDataException("data past the end of the file");
             var b = new byte[len];
             fs.Position = pos;
             fs.ReadAtLeast(b, len, throwOnEndOfStream: false);
@@ -1033,7 +1038,7 @@ public static partial class ModConflicts
                 // (the others that hold the copy in use: they lose nothing there)
                 var alike = g.Recs.Skip(1).Where(r => r.Key is not null && !g.Unlike.Contains(r)).Select(r => r.Label).ToList();
                 report.Conflicts.Add(new(kind, $"{differ} shared keys with different content ({types}{(g.Same > 0 ? $"; {g.Same} identical" : "")}{texts}): {id}; likely winner: {g.Winner}{nl}"
-                    + (alike.Count > 0 && g.Winner != "-" ? $"; same copy as the winner: {string.Join(" | ", alike)}" : ""), who.Select(p => p.Name).ToArray(), g.Keys.ToArray()));
+                    + (alike.Count > 0 && g.Winner != "-" ? $"; same copy as the winner: {string.Join(" | ", alike)}" : ""), who.Select(p => p.Name).ToArray(), g.Keys.ToArray()) { Labels = who.Select(p => p.File).ToArray() });
             }
         }
 
@@ -1041,7 +1046,7 @@ public static partial class ModConflicts
         void Add(Conflict c, List<Party> ps)
         {
             if (OneMod(ps)) report.Info.Add(new(ps[0].Mod, $"versions of one mod: {c.Text}"));
-            else report.Conflicts.Add(c);
+            else report.Conflicts.Add(c with { Labels = ps.Select(p => p.File).ToArray() });
         }
         foreach (var grp in parties.SelectMany(p => p.Replaces.Select(r => (r, p))).GroupBy(x => x.r))
         {
@@ -1078,7 +1083,7 @@ public static partial class ModConflicts
                 var shared = all.Where(x => Co(x) is null).ToList();
                 if (shared.Count > 0) report.Conflicts.Add(new("native hook",
                     $"{a.Name} and {b.Name} patch {shared.Count} of the same TS3W.exe addresses ({a.KnownTable} / {b.KnownTable}): install order decides which patch survives",
-                    new[] { a.Name, b.Name }, shared.Take(8).Select(x => $"0x{x:X}" + (a.Purposes?.GetValueOrDefault(x) is { } pa && b.Purposes?.GetValueOrDefault(x) is { } pb ? $" ({pa} / {pb})" : "")).ToArray()));
+                    new[] { a.Name, b.Name }, shared.Take(8).Select(x => $"0x{x:X}" + (a.Purposes?.GetValueOrDefault(x) is { } pa && b.Purposes?.GetValueOrDefault(x) is { } pb ? $" ({pa} / {pb})" : "")).ToArray()) { Labels = [a.File, b.File] });
             }
         foreach (var p in parties.Where(p => p.Addrs is not null && p.KnownTable is null))
             foreach (var t in tabled)

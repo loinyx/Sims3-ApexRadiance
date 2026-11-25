@@ -1238,7 +1238,6 @@ public sealed partial class MainWindow : Window
     List<Finding> _found = new();
     void RefreshGame()
     {
-        if (_game is not null) Scan.BringApex(_game);
         _state = _game is null ? null : Scan.Run(_game);
         // once per scan: Compat walks Mods and reads every Bin .asi, and the status and footer read it again
         _found = _state is null ? new() : Compat.Check(_game!, _state);

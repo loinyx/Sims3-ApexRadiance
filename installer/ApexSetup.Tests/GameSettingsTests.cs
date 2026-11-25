@@ -32,6 +32,31 @@ static class GameSettingsTests
             "Documents folder: Windows' language with none in the registry, and the folder the game has played in first");
         try
         {
+            // two Documents folders: the game's, and Windows' language's, where Sims3SettingsSetter and an older Apex keep theirs
+            string ea = Path.Combine(root, "EA"), english = Path.Combine(ea, "The Sims 3"), german = Path.Combine(ea, "Die Sims 3"), backup = Path.Combine(ea, "The Sims 3_old");
+            string Toml(string d) => Path.Combine(d, "S3SS", "S3SS.toml");
+            void Make(string f) { Directory.CreateDirectory(Path.GetDirectoryName(f)!); Put(f, ""); }
+            Directory.CreateDirectory(english);
+            Make(Toml(backup));
+            check(Scan.SetterFile(english) == Toml(english) && Scan.SetterFile(english, english) == Toml(english) && Scan.SetterFile(english, german) == Toml(english), "S3SS: never a renamed or copied folder's file, nor a folder Windows' language does not have");
+            Directory.CreateDirectory(german);
+            check(Scan.SetterFile(english, german) == Toml(german), "S3SS: a first file goes where it is read, the folder of Windows' language");
+            Make(Toml(english)); Make(Toml(german));
+            File.SetLastWriteTimeUtc(Toml(english), new(2026, 1, 1)); File.SetLastWriteTimeUtc(Toml(german), new(2026, 1, 1));
+            var tie = Scan.SetterFile(english, german);
+            File.SetLastWriteTimeUtc(Toml(german), new(2026, 1, 2));
+            check(tie == Toml(english) && Scan.SetterFile(english, german) == Toml(german), "S3SS: of the two the one saved last, the game's own when they are alike");
+
+            string here = Path.Combine(english, "Apex Radiance"), there = Path.Combine(german, "Apex Radiance"), before = Path.Combine(root, "before.asi"), after = Path.Combine(root, "after.asi");
+            Put(before, "Software Sims"); Put(after, "..Software\\Sims(Steam)\0..");
+            check(Scan.ApexDir(english) == here && Scan.ApexDir(english, english, before) == here && Scan.ApexDir(english, german, after) == here && Scan.ApexDir(english, german, null) == here, "Apex folder: the game's own when there is no other");
+            check(Scan.ApexDir(english, german, before) == there && Scan.ApexDir(english, Path.Combine(ea, "Les Sims 3"), before) == here, "Apex folder: an older ASI reads the folder of Windows' language");
+            Make(Path.Combine(there, "ApexRadiance.toml"));
+            Make(Path.Combine(here, "game settings", "Options.ini"));
+            check(Scan.ApexDir(english, german, after) == there && Scan.ApexDir(english, german, null) == there, "Apex folder: the one left is read there until the ASI moves it");
+            Make(Path.Combine(here, "ApexRadiance.toml"));
+            check(Scan.ApexDir(english, german, after) == here && Scan.ApexDir(english, german, before) == there, "Apex folder: with settings in both, the one the installed ASI reads");
+
             Put(rules, Rules); Put(ini, Ini); Put(options, Options);
             var now = GameSettings.Now(bin, docs);
             check(now["shadow"] == "2048" && now["sims"] == "2048" && now["bloom"] == "0" && now["reads"] == "20000000" && now["walk.radius"] == "0.15"
@@ -81,6 +106,13 @@ static class GameSettingsTests
             Put(ini, Get(ini) + "; mine\r\n");
             GameSettings.RestoreBin(g);
             check(Get(ini) == Ini + "; mine\r\n" && !GameSettings.CanRestore(bin, docs), "game settings: Restore keeps an edit made since");
+            // also an edit made between two of the launcher's writes
+            GameSettings.ApplyBin(g, docs, new Dictionary<string, string> { ["walk.radius"] = "0.1" });
+            Put(ini, Get(ini) + "; mine too\r\n");
+            GameSettings.ApplyBin(g, docs, new Dictionary<string, string> { ["reads"] = "40000000" });
+            GameSettings.ApplyBin(g, docs, new Dictionary<string, string> { ["walk.radius"] = "0.2" });
+            GameSettings.RestoreBin(g);
+            check(Get(ini) == Ini + "; mine\r\n; mine too\r\n" && !GameSettings.CanRestore(bin, docs), "game settings: Restore keeps an edit made between two changes");
             Put(options, "[options]\r\nenableingamestore =\r\n");
             GameSettings.ApplyOptions(g, docs, new Dictionary<string, string> { ["store"] = "1" });
             check(Get(options) == "[options]\r\nenableingamestore =0\r\n", "game settings: an empty value is filled on its own line");

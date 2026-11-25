@@ -2236,5 +2236,8 @@ public static partial class Strings
         ["The game takes these pictures by itself, and the save grows with them."] = "O jogo tira estas fotos sozinho, e o save cresce com elas.",
         ["Turn that off in Game settings"] = "Desligar em Configurações do jogo",
         ["Open Game settings"] = "Abrir Configurações do jogo",
+        ["Not checked"] = "Não verificado",
+        ["Your mods were not checked"] = "Seus mods não foram verificados",
+        ["The conflict check didn't finish. Check again in a moment."] = "A verificação de conflitos não terminou. Verifique de novo daqui a pouco.",
     };
 }
