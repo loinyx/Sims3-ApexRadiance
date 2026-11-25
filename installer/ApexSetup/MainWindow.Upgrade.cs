@@ -16,7 +16,7 @@ public sealed partial class MainWindow
     bool _upgradeDelete = true;
     string? _upgradeFrom; // (Ready: the copy this one was installed from)
 
-    string[] UpgradeSteps => Paths.MovedFromSetup || _upgradeWasSetup ? [T("What's new"), T("Where it lives"), T("Ready")] : [T("Where it lives"), T("Ready")];
+    string[] UpgradeSteps => Paths.MovedFromSetup || _upgradeWasSetup ? [T("What's new"), T("Where to keep it"), T("Ready")] : [T("Where to keep it"), T("Ready")];
     bool _upgradeWasSetup, _started, _upgradeAsked; // (asked once per run: Ask me later waits for the next start)
 
     // a copy not installed yet: the card instead of the dialog; the installed copy, started from one: Ready
@@ -43,7 +43,7 @@ public sealed partial class MainWindow
         var name = steps[Math.Min(stage, steps.Length - 1)];
         var card = new Grid();
         if (name == T("What's new")) FillUpgradeNews(card);
-        else if (name == T("Where it lives")) FillUpgradeWhere(card, steps);
+        else if (name == T("Where to keep it")) FillUpgradeWhere(card, steps);
         else FillUpgradeReady(card, steps);
         UpgradeCard.Child = card;
         UpgradeRun.Visibility = Visibility.Visible;
@@ -187,11 +187,11 @@ public sealed partial class MainWindow
             {
                 FolderRow(),
                 Toggle("monitor", T("Desktop shortcut"), "", _settings.DesktopShortcut, on => { _settings.DesktopShortcut = on; if (!DryRun) _settings.Save(); }),
-                Toggle("power", T("Start with Windows"), T("Opens quietly in the notification area."), _upgradeStartup, on => _upgradeStartup = on),
+                Toggle("power", T("Start with Windows"), T("Opens quietly in the notification area"), _upgradeStartup, on => _upgradeStartup = on),
             },
         });
         var install = SplitButton(Button(T("Install"), () => _ = UpgradeApply(self, true), accent: true));
-        var other = SplitButton(Array.IndexOf(steps, T("Where it lives")) > 0 ? Button(T("Back"), () => UpgradeShow(0)) : Button(T("Ask me later"), UpgradeClose));
+        var other = SplitButton(Array.IndexOf(steps, T("Where to keep it")) > 0 ? Button(T("Back"), () => UpgradeShow(0)) : Button(T("Ask me later"), UpgradeClose));
         (other.MinWidth, other.FontWeight, install.Margin, other.Margin) = (104, FontWeights.Normal, new Thickness(0), new Thickness(0));
         words.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X2, Margin = new Thickness(0, Design.Space.X6, 0, 0), Children = { install, other } });
         var portable = new HyperlinkButton { Content = T("Use without installing"), FontSize = 13, Padding = new Thickness(0) };
@@ -199,7 +199,7 @@ public sealed partial class MainWindow
         words.Children.Add(new WrapPanel
         {
             Spacing = 6, Margin = new Thickness(0, Design.Space.X4, 0, 0),
-            Children = { new TextBlock { Text = T("One file you can move anywhere:"), FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }, portable },
+            Children = { new TextBlock { Text = T("Prefer a single file you can move anywhere?"), FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }, portable },
         });
         card.Children.Add(split);
     }
@@ -211,7 +211,7 @@ public sealed partial class MainWindow
         if (!install)
         {
             try { LauncherInstall.MakePortable(self, null); UpgradeClose(); BuildSettingsIfShown(); }
-            catch (Exception e) { App.Log(e); await Message(T("Apex Launcher could not switch to portable"), ErrorText(e) + "\n\n" + T("It keeps running from here.")); }
+            catch (Exception e) { App.Log(e); await Message(T("Apex Launcher could not switch to portable"), ErrorText(e) + "\n\n" + T("It keeps running from where it is.")); }
             return;
         }
         try
@@ -227,7 +227,7 @@ public sealed partial class MainWindow
         catch (Exception e)
         {
             App.Log(e);
-            await Message(T("Apex Launcher could not install itself"), ErrorText(e) + "\n\n" + T("It keeps running from here."));
+            await Message(T("Apex Launcher could not install itself"), ErrorText(e) + "\n\n" + T("It keeps running from where it is."));
         }
     }
 

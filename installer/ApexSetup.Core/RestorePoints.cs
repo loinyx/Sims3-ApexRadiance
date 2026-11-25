@@ -144,7 +144,7 @@ public static class RestorePoints
         Engine.CheckWritable();
         if (_open is not null) throw new InvalidOperationException("The launcher is applying changes");
         var points = List(bin);
-        if (!points.Any(p => p.Dir == point.Dir)) throw new InvalidOperationException("This restore point is gone.");
+        if (!points.Any(p => p.Dir == point.Dir)) throw new InvalidOperationException("This restore point no longer exists.");
         var failed = new List<string>();
         foreach (var p in points.TakeWhile(p => p.Dir != point.Dir).Append(point))
         {

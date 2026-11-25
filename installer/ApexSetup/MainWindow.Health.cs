@@ -24,14 +24,14 @@ public sealed partial class MainWindow
 
     string AreaName(HealthArea a) => a switch
     {
-        HealthArea.ApexRadiance => "Apex Radiance", HealthArea.Loaders => T("Loaders"), HealthArea.Graphics => T("Graphics"), HealthArea.GameSettings => T("Game settings"),
+        HealthArea.ApexRadiance => "Apex Radiance", HealthArea.Loaders => T("Mod loaders"), HealthArea.Graphics => T("Graphics"), HealthArea.GameSettings => T("Game settings"),
         HealthArea.Mods => T("Mods"), HealthArea.Stability => T("Stability"), HealthArea.Saves => T("Saves"), _ => T("Space and caches"),
     };
     string AreaDetail(HealthArea a) => a switch
     {
-        HealthArea.ApexRadiance => T("files, settings, one copy"), HealthArea.Loaders => T("ASI loader, Sims 3 Modernization"), HealthArea.Graphics => _state?.Layer.ToString() ?? "",
-        HealthArea.GameSettings => "Options.ini, Resource.cfg", HealthArea.Mods => T("Conflicts that change something in the game."), HealthArea.Stability => T("Your latest sessions."),
-        HealthArea.Saves => T("size, copies, complete"), _ => T("free space, OneDrive, game caches"),
+        HealthArea.ApexRadiance => T("Files, settings and a single copy"), HealthArea.Loaders => T("ASI loader, Sims 3 Modernization"), HealthArea.Graphics => _state?.Layer.ToString() ?? "",
+        HealthArea.GameSettings => "Options.ini, Resource.cfg", HealthArea.Mods => T("Conflicts that change something in the game"), HealthArea.Stability => T("Your latest sessions"),
+        HealthArea.Saves => T("Size, backups and missing parts"), _ => T("Free space, OneDrive and game caches"),
     };
 
     // the conflicts the last check found, without or with only the ignored ones
@@ -129,7 +129,7 @@ public sealed partial class MainWindow
         top.Children.Add(Center(_healthState switch
         {
             HealthState.Blocked => T("The game still starts, but without Apex Radiance until this is fixed."),
-            HealthState.NeedsYou => T("The game starts fine."),
+            HealthState.NeedsYou => T("Nothing here stops the game from starting."),
             _ when ModsUnread || _healthAll.Count(i => i.Finding.Severity != Severity.Info) > 0 => T("Nothing else needs your attention."),
             _ => T("Every check passed."),
         }, 14, Res("ApexSoftTextBrush")));
@@ -172,7 +172,7 @@ public sealed partial class MainWindow
 
         var checks = new StackPanel { Spacing = 4 };
         checks.Children.Add(SectionTitle(T("Checks")));
-        var grid = new CardGrid { MinItemWidth = 310, Spacing = Design.Space.Grid };
+        var grid = new CardGrid { MinItemWidth = 380, Spacing = Design.Space.Grid };
         foreach (var a in HealthAreas) grid.Children.Add(AreaTile(a));
         checks.Children.Add(grid);
         body.Children.Add(checks);
@@ -182,7 +182,7 @@ public sealed partial class MainWindow
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         foot.Children.Add(new TextBlock { Text = T("Something wrong in the game?"), FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
-        var hist = Button(T("History"), () => HealthGo(HistoryPage));
+        var hist = Button(T("Restore points"), () => HealthGo(HistoryPage));
         var repair = Button(T("Repair"), async () => await Repair());
         repair.IsEnabled = !_running && !_busy && _state?.ApexVersion is not null;
         AutomationProperties.SetAutomationId(repair, "HealthRepair");
@@ -257,9 +257,12 @@ public sealed partial class MainWindow
     }
 
     // a page with nothing in it
-    static Border Empty(string title, string text)
+    static Border Empty(string title, string text, string icon = "circle-check")
     {
         var s = new StackPanel { Spacing = 4, Padding = new Thickness(24, 40, 24, 42) };
+        var mark = Lucide.Icon(icon, 32, Res(icon == "circle-check" ? "ApexSuccessBrush" : "ApexIconMutedBrush"), 1.6);
+        (mark.HorizontalAlignment, mark.Margin) = (HorizontalAlignment.Center, new Thickness(0, 0, 0, 8));
+        s.Children.Add(mark);
         s.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap });
         s.Children.Add(new TextBlock { Text = text, FontSize = 13, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap });
         return Glass(s);
@@ -309,7 +312,7 @@ public sealed partial class MainWindow
     void IgnoreDone(bool on, bool note, Action undo)
     {
         HealthBadge.Visibility = _healthState != HealthState.Ready ? Visibility.Visible : Visibility.Collapsed;
-        _healthNote = !note ? null : on ? (T("Ignored. It won't show again."), T("Undo"), undo) : (T("Showing again."), null, null);
+        _healthNote = !note ? null : on ? (T("Ignored. It won't appear again."), T("Undo"), undo) : (T("Showing again"), null, null);
         BuildHealth();
     }
 
@@ -325,7 +328,7 @@ public sealed partial class MainWindow
             items = items.Where(i => !i.Finding.Text.Contains("crashed", StringComparison.Ordinal)).ToList();
         }
         if (items.Count > 0) body.Children.Add(Rows(items.OrderByDescending(i => i.Finding.Severity != Severity.Info).Select(FindingLine)));
-        else if (timeline.Count == 0 && IgnoredIn(area).Count == 0) body.Children.Add(Empty(T("All good"), area == HealthArea.Stability ? T("Play once through the launcher and the session shows here.") : T("Nothing to report.")));
+        else if (timeline.Count == 0 && IgnoredIn(area).Count == 0) body.Children.Add(Empty(T("All good"), area == HealthArea.Stability ? T("Play once through the launcher and the session appears here.") : T("Nothing to report.")));
         if (IgnoredIn(area) is { Count: > 0 } gone)
         {
             var list = new StackPanel { Spacing = 8 };
@@ -364,7 +367,7 @@ public sealed partial class MainWindow
             page.Children.Add(Glass(wait));
             return;
         }
-        if (ModsUnread) page.Children.Add(Empty(T("Your mods were not checked"), T("The conflict check didn't finish. Check again in a moment.")));
+        if (ModsUnread) page.Children.Add(Empty(T("Your mods were not checked"), T("The conflict check didn't finish. Check again in a moment."), "info"));
         var shown = _conflictTab switch { 1 => small, 2 => gone, _ => look };
         foreach (var c in shown) page.Children.Add(ConflictCard(c));
         if (_conflictTab == 0 && other.Count > 0) page.Children.Add(Rows(other.OrderByDescending(i => i.Finding.Severity != Severity.Info).Select(FindingLine)));
@@ -373,7 +376,7 @@ public sealed partial class MainWindow
             page.Children.Add(_conflictTab switch
             {
                 1 => Empty(T("No minor conflicts"), T("None of your mods share a command, a picture or text.")),
-                2 => Empty(T("Nothing ignored"), T("Anything you ignore appears here.")),
+                2 => Empty(T("Nothing ignored"), T("Anything you ignore appears here."), "eye-off"),
                 _ when small.Count + gone.Count + goneToo.Count > 0 => Empty(T("Nothing needs your attention"), T("Everything left is minor or ignored.")),
                 _ => Empty(T("No conflicts"), T("Your mods don't conflict with each other.")),
             });
@@ -431,7 +434,7 @@ public sealed partial class MainWindow
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Cell(T("What differs"), 0, 0, "ApexMutedBrush");
         Cell(T("In use"), 1, 0, "ApexMutedBrush");
-        Cell(T("The other"), 2, 0, "ApexMutedBrush");
+        Cell(T("The other one"), 2, 0, "ApexMutedBrush");
         foreach (var (name, used, other) in c.Values)
         {
             var row = g.RowDefinitions.Count;
@@ -512,7 +515,7 @@ public sealed partial class MainWindow
         try
         {
             var done = await ModWork(() => ModPriority.Apply(docs, moves));
-            _healthNote = (T("{0} has priority now.", party), T("Undo"), async () =>
+            _healthNote = (T("{0} has priority now", party), T("Undo"), async () =>
             {
                 try { await ModWork(() => { ModPriority.Back(docs, done); return 0; }); _healthNote = null; }
                 catch (Exception e) { App.Log(e); await Message(T("The mod was not moved"), ErrorText(e)); }
@@ -549,15 +552,15 @@ public sealed partial class MainWindow
 
     void HealthHistory(StackPanel body)
     {
-        HealthHead(body, T("History"), T("Going back undoes that point and every later one."));
+        HealthHead(body, T("Restore points"), T("Restoring a point undoes that change and every later one."));
         var waiting = _health.Where(i => i.Finding.CanFix).ToList();
         if (waiting.Count > 0) body.Children.Add(Rows(waiting.Select(FindingLine)));
         var points = _game is { } g ? RestorePoints.List(g.Bin) : [];
-        if (points.Count == 0) { body.Children.Add(Empty(T("Nothing yet"), T("Changes made by the launcher appear here."))); return; }
+        if (points.Count == 0) { body.Children.Add(Empty(T("Nothing yet"), T("Changes made by the launcher appear here."), "rotate-ccw")); return; }
         body.Children.Add(Rows(points.Select(p =>
         {
             var fix = p.Label.StartsWith("Fix", StringComparison.Ordinal);
-            var b = Button(fix ? T("Undo") : T("Go back"), async () => { await RestoreAsync(p); _ = CheckHealth(); BuildHealth(); });
+            var b = Button(fix ? T("Undo") : T("Restore"), async () => { await RestoreAsync(p); _ = CheckHealth(); BuildHealth(); });
             b.IsEnabled = !_running && !_busy;
             b.MinWidth = 88;
             return (UIElement)Line(IconTile(fix ? "wrench" : "rotate-ccw", ((SolidColorBrush)Res("ApexMutedBrush")).Color), T(p.Label, p.Args), Day(p.Created.ToLocalTime(), hour: true), b);

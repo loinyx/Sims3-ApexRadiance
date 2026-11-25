@@ -160,8 +160,8 @@ static class ModAddTests
                        ("sub/in.package", Pkg((Xml, 42, "in"))), ("sub/inner.zip", Nest(("two.package", Pkg((Xml, 43, "two"))), ("three.zip", deep))), ("..\\..\\out.sim", sim))))
             {
                 string P(string n) => add.Items.SingleOrDefault(i => i.Name == n) is { } i ? i.Problem ?? "ok" : "gone";
-                check(P("readme.txt") == "gone" && P("pic.png") == "gone" && P("._x.package") == "gone" && P("setup.exe").StartsWith("A program") && P("plug.asi").StartsWith("A program")
-                    && P("house.Sims3Pack").StartsWith("Install it with") && P("in.package") == "ok" && P("two.package") == "ok" && P("three.zip").Contains("too deep") && P("out.sim") == "ok"
+                check(P("readme.txt") == "gone" && P("pic.png") == "gone" && P("._x.package") == "gone" && P("setup.exe").StartsWith("This is a program") && P("plug.asi").StartsWith("This is a program")
+                    && P("house.Sims3Pack").StartsWith("Install it with") && P("in.package") == "ok" && P("two.package") == "ok" && P("three.zip").Contains("too many others") && P("out.sim") == "ok"
                     && add.Items.Where(i => i.Ok).All(i => i.Archive == "pack.zip" && Path.GetFileName(Path.GetDirectoryName(i.File)!).StartsWith("apex-add-")),
                     "add: a zip in a zip is opened and no deeper, programs and the game's packs are told, the rest is passed over | " + string.Join(" | ", add.Items.Select(i => i.Name + "=" + (i.Problem ?? "ok"))));
             }
@@ -173,7 +173,7 @@ static class ModAddTests
             ModAdd.MaxBytes = oldMax;
             // a tar or text under an archive's name, a cut zip, an empty one
             using (var add = Open(Put("text.zip", "hello there"u8.ToArray()), Put("fake.7z", new byte[1024]), Put("cut.zip", File.ReadAllBytes(Path.Combine(drop, "pack.zip"))[..200]), Zip("none.zip", ("readme.txt", [1])), Path.Combine(drop, "missing.package")))
-                check(add.Items.Count == 5 && add.Items.Take(3).All(i => i.Problem!.StartsWith("The archive can't be opened")) && add.Items[3].Problem!.StartsWith("It holds no mod") && add.Items[4].Problem == "The file could not be read.",
+                check(add.Items.Count == 5 && add.Items.Take(3).All(i => i.Problem!.StartsWith("The archive can't be opened")) && add.Items[3].Problem!.StartsWith("There is no mod") && add.Items[4].Problem == "The file could not be read.",
                     "add: an archive that is not one, a cut one, an empty one and a missing file are told | " + string.Join(" | ", add.Items.Select(i => i.Name + "=" + i.Problem)));
             ModConflicts.Extractors = () => [];
             using (var add = Open(Put("x.rar", [.. "Rar!"u8, 0x1A, 7, 0, 1, 2, 3])))

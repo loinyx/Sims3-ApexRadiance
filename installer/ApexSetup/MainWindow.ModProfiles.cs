@@ -144,15 +144,15 @@ public sealed partial class MainWindow
     // a profile's name, refused while another profile has it; null when cancelled
     async Task<string?> AskProfileName(string title, string? text, string initial, string yes)
     {
-        var body = new StackPanel { Spacing = 14, MinWidth = 320, MaxWidth = 440 };
+        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
         if (text is not null) body.Children.Add(Body(text));
         var box = new TextBox { Header = T("Profile name"), Text = initial, MaxLength = ModProfiles.MaxName };
         box.Loaded += (_, _) => { box.Focus(FocusState.Programmatic); box.SelectAll(); };
         body.Children.Add(box);
-        var taken = Muted(T("A profile with that name already exists."));
+        var taken = Design.Parts.FieldError(T("A profile with that name already exists."));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(taken, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         body.Children.Add(taken);
-        var d = new ContentDialog { Title = title, Content = body, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "layers", Title = title, Content = body, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         void Check()
         {
             var name = box.Text.Trim();
@@ -190,7 +190,7 @@ public sealed partial class MainWindow
         var was = ModProfiles.Active();
         Dictionary<string, bool>? before = null;
         await ProfileChange(() => before = ModProfiles.Update(name, mods), T("Profile {0} updated", name),
-            () => Safe(ProfileChange(() => ModProfiles.Put(name, before!, was), T("Profile {0} is as it was", name))));
+            () => Safe(ProfileChange(() => ModProfiles.Put(name, before!, was), T("Profile {0} is back as it was", name))));
     }
 
     async Task DeleteProfileAsync(string name)
@@ -233,15 +233,15 @@ public sealed partial class MainWindow
         var keep = new CheckBox { IsChecked = true, Content = new TextBlock { Text = T("Save the mods that are on now as a profile first"), TextWrapping = TextWrapping.Wrap } };
         if (lost.Count > 0 || unsaved)
         {
-            var body = new StackPanel { Spacing = 14, MaxWidth = 460 };
-            body.Children.Add(Body(T("Mods that turn on: {0}. Mods that turn off: {1}.", plan.TurnOn.Count, plan.TurnOff.Count)));
+            var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
+            body.Children.Add(Body(T("Mods to turn on: {0}. Mods to turn off: {1}.", plan.TurnOn.Count, plan.TurnOff.Count)));
             if (lost.Count > 0)
             {
                 var names = string.Join("\n", lost.Take(5).Select(m => "•  " + Path.GetFileNameWithoutExtension(m.Name))) + (lost.Count > 5 ? "\n" + T("and {0} more", lost.Count - 5) : "");
-                body.Children.Add(Warn(T("Saves can lose items"), T("These mods turn off. Lots and Sims that use their objects or outfits lose them the next time you save without them.") + "\n\n" + names));
+                body.Children.Add(Warn(T("Saves can lose items"), T("These mods will be off. Lots and Sims that use their objects or outfits lose them the next time you save without them.") + "\n\n" + names));
             }
             if (unsaved) body.Children.Add(keep);
-            var d = new ContentDialog { Title = T("Switch to {0}?", name), Content = body, PrimaryButtonText = T("Switch"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+            var d = new ContentDialog { Tag = "layers", Title = T("Switch to {0}?", name), Content = body, PrimaryButtonText = T("Switch"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
             if (await ShowDialog(d) != ContentDialogResult.Primary) return;
         }
         if (_busy) return;
@@ -274,7 +274,7 @@ public sealed partial class MainWindow
         if (plan.Gone.Count > 0)
             told.Add(T("No longer in your mods: {0}.", string.Join(", ", plan.Gone.Take(5).Select(x => Path.GetFileNameWithoutExtension(x))) + (plan.Gone.Count > 5 ? ", " + T("and {0} more", plan.Gone.Count - 5) : "")));
         if (plan.Left.Count > 0) told.Add(T("Left as they are, because the profile doesn't know them: {0}.", plan.Left.Count));
-        ModsResult(T("Profile {0} is on", name), done.Count == 0 ? null : () => Safe(UndoSwitchAsync(done, was)), string.Join(" ", told),
+        ModsResult(T("Profile {0} is in use", name), done.Count == 0 ? null : () => Safe(UndoSwitchAsync(done, was)), string.Join(" ", told),
             plan.Gone.Count > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
         await ModsAgain();
     }

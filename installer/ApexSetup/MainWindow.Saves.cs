@@ -70,7 +70,7 @@ public sealed partial class MainWindow
                 _savesNow = now;
                 if (_step == SavesScreen) DrawSaves(now);
             }
-            catch (Exception e) { App.Log(e); if (run == _savesRun) SavesSay(InfoBarSeverity.Error, T("The launcher can't read your saves"), ErrorText(e)); }
+            catch (Exception e) { App.Log(e); if (run == _savesRun) SavesSay(InfoBarSeverity.Error, T("The launcher couldn't read your saves"), ErrorText(e)); }
         }
     }
 
@@ -131,7 +131,7 @@ public sealed partial class MainWindow
         foreach (var b in new[] { several, import, auto }) if (b != auto ? now.Here.Count > 0 || b != several : !SideFits) acts.Children.Add(Dims(b));
         SavesHost.Children.Add(PageHead(T("Saves"), now.Here.Count switch { 0 => "", 1 => T("1 save"), var n => T("{0} saves", n) } + (now.Here.Count > 0 ? ", " + SaveSize(now.Here.Sum(l => l.Info.Bytes)) : ""), acts));
         if (SavesBlocked() is { } why && now.Here.Count > 0) SavesHost.Children.Add(Warn(why, null));
-        if (now.Entries.Count == 0) { SavesHost.Children.Add(EmptyPlace("users", T("No saves yet. They show here after you save a game."))); return; }
+        if (now.Entries.Count == 0) { SavesHost.Children.Add(EmptyPlace("users", T("No saves yet. They appear here after you save a game."))); return; }
 
         var at = now.Entries.First(e => e.Key.Equals(_savePick, StringComparison.OrdinalIgnoreCase));
         var page = new StackPanel { Spacing = 18 };
@@ -261,7 +261,7 @@ public sealed partial class MainWindow
             Group("saves:backups", T("Backups"),
             [
                 Place("@all", "archive", T("All backups"), now.Entries.Sum(e => e.Points.Count) is var n && n > 0 ? n.ToString() : "", "SavesAll"),
-                Place("@auto", "calendar-clock", T("Automatic backups"), auto, "SaveAutoPage"),
+                Place("@auto", "calendar-clock", T("Automatic"), auto, "SaveAutoPage"),
             ]);
         foreach (var (kind, label) in new[] { (SaveKindOf.Here, T("In the game")), (SaveKindOf.Stored, T("Kept out of the game")), (SaveKindOf.Gone, T("Gone from the game")) })
             Group("saves:" + kind, label, now.Entries.Where(e => e.Kind == kind && (_saveQuery.Length == 0 || Has(e.Name) || Has(e.Save) || e.Look is { } l && Has(SavePlace(l.Save, l.Info)))).Select(e => SaveLine(now, e)));
@@ -417,8 +417,8 @@ public sealed partial class MainWindow
             Fact(T("Last played"), SaveDay(look.Info.LastPlayed, hour: true));
             Fact(T("Size"), SaveSize(look.Info.Bytes));
         }
-        Fact(T("Backups"), e.Points.Count == 0 ? T("None") : e.Points.Count + " \u00b7 " + SaveSize(e.Points.Sum(p => p.Stored)));
-        Fact(T("Last backup"), e.Points.Count == 0 ? T("None") : SaveDay(e.Points.Max(p => p.When)));
+        Fact(T("Backups"), e.Points.Count == 0 ? T("No backups yet") : e.Points.Count + " \u00b7 " + SaveSize(e.Points.Sum(p => p.Stored)));
+        Fact(T("Last backup"), e.Points.Count == 0 ? "\u2014" : SaveDay(e.Points.Max(p => p.When)));
         return new Border { Child = new StackPanel { Children = { top, facts } }, CornerRadius = new CornerRadius(Design.Radius.Panel), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexCardBrush") };
     }
 
@@ -470,7 +470,7 @@ public sealed partial class MainWindow
     [
         (CleanParts.Portraits | CleanParts.Thumbnails, "Portraits and thumbnails", "The game makes them again as you play", "users"),
         (CleanParts.RepeatedMemories, "Repeated memories", "One of each picture stays", "layers"),
-        (AllPictures, "All memories and photos", "These pictures are gone for good", "image"),
+        (AllPictures, "All memories and photos", "Only the pictures you choose to keep stay", "image"),
     ];
 
     void CleanPart(StackPanel host, SavesNow now, SaveLook l)
@@ -498,7 +498,7 @@ public sealed partial class MainWindow
         says.Add((read, done) =>
         {
             var gain = read is null ? 0 : Gain(read, _saveParts);
-            barLeft.Text = !done ? T("Reading the save\u2026") : gain > 0 ? T("{0} can go", SaveSize(gain)) : T("Nothing to free with these choices");
+            barLeft.Text = !done ? T("Reading the save\u2026") : gain > 0 ? T("{0} can be freed", SaveSize(gain)) : T("Nothing to free with these choices");
             bar.ColumnDefinitions[0].Width = new GridLength(gain, GridUnitType.Star);
             bar.ColumnDefinitions[1].Width = new GridLength(Math.Max(1, l.Info.Bytes - gain), GridUnitType.Star);
             part.MinWidth = gain > 0 ? 8 : 0;
@@ -545,7 +545,7 @@ public sealed partial class MainWindow
             var done = CleanRead(l).IsCompleted;
             foreach (var s in says) s(read, done);
             var gain = read is null ? 0 : Gain(read, _saveParts);
-            clean.Content = !done ? T("Reading the save…") : read is null ? T("Can't be read") : read.Plan.Gains.Count == 0 ? T("Can't be cleaned") : gain > 0 ? T("Clean {0}", SaveSize(gain)) : T("Nothing to clean");
+            clean.Content = !done ? T("Reading the save…") : read is null ? T("Can't be read") : read.Plan.Gains.Count == 0 ? T("Can't be cleaned") : gain > 0 ? T("Free up {0}", SaveSize(gain)) : T("Nothing to clean");
             clean.IsEnabled = gain > 0 && SavesBlocked() is null;
             if (read?.Plan is { Refusal: { } no, Gains.Count: 0 }) (note.Text, note.Visibility) = (T(no.Key, TArgs(no.Args)), Visibility.Visible);
         }
@@ -579,7 +579,7 @@ public sealed partial class MainWindow
                         var part = c.Total > 0 ? (double)c.Done / c.Total : 0;
                         if (c.Step == CleanStep.Copy) say(name + T("Making a copy of the save"), -1, true);
                         else if (c.Step == CleanStep.Write) say(name + T("Writing the smaller save"), 0.9 * part, true);
-                        else if (c.Step == CleanStep.Verify) say(name + T("Checking it against the save"), 0.9 * part, true);
+                        else if (c.Step == CleanStep.Verify) say(name + T("Comparing it with the original"), 0.9 * part, true);
                         else say(name + T("Putting it in place"), 0.9 + 0.1 * part, false);
                     }), ct));
                 }
@@ -589,7 +589,7 @@ public sealed partial class MainWindow
         });
         FillSaves();
         if (done is null) return;
-        var freed = T("{0} less", SaveSize(done.Sum(r => r.Before - r.After)));
+        var freed = T("{0} freed", SaveSize(done.Sum(r => r.Before - r.After)));
         if (error is null) SavesSay(InfoBarSeverity.Success, done.Count == 1 ? T("Save cleaned") : T("{0} saves cleaned", done.Count), freed, T("Undo"), () => _ = UndoClean(done), stays: true);
         else
         {
@@ -602,7 +602,7 @@ public sealed partial class MainWindow
     {
         var docs = Docs;
         Exception? error = null;
-        var back = await SaveWork(T("Putting the saves back"), (say, ct) =>
+        var back = await SaveWork(T("Undoing the clean"), (say, ct) =>
         {
             var list = new List<CleanResult>();
             foreach (var r in done)
@@ -617,7 +617,7 @@ public sealed partial class MainWindow
         });
         FillSaves();
         if (back is null) return;
-        if (error is null) { SavesSay(InfoBarSeverity.Success, T("The saves are as they were before.")); return; }
+        if (error is null) { SavesSay(InfoBarSeverity.Success, T("The saves are as they were before")); return; }
         App.Log(error);
         var rest = done.Except(back).ToList();
         SavesSay(InfoBarSeverity.Warning, T("{0} of {1} saves put back", back.Count, done.Count), error is OperationCanceledException ? "" : ErrorText(error), T("Try again"), () => _ = UndoClean(rest), stays: true);
@@ -656,7 +656,7 @@ public sealed partial class MainWindow
     async Task RenameTo(Save s, string name, bool undo)
     {
         var docs = Docs;
-        var now = await SaveWork(T("Rename save"), (say, _) => { say(T("Renaming the save and its copies"), -1, false); return SaveCopies.Rename(docs, s, name); });
+        var now = await SaveWork(T("Rename save"), (say, _) => { say(T("Renaming the save and its backups"), -1, false); return SaveCopies.Rename(docs, s, name); });
         if (now is not null && now.Name != s.Name) SavesGalleryAgain(s.Name, now.Name);
         if (now is not null && s.Dir.Equals(_savePick, StringComparison.OrdinalIgnoreCase)) _saveWant = now.Dir;
         FillSaves();
@@ -669,7 +669,7 @@ public sealed partial class MainWindow
         var now = await SaveWork(T("Keep out of the game"), (say, _) => { say(T("Moving the save"), -1, false); return SaveCopies.Store(docs, l.Save); });
         if (now is not null && now.Name != l.Save.Name) SavesGalleryAgain(l.Save.Name, now.Name);
         FillSaves();
-        if (now is not null) SavesSay(InfoBarSeverity.Success, T("{0} is out of the game", FamilyName(l.Save, l.Info)), T("It is at the end of the list when you want it back."), T("Undo"), () => _ = PutBack(now));
+        if (now is not null) SavesSay(InfoBarSeverity.Success, T("{0} is out of the game", FamilyName(l.Save, l.Info)), T("You can find it at the end of the list."), T("Undo"), () => _ = PutBack(now));
     }
 
     async Task PutBack(Save s)
@@ -678,12 +678,12 @@ public sealed partial class MainWindow
         var now = await SaveWork(T("Put back in the game"), (say, _) => { say(T("Moving the save"), -1, false); return SaveCopies.Unstore(docs, s); });
         if (now is not null && now.Name != s.Name) SavesGalleryAgain(s.Name, now.Name);
         FillSaves();
-        if (now is not null) SavesSay(InfoBarSeverity.Success, T("The save is back in the game."));
+        if (now is not null) SavesSay(InfoBarSeverity.Success, T("The save is back in the game"));
     }
 
     async Task DeleteSave(SaveLook l)
     {
-        if (!await Confirm(T("Move this save to the Recycle Bin?"), T("{0} leaves the game. You can bring it back from the Recycle Bin, and its backups stay where they are.", FamilyName(l.Save, l.Info)), T("Move to the Recycle Bin"), danger: true)) return;
+        if (!await Confirm(T("Move this save to the Recycle Bin?"), T("{0} leaves the game. You can restore it from the Recycle Bin, and its backups stay where they are.", FamilyName(l.Save, l.Info)), T("Move to the Recycle Bin"), danger: true)) return;
         await SaveWork(T("Move to the Recycle Bin"), (say, _) => { say(T("Moving the save"), -1, false); SaveCopies.Delete(l.Save); return l.Save; });
         FillSaves();
     }
@@ -706,10 +706,10 @@ public sealed partial class MainWindow
         var bar = new ProgressBar { IsIndeterminate = true, Maximum = 1 };
         var text = Body(T("Reading the save…"));
         AutomationProperties.SetLiveSetting(text, AutomationLiveSetting.Polite);
-        var body = new StackPanel { Spacing = 14, Width = 420, Children = { text, bar } };
+        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small, Children = { text, bar } };
         using var cts = new CancellationTokenSource();
         var (running, canStop) = (true, true);
-        var d = new ContentDialog { Title = title, Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "save", Title = title, Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
         d.CloseButtonClick += (_, _) => { if (running && canStop && !cts.IsCancellationRequested) { cts.Cancel(); d.CloseButtonText = T("Stopping…"); } };
         d.Closing += (_, e) => e.Cancel = running; // (it closes when the work has ended)
         var opened = new TaskCompletionSource();
@@ -737,7 +737,7 @@ public sealed partial class MainWindow
         d.Hide();
         await shown;
         if (error is OperationCanceledException) SavesSay(InfoBarSeverity.Informational, T("Stopped"), T("Nothing was changed."));
-        else if (error is not null) { App.Log(error); SavesSay(InfoBarSeverity.Error, T("That did not work"), ErrorText(error)); }
+        else if (error is not null) { App.Log(error); SavesSay(InfoBarSeverity.Error, T("Something went wrong"), ErrorText(error)); }
         return result;
     }
 

@@ -223,7 +223,7 @@ public static class Releases
             }
         }
         if (a.Sha256 is { } want && !Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).Equals(want, StringComparison.OrdinalIgnoreCase))
-            throw new SetupException("The download of {0} is damaged. Try again. If it happens again, an antivirus web shield or a proxy may be changing downloads.", a.Name);
+            throw new SetupException("The download of {0} is damaged. Try again. If it happens again, your antivirus or a proxy may be changing downloads.", a.Name);
         return file;
     }
 

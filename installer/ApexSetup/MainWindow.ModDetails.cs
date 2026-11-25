@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         var problems = new List<(string Title, string? Text, string? Action, Action? Run)>();
         if (m.Enabled && !Loaded(m))
             problems.Add((T("The game does not load this folder"), T("Mods\\Resource.cfg doesn't list this folder, so the game skips this mod. Move it into Packages, or a folder inside it."), null, null));
-        if (r.DuplicateOf is { } dup) problems.Add((T("Same as {0}", dup), T("The same file is in two places. Keep the newer one and remove the other."), null, null));
+        if (r.DuplicateOf is { } dup) problems.Add((T("Same as {0}", dup), T("The same file is in two places. Keep one and remove the other."), null, null));
         foreach (var f in r.Findings) problems.Add((f, null, T("See in Health"), () => Show(HealthScreen)));
 
         var tabs = new List<(string Key, string Label)> { ("overview", T("Overview")) };
@@ -234,7 +234,7 @@ public sealed partial class MainWindow
         {
             var notes = new StackPanel { Spacing = 10 };
             notes.Children.Add(Note("lightbulb", "ApexAccentBrush", T("The game loads this as one file instead of {0}, so it starts faster. The {0} mods are kept as they were, and you can take any of them out.", merge.Originals.Count)));
-            notes.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked on {0}, when it was made: every resource matched.", Day(merge.Created.ToLocalTime()))));
+            notes.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked when it was made, on {0}: everything matches the originals.", Day(merge.Created.ToLocalTime()))));
             host.Children.Add(PaneCard(notes, new Thickness(14, 12, 14, 13)));
         }
         if (!m.Enabled && !m.Locked && HasItems(r))
@@ -256,7 +256,7 @@ public sealed partial class MainWindow
         }
 
         host.Children.Add(Actions(CanOpenInS3pe(r) ? ActionRow("package", T("Open in s3pe"), null, () => Safe(OpenInS3peAsync(r))) : null,
-            ActionRow("folder-search", T("Show file"), null, () => ShowFile(r.File.Path))));
+            ActionRow("folder-search", T("Show in Explorer"), null, () => ShowFile(r.File.Path))));
     }
 
     // what the pane's cards are made of: one surface, one corner
@@ -287,7 +287,7 @@ public sealed partial class MainWindow
         var creator = Design.Parts.QuietField(new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), TextAlignment = TextAlignment.Right,
             Margin = new Thickness(0, 0, -8, 0) }, mine); // (its text stands on the other values' edge)
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(creator, T("Creator"));
-        ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name. Type the maker's name to change it.") : T("The maker's name."));
+        ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name. Type the creator's name to change it.") : T("The creator's name"));
         creator.LostFocus += (_, _) =>
         {
             try { save(creator.Text); }

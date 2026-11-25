@@ -63,7 +63,7 @@ public sealed partial class MainWindow
         GraphicsRows(list);
         Label(T("In-game options"), Link(T("Turn all off"), () => { foreach (var i in InGame) _gsWant[i.Id] = "1"; SyncGameSettings(); }));
         InGameRows(list);
-        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set after its first session.")));
+        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet. These four apply after you play once.")));
         Label(T("Loading and walking"));
         LoadingRows(list);
         WalkingValues(host);
@@ -75,11 +75,11 @@ public sealed partial class MainWindow
         var plain = user.All(c => c < 128);
         SettingRow(list, "users", T("Windows user folder"), plain ? T("No special characters") : T("Has characters the game may not read: {0}", user), null, State(plain));
         var cloud = PlaceChecks.InOneDrive(Docs);
-        SettingRow(list, "folder", "OneDrive", cloud ? T("The game's Documents folder is in OneDrive") : T("Not syncing the game's folder"), null, State(!cloud));
+        SettingRow(list, "folder", "OneDrive", cloud ? T("Syncs the game's folder in Documents, which can damage saves") : T("Does not sync the game's folder"), null, State(!cloud));
         Label(T("Your files"));
         var restore = Id(Button(T("Restore"), RestoreGameSettings), "GameSettingsRestore");
         restore.IsEnabled = !_busy && !_running && GameSettings.CanRestore(g.Bin, Docs);
-        SettingRow(list, "undo-2", T("Restore my files"), T("The game's files as they were before your first change here."), null, restore);
+        SettingRow(list, "undo-2", T("Restore my files"), T("The game's files as they were before your first change here"), null, restore);
         SyncGameSettings();
     }
 
@@ -168,25 +168,25 @@ public sealed partial class MainWindow
 
     static readonly (string Id, string Icon, string Title, string Detail)[] InGame =
     [
-        (GameSettings.Store, "shopping-bag", "Turn off Shop mode", "The in-game store."),
-        (GameSettings.Interactive, "gamepad-2", "Turn off interactive loading screens", "The game you play while a save loads."),
-        (GameSettings.Memories, "book-open", "Turn off memories", "Sims stop recording memories."),
-        (GameSettings.Online, "wifi", "Turn off online and social features", "Connect notifications and the sign-in prompt."),
+        (GameSettings.Store, "shopping-bag", "Turn off Shop mode", "Shop mode is the store inside the game"),
+        (GameSettings.Interactive, "gamepad-2", "Turn off interactive loading screens", "The small game you play while a save loads"),
+        (GameSettings.Memories, "book-open", "Turn off memories", "Sims stop recording memories"),
+        (GameSettings.Online, "wifi", "Turn off online and social features", "Stops Connect notifications and the sign-in prompt"),
     ];
 
     void GraphicsRows(SettingList l)
     {
-        Choice(l, "sun", GameSettings.Shadow, T("Shadow resolution"), T("Sharper edges. Needs the highest lighting quality."), GameSettings.ShadowSizes, v => v);
-        Choice(l, "person-standing", GameSettings.Sims, T("Sim texture size"), T("More detail up close. Needs the highest Sim detail."), GameSettings.SimSizes, v => v);
-        Switch(l, "sparkles", GameSettings.Bloom, T("Turn off bloom"), T("Can also remove other screen effects."));
+        Choice(l, "sun", GameSettings.Shadow, T("Shadow resolution"), T("Sharper shadow edges. Needs the game's lighting quality at its highest."), GameSettings.ShadowSizes, v => v);
+        Choice(l, "person-standing", GameSettings.Sims, T("Sim texture size"), T("More detail up close. Needs the game's Sim detail at its highest."), GameSettings.SimSizes, v => v);
+        Switch(l, "sparkles", GameSettings.Bloom, T("Turn off bloom"), T("Can also remove other screen effects"));
     }
 
     void InGameRows(SettingList l) { foreach (var i in InGame) Switch(l, i.Icon, i.Id, T(i.Title), T(i.Detail)); }
 
     void LoadingRows(SettingList l)
     {
-        Choice(l, "hard-drive-download", GameSettings.Reads, T("Files read at once"), T("40 MB may load lots sooner. Not measured."), GameSettings.ReadSizes, v => v[..^6] + " MB");
-        Choice(l, "footprints", "walk", T("Space between walking Sims"), T("Meant to let Sims pass closer. Players report mixed results."), Presets,
+        Choice(l, "hard-drive-download", GameSettings.Reads, T("Files read at once"), T("With 40 MB lots may load sooner, but this was not measured"), GameSettings.ReadSizes, v => v[..^6] + " MB");
+        Choice(l, "footprints", "walk", T("Space between walking Sims"), T("With less space, Sims can pass closer to each other. Results vary."), Presets,
             v => v switch { "half" => T("Half"), "small" => T("Smallest"), _ => T("Default") });
     }
 
@@ -244,7 +244,7 @@ public sealed partial class MainWindow
         SettingRow(l, icon, title, Detail(id, detail), ResetOf(id, title), t, () => Changed(id));
     }
 
-    string Detail(string id, string detail) => Available(id) ? detail : T("Not found in this game's files.");
+    string Detail(string id, string detail) => Available(id) ? detail : T("Not found in this game's files");
 
     FrameworkElement? ResetOf(string id, string title)
     {
@@ -264,7 +264,7 @@ public sealed partial class MainWindow
         var open = new Button { Width = 100 };
         void Open(bool on) { _walkOpen = on; rows.Visibility = on ? Visibility.Visible : Visibility.Collapsed; open.Content = on ? T("Hide") : T("Show"); }
         open.Click += (_, _) => Open(!_walkOpen);
-        SettingRow(new SettingList(host, false), "sliders-horizontal", T("All values in Sims3.ini"), T("The same options one by one, and the stroller's two."), null, open);
+        SettingRow(new SettingList(host, false), "sliders-horizontal", T("All walking values in Sims3.ini"), T("The values behind this option, plus two for strollers"), null, open);
         host.Children.Add(rows);
         Open(_walkOpen);
         var list = new SettingList(rows, false);
@@ -294,13 +294,13 @@ public sealed partial class MainWindow
     void SetterRow(SettingList l)
     {
         var title = T("Recommended settings");
-        if (_state?.S3ss != true) { SettingRow(l, "sliders-horizontal", title, T("It isn't installed. You can apply them after you add it."), null, Button(T("Open Components"), () => Show(ComponentsStep))); return; }
+        if (_state?.S3ss != true) { SettingRow(l, "sliders-horizontal", title, T("Not installed yet. Add it in Components to apply them."), null, Button(T("Open Components"), () => Show(ComponentsStep))); return; }
         var text = SetterSettings.Read(Docs);
         var (on, off) = SetterSettings.Differences(text);
-        if (on.Count + off.Count == 0) { SettingRow(l, "sliders-horizontal", title, T("Already in use."), null, State(true)); return; }
+        if (on.Count + off.Count == 0) { SettingRow(l, "sliders-horizontal", title, T("Already in use"), null, State(true)); return; }
         var b = Button(T("Review"), SuggestSetter);
         b.IsEnabled = !_busy && !_running;
-        SettingRow(l, "sliders-horizontal", title, T("For Apex Radiance: {0} to turn on, {1} to turn off.", on.Count, off.Count), null, b);
+        SettingRow(l, "sliders-horizontal", title, T("For Apex Radiance: {0} to turn on, {1} to turn off", on.Count, off.Count), null, b);
     }
 
     async Task SuggestSetter()
@@ -308,14 +308,14 @@ public sealed partial class MainWindow
         var docs = Docs;
         var text = SetterSettings.Read(docs);
         var (on, off) = SetterSettings.Differences(text);
-        var body = new StackPanel { Spacing = 12, Width = 440 };
+        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
         if (on.Count > 0) body.Children.Add(Body(T("Turns on: {0}", string.Join(", ", on))));
         if (off.Count > 0) body.Children.Add(Body(T("Turns off: {0}", string.Join(", ", off))));
         var hz = ScreenHz();
-        var smooth = new CheckBox { Content = new TextBlock { Text = T("Also turn on Smooth Patch: 480 ticks, {0} FPS to match your screen. A slower processor may prefer it off.", hz), TextWrapping = TextWrapping.Wrap }, IsChecked = false };
+        var smooth = new CheckBox { Content = new TextBlock { Text = T("Also turn on Smooth Patch, at 480 ticks and {0} fps to match your screen. Leave it off on a slower processor.", hz), TextWrapping = TextWrapping.Wrap }, IsChecked = false };
         if (!SetterSettings.SmoothOn(text)) body.Children.Add(smooth);
-        body.Children.Add(Muted(T("Everything else in its settings stays. Restore my files puts them back.")));
-        if (await ShowDialog(new ContentDialog { Title = T("Recommended settings"), Content = body, PrimaryButtonText = T("Apply"), CloseButtonText = T("Cancel"),
+        body.Children.Add(Muted(T("Its other settings stay as they are. To undo this, use Restore my files.")));
+        if (await ShowDialog(new ContentDialog { Tag = "sliders-horizontal", Title = T("Recommended settings"), Content = body, PrimaryButtonText = T("Apply"), CloseButtonText = T("Cancel"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) != ContentDialogResult.Primary) return;
         await GameSettingsWork(() => { SetterSettings.Apply(docs, smooth.IsChecked == true ? hz : null); return Task.FromResult(true); });
     }
@@ -342,10 +342,10 @@ public sealed partial class MainWindow
         }
         SettingRow(l, "cpu", T("Graphics card"), state switch
         {
-            CardState.Recognized => T("Recognized"),
+            CardState.Recognized => T("Recognised"),
             CardState.Added => T("Fixed. The game reads it the next time you play."),
-            CardState.NotRecognized => card!.Found ? T("The game can't read the video memory of {0}, so it picks low settings.", card.Name) : T("The game doesn't know {0}, so it can pick low settings.", card.Name),
-            _ => card is null ? T("Checked after you play once.") : T("The game doesn't know {0}, and its maker isn't in the game's list.", card.Name),
+            CardState.NotRecognized => card!.Found ? T("The game can't read how much video memory {0} has, so it picks low settings", card.Name) : T("The game doesn't know {0}, so it can pick low settings", card.Name),
+            _ => card is null ? T("Checked after you play once") : T("The game doesn't know {0}, and its maker isn't in the game's list", card.Name),
         }, null, end);
     }
 
@@ -386,7 +386,7 @@ public sealed partial class MainWindow
     async Task RestoreGameSettings()
     {
         if (_game is not { } g) return;
-        if (!await Confirm(T("Restore my files"), T("The game's files go back to how they were before your first change here."), T("Restore"))) return;
+        if (!await Confirm(T("Restore your files?"), T("The game's files go back to how they were before your first change here. Every change you made here since then is undone."), T("Restore"))) return;
         var docs = Docs;
         await GameSettingsWork(async () =>
         {
@@ -417,13 +417,13 @@ public sealed partial class MainWindow
     async Task<bool> InGameFolder(Game g, Action here, Dictionary<string, string> plan)
     {
         if (Elevation.IsElevated || DryRun || Elevation.CanWrite(g.Bin)) { await Task.Run(here); return true; }
-        if (Environment.ProcessPath is not { } exe || !await Confirm(T("Administrator permission needed"), T("Windows asks for permission, then your changes apply."), T("Continue"))) return false;
+        if (Environment.ProcessPath is not { } exe || !await Confirm(T("Administrator permission needed"), T("Windows will ask for permission. Then your changes are applied."), T("Continue"))) return false;
         var p = Elevation.StartMaintenance(exe, g.Bin, GameSettingsPlan, Elevation.SaveChoices(plan));
-        if (p is null) { await Message(T("Nothing was changed"), T("Windows did not allow the change.")); return false; }
+        if (p is null) { await Message(T("Nothing was changed"), T("Windows did not get your permission. Try again and choose Yes when it asks.")); return false; }
         using (p)
         {
             await p.WaitForExitAsync();
-            if (p.ExitCode != 0) throw new SetupException("The game's files could not be changed. See the log for details.");
+            if (p.ExitCode != 0) throw new SetupException("The game's files could not be changed. Close the game and try again. The log has the details.");
         }
         return true;
     }
@@ -487,7 +487,7 @@ public sealed partial class MainWindow
         }
         GraphicsRows(Label(T("Graphics")));
         InGameRows(Label(T("In-game options")));
-        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set after its first session.")));
+        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet. These four apply after you play once.")));
         LoadingRows(Label(T("Loading and walking")));
         // (only with the mod chosen in Components, and something to change)
         if (S3ssToggle.IsOn && SetterSettings.Differences(SetterSettings.Read(Docs)) is var d && d.TurnOn.Count + d.TurnOff.Count > 0)
@@ -495,7 +495,7 @@ public sealed partial class MainWindow
             var t = new ToggleSwitch { OnContent = "", OffContent = "", MinWidth = 0, Width = 40, IsOn = _wizSetter };
             t.Toggled += (_, _) => _wizSetter = t.IsOn;
             AutomationProperties.SetName(t, T("Recommended settings"));
-            SettingRow(Label("Sims3SettingsSetter"), "sliders-horizontal", T("Recommended settings"), T("For Apex Radiance: {0} to turn on, {1} to turn off.", d.TurnOn.Count, d.TurnOff.Count), null, t);
+            SettingRow(Label("Sims3SettingsSetter"), "sliders-horizontal", T("Recommended settings"), T("For Apex Radiance: {0} to turn on, {1} to turn off", d.TurnOn.Count, d.TurnOff.Count), null, t);
         }
         _gsBuilt = null;
         SyncGameSettings();

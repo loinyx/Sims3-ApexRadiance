@@ -364,7 +364,7 @@ public static partial class ModLibrary
 
     static void Mine(ModFile m)
     {
-        if (m.Locked || m.FileType != "package") throw new SetupException("The launcher does not move, rename or remove this file.");
+        if (m.Locked || m.FileType != "package") throw new SetupException("The launcher can't move, rename or remove this file.");
         Engine.CheckWritable();
     }
 

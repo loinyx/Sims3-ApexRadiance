@@ -51,11 +51,11 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
             // (the scan tells these only when the piece is the one in use: Parties are the piece, then the mod it is for)
             "translation" => (ConflictLevel.Small, "A translation of a mod", "{0} translates {1}. Nothing to fix."),
             "add-on" => (ConflictLevel.Small, "A mod that changes part of another", "{0} replaces part of {1} on purpose. Nothing to fix."),
-            "decided" when c.Winner is not null => (ConflictLevel.Small, "One mod is set to load first", "{0} is in a folder that loads first, so the game uses it there. Everything else works as usual."),
+            "decided" when c.Winner is not null => (ConflictLevel.Small, "One mod is set to load first", "{0} is in a folder that loads first, so the game uses its version. Everything else works as usual."),
             _ when looks && texts is not null => (ConflictLevel.Small, "Mods that change the same picture or text",
                 c.Winner is null ? "Texts that differ: {0}. Only one mod's texts appear. Everything else works as usual." : "Texts that differ: {1}. The ones from {0} appear. Everything else works as usual."),
             _ when looks => (ConflictLevel.Small, "Mods that change the same picture or text", c.Winner is null ? "Only one appears. Everything else works as usual." : "The one from {0} appears. Everything else works as usual."),
-            _ => (ConflictLevel.Look, "Mods that change the same game data", c.Winner is null ? "The game uses only one there. Everything else works as usual." : "The game uses {0} there. Everything else works as usual."),
+            _ => (ConflictLevel.Look, "Mods that change the same game data", c.Winner is null ? "The game uses only one version. Everything else works as usual." : "The game uses the version from {0}. Everything else works as usual."),
         };
         var names = c.Parties.Select((p, i) => i < c.Labels.Length && c.Parties.Count(x => x.Equals(p, StringComparison.OrdinalIgnoreCase)) > 1 ? $"{p} ({Path.GetDirectoryName(c.Labels[i])})" : p).ToArray();
         var used = Used.Match(c.Text) is { Success: true } u ? u.Groups[1].Value.Trim() : null;
@@ -76,7 +76,7 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
         var id = string.Join("|", c.Parties.Select(Plain).Order(StringComparer.Ordinal).Prepend(what).Prepend(c.Kind is "translation" or "add-on" or "decided" ? "resource key" : c.Kind));
         var finding = level == ConflictLevel.Small ? null
             : idle ? new Finding(Severity.Warning, "{0} likely does nothing. {1} replaces all of it.", args)
-            : winner is { } win ? new Finding(Severity.Warning, "{0} change the same game data. {1} likely wins and the others' changes are lost.", [string.Join(", ", names), win])
+            : winner is { } win ? new Finding(Severity.Warning, "{0} change the same game data. {1} likely wins, and the others' changes are lost.", [string.Join(", ", names), win])
             : new Finding(Severity.Warning, title, []);
         return new(id, level, title, say, args, c.Parties, c.Winner, files, $"{c.Kind}: {c.Text}") { Finding = finding, CanOrder = level != ConflictLevel.Fix && c.Kind != "interaction",
             Labels = c.Labels, InUse = used, Names = names, Alike = Same.Match(c.Text) is { Success: true } a ? a.Groups[1].Value.Split(" | ") : [],

@@ -74,7 +74,7 @@ public static partial class ModMerge
     // as a merge is (the kept originals read where the merge keeps them), under the merge's name and place, on or off.
     public static MergeEditPlan PlanEdit(string docs, ModFile merged, MergeEdit edit)
     {
-        if (merged.Locked) throw new SetupException("The launcher does not move, rename or remove this file.");
+        if (merged.Locked) throw new SetupException("The launcher can't move, rename or remove this file.");
         var rec = Info(docs, merged) ?? throw new SetupException("This file is not a merge made by the launcher.");
         // (an earlier change that did not finish; read again under the lock, for one under way may have ended just now)
         if (rec.Pending is not null)
@@ -162,7 +162,7 @@ public static partial class ModMerge
         var rec = Info(docs, merged);
         if (rec is null || rec.Sha256 != p.Record.Sha256 || rec.Pending is not null || !File.Exists(merged.Path)
             || !rec.Originals.Select(o => o.Rel).SequenceEqual(p.Record.Originals.Select(o => o.Rel), StringComparer.OrdinalIgnoreCase))
-            throw new SetupException("This merge changed since the change was planned. Plan it again.");
+            throw new SetupException("This merge changed while you were editing it. Open it and make your changes again.");
         log.WriteLine($"edit \"{rec.Name}\" {merged.Rel}: {rec.Originals.Count} originals, {p.Outs.Count} out, {plan?.Sources.Count ?? 0} in the new merge");
         // (the files that come in: not the merge's own originals, which stay where they are kept)
         // (by its kept file: a mod of the list can come in under the name of one that goes out)
@@ -250,7 +250,7 @@ public static partial class ModMerge
             }
             // (a file from outside Mods is not held while it is copied: the copy is the file that was merged, or nothing is)
             foreach (var s in fresh.Where(Copied))
-                if (Sha(Store(s)) != hashes[s.Mod.Rel]) throw new SetupException("{0} changed since the merge was planned. Plan it again.", s.Mod.Name);
+                if (Sha(Store(s)) != hashes[s.Mod.Rel]) throw new SetupException("{0} changed while the merge was being prepared. Start the merge again.", s.Mod.Name);
 
             // 5. the record
             FailPoint("commit");

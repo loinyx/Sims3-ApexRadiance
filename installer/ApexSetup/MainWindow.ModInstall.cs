@@ -131,7 +131,7 @@ public sealed partial class MainWindow
             var body = new StackPanel { Spacing = 14, Width = AddWidth(440) };
             body.Children.Add(bar);
             body.Children.Add(name);
-            var d = new ContentDialog { Title = T("Reading the files"), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
+            var d = new ContentDialog { Tag = "package", Title = T("Reading the files"), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
             var shown = ShowDialog(d);
             await Task.WhenAny(reading, shown);
             if (!reading.IsCompleted)
@@ -245,10 +245,9 @@ public sealed partial class MainWindow
         var width = AddWidth(560);
         var d = new ContentDialog
         {
-            Title = ok.Count == 0 ? T("The files can't be added") : ok.Count == 1 ? T("Add {0}", ok[0].Name) : T("Add {0} files", ok.Count),
+            Tag = "package", Title = ok.Count == 0 ? T("The files can't be added") : ok.Count == 1 ? T("Add {0}", ok[0].Name) : T("Add {0} files", ok.Count),
             PrimaryButtonText = ok.Count > 0 ? T("Add") : "", CloseButtonText = ok.Count > 0 ? T("Cancel") : T("Close"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         };
-        d.Resources["ContentDialogMaxWidth"] = width + 60;
         void Changed() => d.IsPrimaryButtonEnabled = ok.Any(i => i.Add);
         var list = new StackPanel { Spacing = 8, Padding = new Thickness(0, 0, 14, 0) };
         // shortcut: the first 200 have a row, the rest keep their default choice; a virtual list if players add that many often
@@ -260,9 +259,9 @@ public sealed partial class MainWindow
             left.Margin = new Thickness(0, ok.Count > 0 ? 8 : 0, 0, 0);
             list.Children.Add(left);
         }
-        var body = new StackPanel { Spacing = 14, Width = width };
+        var body = new StackPanel { Spacing = 16, Width = width };
         if (ok.Count > 0)
-            body.Children.Add(Muted((ok.All(i => i.Archive is not null) && paths.Count == 1 ? T("From {0}.", Path.GetFileName(paths[0])) + " " : "") + T("Each file goes to its own place.")));
+            body.Children.Add(Muted((ok.All(i => i.Archive is not null) && paths.Count == 1 ? T("From {0}.", Path.GetFileName(paths[0])) + " " : "") + T("Each file goes to the right folder.")));
         if (ok.Any(i => i.Place == AddPlace.Mods && !i.CanReplace) && !FolderLoaded(add.Folder)) body.Children.Add(Warn(T("The game does not load this folder"), null));
         if (ok.Any(i => i.Place == AddPlace.Mods) && !File.Exists(Path.Combine(Docs, "Mods", "Resource.cfg")))
             body.Children.Add(Muted(T("The game isn't set up to load mods yet. The launcher adds the Resource.cfg file it needs.")));
@@ -289,7 +288,7 @@ public sealed partial class MainWindow
         run.Children.Add(bar);
         run.Children.Add(now);
         bool running = true, stop = false;
-        var d = new ContentDialog { Title = T("Adding"), Content = new ScrollViewer { Content = run, MaxHeight = 460 }, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "package", Title = T("Adding"), Content = new ScrollViewer { Content = run, MaxHeight = 460 }, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
         // (the file being copied is finished, the rest are not added)
         d.CloseButtonClick += (_, e) => { if (running) { e.Cancel = true; stop = true; d.CloseButtonText = T("Stopping…"); } };
         var shown = ShowDialog(d);
@@ -336,7 +335,7 @@ public sealed partial class MainWindow
         }
         if (replaced > 0) run.Children.Add(Muted(replaced == 1 ? T("The file it replaced is in the Recycle Bin.") : T("The {0} files replaced are in the Recycle Bin.", replaced)));
         var left = add.Items.Where(i => i.Added is null)
-            .Select(i => (i.Name, !i.Ok || !i.Add && i.SameAs is not null ? AddInfo(i) : failed.TryGetValue(i, out var why) ? why : i.Add ? T("Canceled") : T("Not chosen"))).ToList();
+            .Select(i => (i.Name, !i.Ok || !i.Add && i.SameAs is not null ? AddInfo(i) : failed.TryGetValue(i, out var why) ? why : i.Add ? T("Cancelled") : T("Not selected"))).ToList();
         if (left.Count > 0) run.Children.Add(AddLeftOut(T("Left out"), left));
         d.Title = T("Done");
         d.CloseButtonText = T("Close");
@@ -373,7 +372,7 @@ public sealed partial class MainWindow
     async Task UndoAddAsync(List<AddItem> added)
     {
         try { await ModWork(() => { ModAdd.Undo(added); return 0; }); ModsResult(added.Count == 1 ? T("The file you added is in the Recycle Bin") : T("The files you added are in the Recycle Bin"), null); }
-        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some files are still there"), ErrorText(e)); }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some files were not removed"), ErrorText(e)); }
         await ModsAgain();
     }
 
@@ -396,7 +395,7 @@ public sealed partial class MainWindow
                 var file = Elevation.SaveChoices(plan);
                 try
                 {
-                    using var p = Elevation.StartMaintenance(Environment.ProcessPath ?? "", game.Bin, WorldsPlan, file) ?? throw new SetupException("Windows did not allow the change.");
+                    using var p = Elevation.StartMaintenance(Environment.ProcessPath ?? "", game.Bin, WorldsPlan, file) ?? throw new SetupException("Windows did not get your permission. Try again and choose Yes when it asks.");
                     p.WaitForExit();
                 }
                 finally { File.Delete(file); } // (still there when Windows was told no)

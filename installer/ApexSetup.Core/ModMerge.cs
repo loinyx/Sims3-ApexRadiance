@@ -197,7 +197,7 @@ public static partial class ModMerge
             if (dirs is null) { plan.Refusals.Add(R("There is no Resource.cfg in Mods, so the game loads no packages from there.")); return plan; }
             if (ModConflicts.LoadKey(dirs, Slash(UnderMods(targetRel))) is null)
                 plan.Refusals.Add(R("The game does not load packages from {0} (Resource.cfg).", Path.GetDirectoryName(targetRel) ?? "Mods"));
-            if (part.Count < 2) plan.Refusals.Add(R("Pick at least two packages that can be merged."));
+            if (part.Count < 2) plan.Refusals.Add(R("Select at least two packages that can be merged."));
 
             // a resource several packages hold alike goes in once; a package's own repeats of one stay
             var owner = new Dictionary<(uint, uint, ulong), int>();
@@ -307,7 +307,7 @@ public static partial class ModMerge
             // (a mod alone in a part is no merge: it stays the plain mod it is)
             foreach (var alone in parts.Where(p => p.Count == 1).ToList())
             {
-                skipped.Add(new(alone[0].Src.Mod, R("Too big to share a package. It stays as it is.")));
+                skipped.Add(new(alone[0].Src.Mod, R("Too big to share a package with others, so it stays as it is.")));
                 parts.Remove(alone);
             }
             if (parts.Count == 0) parts.Add(new());
@@ -506,7 +506,7 @@ public static partial class ModMerge
     {
         var fi = new FileInfo(s.Mod.Path);
         if (!fi.Exists || fi.Length != s.Size || fi.LastWriteTimeUtc != s.Written)
-            throw new SetupException("{0} changed since the merge was planned. Plan it again.", s.Mod.Rel);
+            throw new SetupException("{0} changed while the merge was being prepared. Start the merge again.", s.Mod.Rel);
     }
 
     // Reports at most every 60 ms, and where a step starts or ends: one report per resource, a hundred thousand of them,
@@ -535,7 +535,7 @@ public static partial class ModMerge
         void Check(List<ModConflicts.Entry>? now)
         {
             var have = now?.ToHashSet();
-            if (have is null || !s.Keep.All(have.Contains)) throw new SetupException("{0} changed since the merge was planned. Plan it again.", s.Mod.Rel);
+            if (have is null || !s.Keep.All(have.Contains)) throw new SetupException("{0} changed while the merge was being prepared. Start the merge again.", s.Mod.Rel);
         }
         if (s.Size > WholeBytes)
         {
@@ -547,7 +547,7 @@ public static partial class ModMerge
         {
             using (var f = new FileStream(s.Mod.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan))
             {
-                if (f.Length != s.Size) throw new SetupException("{0} changed since the merge was planned. Plan it again.", s.Mod.Rel);
+                if (f.Length != s.Size) throw new SetupException("{0} changed while the merge was being prepared. Start the merge again.", s.Mod.Rel);
                 f.ReadExactly(b, 0, (int)s.Size);
             }
             var bytes = b.AsSpan(0, (int)s.Size);
@@ -864,7 +864,7 @@ public static partial class ModMerge
     // Recycle Bin; the notes back. The restored mods.
     public static List<ModFile> Split(string docs, ModFile merged)
     {
-        if (merged.Locked) throw new SetupException("The launcher does not move, rename or remove this file.");
+        if (merged.Locked) throw new SetupException("The launcher can't move, rename or remove this file.");
         Engine.CheckWritable();
         lock (Gate) return SplitNow(docs, merged, Info(docs, merged) ?? throw new SetupException("This file is not a merge made by the launcher."));
     }

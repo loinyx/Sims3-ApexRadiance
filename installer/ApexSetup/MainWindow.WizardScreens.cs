@@ -24,7 +24,7 @@ public sealed partial class MainWindow
         {
             BackOnce(GameHead);
             GameTitle.Text = T("Choose your game");
-            GameSub.Text = T("The launcher found these installs. Pick the one you play.");
+            GameSub.Text = T("The launcher found these installs. Choose the one you play.");
             GameList.Visibility = GameBrowse.Visibility = Visibility.Visible;
             GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;
             return;
@@ -42,8 +42,8 @@ public sealed partial class MainWindow
         }
         if (_games.Count > 1)
         {
-            GameTitle.Text = T("Which is your game?");
-            GameSub.Text = T("The launcher found {0} installs. Apex goes only into the one you choose.", _games.Count);
+            GameTitle.Text = T("Choose your game");
+            GameSub.Text = T("The launcher found {0} installs. Apex Radiance goes only into the one you choose.", _games.Count);
             GameList.Visibility = GameBrowse.Visibility = Visibility.Visible;
             return;
         }
@@ -122,7 +122,7 @@ public sealed partial class MainWindow
         var tile = Design.IconTile.Of("folder", 52);
         tile.HorizontalAlignment = HorizontalAlignment.Center;
         p.Children.Add(tile);
-        p.Children.Add(new TextBlock { Text = T("Choose the The Sims 3 folder"), FontSize = 16, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
+        p.Children.Add(new TextBlock { Text = T("Choose The Sims 3 folder"), FontSize = 16, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
         p.Children.Add(new TextBlock { Text = T("The one with Game\\Bin\\TS3W.exe inside. In Steam: Library › right-click the game › Manage › Browse local files."),
             FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, MaxWidth = 440, HorizontalAlignment = HorizontalAlignment.Center });
         var pick = new Button { Content = Labeled("folder", T("Choose folder")), Style = (Style)Application.Current.Resources["AccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Center };

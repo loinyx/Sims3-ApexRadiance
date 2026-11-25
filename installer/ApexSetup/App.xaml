@@ -104,6 +104,8 @@
             <!-- one shape for every control, and one height for what is picked in a row: 36 -->
             <CornerRadius x:Key="ControlCornerRadius">8</CornerRadius>
             <CornerRadius x:Key="OverlayCornerRadius">12</CornerRadius>
+            <x:Double x:Key="TextControlThemeMinHeight">36</x:Double>
+            <Thickness x:Key="TextControlThemePadding">12,8,8,8</Thickness>
             <Style TargetType="ComboBox" BasedOn="{StaticResource DefaultComboBoxStyle}">
                 <Setter Property="MinHeight" Value="36" />
             </Style>

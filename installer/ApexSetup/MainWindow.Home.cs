@@ -26,7 +26,7 @@ public sealed partial class MainWindow
         {
             host.Spacing = 12;
             host.Children.Add(Heading(T("Home")));
-            host.Children.Add(Card(Body(T("The launcher can't find The Sims 3. Choose the game folder in Settings.")), Button(T("Choose the game"), () => Show(GameStep))));
+            host.Children.Add(Card(Body(T("The launcher can't find The Sims 3. Choose the folder where it is installed.")), Button(T("Choose the game"), () => Show(GameStep))));
             return;
         }
         // (the picture runs to the window's edges; every other screen gets the page margins back in Show)
@@ -41,7 +41,7 @@ public sealed partial class MainWindow
         // the last session shows only when it went wrong: straight back into the newest save
         if (!_running && SessionHistory.List().FirstOrDefault() is { End: SessionEnd.Crash or SessionEnd.LowMemory } last && Saves.Newest(Docs) is { } newest)
             below.Children.Add(Banner(InfoBarSeverity.Warning, last.End == SessionEnd.Crash ? T("The game closed on its own") : T("Ran out of memory"),
-                Played(last.Played) + " · " + T("{0} at its peak", ModRow.SizeText(last.PeakBytes)), T("Open this save again"), async () => await PlayAsync(newest.Name)));
+                Played(last.Played) + " · " + T("memory peaked at {0}", ModRow.SizeText(last.PeakBytes)), T("Open this save again"), async () => await PlayAsync(newest.Name)));
         if (saves.Count > 0) below.Children.Add(HomeSaves(saves.Take(4).ToList()));
         below.Children.Add(HomePictures());
         host.Children.Add(below);
@@ -536,7 +536,7 @@ public sealed partial class MainWindow
         var s = new StackPanel { Spacing = 12 };
         var all = Gallery.List(Docs).Where(p => !p.Video).ToList();
         s.Children.Add(Head(T("Your pictures"), all.Count == 0 ? null : T("Gallery"), () => Show(GalleryScreen)));
-        if (all.Count == 0) { s.Children.Add(Muted(T("Pictures you take in the game show here."))); return s; }
+        if (all.Count == 0) { s.Children.Add(Muted(T("Pictures you take in the game appear here."))); return s; }
         var shown = all.Take(6).ToList();
         var row = new Grid { ColumnSpacing = 12 };
         var cells = new List<Button>();

@@ -32,7 +32,7 @@ public static class ModInstall
         var entries = Dbpf.Index(f);
         if (entries.Count != count) { p.Add("The package is damaged: its index can't be read."); return p; }
         if (entries.Any(e => e.Size > 0 && e.Offset + (long)e.Size > f.Length)) p.Add("The package is damaged: part of it is missing. The download may have been cut short.");
-        if (warnings is not null && entries.Any(e => e.Type == 0x073FAA07)) warnings.Add("A script mod: it runs code in the game. Install it only from a creator you trust.");
+        if (warnings is not null && entries.Any(e => e.Type == 0x073FAA07)) warnings.Add("This is a script mod, which runs code in the game. Add it only if you trust its creator.");
         return p;
     }
 }

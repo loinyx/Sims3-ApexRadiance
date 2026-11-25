@@ -215,7 +215,7 @@
                                 <Image Source="ms-appx:///Assets/apex_logo.png" Width="88" Height="88" />
                                 <StackPanel VerticalAlignment="Center" Spacing="4">
                                     <TextBlock x:Name="WelcomeTitle" Tag="dyn" FontSize="28" FontWeight="SemiBold" />
-                                    <TextBlock Text="Lighting, picture and performance for The Sims 3." Foreground="{ThemeResource ApexMutedBrush}" FontSize="14" />
+                                    <TextBlock Text="Lighting, picture and performance for The Sims 3" Foreground="{ThemeResource ApexMutedBrush}" FontSize="14" />
                                 </StackPanel>
                             </StackPanel>
                             <!-- a newer Setup in the latest Apex Radiance release, downloaded and checked (CheckSetupUpdateAsync) -->
@@ -234,7 +234,7 @@
                                     <TextBlock Text="What the launcher does" Style="{StaticResource ApexStrong}" FontSize="13" />
                                     <StackPanel Orientation="Horizontal" Spacing="12">
                                         <local:LucideIcon Kind="search" Size="16" StrokeWidth="1.75" Stroke="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" />
-                                        <TextBlock Text="Finds your The Sims 3 (Steam or EA app)." Style="{StaticResource ApexBody}" Foreground="{ThemeResource ApexSoftTextBrush}" />
+                                        <TextBlock Text="Finds your copy of The Sims 3 (Steam or EA app)." Style="{StaticResource ApexBody}" Foreground="{ThemeResource ApexSoftTextBrush}" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="12">
                                         <local:LucideIcon Kind="download" Size="16" StrokeWidth="1.75" Stroke="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" />
@@ -254,7 +254,7 @@
                             <StackPanel x:Name="StepsGame" Tag="dyn" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8" />
                             <StackPanel x:Name="GameHead" Spacing="4" Margin="0,0,0,12">
                                 <TextBlock x:Name="GameTitle" Text="Choose your game" Style="{StaticResource ApexTitle}" />
-                                <TextBlock x:Name="GameSub" Text="The launcher found these installs. Pick the one you play." Style="{StaticResource ApexMuted}" FontSize="14" LineHeight="20" TextWrapping="Wrap" />
+                                <TextBlock x:Name="GameSub" Text="The launcher found these installs. Choose the one you play." Style="{StaticResource ApexMuted}" FontSize="14" LineHeight="20" TextWrapping="Wrap" />
                             </StackPanel>
                             <!-- the install's own game panel (FillGameStep): one game with its checks, or where to find it -->
                             <StackPanel x:Name="GamePanel" Tag="dyn" Visibility="Collapsed" />
@@ -344,7 +344,7 @@
                                     <StackPanel Spacing="8" Padding="28" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <Image Source="ms-appx:///Assets/apex_logo.png" Width="104" Height="104" HorizontalAlignment="Center" Margin="0,0,0,8" />
                                         <TextBlock Text="Apex Radiance" FontSize="28" FontWeight="Bold" HorizontalAlignment="Center" />
-                                        <TextBlock Text="Lighting, picture and performance for The Sims 3." Style="{StaticResource ApexMuted}" HorizontalAlignment="Center" TextAlignment="Center" />
+                                        <TextBlock Text="Lighting, picture and performance for The Sims 3" Style="{StaticResource ApexMuted}" HorizontalAlignment="Center" TextAlignment="Center" />
                                         <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" Margin="0,6,0,0">
                                             <Border Style="{StaticResource ApexPill}">
                                                 <TextBlock Text="Required" FontSize="11" Foreground="{ThemeResource ApexMutedBrush}" />
@@ -447,7 +447,7 @@
                                                           AutomationProperties.Name="TS3Wrap" />
                                         </Grid>
                                         <TextBlock Text="TS3Wrap" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,0" />
-                                        <TextBlock Text="If you save with low memory and then quit, offers to reopen the game in that save." Style="{StaticResource ApexMuted}" />
+                                        <TextBlock Text="Opens your last save again with free memory when the game is running out" Style="{StaticResource ApexMuted}" />
                                         <TextBlock x:Name="RestartPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Border>
@@ -468,7 +468,7 @@
                                         </Border>
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                             <TextBlock Text="Sims3SettingsSetter" Style="{StaticResource ApexStrong}" />
-                                            <TextBlock Text="Fixes for game and graphics settings." ToolTipService.ToolTip="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" MaxLines="2" />
+                                            <TextBlock Text="Fixes for game and graphics settings" ToolTipService.ToolTip="Fixes for game and graphics settings" Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" MaxLines="2" />
                                         </StackPanel>
                                         <Grid Grid.Column="2" ColumnSpacing="8" VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="6" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Ellipse x:Name="S3ssDot" Width="6" Height="6" Fill="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" Visibility="Collapsed" /><TextBlock x:Name="S3ssPill" Tag="dyn" Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" /></Grid>
                                         <ToggleSwitch x:Name="S3ssToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
@@ -596,7 +596,7 @@
                         <StackPanel x:Name="ScreenRenderer" Spacing="24" Visibility="Collapsed" MaxWidth="960">
                             <StackPanel x:Name="StepsRenderer" Tag="dyn" Orientation="Horizontal" Spacing="12" />
                             <StackPanel Spacing="4">
-                                <TextBlock Text="How the game draws" Style="{StaticResource ApexTitle}" />
+                                <TextBlock Text="Choose how the game is drawn" Style="{StaticResource ApexTitle}" />
                                 <TextBlock x:Name="GpuLine" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="14" LineHeight="20" />
                             </StackPanel>
                             <Grid x:Name="RendererCards" Tag="dyn" ColumnSpacing="12" />
@@ -620,7 +620,7 @@
                         <!-- 6 About -->
                         <StackPanel x:Name="ScreenAbout" Spacing="18" Visibility="Collapsed" MaxWidth="960">
                             <StackPanel x:Name="AboutHead" Spacing="4">
-                            <TextBlock Text="About and licences" Style="{StaticResource ApexTitle}" />
+                            <TextBlock Text="Credits and licences" Style="{StaticResource ApexTitle}" />
                             <TextBlock Text="Apex Radiance by loinyx" Style="{StaticResource ApexMuted}" FontSize="14" LineHeight="20" />
                             </StackPanel>
                             <StackPanel x:Name="LicenceList" Tag="dyn" Spacing="4" />
@@ -657,7 +657,7 @@
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                 <local:LucideIcon Kind="search" Size="16" Stroke="{ThemeResource ApexMutedBrush}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                <TextBox x:Name="ModSideSearch" Grid.Column="1" PlaceholderText="Search" TextChanged="OnModSideSearch" KeyDown="OnModSideSearchKey" BorderThickness="0" Background="Transparent" Padding="0,5,0,6"
+                                <TextBox x:Name="ModSideSearch" Grid.Column="1" PlaceholderText="Search" TextChanged="OnModSideSearch" KeyDown="OnModSideSearchKey" BorderThickness="0" Background="Transparent" MinHeight="32" Padding="0,5,0,6"
                                          VerticalAlignment="Center" MinWidth="0" GotFocus="OnModSearchFocus" LostFocus="OnModSearchFocus" AutomationProperties.Name="Search folders and tags">
                                     <TextBox.Resources>
                                         <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
@@ -723,7 +723,7 @@
                                         <StackPanel x:Name="ModChips" Tag="dyn" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" />
                                     </ScrollViewer>
                                     <!-- one box: the field draws no background or underline of its own, the border around it shows focus -->
-                                    <TextBox x:Name="ModSearch" Grid.Column="2" PlaceholderText="Search mods" TextChanged="OnModSearch" BorderThickness="0" Background="Transparent" Padding="0,5,0,6"
+                                    <TextBox x:Name="ModSearch" Grid.Column="2" PlaceholderText="Search mods" TextChanged="OnModSearch" BorderThickness="0" Background="Transparent" MinHeight="32" Padding="0,5,0,6"
                                              VerticalAlignment="Center" MinWidth="80" AutomationProperties.Name="Search mods" KeyDown="OnModSearchKey"
                                              GotFocus="OnModSearchFocus" LostFocus="OnModSearchFocus">
                                         <TextBox.Resources>
@@ -791,7 +791,6 @@
                             <Border x:Name="ModHuntBar" Visibility="Collapsed" Margin="0,0,0,10" Padding="16,14" CornerRadius="8" Background="{ThemeResource ApexAccentSoftBrush}" BorderBrush="{ThemeResource ApexAccentLineBrush}" BorderThickness="1">
                                 <StackPanel x:Name="ModHuntContent" Tag="dyn" Spacing="10" />
                             </Border>
-                            <InfoBar x:Name="ModsInfo" IsClosable="True" Margin="0,0,0,10" Visibility="{x:Bind ModsInfo.IsOpen, Mode=OneWay}" />
                             <Border x:Name="ModMergeBar" Tag="dyn" Visibility="Collapsed" Margin="0,0,0,10" Padding="16,10" CornerRadius="8" Background="{ThemeResource ApexCardBrush}" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1" />
                         </StackPanel>
                         <Grid x:Name="ModListHead" Grid.Row="3" ColumnSpacing="16" Height="36" Margin="0,0,0,4">
@@ -869,6 +868,7 @@
                         </StackPanel>
                         <!-- what is chosen: a floating bar for two or more -->
                         <!-- (the actions scroll when the list column is narrower than the bar: it never spills under the details pane) -->
+                        <InfoBar x:Name="ModsInfo" Grid.Row="4" Canvas.ZIndex="5" IsClosable="True" MinWidth="360" MaxWidth="720" Margin="12,0,12,16" VerticalAlignment="Bottom" HorizontalAlignment="Center" Visibility="{x:Bind ModsInfo.IsOpen, Mode=OneWay}" />
                         <Border x:Name="ModSelectionBar" Grid.Row="4" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="12,0,12,16" Padding="5"
                                 CornerRadius="12" Background="{ThemeResource ApexRaisedBrush}" BorderBrush="{ThemeResource ApexInputBorderBrush}" BorderThickness="1" Visibility="Collapsed" Translation="0,0,24">
                             <Border.Shadow><ThemeShadow /></Border.Shadow>
@@ -934,7 +934,7 @@
                     <Grid x:Name="FirstSide" Tag="dyn" />
                     <StackPanel Grid.Column="1" Padding="40" VerticalAlignment="Center">
                         <TextBlock Text="Apex Radiance" FontSize="32" LineHeight="40" FontWeight="SemiBold" />
-                        <TextBlock Text="Lighting, picture and performance for The Sims 3." Foreground="{ThemeResource ApexSoftTextBrush}" FontSize="14" LineHeight="22" TextWrapping="Wrap" Margin="0,8,0,0" />
+                        <TextBlock Text="Lighting, picture and performance for The Sims 3" Foreground="{ThemeResource ApexSoftTextBrush}" FontSize="14" LineHeight="22" TextWrapping="Wrap" Margin="0,8,0,0" />
                         <StackPanel x:Name="FirstPoints" Tag="dyn" Spacing="20" Margin="0,28,0,0" />
                         <Border Margin="0,28,0,0" Padding="16" CornerRadius="12" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexRaisedBrush}">
                             <Grid ColumnSpacing="16">
@@ -944,7 +944,7 @@
                                     <TextBlock x:Name="FirstGame" Tag="dyn" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
                                     <TextBlock x:Name="FirstGameStore" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" />
                                 </StackPanel>
-                                <HyperlinkButton x:Name="FirstNotThis" Grid.Column="2" Content="Other folder" FontSize="13" Padding="0" VerticalAlignment="Center" Click="OnNotThisGame" />
+                                <HyperlinkButton x:Name="FirstNotThis" Grid.Column="2" Content="Choose another folder" FontSize="13" Padding="0" VerticalAlignment="Center" Click="OnNotThisGame" />
                             </Grid>
                         </Border>
                         <Button Style="{StaticResource AccentButtonStyle}" MinWidth="160" Height="40" Margin="0,32,0,0" HorizontalAlignment="Left" Click="OnFirstStart">

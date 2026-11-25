@@ -49,9 +49,9 @@ public sealed class ModAdd : IDisposable
         Programs = [".exe", ".dll", ".asi", ".msi", ".com", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".jar", ".lnk"];
     public static readonly string[] Packs = [".sims3pack", ".ts3pack"];
     const string PackText = "Install it with The Sims 3's own launcher: double-click the file.";
-    const string ProgramText = "A program or plugin. The launcher doesn't add these.";
-    const string NothingText = "It holds no mod, Sim, lot or world.";
-    const string NotOpened = "The archive can't be opened. It may be damaged or ask for a password. Extract it, then add the folder.";
+    const string ProgramText = "This is a program or plugin. The launcher does not add these.";
+    const string NothingText = "There is no mod, Sim, lot or world in it.";
+    const string NotOpened = "The archive can't be opened. It may be damaged or need a password. Extract it, then add the folder.";
     const string TooBig = "The archive is too big to open here. Extract it, then add the folder.";
 
     public static long MaxBytes = ModConflicts.UnpackCap; // taken out of one archive (settable for tests)
@@ -157,7 +157,7 @@ public sealed class ModAdd : IDisposable
     void OpenArchive(string path, string name, string? archive, int depth)
     {
         // (an archive in an archive is opened, one in that is not)
-        if (depth > 1) { Refuse(name, archive, "This archive is too deep inside others. Extract it, then add it."); return; }
+        if (depth > 1) { Refuse(name, archive, "This archive is inside too many others. Extract it, then add it."); return; }
         if (depth == 0) (_bytesLeft, _filesLeft) = (MaxBytes, ModConflicts.UnpackFiles);
         var before = Items.Count;
         string? why = null;
@@ -226,7 +226,7 @@ public sealed class ModAdd : IDisposable
         if (dir is null)
         {
             Engine.Log(new InvalidDataException(unknown));
-            if (unknown!.StartsWith("archive refused: unsafe")) return "The archive was refused: it would write outside its own folder.";
+            if (unknown!.StartsWith("archive refused: unsafe")) return "The archive was refused because it would write outside its own folder.";
             if (unknown.StartsWith("archive refused")) return TooBig;
             return ModConflicts.Extractors().Any(x => x.Kind == "7z") ? NotOpened
                 : "Windows can't open this archive. Install 7-Zip and add it again, or extract it and add the folder.";
@@ -305,7 +305,7 @@ public sealed class ModAdd : IDisposable
         return Keys(a).ToHashSet().Overlaps(Keys(b));
     }
 
-    const string LongText = "The folder and name are too long for the game to read.";
+    const string LongText = "The folder path and file name are too long for the game to read. Use shorter names.";
     // (the game, a 32-bit program, does not read files past the old 260-character path limit)
     static bool TooLong(string path) => path.Length >= ModLibrary.MaxGamePath;
 

@@ -20,7 +20,7 @@ public sealed partial class MainWindow
     async Task MergeAsync(List<ModRow> rows, string? name, string? folder)
     {
         if (_game is null) return;
-        if (rows.Count == 0) { SetInfo(ModsInfo, InfoBarSeverity.Informational, T("These mods can't be merged"), T("Pick at least two packages that can be merged.")); return; }
+        if (rows.Count == 0) { SetInfo(ModsInfo, InfoBarSeverity.Informational, T("These mods can't be merged"), T("Select at least two packages that can be merged.")); return; }
         var mods = rows.Select(r => r.File).ToList();
         folder ??= rows.Select(r => DirOf(r.File)).GroupBy(d => d).OrderByDescending(g => g.Count()).First().Key;
         name ??= ModMerge.FreeName(Docs, folder, (Path.GetFileName(folder) is { Length: > 0 } f ? f : "Mods") + "-merged");
@@ -53,10 +53,9 @@ public sealed partial class MainWindow
 
         var d = new ContentDialog
         {
-            Title = T("Merge {0} mods", mods.Count), PrimaryButtonText = T("Merge"), IsPrimaryButtonEnabled = false, CloseButtonText = T("Cancel"),
+            Tag = "merge", Title = T("Merge {0} mods", mods.Count), PrimaryButtonText = T("Merge"), IsPrimaryButtonEnabled = false, CloseButtonText = T("Cancel"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         };
-        d.Resources["ContentDialogMaxWidth"] = 680.0;
         var box = new TextBox { Header = T("Name of the merged package"), Text = name };
         var line = Muted(T("Checking {0} mods…", mods.Count));
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
@@ -67,7 +66,7 @@ public sealed partial class MainWindow
         status.Children.Add(busy);
         status.Children.Add(line);
         var notices = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
-        var putAll = new HyperlinkButton { Content = T("Put all in"), Padding = new Thickness(0) };
+        var putAll = new HyperlinkButton { Content = T("Include all"), Padding = new Thickness(0) };
         var leaveAll = new HyperlinkButton { Content = T("Leave all conflicts out"), Padding = new Thickness(0) };
         var quick = new WrapPanel { Spacing = 16 };
         quick.Children.Add(putAll);
@@ -89,15 +88,15 @@ public sealed partial class MainWindow
         AutomationProperties.SetName(list, T("Order"));
         var order = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
         order.Children.Add(new TextBlock { Text = T("Order"), FontSize = 14, FontWeight = FontWeights.SemiBold });
-        order.Children.Add(Muted(T("If two mods change the same thing, the top one counts. Drag to change the order, or use the arrows.")));
+        order.Children.Add(Muted(T("If two mods change the same thing, the game uses the one higher up. Drag to change the order, or use the arrows.")));
         order.Children.Add(quick);
         order.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = new SolidColorBrush(Pick(0x0AFFFFFF, 0x06000000)) });
         var leftOut = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
         var scriptBox = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
         var scriptHost = new StackPanel { Spacing = 6, Visibility = Visibility.Collapsed };
         scriptHost.Children.Add(scriptBox);
-        scriptHost.Children.Add(Muted(T("Their makers usually ask not to merge them. Apart, they are easy to put back.")));
-        var partsRow = Toggle(null, T("Split into parts of about 1 GB"), T("For very large merges."), false, on => { parts = on; Changed(0); });
+        scriptHost.Children.Add(Muted(T("Creators of script mods usually ask not to merge them. In a separate package they are easy to put back.")));
+        var partsRow = Toggle(null, T("Divide into parts of about 1 GB"), T("For very large merges"), false, on => { parts = on; Changed(0); });
         partsRow.Visibility = Visibility.Collapsed;
 
         var body = new StackPanel { Spacing = 16, Width = 560 };
@@ -175,7 +174,7 @@ public sealed partial class MainWindow
             var made = plans.Count + (scripts is null ? 0 : 1);
             (busy.IsIndeterminate, busy.Opacity) = (false, 0);
             AutomationProperties.SetAccessibilityView(busy, AccessibilityView.Raw);
-            d.Title = inside == mods.Count ? T("Merge {0} mods", inside) : T("Merge {0} of the {1} mods chosen", inside, mods.Count);
+            d.Title = inside == mods.Count ? T("Merge {0} mods", inside) : T("Merge {0} of the {1} mods selected", inside, mods.Count);
             line.Text = trouble is not null || inside < 2 ? "" : made == 1 ? // (one mod: no merge yet, and the reason is said below)
                 T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, inside, resources, ModRow.SizeText(bytes))
                 : T("Into {0} · {1} packages · {2} mods · {3} resources · {4}", PlaceTitle(folder).Title, made, inside, resources, ModRow.SizeText(bytes));
@@ -189,7 +188,7 @@ public sealed partial class MainWindow
             foreach (var r in scripts?.Refusals ?? [])
                 if (!plans.Any(p => p.Refusals.Any(x => x.Text == r.Text))) notices.Children.Add(Warn(T("The package of script mods can't be made"), T(r.Key, r.Args)));
             var open = choices.Rows.Count(r => r.Undecided);
-            if (open > 0) notices.Children.Add(Warn(open == 1 ? T("1 mod conflicts and stays out until you choose") : T("{0} mods conflict and stay out until you choose", open), T("Put in the ones you want, or leave them out.")));
+            if (open > 0) notices.Children.Add(Warn(open == 1 ? T("1 mod conflicts and stays out until you choose") : T("{0} mods conflict and stay out until you choose", open), T("Include the ones you want, or leave them out.")));
             notices.Visibility = notices.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
             order.Visibility = choices.Rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -241,11 +240,11 @@ public sealed partial class MainWindow
             var who = string.Join(", ", others.Take(3)) + (others.Count > 3 ? " " + T("and {0} more", others.Count - 3) : "");
             var with = meets.Resources == 1 ? T("Conflicts with {0} in 1 resource.", who) : T("Conflicts with {0} in {1} resources.", who, meets.Resources);
             if (r.Pick == false) return (T("Stays out of the merge") + ". " + with, "ApexMutedBrush");
-            if (r.Undecided) return (with + " " + T("Out until you choose."), "ApexWarningBrush");
-            var share = r.Share is not { } s || s is { Kept: 0, Replaced: 0 } ? "" : " " + (s.Replaced == 0 ? T("Its copy counts.") : s.Kept == 0 ? T("Another copy counts. The rest of it goes in.") : T("Its copy counts in {0}, another one in {1}.", s.Kept, s.Replaced));
+            if (r.Undecided) return (with + " " + T("Left out until you choose."), "ApexWarningBrush");
+            var share = r.Share is not { } s || s is { Kept: 0, Replaced: 0 } ? "" : " " + (s.Replaced == 0 ? T("This mod's copy is used.") : s.Kept == 0 ? T("Another mod's copy is used, and the rest of this one goes in.") : T("This mod's copy is used in {0}, another mod's in {1}.", s.Kept, s.Replaced));
             // (one that stays out of the merge is outside it: which copy the game uses is then up to the load order)
             var beside = meets.With.Keys.Where(k => choices.Rows.FirstOrDefault(x => x.Mod.Rel.Equals(k, StringComparison.OrdinalIgnoreCase)) is not { In: true, Why: null }).Select(Plain).Concat(meets.Outside).Take(3).ToList();
-            return (with + share + (beside.Count == 0 ? "" : " " + T("Outside the merge, it also meets {0}: which of them the game uses could change.", string.Join(", ", beside))),
+            return (with + share + (beside.Count == 0 ? "" : " " + T("It also conflicts with {0} outside the merge, and merging can change which one the game uses.", string.Join(", ", beside))),
                 r.Share is { Replaced: > 0 } || beside.Count > 0 ? "ApexWarningBrush" : "ApexSuccessBrush");
         }
 
@@ -261,7 +260,7 @@ public sealed partial class MainWindow
             v.Info.Text = info;
             v.Info.Foreground = Res(brush);
             v.Root.Opacity = r.Pick == false || r.Why is not null ? 0.7 : 1;
-            v.PutIn.Content = r.Pick == false ? T("Put back") : T("Put in");
+            v.PutIn.Content = r.Pick == false ? T("Put back") : T("Include");
             v.PutIn.Visibility = r.In ? Visibility.Collapsed : Visibility.Visible;
             v.LeaveOut.Visibility = r.Meets is not null && r.Pick != false ? Visibility.Visible : Visibility.Collapsed;
             v.Acts.Visibility = v.PutIn.Visibility == Visibility.Visible || v.LeaveOut.Visibility == Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
@@ -421,7 +420,7 @@ public sealed partial class MainWindow
         static string Plain(string file) => Path.GetFileNameWithoutExtension(file);
         var merges = ups.GroupBy(u => u.Merged.Rel, StringComparer.OrdinalIgnoreCase).Select(g => Plain(g.First().Merged.Name)).ToList();
         var names = string.Join(", ", merges.Take(3)) + (merges.Count > 3 ? " " + T("and {0} more", merges.Count - 3) : "");
-        var title = ups.Count == 1 ? T("New version of {0}.", Plain(ups[0].Original.Rel)) : T("New versions of {0} mods.", ups.Count);
+        var title = ups.Count == 1 ? T("New version of {0}", Plain(ups[0].Original.Rel)) : T("New versions of {0} mods", ups.Count);
         var text = merges.Count > 1 ? T("The merges {0} still use the old ones.", names) : ups.Count == 1 ? T("The merge {0} still uses the old one.", names) : T("The merge {0} still uses the old ones.", names);
 
         var say = new TextBlock { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, FontSize = 13 };

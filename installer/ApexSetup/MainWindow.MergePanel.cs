@@ -137,7 +137,7 @@ public sealed partial class MainWindow
         var leave = false;
         try
         {
-            var d = new ContentDialog { Title = T("Save the changes to {0}?", r.Name), Content = T("They are not saved yet."), PrimaryButtonText = T("Save"), SecondaryButtonText = T("Discard"), CloseButtonText = T("Cancel"),
+            var d = new ContentDialog { Tag = "merge", Title = T("Save the changes to {0}?", r.Name), Content = T("If you discard them, they are lost."), PrimaryButtonText = T("Save"), SecondaryButtonText = T("Discard"), CloseButtonText = T("Cancel"),
                 DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
             var answer = await ShowDialog(d);
             leave = answer == ContentDialogResult.Secondary || answer == ContentDialogResult.Primary && await SaveMergeAsync();
@@ -185,7 +185,7 @@ public sealed partial class MainWindow
         var s = new StackPanel { Spacing = 12 };
         var news = new StackPanel { Spacing = 8 };
         s.Children.Add(news);
-        if (mine) s.Children.Add(new TextBlock { Text = T("If two mods change the same thing, the one higher up counts. Drag to change the order."), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        if (mine) s.Children.Add(new TextBlock { Text = T("If two mods change the same thing, the game uses the one higher up. Drag to change the order."), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
 
         var list = new ListView
         {
@@ -358,7 +358,7 @@ public sealed partial class MainWindow
             }
             if (d.Changed && _draftPlan is { CanRun: false } no)
                 foreach (var why in Reasons(no)) news.Children.Add(Warn(why, null));
-            if (d.Left < 2) news.Children.Add(Warn(T("After saving, the merge is removed"), T("A merge needs at least 2 mods. The ones that stay are separate mods again.")));
+            if (d.Left < 2) news.Children.Add(Warn(T("Saving removes the merge"), T("A merge needs at least 2 mods. The ones that stay are separate mods again.")));
             news.Visibility = news.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             foreach (var i in d.Items)
                 if (list.ContainerFromItem(i) is ListViewItem { ContentTemplateRoot: Grid g } c) Paint(c, g, i);
@@ -421,11 +421,11 @@ public sealed partial class MainWindow
     static string ChangeText(MergeDraft.Item i) => i switch
     {
         { Added: not null } => T("Goes in when you save"),
-        { Out: TakeOutTo.On } => T("Comes out when you save, on"),
-        { Out: TakeOutTo.Off } => T("Comes out when you save, off"),
+        { Out: TakeOutTo.On } => T("Comes out when you save, turned on"),
+        { Out: TakeOutTo.Off } => T("Comes out when you save, turned off"),
         { Out: TakeOutTo.Bin } => T("Goes to the Recycle Bin when you save"),
-        { Newer: true, With: { } w } => T("Updated when you save: {0}", Path.GetFileNameWithoutExtension(w.Name)),
-        { With: { } w } => T("Replaced when you save: {0}", Path.GetFileNameWithoutExtension(w.Name)),
+        { Newer: true, With: { } w } => T("Updates when you save: {0}", Path.GetFileNameWithoutExtension(w.Name)),
+        { With: { } w } => T("Is replaced when you save: {0}", Path.GetFileNameWithoutExtension(w.Name)),
         _ => "",
     };
 
@@ -522,12 +522,12 @@ public sealed partial class MainWindow
             AutomationProperties.SetName(a.ItemContainer, $"{x.Name}, {ModRow.Place(x.File)}, {x.Size}");
             a.Handled = true;
         };
-        var none = Muted(T("No mod here can go in."));
-        var body = new StackPanel { Spacing = 12, Width = 440 };
+        var none = Muted(T("No mod can be added to this merge."));
+        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
         body.Children.Add(search);
         body.Children.Add(list);
         body.Children.Add(none);
-        var dlg = new ContentDialog { Title = T("Add mods to this merge"), Content = body, PrimaryButtonText = T("Add"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, IsPrimaryButtonEnabled = false, XamlRoot = Content.XamlRoot };
+        var dlg = new ContentDialog { Tag = "plus", Title = T("Add mods to this merge"), Content = body, PrimaryButtonText = T("Add"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, IsPrimaryButtonEnabled = false, XamlRoot = Content.XamlRoot };
         List<ModRow> shown = [];
         list.SelectionChanged += (_, e) =>
         {
@@ -596,11 +596,11 @@ public sealed partial class MainWindow
         var step = new TextBlock { Text = T("Check the files"), FontSize = 13, TextWrapping = TextWrapping.Wrap };
         AutomationProperties.SetLiveSetting(step, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         var count = new TextBlock { FontSize = 12, Foreground = Res("ApexMutedBrush") };
-        var body = new StackPanel { Spacing = 12, Width = 400 };
+        var body = new StackPanel { Spacing = 12, Width = Design.Dialogs.Small };
         foreach (var x in new FrameworkElement[] { bar, step, count }) body.Children.Add(x);
         var cts = new CancellationTokenSource();
         var running = true;
-        var dlg = new ContentDialog { Title = T("Saving {0}", r.Name), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
+        var dlg = new ContentDialog { Tag = "merge", Title = T("Saving {0}", r.Name), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
         dlg.CloseButtonClick += (_, e) => { if (running) { e.Cancel = true; cts.Cancel(); dlg.CloseButtonText = T("Stopping…"); } };
         var steps = new[] { (MergeStep.Check, T("Check the files")), (MergeStep.Write, T("Write the merged package")), (MergeStep.Verify, T("Check every resource against the originals")), (MergeStep.Move, T("Put the files in place")), (MergeStep.Finish, T("Put the files in place")) };
         var progress = new Progress<MergeProgress>(p =>
@@ -632,10 +632,10 @@ public sealed partial class MainWindow
         {
             var stopped = error is OperationCanceledException;
             // (a SetupException says itself what is out of place, when something is)
-            var why = stopped ? T("Nothing was changed.") : error is SetupException ? ErrorText(error) : error is not null ? ErrorText(error) + " " + T("Your mods are as they were.")
+            var why = stopped ? T("Nothing was changed.") : error is SetupException ? ErrorText(error) : error is not null ? ErrorText(error) + " " + T("Your mods are back as they were.")
                 : string.Join("\n", Reasons(planned!)) + "\n" + T("Nothing was changed.");
             dlg.Title = stopped ? T("Not saved") : T("The merge was not saved");
-            dlg.Content = new TextBlock { Text = why, TextWrapping = TextWrapping.Wrap, MaxWidth = 440 };
+            dlg.Content = new Grid { Width = Design.Dialogs.Small, Children = { Design.Dialogs.Words(why) } };
             dlg.CloseButtonText = T("Close");
             SetInfo(ModsInfo, stopped ? InfoBarSeverity.Informational : InfoBarSeverity.Error, (string)dlg.Title, why); // (the dialog may be gone: another one takes its place)
             await shown;
@@ -652,7 +652,7 @@ public sealed partial class MainWindow
         var left = res.Back.Where(m => !asked.Contains(m.Rel)).Select(m => Path.GetFileNameWithoutExtension(m.Name)).ToList();
         var detail = left.Count == 0 ? "" : T("Windows could not move these to the Recycle Bin, so they are in your mods, turned off: {0}", string.Join(", ", left));
         (_draft, _draftPlan, _mergeOpen, _mergeInner) = (null, null, null, null);
-        ModsResult(res.Remerged is { } m ? T("{0} saved and checked. It holds {1} mods.", Path.GetFileNameWithoutExtension(m.Merged.Name), m.Mods) : T("Every mod is separate again"), null, detail, left.Count == 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        ModsResult(res.Remerged is { } m ? T("{0} saved and checked. It has {1} mods.", Path.GetFileNameWithoutExtension(m.Merged.Name), m.Mods) : T("Every mod is separate again"), null, detail, left.Count == 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
         await ModsAgain();
         if (res.Remerged is { } made)
         {
@@ -790,9 +790,9 @@ public sealed partial class MainWindow
 
         var where = Section(T("Where"), null, out _);
         where.Children.Add(new TextBlock { Text = string.Join(" › ", new[] { ModMerge.FolderName }.Concat(Path.GetRelativePath(Path.GetDirectoryName(merge.Dir)!, row.File.Path).Split(Path.DirectorySeparatorChar))), FontSize = 13, TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush") });
-        where.Children.Add(Muted(T("Taken out of the merge, it goes back to {0}.", ModRow.Place(row.File))));
+        where.Children.Add(Muted(T("If you take it out of the merge, it goes back to {0}.", ModRow.Place(row.File))));
         host.Children.Add(where);
-        host.Children.Add(Actions(ActionRow("folder-search", T("Show file"), null, () => ShowFile(row.File.Path))));
+        host.Children.Add(Actions(ActionRow("folder-search", T("Show in Explorer"), null, () => ShowFile(row.File.Path))));
     }
 
     UIElement InnerTags(MergeOriginal o, Action<Action<ModNote>> change)

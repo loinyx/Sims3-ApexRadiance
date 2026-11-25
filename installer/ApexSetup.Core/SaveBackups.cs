@@ -298,10 +298,10 @@ public static class SaveBackups
             if (from.Equals(to, StringComparison.OrdinalIgnoreCase)) return;
             foreach (var game in new[] { Path.Combine(docs, "Saves"), Path.Combine(docs, "Mods") })
                 if ((to + Path.DirectorySeparatorChar).StartsWith(Path.GetFullPath(game) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new SetupException("Choose a folder the game does not use.");
-            if (BackupChoices.Sure().Others(docs).Any(f => f.Equals(to, StringComparison.OrdinalIgnoreCase))) throw new SetupException("Another game already keeps its backups in this folder.");
+            if (BackupChoices.Sure().Others(docs).Any(f => f.Equals(to, StringComparison.OrdinalIgnoreCase))) throw new SetupException("Another game already keeps its backups in this folder. Choose another folder.");
             // (nor another game's own folder, which has no choice of its own to be found by)
             if (Path.GetFileName(to).Equals(Path.GetFileName(Saves.OwnBackupDir(docs)), StringComparison.OrdinalIgnoreCase) && !to.Equals(Path.GetFullPath(Saves.OwnBackupDir(docs)), StringComparison.OrdinalIgnoreCase)
-                && Directory.Exists(Path.Combine(Path.GetDirectoryName(to)!, "Saves"))) throw new SetupException("Another game already keeps its backups in this folder.");
+                && Directory.Exists(Path.Combine(Path.GetDirectoryName(to)!, "Saves"))) throw new SetupException("Another game already keeps its backups in this folder. Choose another folder.");
             var reach = Directory.Exists(from);
             if (!reach && !leave && BackupChoices.Load().FolderOf(docs) is not null) throw new SetupException("The backup folder isn't available: {0}", from);
             var zips = SaveCopies.ZipFiles(docs).Select(z => z.Path).ToList();

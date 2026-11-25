@@ -96,7 +96,7 @@ function Nav([string]$idOrName) {
 }
 # a screen that is no longer in the sidebar: opened from Settings' rows
 function Open([string]$screen) {
-    $id = @{ 'Game' = 'SettingsGame'; 'Repair or remove' = 'SettingsManage'; 'About and licences' = 'SettingsAbout' }[$screen]
+    $id = @{ 'Game' = 'SettingsGame'; 'Repair or remove' = 'SettingsManage'; 'Credits and licences' = 'SettingsAbout' }[$screen]
     if (-not $id) { Nav $screen; return }
     Nav 'Settings'
     $b = ById $id
@@ -266,7 +266,7 @@ function OneRun([int]$run) {
             }
         }
         # About and licences: each licence (the GitHub links open a browser: left alone)
-        Open 'About and licences'
+        Open 'Credits and licences'
         $reads = @(Buttons | Where-Object { $_.Current.Name -like 'Read, *' })
         for ($k = 0; $k -lt $reads.Count; $k++) {
             Step "licence $k" {

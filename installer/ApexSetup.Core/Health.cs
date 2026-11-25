@@ -70,7 +70,7 @@ public static class Health
         var bytes = GameCaches.List(docs).Sum(c => c.Size);
         var crashed = SessionHistory.List().FirstOrDefault() is { End: not SessionEnd.Normal };
         if (bytes > 0 && (bytes >= CacheSuggestBytes || crashed))
-            yield return new(Severity.Info, crashed ? "The game's caches take {0} MB, and the game didn't close normally last time. Clearing them often helps. The game rebuilds them, and a copy is kept until it starts normally."
+            yield return new(Severity.Info, crashed ? "The game's caches take {0} MB. The game didn't close normally last time, and clearing them often helps. The game rebuilds them, and a copy is kept until it starts normally."
                     : "The game's caches take {0} MB. Clearing them frees that space. The game rebuilds them, and a copy is kept until it starts normally.",
                 [(bytes >> 20).ToString()], () => GameCaches.Clean(docs), Suggest: "Clear the game caches");
         if (GameCaches.Backup is not null)

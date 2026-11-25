@@ -34,7 +34,7 @@ public sealed partial class MainWindow
             FillContent(panel, path, r.Content, cts.Token);
         else
         {
-            panel.Children.Add(WaitLine(T("Reading what it holds…")));
+            panel.Children.Add(WaitLine(T("Reading its content…")));
             Safe(Read());
         }
         return panel;
@@ -64,8 +64,8 @@ public sealed partial class MainWindow
             panel.Children.Add(wrap);
         }
         else
-            panel.Children.Add(Muted(c.Resources.Any(r => r.Entry.Type == ModKinds.S3sa) ? T("Game code and settings: no objects or Create a Sim parts.")
-                : T("No objects or Create a Sim parts: it changes what the game already has.")));
+            panel.Children.Add(Muted(c.Resources.Any(r => r.Entry.Type == ModKinds.S3sa) ? T("Game code and settings, with no objects or Create a Sim parts.")
+                : T("No objects or Create a Sim parts. It changes what the game already has.")));
 
         // (nothing but resources: the list alone, no switch)
         var keys = _contentKeys || c.Items.Count == 0;
@@ -331,7 +331,7 @@ public sealed partial class MainWindow
         DataKind.Text when ModInspect.TableLanguage(r.Entry.Instance) is { } code && Languages.FirstOrDefault(l => l.Code == code).Name is { } language => T("Text · {0}", language),
         DataKind.Tuning => T("Tuning"), DataKind.Script => T("Script"), DataKind.Object => T("Object"), DataKind.CasPart => T("Create a Sim"), DataKind.Texture => T("Texture"),
         DataKind.Picture => T("Picture"), DataKind.Text => T("Text"), DataKind.Model => T("Model"), DataKind.Animation => T("Animation"), DataKind.Sound => T("Sound"),
-        DataKind.Effect => T("Effect"), DataKind.Light => T("Light"), DataKind.Interface => T("Interface"),
+        DataKind.Effect => T("Effect"), DataKind.Light => T("Lighting"), DataKind.Interface => T("Interface"),
         _ => T("Resource"),
     };
 
@@ -438,7 +438,7 @@ public sealed partial class MainWindow
             {
                 App.Log(e);
                 panel.Children.Clear();
-                panel.Children.Add(Warn(T("The mods couldn't be compared"), ErrorText(e)));
+                panel.Children.Add(Warn(T("The mods could not be compared"), ErrorText(e)));
             }
             finally { if (ReferenceEquals(_sharedBar, bar)) _sharedBar = null; }
         }
@@ -484,7 +484,7 @@ public sealed partial class MainWindow
         UIElement ModLine(SharedMod r, params UIElement[] acts)
         {
             var what = string.Join(", ", r.Different.Select(d => DataText(d.Kind, d.Count)));
-            if (r.Identical > 0 && r.Conflict) what += " · " + (r.Identical == 1 ? T("1 more is the same in both") : T("{0} more are the same in both", r.Identical));
+            if (r.Identical > 0 && r.Conflict) what += " · " + (r.Identical == 1 ? T("and 1 more is the same in both") : T("and {0} more are the same in both", r.Identical));
             return Row(Path.GetFileNameWithoutExtension(r.Mod.Name), what, ModInspect.InHealth(found, m, r), acts);
         }
 
@@ -551,7 +551,7 @@ public sealed partial class MainWindow
         List<(ModFile Mod, string From)>? done = null;
         try { done = await ModWork(() => ModPriority.Apply(docs, moves)); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The mod was not moved"), ErrorText(e)); }
-        if (done is not null) ModsResult(T("{0} has priority now.", name), () => Safe(Back(done)));
+        if (done is not null) ModsResult(T("{0} has priority now", name), () => Safe(Back(done)));
         var at = moves.FindIndex(x => x.Mod.Path.Equals(m.Path, StringComparison.OrdinalIgnoreCase));
         await ShowAgain(done is not null && at >= 0 ? done[at].Mod.Rel : m.Rel);
 

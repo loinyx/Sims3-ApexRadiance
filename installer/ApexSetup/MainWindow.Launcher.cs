@@ -220,7 +220,7 @@ public sealed partial class MainWindow
         // prompt from Play: where the game's folder needs one, they wait on Health. A fix that fails does not stop the start.
         if (_settings.FixSafeAutomatically && found.Any(i => i.Finding.CanFix) && (Elevation.IsElevated || DryRun || Elevation.CanWrite(g.Bin))
             && await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); },
-                T("Fixed."), null, "Fix incompatible settings"))
+                T("Fixed"), null, "Fix incompatible settings"))
         {
             RefreshGame(); // (starts the full check too)
             found = await BeforePlay();
@@ -231,7 +231,7 @@ public sealed partial class MainWindow
             var first = found.First(Health.StopsApex).Finding;
             var r = await ShowDialog(new ContentDialog
             {
-                Title = T("One thing before you play"), Content = T(first.Text, first.Args) + "\n\n" + T("The game starts without Apex Radiance until this is fixed."),
+                Tag = "!triangle-alert", Title = T("One thing before you play"), Content = T(first.Text, first.Args) + "\n\n" + T("The game starts without Apex Radiance until this is fixed."),
                 PrimaryButtonText = T("Open Health"), SecondaryButtonText = T("Play anyway"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
             });
             if (r == ContentDialogResult.Primary) { Show(HealthScreen); return; }
@@ -271,7 +271,7 @@ public sealed partial class MainWindow
         {
             var low = info.End == SessionEnd.LowMemory;
             var again = await Confirm(low ? T("You saved and quit with memory running low") : T("The game closed unexpectedly"),
-                low ? T("Starting again frees the memory. The game opens where you saved.") : T("Your last save is safe. Start again where you left off."),
+                low ? T("Starting again frees the memory. The game opens where you saved.") : T("Your last save is safe. You can open it again and go on from there."),
                 T("Open this save again"));
             if (again && Saves.Newest(Docs) is { } last) await StartGameAsync(g, last.Name);
         }
@@ -316,13 +316,13 @@ public sealed partial class MainWindow
         if (Environment.ProcessPath is not { } exe) return true;
         var carry = screen == "components";
         if (!await Confirm(T("Administrator permission needed"), carry
-                ? T("Windows asks for permission, then your changes apply in a separate window.")
-                : T("Windows asks for permission, then this screen opens in a separate window."), T("Continue"))) return false;
+                ? T("Windows will ask for permission. Then your changes are applied in a separate window.")
+                : T("Windows will ask for permission. Then this screen opens in a separate window."), T("Continue"))) return false;
         string? choices = null;
         try { if (carry) choices = Elevation.SaveChoices(ChoicesNow()); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
         _maintenance = Elevation.StartMaintenance(exe, g.Bin, screen, choices);
-        if (_maintenance is null) { await Message(T("Nothing was changed"), T("Windows did not allow the change.")); return false; }
+        if (_maintenance is null) { await Message(T("Nothing was changed"), T("Windows did not get your permission. Try again and choose Yes when it asks.")); return false; }
         AppWindow.Hide();
         try { await _maintenance.WaitForExitAsync(); } catch (Exception e) { App.Log(e); }
         _maintenance = null;
@@ -437,7 +437,7 @@ public sealed partial class MainWindow
             }
             host.Children.Add(wrap);
         }
-        host.Children.Add(Muted(T("Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it.")));
+        host.Children.Add(Muted(T("Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds. Removing one never touches saves made in it.")));
     }
 
     // ---------- Health ----------
@@ -459,26 +459,26 @@ public sealed partial class MainWindow
                 chip = T("Graphics driver"); break;
             case CrashTimeline.Ending.Froze:
                 title = T("Froze and was closed");
-                body = T("The game stopped responding and was closed. No crash report names a file, so no mod is blamed.");
+                body = T("The game stopped responding and was closed. No crash report names a file, so there is no way to tell what caused it.");
                 chip = T("Froze"); chipBrush = "ApexMutedBrush"; break;
             case CrashTimeline.Ending.NoReport:
                 title = T("Closed without a crash report");
-                body = T("The game stopped without writing a crash report: it froze and was closed, or the graphics driver stopped. Nothing crashed in a mod.");
+                body = T("The game stopped without writing a crash report: it froze and was closed, or the graphics driver stopped. No mod shows up as the cause.");
                 chip = T("No report"); chipBrush = "ApexMutedBrush"; break;
             default:
                 (title, body, chip) = e.Why switch
                 {
                     "driver" => (T("Crashed when the graphics driver failed"), T("The driver reported a GPU error at the same moment. Updating the graphics driver usually helps."), T("Graphics driver")),
-                    "memory" => (T("Crashed with memory nearly full"), T("Memory reached {0} of 4 GB. Fewer mods, less CC or a smaller world lowers it.", gb), T("Memory")),
+                    "memory" => (T("Crashed with memory nearly full"), T("Memory reached {0} of the 4 GB the game can use. Fewer mods, less custom content or a smaller world help.", gb), T("Memory")),
                     "called" when e.Culprit is not null => (T("Crashed in a call from {0}", e.Culprit), T("{0} called {1}, and that call crashed.", e.Culprit, e.Into ?? ""), T("Mod")),
-                    _ when e.Culprit is null => (T("Crashed in the game's own code"), T("No mod was calling it."), T("The game")),
+                    _ when e.Culprit is null => (T("Crashed in the game's own code"), T("No mod was calling that code."), T("The game")),
                     _ when e.Renderer => (T("Crashed in {0}", e.Culprit), T("In the renderer's own code, while the game was drawing."), T("Renderer")),
-                    _ => (T("Crashed in {0}", e.Culprit), T("In its own code."), T("Mod")),
+                    _ => (T("Crashed in {0}", e.Culprit), T("The crash was in its own code."), T("Mod")),
                 };
                 if (e.Culprit is null && e.Why is null) chipBrush = "ApexMutedBrush";
                 if (e.Earlier)
                 {
-                    body = e.Replaced is { } r ? T("That version was replaced on {0}. No crash in it since.", MonthDay(r)) : T("That version was replaced since. No crash in it since.");
+                    body = e.Replaced is { } r ? T("That version was replaced on {0}, and there was no crash in it since.", MonthDay(r)) : T("That version has been replaced, and there was no crash in it since.");
                     chip = T("Fixed by an update"); chipBrush = "ApexSuccessBrush";
                 }
                 break;
@@ -575,14 +575,14 @@ public sealed partial class MainWindow
         // a suggestion (clear the caches, back up a save): offered under its own name, never run by Fix or Repair
         if (f.CanApply && it.Area == HealthArea.Mods) return Button(T(f.Suggest!), async () =>
         {
-            try { await ModWork(() => { f.Fix!(); return 0; }); _healthNote = (T("Applied."), null, null); }
+            try { await ModWork(() => { f.Fix!(); return 0; }); _healthNote = (T("Applied"), null, null); }
             catch (Exception e) { App.Log(e); await Message(T("The launcher could not finish"), ErrorText(e)); }
             _modsLoaded = false;
             RefreshGame();
             BuildHealth();
         });
-        if (f.CanApply) return Button(T(f.Suggest!), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Applied."), null, "Apply suggestion: {0}", args: f.Suggest!)) { _modsLoaded = false; RefreshGame(); BuildHealth(); } });
-        if (f.CanFix) return Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); BuildHealth(); } }, accent: true);
+        if (f.CanApply) return Button(T(f.Suggest!), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Applied"), null, "Apply suggestion: {0}", args: f.Suggest!)) { _modsLoaded = false; RefreshGame(); BuildHealth(); } });
+        if (f.CanFix) return Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed"), null, "Fix incompatible settings")) { RefreshGame(); BuildHealth(); } }, accent: true);
         if (ModsFor(it.Files) is { Count: > 0 } hits) return Button(T("Show in Mods"), () => ShowInMods(hits));
         if (f.Link is { } link) return Button(T("Read more"), () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }));
         // (what is missing is installed in Components)
@@ -637,7 +637,7 @@ public sealed partial class MainWindow
         if (s?.Layer == Layer.Dxvk) shown.Add(("DXVK", _latest.GetValueOrDefault(Releases.Dxvk), s.Installed(Components.Dxvk)));
         if (shown.All(x => x.Release is null))
         {
-            host.Children.Add(Card(Muted(_offline ? T("No internet connection. The notes show once the launcher can reach GitHub.") : T("Checking the latest versions…"))));
+            host.Children.Add(Card(Muted(_offline ? T("No internet connection. The notes appear once the launcher can reach GitHub.") : T("Checking the latest versions…"))));
             return;
         }
         foreach (var (name, r, installed) in shown)
@@ -727,59 +727,59 @@ public sealed partial class MainWindow
         host.Children.Add(PageHead(T("Settings"), null));
         host.Children.Add(Section(T("Starting the game")));
         var installed = Environment.ProcessPath is { } exe && LauncherInstall.IsInstalledCopy(exe);
-        host.Children.Add(Toggle("power", T("Start with Windows"), T("Opens quietly in the notification area."), LauncherInstall.RunsAtStartup(),
-            on => LauncherInstall.SetRunAtStartup(Paths.InstalledExe, on), enabled: installed));
-        host.Children.Add(Toggle("eye-off", T("Hide while playing"), T("The launcher comes back when the game closes."), _settings.HideWhilePlaying,
+        host.Children.Add(Toggle("eye-off", T("Hide while playing"), T("The launcher comes back when the game closes"), _settings.HideWhilePlaying,
             on => { _settings.HideWhilePlaying = on; _settings.Save(); }));
-        host.Children.Add(Toggle("shield-check", T("Apply safe fixes without asking"), T("You can undo them in Repair or remove."), _settings.FixSafeAutomatically,
+        host.Children.Add(Toggle("shield-check", T("Apply safe fixes without asking"), T("You can undo them in Repair or remove"), _settings.FixSafeAutomatically,
             on => { _settings.FixSafeAutomatically = on; _settings.Save(); }));
         host.Children.Add(Section(T("Updates")));
-        host.Children.Add(Toggle("wand-sparkles", T("Install updates when I press Play"), T("Then the game starts."), _settings.InstallUpdatesOnPlay,
+        host.Children.Add(Toggle("wand-sparkles", T("Install updates when I press Play"), T("The game starts once they are installed"), _settings.InstallUpdatesOnPlay,
             on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
         host.Children.Add(Section(T("Appearance")));
         host.Children.Add(ThemeCard());
         string[] modes = ["system", "dark", "light"];
         var mode = new ComboBox { Width = 232 };
-        foreach (var label in new[] { T("As Windows"), T("Dark"), T("Light") }) mode.Items.Add(label);
+        foreach (var label in new[] { T("Same as Windows"), T("Dark"), T("Light") }) mode.Items.Add(label);
         mode.SelectedIndex = Math.Max(0, Array.IndexOf(modes, _settings.Mode));
         mode.SelectionChanged += (_, _) => { _settings.Mode = modes[Math.Max(0, mode.SelectedIndex)]; _settings.Save(); ApplyMode(); };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(mode, T("Dark or light"));
-        host.Children.Add(Row("contrast", T("Dark or light"), T("Also while Windows is in the other one."), mode));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(mode, T("Light or dark"));
+        host.Children.Add(Row("contrast", T("Light or dark"), T("Can be different from Windows"), mode));
         var picture = new ComboBox { Width = 232 };
         string[] kinds = ["gallery", "household", "none"];
         foreach (var k in kinds) picture.Items.Add(k switch { "gallery" => T("A picture from the gallery"), "household" => T("The household's photo"), _ => T("No picture") });
         picture.SelectedIndex = Math.Max(0, Array.IndexOf(kinds, _settings.HomePicture));
         picture.SelectionChanged += (_, _) => { _settings.HomePicture = kinds[Math.Max(0, picture.SelectedIndex)]; _settings.Save(); };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picture, T("Picture on top"));
-        host.Children.Add(Row("image", T("Picture on top"), T("What shows at the top of Home."), picture));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picture, T("Picture at the top of Home"));
+        host.Children.Add(Row("image", T("Picture at the top of Home"), T("Choose where it comes from"), picture));
         var chosen = (_gal ??= LoadGallery()).HomePicture is { } hp && File.Exists(hp);
         var choose = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         choose.Children.Add(Button(T("Choose in the gallery"), () => Show(GalleryScreen)));
         if (chosen) choose.Children.Add(Button(T("Use the newest"), () => { _gal!.HomePicture = null; Gallery.Save(_gal); BuildSettings(); }));
-        host.Children.Add(Row("image-plus", T("Gallery picture"), chosen ? T("The one you chose in the gallery.") : T("The newest one you took."), choose));
+        host.Children.Add(Row("image-plus", T("Gallery picture"), chosen ? T("The one you chose in the gallery") : T("The newest one you took"), choose));
         int[] heights = [240, 330, 440];
         var height = new ComboBox { Width = 232 };
-        foreach (var label in new[] { T("Low"), T("Medium"), T("Tall") }) height.Items.Add(label);
+        foreach (var label in new[] { T("Short"), T("Medium"), T("Tall") }) height.Items.Add(label);
         height.SelectedIndex = Math.Max(0, Array.IndexOf(heights, _settings.HomePictureHeight) is var hi && hi >= 0 ? hi : 1);
         height.SelectionChanged += (_, _) => { _settings.HomePictureHeight = heights[Math.Max(0, height.SelectedIndex)]; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(height, T("Picture height"));
-        host.Children.Add(Row("arrow-up-down", T("Picture height"), T("How much of the page the picture takes."), height));
+        host.Children.Add(Row("arrow-up-down", T("Picture height"), T("How much of the page the picture takes"), height));
         var strength = new Slider { Minimum = 30, Maximum = 100, StepFrequency = 5, Width = 232, Value = Math.Clamp(_settings.HomePictureStrength, 30, 100) };
         strength.ValueChanged += (_, e) => { _settings.HomePictureStrength = (int)e.NewValue; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(strength, T("Picture strength"));
-        host.Children.Add(Row("sliders-horizontal", T("Picture strength"), T("Lower it for a quieter picture."), strength));
+        host.Children.Add(Row("sliders-horizontal", T("Picture strength"), T("Lower it for a quieter picture"), strength));
         string[] backs = ["mica", "micaalt", "acrylic", "solid"];
         var back = new ComboBox { Width = 232 };
         foreach (var label in new[] { T("Mica (Windows default)"), T("Mica, stronger"), T("Acrylic"), T("Solid colour") }) back.Items.Add(label);
         back.SelectedIndex = Math.Max(0, Array.IndexOf(backs, _settings.Backdrop));
         back.SelectionChanged += (_, _) => { _settings.Backdrop = backs[Math.Max(0, back.SelectedIndex)]; _settings.Save(); ApplyBackdrop(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(back, T("Window background"));
-        host.Children.Add(Row("layers", T("Window background"), T("Mica and Acrylic take a tint from your wallpaper."), back));
+        host.Children.Add(Row("layers", T("Window background"), T("Mica and Acrylic take a tint from your wallpaper"), back));
         host.Children.Add(Section(T("General")));
+        host.Children.Add(Toggle("power", T("Start with Windows"), T("Opens quietly in the notification area"), LauncherInstall.RunsAtStartup(),
+            on => LauncherInstall.SetRunAtStartup(Paths.InstalledExe, on), enabled: installed));
         host.Children.Add(Row("languages", T("Language"), Languages.First(l => l.Code == Lang).Name, Button(T("Change"), () => OnLanguage(LangButton, new RoutedEventArgs()))));
         host.Children.Add(Row("folder", T("Game folder"), _game?.Root ?? T("No game chosen"), Id(Button(T("Change"), () => Show(GameStep)), "SettingsGame")));
-        host.Children.Add(Row("file-down", T("Logs"), T("What to attach when you ask for help."), Button(T("Open logs folder"), () => OpenFolder(App.LogDir))));
-        host.Children.Add(Row("wrench", T("Repair or remove"), T("Repair, remove a component, or go back in time."), Id(Button(T("Open"), () => Show(Manage)), "SettingsManage")));
+        host.Children.Add(Row("file-down", T("Logs"), T("Attach them when you ask for help"), Button(T("Open log folder"), () => OpenFolder(App.LogDir))));
+        host.Children.Add(Row("wrench", T("Repair or remove"), T("Repair the game, remove a component or go back to a restore point"), Id(Button(T("Open"), () => Show(Manage)), "SettingsManage")));
         host.Children.Add(InstallModeRow());
         host.Children.Add(Row("info", T("Credits and licences"), T("Apex Launcher {0}", App.Version), Id(Button(T("Open"), () => Show(About)), "SettingsAbout")));
         host.Children.Add(Row("trash-2", T("Uninstall Apex Launcher"), T("Removes everything it installed. Your saves and mods stay."),
@@ -811,7 +811,7 @@ public sealed partial class MainWindow
             b.Click += (_, _) => { _settings.Theme = t.Id; _settings.Save(); Design.DesignSystem.Apply(t.Id); ThemeChanged(); };
             grid.Children.Add(b);
         }
-        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = T("Theme"), FontSize = 14, FontWeight = FontWeights.SemiBold }, Muted(T("The colours of the launcher.")) } };
+        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = T("Theme"), FontSize = 14, FontWeight = FontWeights.SemiBold }, Muted(T("The colours of the launcher")) } };
         var head = new Grid { ColumnSpacing = Design.Space.IconToText };
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
@@ -828,12 +828,12 @@ public sealed partial class MainWindow
     // Settings' Uninstall and Windows' Installed apps (--uninstall)
     public async Task UninstallAsync(bool fromWindows = false)
     {
-        if (Games.IsRunning()) { await Message(T("Close the game first"), T("Close The Sims 3, then uninstall.")); return; }
+        if (Games.IsRunning()) { await Message(T("Close the game first"), T("The Sims 3 is open, and the uninstall changes its files.")); return; }
         var keep = new CheckBox { Content = T("Keep my settings, albums and mod notes"), IsChecked = true };
-        var text = new StackPanel { Spacing = 12 };
-        text.Children.Add(Body(T("Apex Radiance and every component the launcher installed are removed, and every file they replaced is put back. Mods you switched off are put back on. Your saves and your own mods stay.")));
+        var text = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
+        text.Children.Add(Body(T("Apex Radiance and every component the launcher installed are removed, and every file they replaced is put back. Mods you turned off are turned on again. Your saves and your own mods stay.")));
         text.Children.Add(keep);
-        var ok = await ShowDialog(new ContentDialog { Title = T("Uninstall Apex Launcher"), Content = text, PrimaryButtonText = T("Uninstall"), CloseButtonText = T("Cancel"),
+        var ok = await ShowDialog(new ContentDialog { Tag = "!trash-2", Title = T("Uninstall Apex Launcher"), Content = text, PrimaryButtonText = T("Uninstall"), CloseButtonText = T("Cancel"),
             DefaultButton = ContentDialogButton.None, XamlRoot = Content.XamlRoot, PrimaryButtonStyle = DangerButton }) == ContentDialogResult.Primary;
         if (!ok) { if (fromWindows) Application.Current.Exit(); return; }
         _busy = true;
@@ -848,9 +848,9 @@ public sealed partial class MainWindow
             if (needAdmin && Environment.ProcessPath is { } exe)
             {
                 var p = Elevation.StartMaintenance(exe, "*", "uninstall");
-                if (p is null) { _busy = false; await Message(T("Nothing was changed"), T("Windows did not allow the change.")); return; }
+                if (p is null) { _busy = false; await Message(T("Nothing was changed"), T("Windows did not get your permission. Try again and choose Yes when it asks.")); return; }
                 await p.WaitForExitAsync();
-                if (p.ExitCode != 0) left.Add(T("Some files weren't restored. See the log for details."));
+                if (p.ExitCode != 0) left.Add(T("some files that could not be restored (the log has the details)"));
             }
             left.AddRange(await Task.Run(() =>
             {
@@ -878,7 +878,7 @@ public sealed partial class MainWindow
         if (left.Count > 0)
         {
             // (the launcher stays: without it nothing could finish the job or put the rest back)
-            await Message(T("The uninstall did not finish"), T("Some things stayed: {0}. Apex Launcher stays so you can try again.", string.Join("; ", left)));
+            await Message(T("The uninstall did not finish"), T("These are still on this PC:") + "\n\n" + string.Join("\n", left) + "\n\n" + T("Apex Launcher stays installed so you can try again."));
             if (fromWindows) Application.Current.Exit();
             return;
         }
@@ -887,7 +887,7 @@ public sealed partial class MainWindow
         var gone = false;
         void RemoveLauncher() { if (gone) return; gone = true; Uninstall.Launcher(keepData: keepSettings); }
         AppWindow.Closing += (_, _) => RemoveLauncher();
-        await Message(T("Apex Launcher was uninstalled"), T("Everything it installed was removed. The files it replaced are back."));
+        await Message(T("Apex Launcher was uninstalled"), T("Everything it installed was removed, and the files it replaced are back."));
         RemoveLauncher();
         Application.Current.Exit();
     }
@@ -904,8 +904,8 @@ public sealed partial class MainWindow
     // nothing (true, false, null)
     async Task<bool?> UpdatesFirst(List<string> ups)
     {
-        var body = new StackPanel { Spacing = 12, Width = 480 };
-        body.Children.Add(new TextBlock { Text = T("Then the game starts. Your settings stay."), Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Medium };
+        body.Children.Add(new TextBlock { Text = T("The game starts once they are installed. Your settings stay."), Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
         var list = new StackPanel();
         foreach (var c in ups)
         {
@@ -913,8 +913,8 @@ public sealed partial class MainWindow
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             FrameworkElement icon = c == Components.Apex
-                ? new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 32, Height = 32 }
-                : new Border { Width = 32, Height = 32, CornerRadius = new CornerRadius(8), Background = Res("ApexPillBrush"), Child = Lucide.Icon(c == Components.Modernization ? "hammer" : c is Components.Bridge or Components.Dxvk ? "layers" : "package", 15, Res("ApexAccentBrush")) };
+                ? new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 40, Height = 40 }
+                : Design.IconTile.Of(c == Components.Modernization ? "hammer" : c is Components.Bridge or Components.Dxvk ? "layers" : "package");
             icon.VerticalAlignment = VerticalAlignment.Top;
             g.Children.Add(icon);
             var words = new StackPanel { Spacing = 2 };
@@ -930,10 +930,10 @@ public sealed partial class MainWindow
             g.Children.Add(words);
             list.Children.Add(g);
         }
-        body.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush") });
+        body.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexRaisedBrush") });
         var r = await ShowDialog(new ContentDialog
         {
-            Title = ups.Count == 1 ? T("1 update installs first") : T("{0} updates install first", ups.Count), Content = body,
+            Tag = "download", Title = ups.Count == 1 ? T("1 update installs first") : T("{0} updates install first", ups.Count), Content = body,
             PrimaryButtonText = T("Update and play"), SecondaryButtonText = T("Play without updating"), CloseButtonText = T("Cancel"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         });
@@ -993,7 +993,7 @@ public sealed partial class MainWindow
 
     static TextBlock Heading(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexTitle"] };
     static TextBlock Strong(string t) => new() { Text = t, FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
-    static TextBlock Body(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexBody"], Foreground = Res("ApexSoftTextBrush") };
+    static TextBlock Body(string t) => Design.Dialogs.Words(t);
     static TextBlock Muted(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexMuted"] };
     static TextBlock Eyebrow(string t) => new() { Text = t, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush") };
 
@@ -1048,7 +1048,7 @@ public sealed partial class MainWindow
     static Border SearchField(TextBox b)
     {
         var none = Res("ApexClearBrush");
-        (b.Background, b.BorderThickness, b.Padding, b.MinWidth, b.VerticalAlignment) = (none, new Thickness(0), new Thickness(0, 5, 0, 6), 0, VerticalAlignment.Center);
+        (b.Background, b.BorderThickness, b.Padding, b.MinWidth, b.MinHeight, b.VerticalAlignment) = (none, new Thickness(0), new Thickness(0, 5, 0, 6), 0, 32, VerticalAlignment.Center);
         foreach (var k in new[] { "TextControlBackgroundFocused", "TextControlBackgroundPointerOver", "TextControlBorderBrushFocused", "TextControlBorderBrushPointerOver" }) b.Resources[k] = none;
         b.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
         var g = new Grid { ColumnSpacing = 12 };

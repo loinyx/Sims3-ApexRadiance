@@ -334,16 +334,16 @@ public static partial class ScriptErrors
                 // (the memory was nearly full: no file is blamed for where the allocation happened to fail)
                 var full = r.Errors.Where(e => e.Crash && e.Why == "memory").Max(e => e.When).ToString("g");
                 f.Add(new(new(m.Crashes >= 2 ? Severity.Warning : Severity.Info, m.Crashes == 1
-                        ? "The game crashed once with its memory nearly full (peak {1} MB of 4096), on {2}. Fewer mods, less CC or a smaller world lowers it."
-                        : "The game crashed {0} times with its memory nearly full (peak {1} MB of 4096), last on {2}. Fewer mods, less CC or a smaller world lowers it.",
+                        ? "The game crashed once with its memory nearly full (peak {1} MB of 4096), on {2}. Fewer mods, less custom content or a smaller world help."
+                        : "The game crashed {0} times with its memory nearly full (peak {1} MB of 4096), last on {2}. Fewer mods, less custom content or a smaller world help.",
                     [m.Crashes.ToString(), m.Exception, full]), m.Files));
             }
             else if (m.Crashes > 0 && m.Earlier)
             {
                 // (crashes in a file updated since: a note, never a pattern; nothing has crashed there since the update)
                 var before = r.Errors.Where(e => e.Crash && e.Earlier && e.Mod == m.Mod && e.Why == m.Why).Max(e => e.When).ToString("g");
-                f.Add(new(new(Severity.Info, m.Crashes == 1 ? "{1} crashed the game once on {2}, before it was updated. No crash in it since."
-                        : "{1} crashed the game {0} times before it was updated, last on {2}. No crash in it since.",
+                f.Add(new(new(Severity.Info, m.Crashes == 1 ? "{1} crashed the game once on {2}, before it was updated. It has not crashed since."
+                        : "{1} crashed the game {0} times before it was updated, last on {2}. It has not crashed since.",
                     [m.Crashes.ToString(), m.Mod!, before]), m.Files));
             }
             else if (m.Crashes > 0 && m.Why == "called" && m.Mod is not null)
@@ -352,7 +352,7 @@ public static partial class ScriptErrors
                 var last = r.Errors.Where(e => e.Crash && !e.Earlier && e.Mod == m.Mod && e.Why == m.Why).Max(e => e.When).ToString("g");
                 f.Add(new(new(m.Crashes >= CrashPattern ? Severity.Warning : Severity.Info, m.Crashes == 1
                         ? "The game crashed once in a call {1} made into {3}, on {2}."
-                        : "{1} crashed the game {0} times in calls it made into {3}. This past week, last on {2}.",
+                        : "{1} crashed the game {0} times in the past week, in calls to {3}. The last one was on {2}.",
                     [m.Crashes.ToString(), m.Mod, last, m.Exception]), m.Files));
             }
             else if (m.Crashes > 0)
@@ -360,7 +360,7 @@ public static partial class ScriptErrors
                 var last = r.Errors.Where(e => e.Crash && !e.Earlier && e.Mod == m.Mod && e.Why == m.Why).Max(e => e.When).ToString("g");
                 f.Add(new(new(m.Crashes >= CrashPattern ? Severity.Warning : Severity.Info, m.Crashes == 1
                         ? m.Mod is null ? "The game crashed once in its own code, on {1}." : "The game crashed once in {1}, on {2}."
-                        : m.Mod is null ? "The game crashed {0} times in its own code. This past week, last on {1}." : "{1} crashed the game {0} times. This past week, last on {2}.",
+                        : m.Mod is null ? "The game crashed {0} times in its own code in the past week. The last one was on {1}." : "{1} crashed the game {0} times in the past week. The last one was on {2}.",
                     m.Mod is null ? [m.Crashes.ToString(), last] : [m.Crashes.ToString(), m.Mod, last]), m.Files));
             }
             if (m.Count - m.Crashes is var n and > 0)

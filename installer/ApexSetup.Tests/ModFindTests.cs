@@ -141,7 +141,7 @@ static class ModFindTests
         check(ModFind.Read(lone) is { Name: "Lone.nhd", Items.Count: 1 }, "find: a save's file outside a save is read alone");
         File.Delete(lone);
         File.Delete(Path.Combine(dir, "Beside.nhd"));
-        check(Refused(dir) == "This folder is not a save.", "find: another folder is refused");
+        check(Refused(dir) == "This folder is not a save. Choose one that ends in .sims3.", "find: another folder is refused");
 
         File.WriteAllBytes(Path.Combine(dir, "protected.package"), [.. "DBPP"u8, .. new byte[200]]);
         check(Refused(Path.Combine(dir, "protected.package")) == "This file is protected, so the launcher can't read it.", "find: a protected package is refused, not read");

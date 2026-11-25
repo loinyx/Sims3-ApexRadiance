@@ -64,7 +64,7 @@ public sealed partial class MainWindow
         body.Children.Add(PaneCard(list, new Thickness(14, 13, 14, 13)));
         var cts = new CancellationTokenSource();
         var running = true; // (a failed run leaves the bar short of the end: Close then closes, it does not stop)
-        var d = new ContentDialog { Title = T("Merging into {0}", jobs[0].File), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "merge", Title = T("Merging into {0}", jobs[0].File), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
         d.CloseButtonClick += (_, e) => { if (running && !cts.IsCancellationRequested) { e.Cancel = true; cts.Cancel(); d.CloseButtonText = T("Stopping…"); } };
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var current = MergeStep.Check;
@@ -151,9 +151,9 @@ public sealed partial class MainWindow
             bar.ShowError = true;
             result.Visibility = Visibility.Visible;
             // (a SetupException from Run says what is out of place itself, such as originals left in the merge folder)
-            result.Text = (done.Count > 0 ? T("Done before it: {0}.", string.Join(", ", done.Select(r => r.Merged.Name))) + " " : "")
+            result.Text = (done.Count > 0 ? T("Merged before it stopped: {0}.", string.Join(", ", done.Select(r => r.Merged.Name))) + " " : "")
                 + (error is OperationCanceledException ? T(done.Count > 0 ? "The rest was not merged." : "Nothing was changed.")
-                : ErrorText(error) + (error is SetupException || done.Count > 0 ? "" : " " + T("Your mods are as they were.")));
+                : ErrorText(error) + (error is SetupException || done.Count > 0 ? "" : " " + T("Your mods are back as they were.")));
         }
         await shown;
         return (done, error);
@@ -209,11 +209,11 @@ public sealed partial class MainWindow
         var suspects = _mods.Count(m => m.FileType == "package" && !m.Locked && m.Enabled);
         var rounds = (int)Math.Ceiling(Math.Log2(Math.Max(2, suspects)));
         if (!await Confirm(T("Find a problem mod"),
-                T("Each round, the launcher turns off half of your {0} active mods. You play, then say if the problem is still there. About {1} rounds find the mod causing it. You can stop at any time, and every mod goes back as it was.", suspects, rounds)
-                + "\n\n" + T("While you hunt, don't overwrite your save. It would lose objects and outfits from the mods that are off. Use Save As, or quit without saving."),
+                T("Each round, the launcher turns off half of the {0} mods that are on. You play, then say if the problem is still there. After about {1} rounds the launcher finds the mod that causes it. You can stop at any time, and every mod goes back as it was.", suspects, rounds)
+                + "\n\n" + T("During the search, don't overwrite your save. It would lose objects and outfits from the mods that are off. Use Save As, or quit without saving."),
                 T("Start"))) return;
         try { ModHunt.Start(Mods.List(_game!, Docs, kinds: false), Docs, _modLooks.Select(p => _mods.FirstOrDefault(m => m.Path == p)?.Rel).OfType<string>()); }
-        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The hunt did not start"), ErrorText(e)); return; }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The search did not start"), ErrorText(e)); return; }
         _modsLoaded = false;
         _folderSig = "";
         await LoadModsAsync();
@@ -250,7 +250,7 @@ public sealed partial class MainWindow
         var done = st.Suspects.Count <= 1;
         var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         head.Children.Add(Lucide.Icon("bug", 18, Res("ApexAccentBrush")));
-        head.Children.Add(new TextBlock { Text = done ? T("Hunt finished") : T("Finding a problem mod: round {0}", st.Round), FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        head.Children.Add(new TextBlock { Text = done ? T("Search finished") : T("Finding a problem mod: round {0}", st.Round), FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         host.Children.Add(head);
         if (done)
         {
@@ -270,12 +270,12 @@ public sealed partial class MainWindow
         var left = ModHunt.RoundsLeft(st);
         host.Children.Add(new ProgressBar { Maximum = st.Round + left - 1, Value = st.Round - 1 });
         host.Children.Add(Body(T("{0} of the {1} suspect mods are off this round. Play until the problem usually shows up, then come back.", st.Off.Count, st.Suspects.Count)));
-        host.Children.Add(Warn(T("Don't overwrite your save while hunting"), T("It would lose objects and outfits from the mods that are off. Use Save As, or quit without saving.")));
+        host.Children.Add(Warn(T("Don't overwrite your save during the search"), T("It would lose objects and outfits from the mods that are off. Use Save As, or quit without saving.")));
         var a = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         // (one answer per round: the buttons stay off until the list is read again and the banner rebuilt)
         void Once(Func<Task> act) { foreach (var b in a.Children.OfType<Control>()) b.IsEnabled = false; _ = act(); }
         a.Children.Add(Button(T("The problem is still there"), () => Once(() => HuntAnswer(true)), accent: true));
-        a.Children.Add(Button(T("It is gone"), () => Once(() => HuntAnswer(false))));
+        a.Children.Add(Button(T("The problem is gone"), () => Once(() => HuntAnswer(false))));
         a.Children.Add(Button(T("Stop and put every mod back"), () => Once(HuntStop)));
         host.Children.Add(a);
     }

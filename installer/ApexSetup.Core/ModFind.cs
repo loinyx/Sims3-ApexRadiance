@@ -58,7 +58,7 @@ public static class ModFind
             // (a save: its worlds and households are one file each, read together)
             var dir = inSave ? parent : path;
             var files = Directory.EnumerateFiles(dir, "*.nhd").Where(f => (File.GetAttributes(f) & FileAttributes.ReparsePoint) == 0).Order(StringComparer.OrdinalIgnoreCase).ToList();
-            if (files.Count == 0) throw new SetupException("This folder is not a save.");
+            if (files.Count == 0) throw new SetupException("This folder is not a save. Choose one that ends in .sims3.");
             FromPackages(files, found, ct);
             return found.Source(Path.GetFileName(dir.TrimEnd('\\', '/')));
         }

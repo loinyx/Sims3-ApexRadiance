@@ -193,7 +193,7 @@ public sealed class GitHubSource : ISource
             case Components.S3pp:
             {
                 if (S3ppArchive is null) throw new InvalidOperationException("Download Sims 3 Performance Patch from Nexus Mods first.");
-                var (asi, ini) = S3ppFiles(S3ppArchive) ?? throw new InvalidDataException("This file has no Sims3Performance.asi.");
+                var (asi, ini) = S3ppFiles(S3ppArchive) ?? throw new InvalidDataException("This file has no Sims3Performance.asi. Choose the file you downloaded from Nexus Mods.");
                 files.Add((asi, Path.Combine(bin, "Sims3Performance.asi")));
                 if (ini is not null) files.Add((ini, Path.Combine(bin, "Sims3Performance.ini")));
                 return (files, "Nexus Mods");
@@ -327,7 +327,7 @@ public static class Engine
     // no free space and no note about Documents.
     public sealed record Check(string Key, string[] Args, bool Blocks);
     public static Func<string, long> FreeBytes = dir => new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace;
-    public const string CloseGameText = "Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again.";
+    public const string CloseGameText = "Close The Sims 3, its launcher, TS3Wrap (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again.";
     public const string CannotWriteText = "The launcher can't save files in {0}. If Controlled folder access is on in Windows Security, allow ApexLauncher.exe there. Or move the game out of the protected folder.";
     public static List<Check> Preflight(Game g, State s, string? docs, long downloadBytes, bool replacesD3d9, bool downloads = true)
     {
@@ -358,7 +358,7 @@ public static class Engine
                 l.Add(new("The launcher didn't find The Sims 3 folder in Documents. Start the game once to create it, then open the launcher again.", [], false));
         }
         if (replacesD3d9 && s.Layer == Layer.Other)
-            l.Add(new("{0} (d3d9.dll) is moved to Game\\Bin\\Apex Radiance backup. Removing the renderer in Repair or remove puts it back.", [ForeignD3d9(g.Bin)], false));
+            l.Add(new("{0} (d3d9.dll) is moved to Game\\Bin\\Apex Radiance backup. To get it back, remove the renderer in Repair or remove.", [ForeignD3d9(g.Bin)], false));
         if (Scan.Loaders(g.Bin) is { Count: > 1 } loaders)
             l.Add(new("Found two ASI loaders ({0}). The launcher keeps {1} and moves the others to Game\\Bin\\Apex Radiance backup.", [string.Join(", ", loaders), loaders[0]], false));
         return l;
@@ -742,7 +742,7 @@ public static class Engine
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; } // (unknown: the safe answer)
     }
-    public const string RestartHostWaitsText = "Start the game once with Apex Radiance, then turn on the restart host here.";
+    public const string RestartHostWaitsText = "Start the game once with Apex Radiance, then turn on TS3Wrap here.";
 
     // on: ts3wrap.exe next to the ASI and [ui] restart_host = true, what Apex checks before it starts the host
     public static bool RestartHostOn(string bin, string docs)

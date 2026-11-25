@@ -50,13 +50,13 @@ public static class SmoothMotion
     public static (string Key, string Arg)? Blocked(Status s, bool bridge, bool setupTurnedOn)
     {
         if (s.Error is not null) return ("Could not read the NVIDIA driver settings: {0}", s.Error);
-        if (s.Owner is not null) return ("Already in your NVIDIA profile \"{0}\": the launcher leaves it as it is.", s.Owner);
+        if (s.Owner is not null) return ("Already in your NVIDIA profile “{0}”: the launcher leaves it as it is.", s.Owner);
         // on, but not by Setup (Profile Inspector): Setup does not undo it
         if (s.On) return setupTurnedOn || s.SetupsProfile ? null : ("Turned on outside the launcher, in the NVIDIA driver settings: the launcher leaves it as it is.", "");
         if (!IsRtx40or50(s.Card)) return ("Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0}).", s.Card ?? "");
         if (s.Driver < MinDriver) return ("Needs NVIDIA driver 571.86 or newer (found: {0}).", DriverText(s.Driver));
         // shortcut: DXVK on TS3W.exe is Vulkan too but untested with Smooth Motion; allow it once seen working in game
-        if (!bridge) return ("Needs the RTX Remix bridge as the graphics choice.", "");
+        if (!bridge) return ("Needs the RTX Remix bridge. Choose it in Graphics.", "");
         return null;
     }
 

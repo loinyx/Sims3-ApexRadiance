@@ -67,7 +67,7 @@ public sealed partial class MainWindow
         AutomationProperties.SetName(grid, T("Pictures that stay"));
         var count = Muted("");
         count.VerticalAlignment = VerticalAlignment.Center;
-        var all = Link(T("Choose all"), () => { });
+        var all = Link(T("Select all"), () => { });
         all.VerticalAlignment = VerticalAlignment.Center;
         var foot = new Grid { ColumnSpacing = 12, MinHeight = 32 };
         foot.ColumnDefinitions.Add(new ColumnDefinition());
@@ -75,8 +75,8 @@ public sealed partial class MainWindow
         foot.Children.Add(count);
         Grid.SetColumn(all, 1);
         foot.Children.Add(all);
-        var body = new StackPanel { Spacing = 12, Width = 660 };
-        body.Children.Add(Body(T("The ones you choose never leave in a clean.")));
+        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Large };
+        body.Children.Add(Body(T("The pictures you choose are never removed when you clean.")));
         var pick = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
         AutomationProperties.SetName(pick, T("Which save"));
         foreach (var l in saves) pick.Items.Add(FamilyName(l.Save, l.Info) + " · " + SavePlace(l.Save, l.Info));
@@ -84,8 +84,7 @@ public sealed partial class MainWindow
         var host = new Grid { Height = 380 };
         body.Children.Add(host);
         body.Children.Add(foot);
-        var d = new ContentDialog { Title = T("Choose the pictures that stay"), Content = body, PrimaryButtonText = T("Done"), SecondaryButtonText = T("Save to a folder"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
-        d.Resources["ContentDialogMaxWidth"] = 740.0;
+        var d = new ContentDialog { Tag = "images", Title = T("Choose the pictures that stay"), Content = body, PrimaryButtonText = T("Done"), SecondaryButtonText = T("Save to a folder"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         using var stop = new CancellationTokenSource();
         var read = new Dictionary<int, List<KeepPicture>>();
         var (at, filling) = (-1, false);
@@ -123,7 +122,7 @@ public sealed partial class MainWindow
             var n = shown.Count(p => p.Kept);
             count.Text = n == 1 ? T("1 of {0} stays", shown.Count) : T("{0} of {1} stay", n, shown.Count);
             foot.Visibility = shown.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            all.Content = shown.Count > 0 && n == shown.Count ? T("Choose none") : T("Choose all");
+            all.Content = shown.Count > 0 && n == shown.Count ? T("Clear the selection") : T("Select all");
             d.IsSecondaryButtonEnabled = read.Values.Any(l => l.Any(p => p.Kept));
         }
         async Task Open(int i)
@@ -200,7 +199,7 @@ public sealed partial class MainWindow
                 }
                 return new[] { made };
             }) is not [var n]) return;
-            SavesSay(InfoBarSeverity.Success, n == 1 ? T("1 picture saved.") : T("{0} pictures saved.", n), "", T("Open folder"), () => OpenFolder(f.Path));
+            SavesSay(InfoBarSeverity.Success, n == 1 ? T("1 picture saved") : T("{0} pictures saved", n), "", T("Open folder"), () => OpenFolder(f.Path));
         }
         catch (Exception e) { App.Log(e); SavesSay(InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
     }

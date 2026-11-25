@@ -304,7 +304,7 @@ public static partial class ModMerge
     // a merged package and its originals to the Recycle Bin, so none is left kept where nothing shows it
     public static void RemoveAll(string docs, ModFile merged)
     {
-        if (merged.Locked) throw new SetupException("The launcher does not move, rename or remove this file.");
+        if (merged.Locked) throw new SetupException("The launcher can't move, rename or remove this file.");
         Engine.CheckWritable();
         lock (Gate)
         {

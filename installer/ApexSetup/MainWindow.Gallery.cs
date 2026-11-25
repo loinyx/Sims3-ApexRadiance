@@ -310,7 +310,7 @@ public sealed partial class MainWindow
             var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = Lucide.Element("pencil") };
             var one = c;
             rename.Click += async (_, _) => { if (await AlbumDialog(one) is not null) BuildGallery(); };
-            var drop = new MenuFlyoutItem { Text = T("Delete the album"), Icon = Lucide.Element("trash-2") };
+            var drop = new MenuFlyoutItem { Text = T("Delete album"), Icon = Lucide.Element("trash-2") };
             drop.Click += async (_, _) =>
             {
                 if (!await Confirm(T("Delete {0}?", one.Name), T("Only the album is deleted. Its pictures stay in your Screenshots folder and other albums."), T("Delete"))) return;
@@ -450,10 +450,10 @@ public sealed partial class MainWindow
         var s = new StackPanel { Spacing = Design.Space.Section };
         var pics = InAlbum();
         if (pics.Count == 0 && _galQuery.Length > 0) { s.Children.Add(EmptyPlace("search", T("Nothing found for “{0}”.", _galQuery))); return s; }
-        if (pics.Count == 0) { s.Children.Add(EmptyPlace("image", _galAlbum == Gallery.Favourites ? T("No favourites yet: open a picture and add it.") : T("No pictures here yet."))); return s; }
+        if (pics.Count == 0) { s.Children.Add(EmptyPlace("image", _galAlbum == Gallery.Favourites ? T("No favourites yet. Open a picture and choose Add to favourites.") : Gallery.CustomOf(_gal!, _galAlbum) is not null ? T("This album is empty. Open a picture and choose Add to an album.") : T("No pictures here yet. Take one in the game with C."))); return s; }
         var shown = pics.Take(_galLimit).ToList();
         var groups = _galByHome
-            ? shown.GroupBy(p => Gallery.HouseholdOf(p, _gal!, _galSaves) is { } h ? HouseTitle(h) : T("Not sorted yet")).Select(x => (Key: x.Key, List: x.ToList()))
+            ? shown.GroupBy(p => Gallery.HouseholdOf(p, _gal!, _galSaves) is { } h ? HouseTitle(h) : T("No household yet")).Select(x => (Key: x.Key, List: x.ToList()))
             : shown.GroupBy(p => p.Taken.Date).Select(x => (Key: x.Key.ToString("D", LangCulture()), List: x.ToList()));
         var index = 0;
         foreach (var (key, list) in groups)
@@ -908,7 +908,7 @@ public sealed partial class MainWindow
         title.Children.Add(new TextBlock { Text = members.Count == 1 ? T("1 picture") : T("{0} pictures", members.Count), FontSize = 14, Opacity = 0.65, Foreground = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 10, 0, 0) });
         head.Children.Add(title);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-        var whole = new Button { Content = T("Open the album"), Height = Design.Size.Control };
+        var whole = new Button { Content = T("Open album"), Height = Design.Size.Control };
         var shut = new Button { Content = new LucideIcon { Kind = "x", Size = 16, Follow = true, StrokeWidth = 1.75 }, Width = Design.Size.Control, Height = Design.Size.Control, Padding = new Thickness(0) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(shut, T("Close"));
         actions.Children.Add(whole);
@@ -1032,11 +1032,11 @@ public sealed partial class MainWindow
     MenuFlyout PileMenu(CustomAlbum c)
     {
         var menu = new MenuFlyout();
-        var open = new MenuFlyoutItem { Text = T("Open the album"), Icon = Lucide.Element("external-link") };
+        var open = new MenuFlyoutItem { Text = T("Open album"), Icon = Lucide.Element("external-link") };
         open.Click += (_, _) => { _galAlbum = c.Key; BuildGallery(); };
         var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = Lucide.Element("pencil") };
         rename.Click += async (_, _) => { if (await AlbumDialog(c) is not null) BuildGallery(); };
-        var undo = new MenuFlyoutItem { Text = T("Undo the album"), Icon = Lucide.Element("undo-2") };
+        var undo = new MenuFlyoutItem { Text = T("Ungroup album"), Icon = Lucide.Element("undo-2") };
         undo.Click += (_, _) =>
         {
             if (_gal is null) return;
@@ -1047,7 +1047,7 @@ public sealed partial class MainWindow
             Keep(step: true);
             if (_galSide is not null) _galSide.Content = GalleryAlbums();
             FlipBoard();
-            ShowUndo(T("Album undone: its pictures are back on the board"), () => StepBack(true));
+            ShowUndo(T("Album ungrouped: its pictures are back on the board"), () => StepBack(true));
         };
         menu.Items.Add(open);
         menu.Items.Add(rename);
@@ -1424,7 +1424,7 @@ public sealed partial class MainWindow
             }
             if (look.Stickers.Count > 0)
             {
-                var clear = new HyperlinkButton { Content = T("Take every sticker off"), Margin = new Thickness(0, 8, 0, 0), Foreground = Res("ApexErrorBrush") };
+                var clear = new HyperlinkButton { Content = T("Remove all stickers"), Margin = new Thickness(0, 8, 0, 0), Foreground = Res("ApexErrorBrush") };
                 clear.Click += (_, _) => { look.Stickers.Clear(); Changed(); FillCustomize(); };
                 body.Children.Add(clear);
             }
@@ -1481,8 +1481,8 @@ public sealed partial class MainWindow
             body.Children.Add(Caption(T("LAYOUT")));
             body.Children.Add(Range(T("Tilt: tidy to messy"), T("Tidy"), T("Messy"), 0, 1.6, look.Tilt, v => look.Tilt = v));
             body.Children.Add(Caption(T("SPACING")));
-            body.Children.Add(Range(T("Spacing: close to apart"), T("Close"), T("Apart"), 0.6, 1.7, look.Spacing, v => look.Spacing = v, FlipBoard));
-            body.Children.Add(Caption(T("ENTRANCE")));
+            body.Children.Add(Range(T("Spacing: close to apart"), T("Together"), T("Apart"), 0.6, 1.7, look.Spacing, v => look.Spacing = v, FlipBoard));
+            body.Children.Add(Caption(T("HOW PICTURES APPEAR")));
             var ways = Columns(3);
             for (int i = 0; i < Entrances.Length; i++)
             {
@@ -2958,7 +2958,7 @@ public sealed partial class MainWindow
 
     static readonly (string Glyph, string Name)[] AlbumIcons =
     [
-        ("star", "Favourite"), ("heart", "Love"), ("users", "Family"), ("baby", "Baby"), ("house", "Home"), ("camera", "Pictures"), ("plane", "Trip"), ("map-pin", "Places"),
+        ("star", "Star"), ("heart", "Love"), ("users", "Family"), ("baby", "Baby"), ("house", "House"), ("camera", "Pictures"), ("plane", "Trip"), ("map-pin", "Places"),
         ("globe", "World"), ("sun", "Summer"), ("moon", "Night"), ("leaf", "Autumn"), ("snowflake", "Winter"), ("flower-2", "Garden"), ("tree-palm", "Beach"), ("mountain", "Mountain"),
         ("tent", "Camping"), ("umbrella", "Rain"), ("cake", "Birthday"), ("party-popper", "Celebration"), ("gift", "Gift"), ("gem", "Wedding"), ("crown", "Royalty"), ("trophy", "Trophy"),
         ("graduation-cap", "Graduation"), ("school", "School"), ("briefcase", "Work"), ("building-2", "City"), ("church", "Church"), ("hammer", "Build"), ("sofa", "Furniture"), ("bed", "Bedroom"),
@@ -2978,7 +2978,7 @@ public sealed partial class MainWindow
     async Task<CustomAlbum?> AlbumDialog(CustomAlbum? album, string? home = null)
     {
         var name = new TextBox { Header = T("Name"), Text = album?.Name ?? "", PlaceholderText = T("Trip to Egypt") };
-        var grid = new GridView { SelectionMode = ListViewSelectionMode.Single, Margin = new Thickness(0, 14, -4, 0), MaxHeight = 232 }; // (eight across, the last on the fields' edge)
+        var grid = new GridView { SelectionMode = ListViewSelectionMode.Single, Margin = new Thickness(0, 0, -4, 0), MaxHeight = 232 }; // (eight across, the last on the fields' edge)
         foreach (var (glyph, label) in AlbumIcons)
         {
             var cell = new Border { Width = 48, Height = 48, CornerRadius = new CornerRadius(10), Background = Res("ApexTileBrush"), Child = new LucideIcon { Kind = glyph, Size = 22, Follow = true, StrokeWidth = 1.75 } };
@@ -2987,16 +2987,15 @@ public sealed partial class MainWindow
             grid.Items.Add(cell);
         }
         grid.SelectedIndex = Math.Max(0, Array.FindIndex(AlbumIcons, i => i.Glyph == AlbumIcon(album?.Icon ?? "")));
-        var body = new StackPanel { Width = 412 };
+        var body = new StackPanel { Width = 412, Spacing = 16 };
         body.Children.Add(name);
-        var house = new ComboBox { Header = T("Household"), HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 14, 0, 0) };
+        var house = new ComboBox { Header = T("Household"), HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var v in _galSaves) house.Items.Add(v.Name);
         var was = album is null ? home ?? (_galSaves.Any(v => v.Name == _galAlbum) ? _galAlbum : null) : Gallery.HomeOf(album, _gal!, _galPics, _galSaves);
         house.SelectedIndex = Math.Max(0, _galSaves.ToList().FindIndex(v => string.Equals(v.Name, was, StringComparison.OrdinalIgnoreCase)));
         if (_galSaves.Count > 0) body.Children.Add(house);
-        body.Children.Add(new TextBlock { Text = T("Icon"), Margin = new Thickness(0, 14, 0, 0) });
-        body.Children.Add(grid);
-        var d = new ContentDialog { Title = album is null ? T("New album") : T("Change the album"), Content = body, PrimaryButtonText = album is null ? T("Create album") : T("Save"), CloseButtonText = T("Cancel"),
+        body.Children.Add(new StackPanel { Spacing = 8, Children = { Design.Parts.Label(T("Icon")), grid } });
+        var d = new ContentDialog { Tag = "images", Title = album is null ? T("New album") : T("Edit album"), Content = body, PrimaryButtonText = album is null ? T("Create album") : T("Save"), CloseButtonText = T("Cancel"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot, IsPrimaryButtonEnabled = name.Text.Trim().Length > 0 };
         name.TextChanged += (_, _) => d.IsPrimaryButtonEnabled = name.Text.Trim().Length > 0;
         if (await ShowDialog(d) != ContentDialogResult.Primary) return null;
@@ -3510,7 +3509,7 @@ public sealed partial class MainWindow
             side.Children.Add(cap);
 
             // what to do with it
-            var fav = ActionRow("star", info.Favourite ? T("In Favourites") : T("Favourite"), null, () => { var i = Gallery.Info(_gal!, p.Path); i.Favourite = !i.Favourite; Keep(); Fill(); }, info.Favourite);
+            var fav = ActionRow("star", info.Favourite ? T("In favourites") : T("Add to favourites"), null, () => { var i = Gallery.Info(_gal!, p.Path); i.Favourite = !i.Favourite; Keep(); Fill(); }, info.Favourite);
             var inAlbums = _gal!.Custom.Where(c => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)).ToList();
             var album = ActionRow("images", T("Add to an album"), null, () => { }, inAlbums.Count > 0);
             var albums = new MenuFlyout();
@@ -3551,13 +3550,13 @@ public sealed partial class MainWindow
                 }
             }
 
-            var folder = Button(T("Show in folder"), () => Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{p.Path}\"") { UseShellExecute = true }));
+            var folder = Button(T("Show in Explorer"), () => Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{p.Path}\"") { UseShellExecute = true }));
             var bin = Design.Parts.IconBoxed("trash-2", T("Move to the Recycle Bin"), ink: Res("ApexErrorBrush"));
             bin.Click += async (_, _) =>
             {
-                if (!await Confirm(T("Move this picture to the Recycle Bin?"), T("You can put it back from the Recycle Bin."), T("Move it"))) return;
+                if (!await Confirm(T("Move this picture to the Recycle Bin?"), T("You can restore it from the Recycle Bin."), T("Move it"))) return;
                 try { Gallery.Remove(_gal!, p.Path); removed = true; pics.RemoveAt(at); if (pics.Count == 0) { Close(); return; } at = Math.Min(at, pics.Count - 1); Fill(); }
-                catch (Exception e) { App.Log(e); await Message(T("Couldn't move the picture"), ErrorText(e)); }
+                catch (Exception e) { App.Log(e); await Message(T("The picture was not moved"), ErrorText(e)); }
             };
             Design.Parts.FillFoot(foot, folder, bin);
         }

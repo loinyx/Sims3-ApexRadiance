@@ -16,7 +16,7 @@ public static class DesignSystem
 
     // one brush for every main button, its stops recoloured with the theme (made on the UI thread, at start)
     static LinearGradientBrush? _main, _over, _down;
-    static SolidColorBrush? _ink, _edge, _accent, _accentText, _accentOver, _dialog, _dialogFoot, _dialogEdge, _clear, _fill, _fillOver, _fillDown, _line, _field, _fieldOver;
+    static SolidColorBrush? _ink, _edge, _accent, _accentText, _accentOver, _dialog, _dialogFoot, _dialogEdge, _clear, _fill, _fillOver, _fillDown, _line, _field, _fieldOver, _soft;
     static LinearGradientBrush Sweep() => new() { StartPoint = new(0, 0), EndPoint = new(1, 1) };
     public static Brush MainBrush => _main ?? (Brush)App.Brush("ApexAccentBrush");
 
@@ -28,7 +28,7 @@ public static class DesignSystem
         if (HighContrast) return;
         (_main, _over, _down, _ink, _edge, _accent, _accentText, _accentOver) = (Sweep(), Sweep(), Sweep(), new(), new(), new(), new(), new());
         (_dialog, _dialogFoot, _dialogEdge, _clear, _fill, _fillOver, _fillDown) = (new(), new(), new(), new(), new(), new(), new());
-        (_line, _field, _fieldOver) = (new(), new(), new());
+        (_line, _field, _fieldOver, _soft) = (new(), new(), new(), new());
         Into(Application.Current.Resources);
         Apply(theme);
     }
@@ -57,6 +57,7 @@ public static class DesignSystem
             foreach (var state in new[] { "", "PointerOver", "Pressed" }) res[control + "BorderBrush" + state] = _line;
         }
         // a field: one line all round, in the accent with the keyboard in it
+        res["TextControlHeaderForeground"] = res["ComboBoxHeaderForeground"] = res["SliderHeaderForeground"] = _soft;
         (res["TextControlBackground"], res["TextControlBackgroundPointerOver"], res["TextControlBackgroundFocused"]) = (_fill, _fillOver, _fill);
         (res["TextControlBorderBrush"], res["TextControlBorderBrushPointerOver"], res["TextControlBorderThemeThicknessFocused"]) = (_field, _fieldOver, new Thickness(1));
         // links, sliders, progress, the mark of the selected place, the line of a field with the keyboard in it. By name and not in the
@@ -94,7 +95,7 @@ public static class DesignSystem
         (_accent!.Color, _accentText!.Color) = (Now["Accent"], Now["AccentText"]);
         _accentOver!.Color = Mix(Now["AccentText"], App.Light ? Black : White, 0.35);
         (_clear!.Color, _fill!.Color, _fillOver!.Color, _fillDown!.Color) = (Now["Clear"], Now["Fill"], Now["FillOver"], Now["FillDown"]);
-        (_line!.Color, _field!.Color, _fieldOver!.Color) = (Now["CardBorder"], Now["InputBorder"], Now["InputBorderHover"]);
+        (_line!.Color, _field!.Color, _fieldOver!.Color, _soft!.Color) = (Now["CardBorder"], Now["InputBorder"], Now["InputBorderHover"], Now["SoftText"]);
         (_dialog!.Color, _dialogFoot!.Color, _dialogEdge!.Color) = (Now["Card"], Now["Footer"], Now["CardBorder"]);
         Stops(_main, Now.Gradient, 0);
         Stops(_over!, Now.Gradient, 0.08);

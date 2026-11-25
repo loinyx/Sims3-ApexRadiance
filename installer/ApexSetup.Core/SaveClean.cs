@@ -191,7 +191,7 @@ public static class SaveClean
                 try { File.Delete(p.Path + NewSuffix); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
             // (nothing changed: the zip is not a point anyone asked for. When an original is stuck aside, it stays: it is the save.)
             if (back) try { File.Delete(copy); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-            else throw new SetupException("The clean failed and a file could not be put back. The save as it was is in {0}.", copy);
+            else throw new SetupException("The clean failed and a file could not be put back. The original save is in {0}.", copy);
             throw;
         }
         // 4. the originals go: the zip holds them (one that stays is cleared at the next start)

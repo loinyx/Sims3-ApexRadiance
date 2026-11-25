@@ -46,11 +46,11 @@ public static class ModHunt
     public static State Start(IReadOnlyList<ModFile> mods, string docs, IEnumerable<string>? first = null)
     {
         Engine.CheckWritable();
-        if (Current() is not null) throw new SetupException("A hunt is already running.");
+        if (Current() is not null) throw new SetupException("A search is already running.");
         // (an on and an off mod at the same place share one Rel: the hunt can't tell them apart and leaves both alone)
         var mine = mods.Where(m => m.FileType == "package" && !m.Locked).GroupBy(m => m.Rel, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() == 1).Select(g => g.First()).ToList();
         var suspects = mine.Where(m => m.Enabled).Select(m => m.Rel).ToList();
-        if (suspects.Count < 2) throw new SetupException("A hunt needs at least two mods.");
+        if (suspects.Count < 2) throw new SetupException("The search needs at least two mods.");
         // (mods named by a finding go first, so they are tested in the first halves)
         if (first is not null) { var f = first.ToHashSet(StringComparer.OrdinalIgnoreCase); suspects = [.. suspects.Where(f.Contains), .. suspects.Where(x => !f.Contains(x))]; }
         var st = new State(1, suspects, [], mine.ToDictionary(m => m.Rel, m => m.Enabled, StringComparer.OrdinalIgnoreCase));
@@ -60,7 +60,7 @@ public static class ModHunt
     // the player's answer: still there → it is among the mods still on; gone → among the ones switched off
     public static State? Answer(bool stillThere, IReadOnlyList<ModFile> mods, string docs)
     {
-        var st = Current() ?? throw new SetupException("No hunt is running.");
+        var st = Current() ?? throw new SetupException("No search is running.");
         var suspects = stillThere ? st.Suspects.Except(st.Off, StringComparer.OrdinalIgnoreCase).ToList() : st.Off.ToList();
         var next = st with { Round = st.Round + 1, Suspects = suspects, Off = [] };
         return suspects.Count <= 1 ? Finish(next, mods, docs) : Apply(next, mods, docs, st);

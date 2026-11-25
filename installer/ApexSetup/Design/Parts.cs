@@ -117,6 +117,18 @@ public static class Parts
 
     // ---------- fields ----------
 
+    // over a field, as the field's own header
+    public static TextBlock Label(string text) => new() { Text = text, FontSize = TextSize.Body, Foreground = B("SoftText") };
+
+    // under a field, why what is in it will not do
+    public static StackPanel FieldError(string text)
+    {
+        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.X2 };
+        s.Children.Add(Lucide.Icon("circle-alert", 14, B("Error")));
+        s.Children.Add(new TextBlock { Text = text, FontSize = TextSize.Small, Foreground = B("Error"), VerticalAlignment = VerticalAlignment.Center });
+        return s;
+    }
+
     // a value that can be typed over: a value like the others until the pointer or the keyboard is on it
     public static TextBox QuietField(TextBox t, bool editable)
     {

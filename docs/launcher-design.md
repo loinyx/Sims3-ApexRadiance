@@ -11,6 +11,8 @@ How the launcher looks, and where each part of the look is defined. Code: `insta
 | `Oklch.cs` | Colours by lightness, strength and hue; WCAG contrast |
 | `DesignSystem.cs` | Puts a theme into the app: App.xaml's brushes and the controls' own accent keys, changed in place |
 | `IconTile.cs` | The icon at the start of a row or a card |
+| `Parts.cs` | The pieces a screen is made of |
+| `Dialogs.cs` | The one shape of every dialog |
 
 `App.xaml` declares the brushes (`Apex<Name>Brush`); their written values are what a Windows contrast theme keeps. Code
 reads a brush with `Res("ApexCardBrush")` and a colour with `Tone("Card")`. A screen has no colour, distance or text size
@@ -60,6 +62,22 @@ flashes. `DesignSystem.Into` gives them to every button, box and field; a screen
 
 `ApexSetup.Tests/DesignTests.cs` reads the screens' source: an icon outside Lucide and Windows' `Transparent` fail, and text sizes,
 corners and colours off the scale may only become fewer.
+
+## Dialogs and messages
+
+- `MainWindow.ShowDialog` gives every dialog its shape (`Dialogs.Dress`): an icon tile and a title of 20, the words at 14, three
+  widths (440, 560, 680), buttons 40 high at the right with the one that goes on last. A dialog says its icon in `Tag`, with `!`
+  before it for what needs care; the keyboard starts on Cancel when the action deletes.
+- A message (`SetInfo`) is a neutral card with a Lucide icon in its tone. What came of an action floats at the bottom of Mods and
+  Saves: a success goes by itself (7 s, or 20 s with Undo), the rest stays until it is closed.
+- Menus, tooltips and lists that open share one surface; a field is 36 high, its label at 14 above it.
+- A page with nothing in it says so with an icon and one line (`Empty`, `EmptyPlace`).
+
+## Words
+
+A title is a noun, a button an action. A line under a title is one sentence with no final period. One word for one thing:
+turn on and off, choose (one), select (several), delete (gone for good) and Move to the Recycle Bin, put back, backup, merge,
+split and divide. Every text is in the 21 languages (`Strings.<code>.cs`); a key no screen uses is taken out.
 
 ## Rows
 

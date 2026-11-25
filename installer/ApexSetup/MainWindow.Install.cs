@@ -19,7 +19,7 @@ public sealed partial class MainWindow
         if (await picker.PickSingleFolderAsync() is not { } f) return null;
         var dir = LauncherInstall.FolderFor(f.Path);
         if (string.Equals(dir, Paths.DefaultInstallDir, StringComparison.OrdinalIgnoreCase) || DryRun || await Task.Run(() => LauncherInstall.CanInstallTo(dir))) return dir;
-        await Message(T("Choose another folder"), T("Apex Launcher can't keep itself up to date in {0} without administrator permission.", dir));
+        await Message(T("This folder can't be used"), T("Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder.", dir));
         return null;
     }
 
@@ -69,7 +69,7 @@ public sealed partial class MainWindow
         {
             App.Log(e);
             await Message(install ? T("Apex Launcher could not install itself") : T("Apex Launcher could not switch to portable"),
-                ErrorText(e) + "\n\n" + T("It keeps running from here."));
+                ErrorText(e) + "\n\n" + T("It keeps running from where it is."));
         }
     }
 
@@ -95,8 +95,8 @@ public sealed partial class MainWindow
         var list = new StackPanel();
         foreach (var (value, icon, title, text) in new[]
         {
-            (true, "hard-drive", T("Keep Apex Launcher on this PC"), T("Recommended. In the Start menu and on the desktop")),
-            (false, "folder", T("Keep it as a single file"), T("One file you can move anywhere")),
+            (true, "hard-drive", T("Install on this PC"), T("Recommended: opens from the Start menu and the desktop")),
+            (false, "folder", T("Use as a single file"), T("Nothing is installed, and you can move it to any folder")),
         })
         {
             var on = value == _doneInstall;
@@ -135,7 +135,7 @@ public sealed partial class MainWindow
         var mode = LauncherInstall.Mode;
         (string, FrameworkElement) row = mode switch
         {
-            LauncherMode.Installed => (T("Installed in {0}.", ShortPath(Paths.InstallDir)), Pair(Button(T("Move…"), async () =>
+            LauncherMode.Installed => (T("Installed in {0}", ShortPath(Paths.InstallDir)), Pair(Button(T("Move…"), async () =>
             {
                 if (await PickInstallFolder() is not { } dir || string.Equals(dir, Paths.InstallDir, StringComparison.OrdinalIgnoreCase)) return;
                 if (await Confirm(T("Move Apex Launcher?"), T("It moves to {0}. Your settings stay and the shortcuts follow.", dir), T("Move it")))
@@ -147,11 +147,11 @@ public sealed partial class MainWindow
                 if (await Confirm(T("Use without installing?"), T("Apex Launcher moves to {0} and leaves the Start menu, the desktop and Installed apps. Your settings stay.", f.Path), T("Move it")))
                     await ApplyInstallMode(false, self, f.Path);
             }))),
-            LauncherMode.Portable => (T("Not installed: running from {0}.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Install it"), () => UpgradeShow(Array.IndexOf(UpgradeSteps, T("Where it lives"))))),
-            _ => (T("Running from {0}, not installed yet.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Choose"), () => UpgradeShow(0))),
+            LauncherMode.Portable => (T("Not installed: running from {0}", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Install it"), () => UpgradeShow(Array.IndexOf(UpgradeSteps, T("Where to keep it"))))),
+            _ => (T("Running from {0}, not installed yet", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Choose"), () => UpgradeShow(0))),
         };
         var (text, action) = row;
-        return Row("hard-drive", T("This copy of the launcher"), text, DryRun ? null : action);
+        return Row("hard-drive", T("Apex Launcher on this PC"), text, DryRun ? null : action);
 
         static FrameworkElement Pair(params Button[] buttons)
         {

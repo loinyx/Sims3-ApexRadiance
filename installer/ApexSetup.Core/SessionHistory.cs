@@ -43,7 +43,7 @@ public static class SessionHistory
         var crash = recent.Count(s => s.End == SessionEnd.Crash);
         var peak = recent.Max(s => s.PeakBytes);
         if (low > 0)
-            f.Add(new(Severity.Warning, "{0} of the last {1} game sessions ran out of memory (peak {2} MB of the game's 4096 MB). Fewer mods, less CC or a smaller world lowers it.",
+            f.Add(new(Severity.Warning, "{0} of the last {1} game sessions ran out of memory (peak {2} MB of the game's 4096 MB). Fewer mods, less custom content or a smaller world help.",
                 [low.ToString(), recent.Count.ToString(), (peak >> 20).ToString()]));
         if (crash > 0)
             // (a crash now and then happens to the game without any mod: one is a note, two or more of the last few a look)

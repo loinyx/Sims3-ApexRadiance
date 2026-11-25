@@ -108,11 +108,11 @@ public sealed partial class MainWindow
             Safe(LoadModPicturesAsync(_modRows));
             Safe(LoadMergeUpdatesAsync(LoadDefaultsAsync(g, _modRows), _modRows));
         }
-        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not read your mods"), ErrorText(e)); }
+        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher couldn't read your mods"), ErrorText(e)); }
         finally { _modsLoading = false; }
         _folderSig = "";
         // (after a failed read FillMods would start the read again, without end: the next visit or change tries again)
-        if (_modsLoaded) FillMods(); else ModsSummary.Text = T("The launcher could not read your mods");
+        if (_modsLoaded) FillMods(); else ModsSummary.Text = T("The launcher couldn't read your mods");
         if (_modsAgain) await LoadModsAsync();
     }
 
@@ -205,7 +205,7 @@ public sealed partial class MainWindow
                 : _modPlace switch
                 {
                     NewMods => ("sparkles", T("Nothing new since you last played.")),
-                    LookMods => ("circle-check", T("Nothing needs a look.")),
+                    LookMods => ("circle-check", T("No mod needs a look.")),
                     DupMods => ("circle-check", T("No duplicate mods.")),
                     OffMods => ("power", T("Every mod is on.")),
                     _ when _modPlace.StartsWith('#') => ("tag", T("No mod has this tag yet. Drag mods onto it, or add it in a mod's details.")),
@@ -387,7 +387,7 @@ public sealed partial class MainWindow
             foreach (var p in places) items.Add(PlaceItem(p));
             if (key == "tags" && q.Length == 0) items.Add(PlaceItem(new Place(NewTag, T("New tag"), "plus", -1)));
         }
-        if (q.Length > 0 && items.Count == 0) items.Add(new TextBlock { Text = T("No folders or tags match \"{0}\".", q), Style = (Style)Application.Current.Resources["ApexMuted"], Margin = new Thickness(10, 4, 10, 0) });
+        if (q.Length > 0 && items.Count == 0) items.Add(new TextBlock { Text = T("No folders or tags match “{0}”.", q), Style = (Style)Application.Current.Resources["ApexMuted"], Margin = new Thickness(10, 4, 10, 0) });
         ModFolders.ItemsSource = items;
         SelectPlace();
     }
@@ -453,7 +453,7 @@ public sealed partial class MainWindow
             menu.Items.Add(MenuItem(T("Turn on all mods inside"), () => SetMods(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), true), "power"));
             menu.Items.Add(MenuItem(T("Turn off all mods inside"), () => SetMods(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), false), "power-off"));
             menu.Items.Add(MenuItem(T("Merge this folder…"), () => Safe(MergeAsync(_modRows.Where(r => InDir(r.File, dir) && Mine(r)).ToList(), Path.GetFileName(dir), dir)), "merge"));
-            menu.Items.Add(MenuItem(T("Open in Explorer"), () => OpenFolder(Path.Combine(Docs, "Mods", dir)), "folder-search"));
+            menu.Items.Add(MenuItem(T("Open folder"), () => OpenFolder(Path.Combine(Docs, "Mods", dir)), "folder-search"));
             menu.Items.Add(new MenuFlyoutSeparator());
             menu.Items.Add(MenuItem(T("Delete folder"), () => Safe(DeleteFolderAsync(dir)), "trash-2"));
             g.ContextFlyout = menu;
@@ -626,10 +626,13 @@ public sealed partial class MainWindow
 
     async Task<string?> AskName(string title, string initial, string yes)
     {
-        var box = new TextBox { Text = initial, MinWidth = 320 };
+        var box = new TextBox { Text = initial, Width = Design.Dialogs.Small };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, title);
         box.Loaded += (_, _) => box.SelectAll();
-        var d = new ContentDialog { Title = title, Content = box, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "pencil", Title = title, Content = box, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        void Check() => d.IsPrimaryButtonEnabled = box.Text.Trim().Length > 0;
+        box.TextChanged += (_, _) => Check();
+        Check();
         return await ShowDialog(d) == ContentDialogResult.Primary && box.Text.Trim().Length > 0 ? box.Text : null;
     }
 
@@ -667,7 +670,7 @@ public sealed partial class MainWindow
 
     async Task DeleteFolderAsync(string dir)
     {
-        if (!await Confirm(T("Delete this folder?"), T("This deletes {0}. Only empty folders can be deleted, so no mod is lost.", Path.GetFileName(dir)), T("Delete"), danger: true)) return;
+        if (!await Confirm(T("Delete this folder?"), T("{0} is deleted. Only empty folders can be deleted, so no mod is lost.", Path.GetFileName(dir)), T("Delete"), danger: true)) return;
         await ModsChange(() => { ModLibrary.DeleteFolder(Docs, dir); _modPlace = Path.GetDirectoryName(dir) is { Length: > 0 } up ? up : AllMods; }, T("Folder deleted"));
     }
 
@@ -703,7 +706,11 @@ public sealed partial class MainWindow
     {
         _modUndo = undo;
         SetInfo(ModsInfo, severity, done, detail, undo is null ? null : T("Undo"), undo is null ? null : () => { var u = _modUndo; _modUndo = null; ModsInfo.IsOpen = false; u?.Invoke(); });
+        // (what went well goes by itself, as in Saves; the rest stays until it is read)
+        var mine = ++_modsNote;
+        if (severity == InfoBarSeverity.Success) After(undo is null ? 7000 : 20000, () => { if (mine == _modsNote && ModsInfo.Severity == InfoBarSeverity.Success) ModsInfo.IsOpen = false; });
     }
+    int _modsNote;
 
     // ---------- moving, switching, adding ----------
 
@@ -750,13 +757,13 @@ public sealed partial class MainWindow
         {
             string? failed = null;
             foreach (var (r, d) in back) try { Replace(r, ModLibrary.Move(r.File, Docs, d)); } catch (Exception e) { App.Log(e); failed ??= ErrorText(e); }
-            if (failed is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods couldn't be moved"), failed);
+            if (failed is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), failed);
             _folderSig = "";
             FillMods();
         }
         // (some moved, some not: the ones that moved can still be undone)
-        if (error is not null && back.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods couldn't be moved"), error);
-        else if (error is not null) ModsResult(T("Some mods couldn't be moved"), Undo, error, InfoBarSeverity.Warning);
+        if (error is not null && back.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), error);
+        else if (error is not null) ModsResult(T("Some mods were not moved"), Undo, error, InfoBarSeverity.Warning);
         else if (back.Count > 0) ModsResult(back.Count == 1 ? T("Mod moved to {0}", where) : T("{0} mods moved to {1}", back.Count, where), Undo);
         _folderSig = "";
         FillMods();
@@ -823,7 +830,7 @@ public sealed partial class MainWindow
         _folderSig = "";
         FillMods();
         // (some moved, some not: the ones that moved can still be undone)
-        if (error is not null && changed.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods couldn't be moved"), ErrorText(error));
+        if (error is not null && changed.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), ErrorText(error));
         else if (error is not null) ModsResult(on ? T("{0} of {1} mods turned on", changed.Count, todo.Count) : T("{0} of {1} mods turned off", changed.Count, todo.Count), () => SetMods(changed, !on), ErrorText(error), InfoBarSeverity.Warning);
         else if (changed.Count > 1) ModsResult(on ? T("{0} mods turned on", changed.Count) : T("{0} mods turned off", changed.Count), () => SetMods(changed, !on));
     }
@@ -1293,6 +1300,14 @@ public sealed partial class MainWindow
         var over = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
         ModSelectionBar.MaxWidth = over > 0 ? Math.Max(160, list.ActualWidth - over - 24) : double.PositiveInfinity;
         ModSelectionBar.Translation = new System.Numerics.Vector3((float)(-over / 2), 0, 24);
+        // (a message stands over the bar, in the same free part)
+        if (ModsInfo.Parent == ModSelectionBar.Parent)
+        {
+            (ModsInfo.HorizontalAlignment, ModsInfo.MaxWidth) = (HorizontalAlignment.Center, over > 0 ? Math.Max(320, list.ActualWidth - over - 24) : 720);
+            ModsInfo.MinWidth = Math.Min(360, ModsInfo.MaxWidth);
+            ModsInfo.Margin = new Thickness(12, 0, 12, ModSelectionBar.Visibility == Visibility.Visible ? 76 : 16);
+            ModsInfo.Translation = new System.Numerics.Vector3((float)(-over / 2), 0, 32);
+        }
         // (what the bar's actions have: the list without its sides, the bar's own margins and its padding)
         var room = list.ActualWidth - over - 56 - 24 - 12;
         if (Math.Abs(room - _barRoom) < 1) return;
@@ -1382,14 +1397,14 @@ public sealed partial class MainWindow
         foreach (var i in TagMenu(picked).Items.ToList()) tag.Items.Add(i);
         menu.Items.Add(tag);
         if (mine.Count > 1) menu.Items.Add(MenuItem(T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null)), "merge"));
-        if (picked.Count == 1 && ModMerge.IsMerged(picked[0].File)) menu.Items.Add(MenuItem(T("Split back into its mods…"), () => Safe(SplitAsync(picked[0])), "merge"));
+        if (picked.Count == 1 && ModMerge.IsMerged(picked[0].File)) menu.Items.Add(MenuItem(T("Split into mods…"), () => Safe(SplitAsync(picked[0])), "merge"));
         if (picked.Count == 1) menu.Items.Add(MenuItem(T("Show in Explorer"), () => ShowFile(picked[0].File.Path), "folder-search"));
         if (picked.Count == 1 && CanOpenInS3pe(picked[0])) menu.Items.Add(MenuItem(T("Open in s3pe"), () => Safe(OpenInS3peAsync(picked[0])), "package"));
         menu.Items.Add(MenuItem(picked.Count == 1 ? T("Copy name") : T("Copy names"), () => CopyText(string.Join(Environment.NewLine, picked.Select(r => r.File.Name))), "copy"));
         if (mine.Count > 0)
         {
             menu.Items.Add(new MenuFlyoutSeparator());
-            menu.Items.Add(MenuItem(T("Remove"), () => RemoveMods(mine), "trash-2", Windows.System.VirtualKey.Delete, danger: true));
+            menu.Items.Add(MenuItem(T("Move to the Recycle Bin"), () => RemoveMods(mine), "trash-2", Windows.System.VirtualKey.Delete, danger: true));
         }
         menu.ShowAt(view, e.GetPosition(view));
         e.Handled = true;
@@ -1548,7 +1563,7 @@ public sealed partial class MainWindow
             }
             catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         }
-        var back = new HyperlinkButton { Content = T("Back to detected"), FontSize = 12, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
+        var back = new HyperlinkButton { Content = T("Use the detected type"), FontSize = 12, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
             IsEnabled = inside is not null || ModNotes.Get(r.File.Rel)?.Kinds is not null };
         back.Click += (_, _) => Save(null);
         var done = new Button { Content = T("Done"), Style = (Style)Application.Current.Resources["AccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Right };
@@ -1692,13 +1707,13 @@ public sealed partial class MainWindow
         rows = rows.Where(Mine).ToList();
         if (rows.Count == 0) return;
         var merged = rows.Where(r => ModMerge.IsMerged(r.File)).ToList();
-        var text = (rows.Count == 1 ? T("{0} goes to the Recycle Bin. You can restore it from there.", rows[0].Name)
-            : T("{0} mods go to the Recycle Bin. You can restore them from there.", rows.Count))
+        var text = (rows.Count == 1 ? T("{0} is removed from the game. You can restore it from the Recycle Bin.", rows[0].Name)
+            : T("{0} mods are removed from the game. You can restore them from the Recycle Bin.", rows.Count))
             + (rows.Any(HasItems) ? "\n\n" + T("Lots and Sims that use its objects or outfits lose them the next time you save without it.") : "");
         // (a merged mod's originals go back unless the player says otherwise: none is left kept where nothing shows it)
-        var body = new StackPanel { Spacing = 14, MaxWidth = 460 };
-        body.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
-        var keep = new CheckBox { IsChecked = true, Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = T("Keep the {0} mods inside it", merged.Sum(r => ModMerge.Info(r.File)?.Originals.Count ?? 0)) } };
+        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
+        body.Children.Add(Design.Dialogs.Words(text));
+        var keep = new CheckBox { IsChecked = true, Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = T("Keep the {0} mods inside it as separate mods", merged.Sum(r => ModMerge.Info(r.File)?.Originals.Count ?? 0)) } };
         if (merged.Count > 0)
         {
             body.Children.Add(keep);
@@ -1708,7 +1723,7 @@ public sealed partial class MainWindow
             keep.Unchecked += (_, _) => gone.Visibility = Visibility.Visible;
             body.Children.Add(gone);
         }
-        var d = new ContentDialog { Title = rows.Count == 1 ? T("Remove this mod?") : T("Remove these mods?"), Content = body, PrimaryButtonText = T("Remove"), CloseButtonText = T("Cancel"),
+        var d = new ContentDialog { Title = rows.Count == 1 ? T("Move this mod to the Recycle Bin?") : T("Move these mods to the Recycle Bin?"), Content = body, PrimaryButtonText = T("Move to the Recycle Bin"), CloseButtonText = T("Cancel"),
             XamlRoot = Content.XamlRoot, DefaultButton = ContentDialogButton.None, PrimaryButtonStyle = DangerButton };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;
         var back = keep.IsChecked == true;
@@ -1861,8 +1876,7 @@ public sealed partial class MainWindow
         var body = new StackPanel { Spacing = 12, Width = 860 };
         body.Children.Add(top);
         body.Children.Add(grid);
-        var d = new ContentDialog { Title = T("What {0} replaces", r.Name), Content = body, CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
-        d.Resources["ContentDialogMaxWidth"] = 940.0;
+        var d = new ContentDialog { Tag = "replace", Title = T("What {0} replaces", r.Name), Content = body, CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
         await ShowDialog(d);
     }
 
@@ -1878,9 +1892,9 @@ public sealed partial class MainWindow
         ("Bottom", true) => T("1 bottom"), ("Bottom", _) => T("{0} bottoms", n),
         ("Shoes", true) => T("1 pair of shoes"), ("Shoes", _) => T("{0} pairs of shoes", n),
         ("Accessory", true) => T("1 accessory"), ("Accessory", _) => T("{0} accessories", n),
-        ("Facial hair", true) => T("1 facial hair"), ("Facial hair", _) => T("{0} facial hair", n),
-        ("Makeup", true) => T("1 makeup"), ("Makeup", _) => T("{0} makeup", n),
-        ("Eyebrows", true) => T("1 set of eyebrows"), ("Eyebrows", _) => T("{0} eyebrows", n),
+        ("Facial hair", true) => T("1 facial hair style"), ("Facial hair", _) => T("{0} facial hair styles", n),
+        ("Makeup", true) => T("1 makeup item"), ("Makeup", _) => T("{0} makeup items", n),
+        ("Eyebrows", true) => T("1 set of eyebrows"), ("Eyebrows", _) => T("{0} sets of eyebrows", n),
         ("Eye colour", true) => T("1 eye colour"), ("Eye colour", _) => T("{0} eye colours", n),
         ("Skin detail", true) => T("1 skin detail"), ("Skin detail", _) => T("{0} skin details", n),
         ("Tattoo", true) => T("1 tattoo"), ("Tattoo", _) => T("{0} tattoos", n),
@@ -1949,7 +1963,7 @@ public sealed partial class MainWindow
     // a tag's name and colour from the player; null when cancelled
     async Task<(string Name, string Color)?> AskTag(string title, string name, string color, string yes)
     {
-        var box = new TextBox { Text = name, PlaceholderText = T("Tag name"), MinWidth = 320, MaxLength = 40 };
+        var box = new TextBox { Header = T("Name"), Text = name, PlaceholderText = T("Tag name"), MaxLength = 40 };
         var colors = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var chosen = color;
         var rings = new List<Border>();
@@ -1965,10 +1979,13 @@ public sealed partial class MainWindow
             rings.Add(ring);
             colors.Children.Add(ring);
         }
-        var body = new StackPanel { Spacing = 14 };
+        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
         body.Children.Add(box);
-        body.Children.Add(colors);
-        var d = new ContentDialog { Title = title, Content = body, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        body.Children.Add(new StackPanel { Spacing = 8, Children = { Design.Parts.Label(T("Colour")), colors } });
+        var d = new ContentDialog { Tag = "tag", Title = title, Content = body, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        void Check() => d.IsPrimaryButtonEnabled = box.Text.Trim().Length > 0;
+        box.TextChanged += (_, _) => Check();
+        Check();
         return await ShowDialog(d) == ContentDialogResult.Primary && box.Text.Trim().Length > 0 ? (box.Text, chosen) : null;
     }
 

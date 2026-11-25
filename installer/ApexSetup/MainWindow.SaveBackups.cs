@@ -48,7 +48,7 @@ public sealed partial class MainWindow
         var list = new StackPanel { Spacing = 4 };
         AutomationProperties.SetName(list, T("Backups"));
         if (now.FolderGone is { } gone) list.Children.Add(Warn(T("The backup folder isn't available"), gone, T("Change"), () => SavesGo("auto")));
-        else if (points.Count == 0) list.Children.Add(Row("copy", T("No backups yet"), T("Make one now, or let the launcher make them."), null));
+        else if (points.Count == 0) list.Children.Add(Row("copy", T("No backups yet"), T("Make one now, or let the launcher make them"), null));
         foreach (var p in _saveAllBackups ? points : points.Take(BackupsShown)) list.Children.Add(BackupRow(e, p));
         if (points.Count > BackupsShown)
         {
@@ -79,7 +79,7 @@ public sealed partial class MainWindow
         var (title, sub) = (BackupTitle(p), BackupSub(p));
         // why it was made, at a glance; a pinned one says that instead
         var mark = RowIcon(p.Pinned ? "pin" : WhyId(p) switch { "auto" => "calendar-clock", "clean" => "sparkles", "restore" => "undo-2", "game" => "gamepad-2", _ => "copy" });
-        if (p.Pinned) { ToolTipService.SetToolTip(mark, T("Pinned: never deleted by itself")); }
+        if (p.Pinned) { ToolTipService.SetToolTip(mark, T("Pinned: never deleted automatically")); }
         g.Children.Add(mark);
         var words = (StackPanel)Col(SaveText(title, 14, strong: true), SaveText(sub, 13, "ApexMutedBrush"));
         (words.Spacing, words.VerticalAlignment) = (2, VerticalAlignment.Center);
@@ -124,8 +124,8 @@ public sealed partial class MainWindow
         {
             Item(T("Give it a name"), () => NameBackup(p), "pencil");
             if (p.Label is not null) Item(T("Remove the name"), () => MarkBackups([p], q => (null, q.Pinned)), "x");
-            Item(p.Pinned ? T("Unpin") : T("Pin, never delete"), () => MarkBackups([p], q => (q.Label, !q.Pinned)), p.Pinned ? "pin-off" : "pin");
-            Item(T("Check the file"), () => CheckBackup(p), "check");
+            Item(p.Pinned ? T("Unpin") : T("Pin so it is never deleted"), () => MarkBackups([p], q => (q.Label, !q.Pinned)), p.Pinned ? "pin-off" : "pin");
+            Item(T("Check this backup"), () => CheckBackup(p), "check");
         }
         Item(T("Export"), () => ExportBackups([(e, p)]), "upload", mine || SavesBlocked() is null);
         if (!SaveBackups.CanDelete(p)) return menu;
@@ -144,7 +144,7 @@ public sealed partial class MainWindow
         var when = new[] { of.OnClose ? T("When the game closes") : null, of.BeforePlay ? T("Before playing") : null, of.Daily ? T("Once a day") : null }.OfType<string>();
         var text = !on ? T("Off") : string.Join(", ", when.Select((w, i) => i == 0 ? w : Lower(w))) + " · " + (of.Keep == 1 ? T("keeps the newest one") : T("keeps the newest {0}", of.Keep));
         if (_autoBackup is { IsCompleted: false }) text = T("Backing up…");
-        else if (on && _autoError is { } bad) text = T("The last one did not work: {0}", bad);
+        else if (on && _autoError is { } bad) text = T("The last backup failed: {0}", bad);
         var sw = new ToggleSwitch { IsOn = on, OnContent = "", OffContent = "", MinWidth = 0, Width = 40, IsEnabled = !DryRun };
         AutomationProperties.SetName(sw, T("Automatic backups of this save"));
         AutomationProperties.SetAutomationId(sw, "SaveAuto");
@@ -167,7 +167,7 @@ public sealed partial class MainWindow
     {
         if (DryRun) return;
         try { BackupChoices.Change(edit); }
-        catch (Exception x) { App.Log(x); SavesSay(InfoBarSeverity.Error, T("That did not work"), ErrorText(x)); }
+        catch (Exception x) { App.Log(x); SavesSay(InfoBarSeverity.Error, T("Something went wrong"), ErrorText(x)); }
         _nextDaily = Math.Min(_nextDaily, Environment.TickCount64 + 5000); // (once a day, just turned on, does not wait)
         DispatcherQueue.TryEnqueue(SavesAgain); // (later: it removes the control that changed)
     }
@@ -185,13 +185,13 @@ public sealed partial class MainWindow
         keep.Header = T("Backups to keep");
         (keep.HorizontalAlignment, keep.Margin) = (HorizontalAlignment.Stretch, new Thickness(0, 12, 0, 0));
         boxes.Children.Add(keep);
-        var (same, mine) = (new RadioButton { Content = T("As for every save"), IsChecked = !own }, new RadioButton { Content = T("Only for this save"), IsChecked = own });
+        var (same, mine) = (new RadioButton { Content = T("Same as every save"), IsChecked = !own }, new RadioButton { Content = T("Only for this save"), IsChecked = own });
         void Say() => boxes.Visibility = mine.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         same.Checked += (_, _) => Say();
         mine.Checked += (_, _) => Say();
         Say();
         boxes.Margin = new Thickness(28, 0, 0, 0);
-        var d = new ContentDialog { Title = T("Automatic backups of {0}", e.Name), Content = new StackPanel { Spacing = 4, Width = 400, Children = { same, mine, boxes } }, PrimaryButtonText = T("Save"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "shield-check", Title = T("Automatic backups of {0}", e.Name), Content = new StackPanel { Spacing = 8, Width = Design.Dialogs.Small, Children = { same, mine, boxes } }, PrimaryButtonText = T("Save"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;
         ChangeBackups(c =>
         {
@@ -223,21 +223,21 @@ public sealed partial class MainWindow
     async Task MarkBackups(List<SavePoint> points, Func<SavePoint, (string? Label, bool Pinned)> to)
     {
         try { await Task.Run(() => { foreach (var p in points) { var (label, pin) = to(p); SaveBackups.Mark(p, label, pin); } }); }
-        catch (Exception x) { App.Log(x); SavesSay(InfoBarSeverity.Error, T("That did not work"), ErrorText(x)); }
+        catch (Exception x) { App.Log(x); SavesSay(InfoBarSeverity.Error, T("Something went wrong"), ErrorText(x)); }
         FillSaves();
     }
 
     async Task CheckBackup(SavePoint p)
     {
-        if (await SaveWork(T("Checking the file"), (say, ct) => { say(BackupTitle(p), -1, true); SaveBackups.Verify(p, ct); return p; }) is not null)
-            SavesSay(InfoBarSeverity.Success, T("The file is whole"), BackupTitle(p));
+        if (await SaveWork(T("Checking the backup"), (say, ct) => { say(BackupTitle(p), -1, true); SaveBackups.Verify(p, ct); return p; }) is not null)
+            SavesSay(InfoBarSeverity.Success, T("The backup is complete and undamaged"), BackupTitle(p));
     }
 
     async Task DeleteBackups(List<SavePoint> points)
     {
         var bin = points.All(p => SaveBackups.HasBin(p.Path));
         if (!bin && !await Confirm(points.Count == 1 ? T("Delete this backup?") : T("Delete {0} backups?", points.Count), T("This drive has no Recycle Bin, so you can't bring them back."), T("Delete"), danger: true)) return;
-        if (await SaveWork(T("Removing backups"), (say, _) => { say(BackupCount(points.Count), -1, false); SaveBackups.Delete(points); return points; }) is not null)
+        if (await SaveWork(T("Deleting backups"), (say, _) => { say(BackupCount(points.Count), -1, false); SaveBackups.Delete(points); return points; }) is not null)
             SavesSay(InfoBarSeverity.Success, bin ? points.Count == 1 ? T("Backup moved to the Recycle Bin") : T("{0} backups moved to the Recycle Bin", points.Count) : points.Count == 1 ? T("Backup deleted") : T("{0} backups deleted", points.Count));
         FillSaves();
     }
@@ -248,12 +248,12 @@ public sealed partial class MainWindow
         var bin = e.Kind == SaveKindOf.Stored || e.Points.All(p => SaveBackups.HasBin(p.Path));
         var text = e.Kind == SaveKindOf.Stored ? T("The save goes to the Recycle Bin, and its backups stay where they are.")
             : e.Points.Count == 1 ? T("Its last backup goes to the Recycle Bin.") : T("Its {0} backups go to the Recycle Bin.", e.Points.Count);
-        text = bin ? text + " " + T("Empty the Recycle Bin to delete it for good.") : T("This drive has no Recycle Bin, so you can't bring it back.");
+        text = bin ? text + " " + T("You can restore from there until you empty the Recycle Bin.") : T("This drive has no Recycle Bin, so you can't bring it back.");
         // (the next of the same kind is chosen after it, to delete several in a row)
         var same = _savesNow?.Entries.Where(x => x.Kind == e.Kind).ToList() ?? [];
         var at = same.FindIndex(x => x.Key == e.Key);
         var next = same.ElementAtOrDefault(at + 1) ?? same.ElementAtOrDefault(at - 1);
-        if (!await Confirm(T("Delete {0}?", e.Name), text, T("Delete"), danger: true)) return;
+        if (!await Confirm(bin ? T("Move {0} to the Recycle Bin?", e.Name) : T("Delete {0}?", e.Name), text, bin ? T("Move to the Recycle Bin") : T("Delete"), danger: true)) return;
         if (await SaveWork(T("Delete"), (say, _) =>
         {
             say(T("Moving the save"), -1, false);
@@ -319,13 +319,13 @@ public sealed partial class MainWindow
             AutomationProperties.SetName(b, title + ". " + sub);
             return b;
         }
-        var swap = Choice(T("Replace the current save"), T("It becomes one more backup"), true);
+        var swap = Choice(T("Replace the current save"), T("The current save becomes a backup"), true);
         var beside = Choice(T("Open as another save"), T("Both stay in the game"), false);
-        var body = new StackPanel { Spacing = 6, Width = 432 };
+        var body = new StackPanel { Spacing = 12, Width = Design.Dialogs.Small };
         body.Children.Add(new TextBlock { Text = string.Join(" · ", new[] { e.Name, p.Label is null ? WhyText(p) : SaveDay(p.When, hour: true), SaveSize(p.Stored) }), FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
         foreach (var b in new[] { swap, beside })
         {
-            var card = new Border { Child = b, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(16, 11, 16, 11) };
+            var card = new Border { Child = b, CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), Padding = new Thickness(16) };
             void Paint() => (card.Background, card.BorderBrush) = (Res(b.IsChecked == true ? "ApexAccentSoftBrush" : "ApexCardBrush"), Res(b.IsChecked == true ? "ApexAccentLineBrush" : "ApexCardBorderBrush"));
             b.Checked += (_, _) => Paint();
             b.Unchecked += (_, _) => Paint();
@@ -337,7 +337,7 @@ public sealed partial class MainWindow
             var names = new TextBlock { Text = string.Join('\n', missing), FontSize = 12, Foreground = Res("ApexWarningTextBrush"), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
             var more = new ScrollViewer { Content = names, MaxHeight = 140, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 0) };
             var few = new TextBlock { Text = string.Join(", ", missing.Take(2)) + (missing.Count > 2 ? " " + T("and {0} more", missing.Count - 2) : ""), FontSize = 12, Foreground = Res("ApexWarningTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis };
-            var see = Link(T("See"), () => { });
+            var see = Link(T("See the mods"), () => { });
             see.VerticalAlignment = VerticalAlignment.Center;
             AutomationProperties.SetName(see, T("See the mods"));
             see.Click += (_, _) => { (more.Visibility, few.Visibility) = (Visibility.Visible, Visibility.Collapsed); see.Visibility = Visibility.Collapsed; };
@@ -352,9 +352,9 @@ public sealed partial class MainWindow
             line.Children.Add(words);
             Grid.SetColumn(see, 2);
             line.Children.Add(see);
-            body.Children.Add(new Border { Child = line, Padding = new Thickness(16, 10, 14, 10), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Margin = new Thickness(0, 6, 0, 0), Background = Res("ApexWarningSoftBrush"), BorderBrush = Res("ApexWarningLineBrush") });
+            body.Children.Add(new Border { Child = line, Padding = new Thickness(16, 12, 16, 12), CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), Background = Res("ApexWarningSoftBrush"), BorderBrush = Res("ApexWarningLineBrush") });
         }
-        var d = new ContentDialog { Title = p.Label is { } l ? T("Restore “{0}”", l) : T("Restore {0}", Lower(SaveDay(p.When, hour: true))), Content = body, PrimaryButtonText = T("Restore"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "undo-2", Title = p.Label is { } l ? T("Restore “{0}”", l) : T("Restore {0}", Lower(SaveDay(p.When, hour: true))), Content = body, PrimaryButtonText = T("Restore"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;
         if (beside.IsChecked == true) await OpenAsAnother(e, p); else await RestoreSave(look.Save, p, e.Name);
     }
@@ -374,7 +374,7 @@ public sealed partial class MainWindow
     {
         var boxes = new List<(CheckBox Box, SaveLook Look)>();
         var rows = new StackPanel();
-        var d = new ContentDialog { Title = T("Clean several saves"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "sparkles", Title = T("Clean several saves"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         foreach (var l in now.Here)
         {
             var g = new Grid { ColumnSpacing = 14 };
@@ -412,15 +412,15 @@ public sealed partial class MainWindow
         void Sum()
         {
             var gain = Picked().Sum(l => Known(l) is { } r ? Gain(r, _saveParts) : 0);
-            d.PrimaryButtonText = gain > 0 ? T("Clean {0}", SaveSize(gain)) : T("Nothing to clean");
+            d.PrimaryButtonText = gain > 0 ? T("Free up {0}", SaveSize(gain)) : T("Nothing to clean");
             d.IsPrimaryButtonEnabled = gain > 0 && SavesBlocked() is null;
         }
         var what = CleanOptions.Where(o => (_saveParts & o.Parts) == o.Parts).Select(o => T(o.Name)).ToList();
         d.Content = new StackPanel
         {
-            Width = 440, Spacing = 14, Children =
+            Width = Design.Dialogs.Small, Spacing = 16, Children =
             {
-                new TextBlock { Text = what.Count > 0 ? string.Join(", ", what) : T("Nothing is turned on in Clean"), FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap },
+                new TextBlock { Text = what.Count > 0 ? string.Join(", ", what) : T("Choose what to clean on a save's page first"), FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap },
                 new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), Child = new ScrollViewer { Content = rows, MaxHeight = 340 } },
                 PageSub(T("Each save gets a backup first.")),
             },
@@ -461,7 +461,7 @@ public sealed partial class MainWindow
         var keep = KeepBox(c.Keep);
         AutomationProperties.SetName(keep, T("Backups of each save"));
         keep.SelectionChanged += (_, _) => ChangeBackups(x => x.Keep = (int)((ComboBoxItem)keep.SelectedItem).Tag);
-        page.Children.Add(Row("layers", T("Backups of each save"), T("Older automatic ones go to the Recycle Bin."), keep));
+        page.Children.Add(Row("layers", T("Backups of each save"), T("Older automatic backups go to the Recycle Bin"), keep));
         var limit = Numbers(c.LimitGb, [2, 5, 10, 20, 50, 0], n => n == 0 ? T("No limit") : n + " GB");
         AutomationProperties.SetName(limit, T("Space limit"));
         limit.SelectionChanged += (_, _) => ChangeBackups(x => x.LimitGb = (int)((ComboBoxItem)limit.SelectedItem).Tag);
@@ -482,7 +482,7 @@ public sealed partial class MainWindow
         var place = Row("folder", T("Folder"), now.FolderGone is null ? now.Free is { } free ? T("{0} · {1} free", dir, SaveSize(free)) : dir : T("{0} isn't available", dir),
             new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Dims(Open()), Dims(change) } });
         page.Children.Add(place);
-        page.Children.Add(Toggle("check", T("Check each backup"), T("Reads everything again after copying"), c.Check, on => ChangeBackups(x => x.Check = on), !DryRun));
+        page.Children.Add(Toggle("check", T("Check each backup"), T("Reads each copy again to make sure it is complete"), c.Check, on => ChangeBackups(x => x.Check = on), !DryRun));
         page.Children.Add(Toggle("blocks", T("Remember the mods that are on"), T("Tells you which are missing when you restore"), c.RememberMods, on => ChangeBackups(x => x.RememberMods = on), !DryRun));
         SavesHost.Children.Add(page);
 
@@ -531,12 +531,12 @@ public sealed partial class MainWindow
         page.Children.Add(SavesSubHead(T("All backups"), BackupCount(every.Count) + ", " + used, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { bySave, byWhy } }));
         var shown = every.Where(x => (_allSave == "" || x.Of.Key == _allSave || _allSave == "-gone" && x.Of.Kind == SaveKindOf.Gone) && (_allWhy == "" || WhyId(x.Point) == _allWhy)).ToList();
         SavesHost.Children.Add(page);
-        if (shown.Count == 0) { page.Children.Add(EmptyPlace("copy", T("No backups here yet."))); return; }
+        if (shown.Count == 0) { page.Children.Add(EmptyPlace("copy", T("No backups here. Make one on a save's page, or choose another save or reason."))); return; }
 
         var sync = new List<Action>();
         var mine = shown.Where(x => SaveBackups.CanDelete(x.Point)).ToList();
         var all = new CheckBox { MinWidth = 0, MinHeight = 32, IsThreeState = false };
-        AutomationProperties.SetName(all, T("Choose all"));
+        AutomationProperties.SetName(all, T("Select all"));
         all.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
         all.Click += (_, _) => { if (_allPicks.Count == mine.Count) _allPicks.Clear(); else foreach (var x in mine) _allPicks.Add(x.Point.Path); Say(); };
         var head = Columns(all, null, SaveText(T("Save file"), 12, strong: true), SaveText(T("When"), 12, "ApexMutedBrush"), SaveText(T("Reason"), 12, "ApexMutedBrush"), SaveText(T("Size"), 12, "ApexMutedBrush"), null);
@@ -547,12 +547,12 @@ public sealed partial class MainWindow
             var box = new CheckBox { MinWidth = 0, MinHeight = 32, IsEnabled = SaveBackups.CanDelete(p) };
             box.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
             AutomationProperties.SetName(box, $"{of.Name}, {BackupTitle(p)}, {WhyText(p)}, {SaveSize(p.Stored)}");
-            if (!box.IsEnabled) ToolTipService.SetToolTip(box, T("The game keeps this one"));
+            if (!box.IsEnabled) ToolTipService.SetToolTip(box, T("Made by the game, so you can't select it"));
             box.Click += (_, _) => { if (box.IsChecked == true) _allPicks.Add(p.Path); else _allPicks.Remove(p.Path); Say(); };
             var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             var title = SaveText(p.Label ?? EntryName(now, of), 14, strong: true);
             name.Children.Add(title);
-            if (p.Pinned) { var pin = Lucide.Icon("pin", 14, Res("ApexAccentBrush")); ToolTipService.SetToolTip(pin, T("Pinned: never deleted by itself")); name.Children.Add(pin); }
+            if (p.Pinned) { var pin = Lucide.Icon("pin", 14, Res("ApexAccentBrush")); ToolTipService.SetToolTip(pin, T("Pinned: never deleted automatically")); name.Children.Add(pin); }
             ToolTipService.SetToolTip(name, p.Label is null ? of.Name : p.Label + "\n" + of.Name);
             var row = new Border { MinHeight = 56, Padding = new Thickness(12, 0, 4, 0), BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Res("ApexHairlineBrush"), ContextFlyout = BackupMenu(of, p),
                 Child = Columns(box, SavePhoto(of.Look, 40), name, SaveText(SaveDay(p.When, hour: true), 13, "ApexSoftTextBrush"), SaveText(T(BackupWhys.First(w => w.Id == WhyId(p)).Text), 13, "ApexSoftTextBrush"), SaveText(SaveSize(p.Stored), 13, "ApexSoftTextBrush"), MoreButton(T("More options") + ", " + of.Name + ", " + BackupTitle(p), BackupMenu(of, p))) };
@@ -596,7 +596,7 @@ public sealed partial class MainWindow
         var clear = IconButton("x", T("Clear the selection"));
         clear.Click += (_, _) => { _allPicks.Clear(); SavesAgain(); };
         s.Children.Add(clear);
-        var count = new TextBlock { Text = picked.Count == 1 ? T("1 chosen") : T("{0} chosen", picked.Count), FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 8, 0) };
+        var count = new TextBlock { Text = picked.Count == 1 ? T("1 selected") : T("{0} selected", picked.Count), FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 8, 0) };
         AutomationProperties.SetLiveSetting(count, AutomationLiveSetting.Polite);
         s.Children.Add(count);
         s.Children.Add(new TextBlock { Text = SaveSize(picked.Sum(x => x.Point.Stored)), FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
@@ -614,7 +614,7 @@ public sealed partial class MainWindow
         }
         if (pins.Count > 0) Act(unpin ? "pin-off" : "pin", unpin ? T("Unpin") : T("Pin"), () => MarkBackups(pins, p => (p.Label, !unpin)));
         Act("upload", T("Export"), () => ExportBackups(picked));
-        Act("trash-2", points.All(p => SaveBackups.HasBin(p.Path)) ? T("Recycle Bin") : T("Delete"), () => DeleteBackups(points), "ApexErrorBrush");
+        Act("trash-2", points.All(p => SaveBackups.HasBin(p.Path)) ? T("Move to the Recycle Bin") : T("Delete"), () => DeleteBackups(points), "ApexErrorBrush");
         SavesBar.Child = s;
     }
 
@@ -667,7 +667,7 @@ public sealed partial class MainWindow
         catch (Exception e) { App.Log(e); return; }
         var bar = new ProgressBar { IsIndeterminate = true };
         var text = Body(T("Backing up…"));
-        var d = new ContentDialog { Title = T("Backing up your saves"), Content = new StackPanel { Spacing = 14, Width = 420, Children = { text, bar } }, CloseButtonText = T("Play without waiting"), XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "copy", Title = T("Backing up your saves"), Content = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small, Children = { text, bar } }, CloseButtonText = T("Play without waiting"), XamlRoot = Content.XamlRoot };
         var stop = new CancellationTokenSource(); // (the work may outlive this)
         var running = true;
         d.CloseButtonClick += (_, _) => { d.CloseButtonText = T("Stopping…"); stop.Cancel(); _autoStop?.Cancel(); };

@@ -162,7 +162,7 @@ public sealed partial class MainWindow : Window
             {
                 if (_busy) // (an install in progress finishes first: said, with the button kept)
                 {
-                    SetInfo(SetupUpdateInfo, InfoBarSeverity.Informational, T("A new Apex Launcher is available"),
+                    SetInfo(SetupUpdateInfo, InfoBarSeverity.Informational, T("A new version of Apex Launcher is available"),
                         T("Wait for the current change to finish, then update the launcher."), T("Update the launcher"), UpdateNow);
                     return;
                 }
@@ -178,19 +178,17 @@ public sealed partial class MainWindow : Window
                     // (the new exe quarantined or blocked by an antivirus: said as such)
                     var shown = e is FileNotFoundException || e is System.ComponentModel.Win32Exception { NativeErrorCode: 2 or 225 or 226 } || Engine.IsVirusBlock(e)
                         ? Engine.Antivirus(SelfUpdate.AssetName, Path.GetDirectoryName(file) ?? "") : e;
-                    _ = ShowDialog(new ContentDialog { Title = T("The launcher could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
+                    _ = ShowDialog(new ContentDialog { Tag = "!circle-alert", Title = T("The launcher could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
                 }
             }
-            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new Apex Launcher is available"),
+            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new version of Apex Launcher is available"),
                 T("Apex Launcher {0} is ready to install. The launcher opens again after the update.", v), T("Update the launcher"), UpdateNow);
             // (the notice above sits on the old start page: anywhere else, and when no game runs, the offer is a card of its own)
             if (_step == Welcome || _running || _busy) return;
-            var body = new StackPanel { Spacing = 14, Width = 420 };
-            body.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 64, Height = 64, HorizontalAlignment = HorizontalAlignment.Center });
-            body.Children.Add(new TextBlock { Text = T("Downloaded and checked. The launcher restarts in a moment and reopens where you were. Nothing in the game changes."),
-                TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = App.Brush("ApexSoftTextBrush") });
-            body.Children.Add(new TextBlock { Text = App.Version + " \u2192 " + v, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Foreground = App.Brush("ApexMutedBrush") });
-            if (await ShowDialog(new ContentDialog { Title = T("Apex Launcher {0} is ready", v), Content = body, PrimaryButtonText = T("Restart now"), CloseButtonText = T("Later"),
+            var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
+            body.Children.Add(Design.Dialogs.Words(T("Downloaded and checked. The launcher restarts in a moment and reopens where you were. Nothing in the game changes.")));
+            body.Children.Add(new TextBlock { Text = App.Version + " \u2192 " + v, FontSize = 13, Foreground = App.Brush("ApexMutedBrush") });
+            if (await ShowDialog(new ContentDialog { Tag = "download", Title = T("Apex Launcher {0} is ready", v), Content = body, PrimaryButtonText = T("Restart now"), CloseButtonText = T("Later"),
                     DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Primary)
                 UpdateNow();
         }
@@ -486,7 +484,7 @@ public sealed partial class MainWindow : Window
         FooterNote.Text = _step switch
         {
             ComponentsStep or WizardSettings when _running && Wizard => T("Waiting for the game to close\u2026"),
-            GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."),
+            GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher, TS3Wrap (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."),
             GameStep when Wizard && _gameAllSet => T("All set to install."),
             GameSettingsScreen => _running ? T("Close The Sims 3 to continue") : GameSettingsCount() > 0 ? T("Each file is copied before it changes.") : "",
             WizardSettings => T("Each file is copied before it changes."),
@@ -521,7 +519,7 @@ public sealed partial class MainWindow : Window
         FirstSide.Children.Clear();
         FirstSide.Children.Add(SplitSide());
         FirstPoints.Children.Clear();
-        FirstPoints.Children.Add(SplitPoint("gauge", T("Ready in about 2 minutes"), T("The recommended mods are already chosen")));
+        FirstPoints.Children.Add(SplitPoint("gauge", T("Ready in about 2 minutes"), T("Just continue: the recommended mods are already chosen")));
         FirstPoints.Children.Add(SplitPoint("shield-check", T("You can undo everything later"), T("Each file is copied before it changes")));
         FirstPoints.Children.Add(SplitPoint("download", T("Straight from who made it"), T("Each mod comes from its author's own page")));
         Steps(StepsGame, 1);
@@ -585,10 +583,10 @@ public sealed partial class MainWindow : Window
         // (asked once per game: the probe writes a file in Game\Bin)
         if (on && _game is { } wg && _writableFor.Bin != wg.Bin) _writableFor = (wg.Bin, Elevation.IsElevated || Elevation.CanWrite(wg.Bin));
         var needsAdmin = on && !_writableFor.Writable;
-        if (on && _running) SetInfo(WizardNotice, InfoBarSeverity.Warning, T("The Sims 3 is open."), T("Save and close the game. Install comes back on its own when it closes."));
+        if (on && _running) SetInfo(WizardNotice, InfoBarSeverity.Warning, T("The Sims 3 is open"), T("Save and close the game. The Install button comes back when it closes."));
         // (the footer's Try again reads the releases again)
-        else if (on && _offline) SetInfo(WizardNotice, InfoBarSeverity.Warning, T("No internet."), T("The launcher downloads the files from each author's GitHub. Check your connection and try again."));
-        else if (needsAdmin) SetInfo(WizardNotice, InfoBarSeverity.Informational, T("Windows will ask for permission"), T("The game is in a protected folder. One prompt, then the change runs in its own window."));
+        else if (on && _offline) SetInfo(WizardNotice, InfoBarSeverity.Warning, T("No internet"), T("The launcher downloads the files from each author's GitHub. Check your connection and try again."));
+        else if (needsAdmin) SetInfo(WizardNotice, InfoBarSeverity.Informational, T("Windows will ask for permission"), T("The game is in a protected folder. After you allow it, the changes run in a separate window."));
         else WizardNotice.IsOpen = false;
         WizardNotice.Visibility = WizardNotice.IsOpen ? Visibility.Visible : Visibility.Collapsed; // (a closed bar still took the panel's gap)
         // (the game step holds the install back while the game runs: said in the card, not only in the footer)
@@ -762,7 +760,7 @@ public sealed partial class MainWindow : Window
             g.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 48, Height = 48, VerticalAlignment = VerticalAlignment.Center });
             var words = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
             words.Children.Add(new TextBlock { Text = "Apex Radiance", FontSize = 20, FontWeight = FontWeights.SemiBold });
-            words.Children.Add(new TextBlock { Text = T("Lighting, picture and performance for The Sims 3."), FontSize = 13, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
+            words.Children.Add(new TextBlock { Text = T("Lighting, picture and performance for The Sims 3"), FontSize = 13, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
             Grid.SetColumn(words, 1); g.Children.Add(words);
             var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
             var version = apexUpdate && have is not null && latest is not null ? have + " \u2192 " + latest : have;
@@ -780,7 +778,7 @@ public sealed partial class MainWindow : Window
         S3ssDot.Visibility = Changes(Components.S3ss) ? Visibility.Visible : Visibility.Collapsed;
         S3ppDot.Visibility = Changes(Components.S3pp) ? Visibility.Visible : Visibility.Collapsed;
         MonoDot.Visibility = Changes(Components.MonoPatcher) ? Visibility.Visible : Visibility.Collapsed;
-        if (!wizard) Label(T("Parts of Apex"));
+        if (!wizard) Label(T("Parts of Apex Radiance"));
         if (CoreModernization.Visibility == Visibility.Visible)
             Row(IconBox("wrench"), "Sims 3 Modernization", ModDesc.Text, null, State(ModPill), Changes(Components.Modernization),
                 wizard || ModChannel.Visibility != Visibility.Visible ? null : Channel(), Mirror(ModToggle, "Sims 3 Modernization"));
@@ -803,11 +801,11 @@ public sealed partial class MainWindow : Window
             };
             // (a choice missing from the menu says why: the card or driver cannot run it; a change chosen keeps its own line)
             var blocked = BridgeDetail.Text.Length > 0 && _state is { } rs && _renderer == RendererOf(rs);
-            Row(IconBox("monitor"), T("Graphics"), T("How Apex draws the game."), null,
+            Row(IconBox("monitor"), T("Graphics"), T("What draws the game on your screen"), null,
                 blocked ? Tip(StateText(BridgeDetail.Text, Res("ApexWarningBrush"))!) : StateText(RendererState.Text, RendererState.Foreground),
                 Changes(Components.Bridge, Components.Dxvk), menu);
         }
-        Row(IconBox("rotate-ccw"), T("TS3Wrap"), Why(RestartToggle, RestartPill, T("Reopens your last save with fresh memory when the game runs low.")), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
+        Row(IconBox("rotate-ccw"), T("TS3Wrap"), Why(RestartToggle, RestartPill, T("Opens your last save again with free memory when the game is running out")), null, State(RestartPill), Changes(Components.RestartHost), Mirror(RestartToggle, "TS3Wrap"));
         if (SmoothSection.Visibility == Visibility.Visible && SmoothCard.Visibility == Visibility.Visible && (!wizard || SmoothToggle.IsEnabled))
         {
             FrameworkElement? smoothState = State(SmoothPill);
@@ -818,10 +816,10 @@ public sealed partial class MainWindow : Window
                 Put(both, Adopt(SmoothHelp, SmoothCard));
                 smoothState = both;
             }
-            Row(IconBox("film"), "NVIDIA Smooth Motion", T("Extra frames for smoother motion, on RTX 40 and 50 cards."), null, smoothState, _smoothWant is not null, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
+            Row(IconBox("film"), "NVIDIA Smooth Motion", T("Extra frames for smoother motion, on RTX 40 and 50 cards"), null, smoothState, _smoothWant is not null, Mirror(SmoothToggle, "NVIDIA Smooth Motion"));
         }
         if (SmoothSection.Visibility == Visibility.Visible && AfmfCard.Visibility == Visibility.Visible && (!wizard || AfmfToggle.IsEnabled))
-            Row(IconBox("film"), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion."), null, State(AfmfPill), _afmfWant is not null, Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
+            Row(IconBox("film"), "AMD Fluid Motion Frames", T("The AMD driver adds frames for smoother motion"), null, State(AfmfPill), _afmfWant is not null, Mirror(AfmfToggle, "AMD Fluid Motion Frames"));
         _fpsBox ??= ((Panel)FpsCard.Child).Children.OfType<StackPanel>().First(sp => sp.Children.Contains(FpsCombo));
         if (!wizard && SmoothSection.Visibility == Visibility.Visible && FpsCard.Visibility == Visibility.Visible)
         {
@@ -831,7 +829,7 @@ public sealed partial class MainWindow : Window
         if (!wizard) return;
         // the mods by other modders, offered in the install too (outside it, the Other mods cards below the list)
         Label(T("Optional, from other authors"));
-        Row(IconBox("sliders-horizontal"), "Sims3SettingsSetter", Why(S3ssToggle, S3ssPill, T("Fixes for game and graphics settings.")), null, null, false, Mirror(S3ssToggle, "Sims3SettingsSetter"));
+        Row(IconBox("sliders-horizontal"), "Sims3SettingsSetter", Why(S3ssToggle, S3ssPill, T("Fixes for game and graphics settings")), null, null, false, Mirror(S3ssToggle, "Sims3SettingsSetter"));
         Row(IconBox("zap"), "Sims 3 Performance Patch", T("Makes the game run faster. Needs a free Nexus Mods account."), null, null, false,
             S3ppToggle.Visibility == Visibility.Visible ? Mirror(S3ppToggle, "Sims 3 Performance Patch")
             : S3ppWait.Visibility == Visibility.Visible ? new ProgressRing { Width = 16, Height = 16, IsActive = true }
@@ -893,7 +891,7 @@ public sealed partial class MainWindow : Window
                     NavigateUri = new Uri($"https://github.com/{Releases.Apex}/releases/tag/{Uri.EscapeDataString(rel.Tag)}") });
             CardRow(UpdateList, left, $"{(Known(c) is { Length: > 0 } v ? v : "?")} \u2192 {Latest(c)}", "ApexSoftTextBrush");
         }
-        if (_running) CardStrip(UpdateList, T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update."), null);
+        if (_running) CardStrip(UpdateList, T("Close The Sims 3, its launcher, TS3Wrap (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update."), null);
 
     }
 
@@ -991,8 +989,12 @@ public sealed partial class MainWindow : Window
 
     void ThemeChrome()
     {
-        foreach (var (key, dark, light) in new[] { ("Success", 0xFF14231Bu, 0xFFE4F3EAu), ("Warning", 0xFF2A2214u, 0xFFFBF1DFu), ("Error", 0xFF2C1718u, 0xFFFBE6E5u), ("Informational", 0xFF1E1E1Eu, 0xFFEFEFEFu) })
-            Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = new SolidColorBrush(Pick(dark, light));
+        // a message: a quiet card, its colour only in its mark
+        foreach (var key in new[] { "Success", "Warning", "Error", "Informational" }) Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = _over;
+        Root.Resources["InfoBarBorderBrush"] = _overEdge;
+        foreach (var note in new[] { SetupUpdateInfo, WelcomeInfo, GameRunningNotice, WizardNotice, GraphicsInfo, ManageInfo, SavesNote, ModsInfo }) note.CornerRadius = new CornerRadius(Design.Radius.Card);
+        // (over the screen: what came of something the player did)
+        foreach (var note in new[] { SavesNote, ModsInfo }) (note.Shadow, note.Translation) = (new ThemeShadow(), new System.Numerics.Vector3(note.Translation.X, 0, 32));
         // (the boxes of the list: drawn to be found, not to be seen first)
         (QuietBox.Color, _over.Color, _overEdge.Color) = (Tone("InputBorderHover"), Tone("Raised"), Tone("InputBorder"));
         ModListHead.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
@@ -1001,8 +1003,8 @@ public sealed partial class MainWindow : Window
         // does not reach these. A contrast theme keeps its own)
         if (!new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast)
         {
-            foreach (var key in new[] { "FlyoutPresenterBackground", "MenuFlyoutPresenterBackground", "ComboBoxDropDownBackground" }) Application.Current.Resources[key] = _over;
-            foreach (var key in new[] { "FlyoutBorderThemeBrush", "MenuFlyoutPresenterBorderBrush", "ComboBoxDropDownBorderBrush" }) Application.Current.Resources[key] = _overEdge;
+            foreach (var key in new[] { "FlyoutPresenterBackground", "MenuFlyoutPresenterBackground", "ComboBoxDropDownBackground", "ToolTipBackground" }) Application.Current.Resources[key] = _over;
+            foreach (var key in new[] { "FlyoutBorderThemeBrush", "MenuFlyoutPresenterBorderBrush", "ComboBoxDropDownBorderBrush", "ToolTipBorderBrush" }) Application.Current.Resources[key] = _overEdge;
         }
         (_content.Color, _contentEdge.Color) = (Tone("Content"), Tone("CardBorder"));
         Nav.Resources["NavigationViewContentBackground"] = _content;
@@ -1099,7 +1101,7 @@ public sealed partial class MainWindow : Window
             // checked at every start: the player learns about a new release here, without visiting GitHub
             var lines = ups.Select(c => T("{0} {1} → {2}", Name(c), Known(c) is { Length: > 0 } v ? v : "?", Latest(c)!));
             SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Updates available"),
-                string.Join(", ", lines) + ". " + (_running ? T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update.") : T("Update now installs them.")));
+                string.Join(", ", lines) + ". " + (_running ? T("Close The Sims 3, its launcher, TS3Wrap (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update.") : T("The Update button installs them.")));
         }
         // (a game with Apex, checked and current: the status card's header says so)
         else WelcomeInfo.IsOpen = false;
@@ -1145,7 +1147,7 @@ public sealed partial class MainWindow : Window
         {
             var bar = new InfoBar
             {
-                IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("The launcher fixes this") : "",
+                IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("The launcher can fix this") : "",
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
             };
             if (x.Link is { } link) bar.ActionButton = new HyperlinkButton { Content = T("Read more"), NavigateUri = new Uri(link) };
@@ -1172,7 +1174,7 @@ public sealed partial class MainWindow : Window
         if (repair.Count > 0 || fixable)
             Make(T("Repair"), async () =>
             {
-                if (fixable && !await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."), WelcomeInfo, "Fix incompatible settings")) return;
+                if (fixable && !await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed"), WelcomeInfo, "Fix incompatible settings")) return;
                 if (repair.Count > 0 && !_offline) await InstallAsync(repair);
             }, needsNet: !fixable);
         if (test && apexRelease is not null)
@@ -1205,8 +1207,10 @@ public sealed partial class MainWindow : Window
     static void SetInfo(InfoBar bar, InfoBarSeverity sev, string title, string msg, string? action = null, Action? onAction = null)
     {
         bar.Severity = sev; bar.Title = title; bar.Message = msg; bar.IsOpen = true; bar.Content = null;
+        var (icon, tone) = sev switch { InfoBarSeverity.Success => ("circle-check", "Success"), InfoBarSeverity.Warning => ("triangle-alert", "Warning"), InfoBarSeverity.Error => ("circle-alert", "Error"), _ => ("info", "Accent") };
+        bar.IconSource = new ImageIconSource { ImageSource = Lucide.Picture(icon, Tone(tone), 2) };
         if (action is null) { bar.ActionButton = null; return; }
-        var b = new Button { Content = action };
+        var b = new Button { Content = action, Height = Design.Size.ControlSmall, Padding = new Thickness(12, 0, 12, 0) };
         b.Click += (_, _) => onAction?.Invoke();
         bar.ActionButton = b;
     }
@@ -1254,7 +1258,7 @@ public sealed partial class MainWindow : Window
         if (res is null) return;
         if (Games.FromFolder(res.Path) is not { } g)
         {
-            await Message(T("No game in this folder"), T("Pick the The Sims 3 folder, or its Game\\Bin folder (the one with TS3W.exe or TS3.exe)."));
+            await Message(T("No game in this folder"), T("Choose The Sims 3 folder, or its Game\\Bin folder (the one with TS3W.exe or TS3.exe)."));
             return;
         }
         var existing = _games.FirstOrDefault(x => x.Game.Bin.Equals(g.Bin, StringComparison.OrdinalIgnoreCase));
@@ -1289,7 +1293,7 @@ public sealed partial class MainWindow : Window
             {
                 IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args),
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
-                Title = x.CanFix ? T("The launcher fixes this") : "",
+                Title = x.CanFix ? T("The launcher can fix this") : "",
             };
             if (x.Link is { } link) bar.ActionButton = new HyperlinkButton { Content = T("Read more"), NavigateUri = new Uri(link) };
             ProblemList.Children.Add(bar);
@@ -1320,7 +1324,7 @@ public sealed partial class MainWindow : Window
             {
                 Engine.CheckWritable();
                 foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanApply && keys.Contains((x.Suggest, string.Join("\n", x.Args))))) x.Fix!();
-            }, T("Applied."), resultBar, label, keepChoices: true, args: args);
+            }, T("Applied"), resultBar, label, keepChoices: true, args: args);
         }
         foreach (var x in sug)
         {
@@ -1472,7 +1476,7 @@ public sealed partial class MainWindow : Window
             : _afmfError is not null ? (T(Engine.FriendlyFrameGenError(_afmfError, true, _afmfErrorOn)), "ApexWarningBrush")
             : blocked is { } b ? (T(b.Key, b.Arg), "ApexMutedBrush")
             : a.On ? (T(_afmfFps && LimitNow60 ? "On in the AMD driver \u00b7 frame limit now 60 fps" : "On in the AMD driver, for every game"), "ApexSuccessBrush")
-            : (T("Off in the AMD driver."), "ApexMutedBrush")));
+            : (T("Off in the AMD driver"), "ApexMutedBrush")));
     }
 
     void OnAfmfToggle(object sender, RoutedEventArgs e)
@@ -1541,7 +1545,7 @@ public sealed partial class MainWindow : Window
         // the frame generation the row stands beside, by name: the one that is on (or turns on), else the row shown
         var active = ActiveFrameGen();
         var fg = active ?? (SmoothCard.Visibility == Visibility.Visible && SmoothToggle.IsEnabled ? "NVIDIA Smooth Motion" : "AMD Fluid Motion Frames");
-        FpsDesc.Text = T("Works best at 60 to 90 fps with {0}.", fg);
+        FpsDesc.Text = T("Works best at 60 to 90 fps with {0}", fg);
         // the doubled figure only while frame generation is on; otherwise the limit as it is
         string Seen(int v) => active is null ? (v > 0 ? T("{0} fps", v) : T("no limit"))
             : v > 0 ? T("{0} fps \u00b7 about {1} on screen", v, v * 2) : T("No limit \u00b7 about double on screen");
@@ -1711,11 +1715,11 @@ public sealed partial class MainWindow : Window
         var nvidia = _vulkan?.Card?.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) == true;
         var (icon, title, kind, lines) = r switch
         {
-            RBridge => ("sparkles", "RTX Remix bridge", T("Recommended"), new List<(bool, string)> { (true, T("About 600 MB more memory")), (true, T("Good for big neighborhoods")) }
+            RBridge => ("sparkles", "RTX Remix bridge", T("Recommended"), new List<(bool, string)> { (true, T("About 600 MB more memory")), (true, T("Good for big worlds")) }
                 .Concat(nvidia ? [(true, T("Unlocks NVIDIA Smooth Motion"))] : new List<(bool, string)>()).ToList()),
             RDxvk => ("boxes", "DXVK", T("Alternative"), new List<(bool, string)> { (true, T("Vulkan, fewer stutters")), (true, T("Use it if the bridge gives you trouble")), (false, T("No extra memory")) }),
             RNative => ("gamepad-2", "Direct3D 9", T("The game's own"), new List<(bool, string)> { (true, T("Changes nothing in the game")), (false, T("Apex runs worse")), (false, T("More crashes from low memory")) }),
-            _ => ("monitor", T("Keep my d3d9.dll"), "", new List<(bool, string)> { (true, T("Your d3d9.dll stays as it is.")) }),
+            _ => ("monitor", T("Keep my d3d9.dll"), "", new List<(bool, string)> { (true, T("Your d3d9.dll stays as it is")) }),
         };
         if (installed) kind = kind.Length > 0 ? kind + " \u00b7 " + T("installed") : T("Installed");
         var top = new Grid { Height = Design.Size.Tile };
@@ -1789,7 +1793,7 @@ public sealed partial class MainWindow : Window
             : _renderer == RDxvk ? StateLine(Components.Dxvk, true, true, false)
             : _renderer == RBridge ? StateLine(Components.Bridge, true, true, false)
             : _renderer == RNative ? (T("Works, but the RTX Remix bridge or DXVK run Apex Radiance better."), "ApexMutedBrush")
-            : (T("Your d3d9.dll stays as it is."), "ApexMutedBrush"));
+            : (T("Your d3d9.dll stays as it is"), "ApexMutedBrush"));
         GpuLine.Text = _vulkan is { Card: { } cardName } ? T("Your graphics card: {0}", $"{cardName} \u00b7 Vulkan {_vulkan?.Version}") : "";
         GpuLine.Visibility = GpuLine.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         BridgeDetail.Text = "";
@@ -1832,8 +1836,8 @@ public sealed partial class MainWindow : Window
         ModToggle.IsEnabled = g.ModernizationSupported || s.Modernization;
         if (!g.ModernizationSupported && !s.Modernization) ModToggle.IsOn = false;
         ModDesc.Text = g.ModernizationSupported
-            ? T("Fixes stutters, Sims getting stuck and crashes.")
-            : T("Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47.");
+            ? T("Fixes stutters, Sims getting stuck and crashes")
+            : T("Not available for this game version. It works with Steam 1.67.2 and EA app 1.69.47.");
         ModChannel.Visibility = ModToggle.IsOn && g.ModernizationSupported ? Visibility.Visible : Visibility.Collapsed;
 
         UpdateFooter();
@@ -1848,7 +1852,7 @@ public sealed partial class MainWindow : Window
         var latest = Latest(c);
         if (!present) return on ? (T("Will be installed"), "ApexAccentBrush") : ("", "ApexMutedBrush");
         if (!on) return (v is { Length: > 0 } ? T("{0} \u00b7 will be removed", v) : T("Will be removed"), "ApexWarningBrush");
-        if (wrong) return (T("Wrong build"), "ApexWarningBrush");
+        if (wrong) return (T("Wrong version for this game"), "ApexWarningBrush");
         if (v is not { Length: > 0 }) return ("", "ApexMutedBrush");
         return Newer(latest, v) || c == Components.Modernization && ModChannelChange() ? (T("{0} \u2192 {1}", v, latest!), "ApexAccentBrush") : (v, "ApexMutedBrush");
     }
@@ -1959,7 +1963,7 @@ public sealed partial class MainWindow : Window
             if (found is null)
             {
                 if (fromPicker || ext != ".asi" && System.IO.Path.GetFileName(path).Contains("Performance", StringComparison.OrdinalIgnoreCase))
-                    await Message(T("Not the Performance Patch"), T("{0} has no Sims3Performance.asi. If the download is a .7z or .rar, extract it and choose Sims3Performance.asi.", System.IO.Path.GetFileName(path)));
+                    await Message(T("This is not the Performance Patch"), T("{0} has no Sims3Performance.asi. If the download is a .7z or .rar, extract it and choose Sims3Performance.asi.", System.IO.Path.GetFileName(path)));
                 return;
             }
             _s3ppWatch?.Dispose();
@@ -2160,7 +2164,7 @@ public sealed partial class MainWindow : Window
             // second choice (Repair or remove sets them right later)
             if (!engineDone && point?.Committed is { } p)
             {
-                var keep = await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + "\n\n" + T("The launcher puts back the files it changed.")),
+                var keep = await ShowDialog(new ContentDialog { Tag = "!circle-alert", Title = title, Content = ErrorContent(text + "\n\n" + T("Undoing puts back every file the launcher changed.")),
                     PrimaryButtonText = T("Undo these changes"), SecondaryButtonText = T("Keep what was installed"),
                     DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Secondary;
                 if (!keep)
@@ -2169,7 +2173,7 @@ public sealed partial class MainWindow : Window
                     // (Restore needs the game, its launcher and the restart host closed: said, not skipped in silence)
                     if (_running || Games.IsRunning())
                     {
-                        await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(T("The launcher couldn't put the files back because The Sims 3, its launcher, the restart host or the RTX Remix bridge is open. Close them, then click Restore on the newest restore point in Repair or remove.")),
+                        await ShowDialog(new ContentDialog { Tag = "!circle-alert", Title = title, Content = ErrorContent(T("The launcher couldn't put the files back because The Sims 3, its launcher, TS3Wrap or the RTX Remix bridge is open. Close them, then click Restore on the newest restore point in Repair or remove.")),
                             CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
                         _busy = false;
                         return;
@@ -2179,11 +2183,11 @@ public sealed partial class MainWindow : Window
                     await RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir);
                     // the driver's frame generation is not in a restore point: the removal turned it off, and it stays off
                     if (smoothOff || afmfOff)
-                        await Message(T("The launcher could not finish"), T("Frame generation was turned off with the removal. To use it again, turn it on in Components."));
+                        await Message(T("Frame generation was turned off"), T("Frame generation was turned off with the removal. To use it again, turn it on in Components."));
                     return;
                 }
             }
-            else await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + (touched ? "\n\n" + T("Open Repair or remove to put the game back as it was.") : "")),
+            else await ShowDialog(new ContentDialog { Tag = "!circle-alert", Title = title, Content = ErrorContent(text + (touched ? "\n\n" + T("Open Repair or remove to put the game back as it was.") : "")),
                 CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
             _busy = false;
             Show(engineDone && !inline ? DoneStep : from);
@@ -2220,20 +2224,18 @@ public sealed partial class MainWindow : Window
             return choice;
         }
         var update = _updatingForPlay;
-        var body = new StackPanel { Spacing = 12, Width = 460 };
-        body.Children.Add(new Border { Width = 64, Height = 64, CornerRadius = new CornerRadius(32), HorizontalAlignment = HorizontalAlignment.Center,
-            Background = Res("ApexWarningSoftBrush"), Child = Lucide.Icon(left is null ? "undo-2" : "triangle-alert", 28, Res("ApexWarningBrush"), 2.2) });
+        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
         var what = left is not null ? T("Some files couldn't be restored: {0}. Use Repair or remove to fix the game.", left)
             : net ? T("The launcher can't reach GitHub. Check your internet connection and try again.")
-            : update ? T("The game is as it was before the update.") : T("Everything it added was removed again.");
-        body.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center });
-        body.Children.Add(new TextBlock { Text = what, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = Res("ApexMutedBrush") });
-        var copy = new HyperlinkButton { Content = T("Copy details"), HorizontalAlignment = HorizontalAlignment.Center };
+            : update ? T("The game is as it was before the update.") : T("Everything added so far was removed again.");
+        body.Children.Add(Design.Dialogs.Words(text));
+        body.Children.Add(Design.Dialogs.Words(what));
+        var copy = new HyperlinkButton { Content = T("Copy details"), Padding = new Thickness(0) };
         copy.Click += (_, _) => { var dp = new Windows.ApplicationModel.DataTransfer.DataPackage(); dp.SetText(text + "\n\n" + App.Details()); Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp); };
         body.Children.Add(copy);
         var r = await ShowDialog(new ContentDialog
         {
-            Title = left is not null ? T("The launcher could not finish") : update ? T("The update wasn't installed") : T("Nothing was changed"),
+            Tag = "!triangle-alert", Title = left is not null ? T("The launcher could not finish") : update ? T("The update wasn't installed") : T("Nothing was changed"),
             Content = body, PrimaryButtonText = T("Try again"), SecondaryButtonText = update ? T("Play anyway") : "", CloseButtonText = update ? T("Cancel") : T("Back"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         });
@@ -2316,7 +2318,7 @@ public sealed partial class MainWindow : Window
             var (card, words) = SplitCard(done: true);
             card.MinHeight = Math.Max(360, Math.Min(Design.Size.InstallHeight, Nav.ActualHeight - 48) - 74); // (down to the footer)
             words.Children.Add(SplitTitle(T("All installed")));
-            words.Children.Add(SplitText(T("Apex Radiance {0} is in your The Sims 3. Your saves and mods weren't touched.", _state?.ApexVersion ?? "")));
+            words.Children.Add(SplitText(T("Apex Radiance {0} is installed in The Sims 3. Your saves and mods were not touched.", _state?.ApexVersion ?? "")));
             var went = new StackPanel { Spacing = Design.Space.X3, Margin = new Thickness(0, 24, 0, 0) };
             foreach (var c in _lastInstall.Where(c => c is not (Components.Loader or Components.Apex)))
             {
@@ -2366,7 +2368,7 @@ public sealed partial class MainWindow : Window
         if (s.S3ss) ManageRow("sliders-horizontal", "Sims3SettingsSetter", "", T("Remove"), () => RemoveAsync(Components.S3ss));
         if (s.RestartHost) ManageRow("rotate-ccw", T("TS3Wrap"), "", T("Remove"), () => RemoveAsync(Components.RestartHost));
         if (s.Modernization) ManageRow("wrench", "Sims 3 Modernization", "", T("Remove"), () => RemoveAsync(Components.Modernization));
-        ManageRow("trash-2", T("Uninstall everything"), T("Puts back every file it replaced."), T("Uninstall"), UninstallAll, danger: true);
+        ManageRow("trash-2", T("Uninstall everything"), T("Removes what the launcher installed and puts back every file it replaced"), T("Uninstall"), UninstallAll, danger: true);
 
         foreach (var p in RestorePoints.List(g.Bin))
         {
@@ -2375,7 +2377,7 @@ public sealed partial class MainWindow : Window
                 T("Restore"), () => RestoreAsync(p), list: RestoreList);
         }
         if (RestoreList.Children.Count == 0)
-            RestoreList.Children.Add(Row("undo-2", T("No restore points yet"), T("The launcher makes one before every change."), null));
+            RestoreList.Children.Add(Row("undo-2", T("No restore points yet"), T("The launcher makes one before every change"), null));
     }
 
     // dates in Setup's language, not the format Windows uses
@@ -2393,7 +2395,7 @@ public sealed partial class MainWindow : Window
         return hour ? day + ", " + t.ToString("t", LangCulture()) : day;
     }
 
-    string GraphicsRemoval(bool backup) => backup ? T("Puts back the graphics files you had before.")
+    string GraphicsRemoval(bool backup) => backup ? T("Puts back the graphics files you had before")
         : T("Goes back to the game's default graphics. Your in-game graphics settings may reset once.");
 
     void ManageRow(string icon, string title, string desc, string action, Func<Task> run, bool danger = false, Panel? list = null)
@@ -2416,20 +2418,20 @@ public sealed partial class MainWindow : Window
     async Task RestoreAsync(RestorePoint p, bool ask = true, InfoBar? bar = null)
     {
         if (_game is not { } g || _busy) return;
-        if (_running) { SetInfo(bar ?? ManageInfo, InfoBarSeverity.Warning, T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."), ""); return; }
+        if (_running) { SetInfo(bar ?? ManageInfo, InfoBarSeverity.Warning, T("Close The Sims 3, its launcher, TS3Wrap (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."), ""); return; }
         if (ask && !await Confirm(T("Restore this point?"), T("The launcher puts back the files as they were before this change, and undoes every change made after it. Close the game first."), T("Restore"))) return;
         await Guarded(() =>
         {
             if (RestorePoints.Restore(g.Bin, p, Scan.DocumentsFor(g)) is { Count: > 0 } failed)
                 throw new IOException(T("The launcher couldn't restore {0}.", string.Join(", ", failed)));
-        }, T("Changes undone."), bar);
+        }, T("Changes undone"), bar);
     }
 
     async Task RemoveAsync(string c)
     {
         if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. The launcher removes the files and puts back the ones it replaced."), T("Remove"), danger: true)) return;
-        await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)), label: "Remove {0}", args: Components.Name(c));
+        await Guarded(() => Engine.Remove(g, c), T("{0} removed", Name(c)), label: "Remove {0}", args: Components.Name(c));
         AfterFrameGenOff();
         RefreshComponents();
     }
@@ -2438,7 +2440,7 @@ public sealed partial class MainWindow : Window
     {
         if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Uninstall everything?"), T("The launcher removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"), danger: true)) return;
-        await Guarded(() => Engine.RemoveAll(g), T("Everything the launcher installed was removed."), label: "Uninstall everything");
+        await Guarded(() => Engine.RemoveAll(g), T("Everything the launcher installed was removed"), label: "Uninstall everything");
         AfterFrameGenOff();
         RefreshComponents();
     }
@@ -2528,8 +2530,7 @@ public sealed partial class MainWindow : Window
     async Task ReadLicence(string name, string text)
     {
         var body = new TextBlock { Text = text.Trim(), FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Foreground = Res("ApexSoftTextBrush") };
-        var d = new ContentDialog { Title = name, Content = new ScrollViewer { Content = body, MaxHeight = 420, Margin = new Thickness(0, 0, -16, 0), Padding = new Thickness(0, 0, 16, 0) }, CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
-        d.Resources["ContentDialogMaxWidth"] = 640.0;
+        var d = new ContentDialog { Tag = "file-code", Title = name, Content = new ScrollViewer { Content = body, Width = Design.Dialogs.Medium, MaxHeight = 420, Margin = new Thickness(0, 0, -16, 0), Padding = new Thickness(0, 0, 16, 0) }, CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
         await ShowDialog(d);
     }
 
@@ -2556,7 +2557,7 @@ public sealed partial class MainWindow : Window
         _showingUnexpected = true;
         DispatcherQueue.TryEnqueue(async () =>
         {
-            try { await ShowDialog(new ContentDialog { Title = T("The launcher could not finish"), Content = ErrorContent(ErrorText(e)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot }); }
+            try { await ShowDialog(new ContentDialog { Tag = "!circle-alert", Title = T("The launcher could not finish"), Content = ErrorContent(ErrorText(e)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot }); }
             catch (Exception x) { App.Log(x); }
             finally { _showingUnexpected = false; }
         });
@@ -2574,7 +2575,7 @@ public sealed partial class MainWindow : Window
         catch (Exception e) { App.Log(e); return true; } // (a check that cannot run is no reason to stop)
         if (found.Count == 0) return true;
         var text = string.Join("\n\n", found.Select(f => "• " + T(f.Key, f.Args)));
-        if (found.Any(f => f.Blocks)) { await Message(T("Before the launcher can continue"), text); return false; }
+        if (found.Any(f => f.Blocks)) { await Message(T("The launcher can't continue yet"), text); return false; }
         return await Confirm(T("Before the launcher continues"), text, T("Continue"));
     }
 
@@ -2590,7 +2591,7 @@ public sealed partial class MainWindow : Window
             IOException => T("A file the launcher needs is in use or can't be saved. Close the game and other programs using it, then try again."),
             // an English text Setup throws and translates (Close The Sims 3 first, the restart host's wait): that text alone
             _ when Has(ex.Message) => T(ex.Message),
-            _ => T("The launcher ran into a problem it did not expect."),
+            _ => T("The launcher ran into an unexpected problem. Try again. If it happens again, send the log when you ask for help."),
         };
         return ex is SetupException || Has(ex.Message) || plain == ex.Message ? plain : plain + "\n\n" + ex.Message;
     }
@@ -2598,8 +2599,10 @@ public sealed partial class MainWindow : Window
     // a dialog's text with "Copy details" (the log's context and last lines, for a report) and "Open log folder"
     StackPanel ErrorContent(string text)
     {
-        var p = new StackPanel { Spacing = 10 };
-        p.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+        var p = new StackPanel { Spacing = 12, Width = Design.Dialogs.Small };
+        var words = Design.Dialogs.Words(text);
+        words.IsTextSelectionEnabled = true;
+        p.Children.Add(words);
         p.Children.Add(ErrorLinks());
         return p;
     }
@@ -2628,16 +2631,16 @@ public sealed partial class MainWindow : Window
 
     // ---------- dialogs and language ----------
 
-    async Task Message(string title, string text) =>
-        await ShowDialog(new ContentDialog { Title = title, Content = text, CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
+    async Task Message(string title, string text, string icon = "!circle-alert") =>
+        await ShowDialog(new ContentDialog { Tag = icon, Title = title, Content = text, CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
 
     // a button whose action removes or deletes: its text in red
     static Style DangerButton => new(typeof(Button)) { BasedOn = (Style)Application.Current.Resources["DefaultButtonStyle"], Setters = { new Setter(Control.ForegroundProperty, Res("ApexErrorBrush")) } };
 
     // the action in the accent colour; one that deletes or removes says so in red and lights neither button (Enter does nothing)
-    async Task<bool> Confirm(string title, string text, string yes, bool danger = false)
+    async Task<bool> Confirm(string title, string text, string yes, bool danger = false, string icon = "info")
     {
-        var d = new ContentDialog { Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot,
+        var d = new ContentDialog { Tag = danger ? null : icon, Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot,
             DefaultButton = danger ? ContentDialogButton.None : ContentDialogButton.Primary };
         if (danger) d.PrimaryButtonStyle = DangerButton;
         return await ShowDialog(d) == ContentDialogResult.Primary;
@@ -2664,6 +2667,7 @@ public sealed partial class MainWindow : Window
         d.Language = Root.Language; // (a dialog is a popup: it does not inherit the window's language)
         DarkDialog(d);
         Design.DesignSystem.Into(d.Resources);
+        Design.Dialogs.Dress(d);
         HandCursor.Watch(d);
         _dialogShown = d.ShowAsync().AsTask();
         try { return await _dialogShown; }

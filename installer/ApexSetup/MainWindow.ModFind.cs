@@ -60,7 +60,8 @@ public sealed partial class MainWindow
     {
         if (_findPage is null) return;
         StopFind();
-        TakeInfo((Panel)ModHuntBar.Parent);
+        TakeInfo((Panel)ModSelectionBar.Parent);
+        PlaceSelectionBar();
         ScreenMods.Children.Remove(_findPage);
         _findPage = null;
         ((FrameworkElement)ModList.Parent).Visibility = Visibility.Visible;
@@ -75,6 +76,7 @@ public sealed partial class MainWindow
     {
         ((Panel)ModsInfo.Parent).Children.Remove(ModsInfo);
         to.Children.Add(ModsInfo);
+        (ModsInfo.Margin, ModsInfo.HorizontalAlignment, ModsInfo.Translation) = (new Thickness(0), HorizontalAlignment.Stretch, new System.Numerics.Vector3(0, 0, 0));
     }
 
     // (a click on the place already chosen raises no selection change: it goes back to the list as well)
@@ -218,9 +220,9 @@ public sealed partial class MainWindow
         {
             var n = r?.Source.Items.Count ?? 0;
             var line = Muted(r is null ? T("A list of custom content, a package, a Sim, a lot or a save. You can also drop it here.")
-                : n == 0 ? T("This file names no custom content. Drop another file here to change it.")
+                : n == 0 ? T("This file lists no custom content. Drop another file here to change it.")
                 : (n == 1 ? T("1 item read. Drop another file here to change it.") : T("{0} items read. Drop another file here to change it.", n))
-                  + (r.Source.Truncated ? " " + T("The file names more than the launcher reads.") : ""));
+                  + (r.Source.Truncated ? " " + T("It has more items than the launcher reads, so some are left out.") : ""));
             // (a screen reader says what was read without moving to it)
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(line, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
             text.Children.Add(line);
@@ -367,7 +369,7 @@ public sealed partial class MainWindow
         if (rows.Count == 0)
             _findRows.Children.Add(FindLine(q.Length > 0 && mine.Count > 0 ? T("Nothing here matches your search.") : _findTab switch
             {
-                "off" => T("Nothing this file uses is turned off."), "missing" => T("Nothing is missing."), _ => T("None of your mods is used by this file."),
+                "off" => T("Nothing this file uses is turned off."), "missing" => T("Nothing is missing."), _ => T("This file uses none of your mods."),
             }));
         if (at >= 0 && _findRows.Children.Count > 0 && _findRows.Children[Math.Min(at, _findRows.Children.Count - 1)] is Grid next)
             next.Children.OfType<Button>().FirstOrDefault()?.Focus(FocusState.Programmatic);
@@ -472,16 +474,16 @@ public sealed partial class MainWindow
 
         var groups = new List<(CacheGroup Group, string Name, string Text, bool On)>
         {
-            (CacheGroup.CreateASim, T("Create a Sim"), T("Hair and clothes that are gone or look wrong"), true),
-            (CacheGroup.Scripts, T("Scripts"), T("After you change script mods"), true),
+            (CacheGroup.CreateASim, T("Create a Sim"), T("When hair or clothes are missing or look wrong"), true),
+            (CacheGroup.Scripts, T("Scripts"), T("When you changed script mods"), true),
             (CacheGroup.Worlds, T("Worlds"), T("When a world takes long to load"), true),
-            (CacheGroup.Thumbnails, T("Thumbnails"), T("Wrong pictures in Buy and Build mode"), false),
-            (CacheGroup.Online, T("Online"), T("Store pictures and online features that don't load"), false),
-            (CacheGroup.ErrorLogs, T("Old error logs"), T("Script errors Health is done with"), true),
+            (CacheGroup.Thumbnails, T("Thumbnails"), T("When Buy or Build mode shows wrong pictures"), false),
+            (CacheGroup.Online, T("Online"), T("When store pictures or online features don't load"), false),
+            (CacheGroup.ErrorLogs, T("Old error logs"), T("Script errors that Health has already read"), true),
         };
-        var body = new StackPanel { Spacing = 8, Width = 480 };
+        var body = new StackPanel { Spacing = 8, Width = Design.Dialogs.Medium };
         body.Children.Add(Muted(T("The game rebuilds its caches the next time it starts.")));
-        var d = new ContentDialog { Title = T("Clear caches"), PrimaryButtonText = T("Clear"), CloseButtonText = T("Cancel"), SecondaryButtonText = kept ? T("Put the caches back") : "", DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "brush", Title = T("Clear caches"), PrimaryButtonText = T("Clear"), CloseButtonText = T("Cancel"), SecondaryButtonText = kept ? T("Put the caches back") : "", DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         var total = new TextBlock { FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 6, 0, 0) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(total, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         var boxes = new List<(CacheGroup Group, CheckBox Box)>();
@@ -526,7 +528,7 @@ public sealed partial class MainWindow
         try
         {
             var bytes = await ModWork(() => GameCaches.Clean(docs, chosen));
-            ModsResult(chosen is [CacheGroup.ErrorLogs] ? T("Old error logs cleared.") : T("Caches cleared. The game rebuilds them when it starts."), () => Safe(PutCachesBackAsync(last: true)), T("{0} freed", ModRow.SizeText(bytes)));
+            ModsResult(chosen is [CacheGroup.ErrorLogs] ? T("Old error logs cleared") : T("Caches cleared. The game rebuilds them when it starts."), () => Safe(PutCachesBackAsync(last: true)), T("{0} freed", ModRow.SizeText(bytes)));
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         RefreshGame();
@@ -538,7 +540,7 @@ public sealed partial class MainWindow
         try
         {
             var back = await ModWork(() => GameCaches.Restore(last));
-            ModsResult(back ? T("Caches put back.") : T("There is no copy to put back."), null, "", back ? InfoBarSeverity.Success : InfoBarSeverity.Informational);
+            ModsResult(back ? T("Caches put back") : T("There is no copy to put back"), null, "", back ? InfoBarSeverity.Success : InfoBarSeverity.Informational);
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some caches were not put back"), ErrorText(e)); }
         RefreshGame();

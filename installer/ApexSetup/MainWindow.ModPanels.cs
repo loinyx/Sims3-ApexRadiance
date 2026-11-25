@@ -14,23 +14,18 @@ public sealed partial class MainWindow
     {
         var mine = picked.Where(Mine).ToList();
         var list = _modsGrid ? (ListViewBase)ModGrid : ModList;
-        // (their pictures, one behind the other, in the place of the one mod's)
-        var stack = new Grid { Width = 92, Height = 92, VerticalAlignment = VerticalAlignment.Top };
-        var shown = picked.Take(3).ToList();
-        for (var i = shown.Count - 1; i >= 0; i--)
+        // (their pictures side by side in the place of the one mod's, and how many more there are)
+        var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X2 };
+        var shown = picked.Take(picked.Count > 4 ? 3 : 4).ToList();
+        foreach (var one in shown)
         {
-            FrameworkElement glyph = shown[i].Image is { } own ? new Image { Source = own, Stretch = Stretch.Uniform, Margin = new Thickness(3) } : Lucide.Icon(shown[i].KindIcon, 26, shown[i].GlyphBrush, 1.6);
-            glyph.HorizontalAlignment = HorizontalAlignment.Center;
-            glyph.VerticalAlignment = VerticalAlignment.Center;
-            var step = 28 / Math.Max(1, shown.Count - 1);
-            // (the tile's own wash on an opaque base, so the tiles behind don't show through)
-            stack.Children.Add(new Border
-            {
-                Width = 64, Height = 64, CornerRadius = new CornerRadius(12), Background = Res("ApexRaisedBrush"), BorderBrush = Res("ApexPaneBrush"), BorderThickness = new Thickness(2),
-                HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(i * step, 28 - i * step, 0, 0),
-                Child = new Border { Background = shown[i].TileBrush, CornerRadius = new CornerRadius(10), Child = glyph },
-            });
+            FrameworkElement glyph = one.Image is { } own ? new Image { Source = own, Stretch = Stretch.Uniform, Margin = new Thickness(6) } : Lucide.Icon(one.KindIcon, 24, Res("ApexMutedBrush"));
+            (glyph.HorizontalAlignment, glyph.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center);
+            stack.Children.Add(new Border { Width = 60, Height = 60, CornerRadius = new CornerRadius(Design.Radius.Card), Background = Res("ApexTileBrush"), Child = glyph });
         }
+        if (picked.Count > shown.Count)
+            stack.Children.Add(new Border { Width = 60, Height = 60, CornerRadius = new CornerRadius(Design.Radius.Card), Background = Res("ApexTileBrush"),
+                Child = new TextBlock { Text = "+" + (picked.Count - shown.Count), FontSize = 16, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexSoftTextBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } });
         var kinds = picked.Select(r => r.Kind).Distinct().ToList();
         var on = mine.Count(r => r.File.Enabled);
         var sub = string.Join(" · ", new[]

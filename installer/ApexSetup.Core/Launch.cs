@@ -25,11 +25,11 @@ public static class Launch
         var psi = new ProcessStartInfo(g.ExePath, Args(save)) { WorkingDirectory = g.Bin, UseShellExecute = false };
         // (a Steam copy started by its exe asks Steam to start it otherwise; the app id lets it run in place)
         if (g.Edition == Edition.Steam) psi.Environment["SteamAppId"] = SteamAppId.ToString();
-        try { return Process.Start(psi) ?? throw new SetupException("Windows did not start the game."); }
+        try { return Process.Start(psi) ?? throw new SetupException("Windows did not start the game. Press Play to try again."); }
         catch (Win32Exception e) when (e.NativeErrorCode == 740) // (the exe asks for administrator: started through the shell)
         {
             return Process.Start(new ProcessStartInfo(g.ExePath, Args(save)) { WorkingDirectory = g.Bin, UseShellExecute = true })
-                   ?? throw new SetupException("Windows did not start the game.");
+                   ?? throw new SetupException("Windows did not start the game. Press Play to try again.");
         }
     }
 }

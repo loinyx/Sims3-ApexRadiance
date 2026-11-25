@@ -19,8 +19,8 @@ public sealed partial class MainWindow
             rows.Children.Add(FlyoutRow(Lucide.Icon(icon, 18), title, help, () => { flyout.Hide(); run(); }, enabled));
         var chosen = Picked().Where(Mine).ToList();
         Tool("merge", T("Merge mods"), chosen.Count > 1 ? T("The {0} selected, into one package", chosen.Count) : T("Select two or more mods first"), () => Safe(MergeAsync(chosen, null, null)), chosen.Count > 1 && !_busy);
-        Tool("scan-search", T("Find custom content"), T("See what a file needs to work"), () => Safe(FindContentAsync()));
-        Tool("bug", T("Find a problem mod"), T("Tests your mods in halves"), () => OnModsHunt(sender, e), _modsLoaded && !_busy && ModHunt.Current() is null);
+        Tool("scan-search", T("Find custom content"), T("See which mods a file uses and what is missing"), () => Safe(FindContentAsync()));
+        Tool("bug", T("Find a problem mod"), T("Tests half of your mods at a time"), () => OnModsHunt(sender, e), _modsLoaded && !_busy && ModHunt.Current() is null);
         Tool("brush", T("Clear game caches"), T("For items that are missing or look wrong"), () => Safe(ChooseCachesAsync()));
         if (Picked() is [var one] && CanOpenInS3pe(one)) Tool("package", T("Open in s3pe"), one.Name, () => Safe(OpenInS3peAsync(one)));
 
@@ -46,12 +46,12 @@ public sealed partial class MainWindow
         var docs = Docs;
         var worlds = Path.Combine(g.Root, "GameData", "Shared", "NonPackaged", "Worlds");
         // (the game makes Saved Sims and Library itself in its Documents folder; Mods is the player's, Worlds the game's own)
-        string? Own(string name) => Directory.Exists(docs) || Directory.Exists(Path.Combine(docs, name)) ? null : T("Start the game once. It makes these folders.");
+        string? Own(string name) => Directory.Exists(docs) || Directory.Exists(Path.Combine(docs, name)) ? null : T("The game makes these folders the first time it starts");
         var mods = Path.Combine(docs, "Mods");
-        Folder(0, "Mods", mods, Directory.Exists(mods) ? null : T("The Mods folder is made when you add a mod."));
+        Folder(0, "Mods", mods, Directory.Exists(mods) ? null : T("The Mods folder is made when you add a mod"));
         Folder(1, T("Saved Sims"), Path.Combine(docs, "SavedSims"), Own("SavedSims"));
         Folder(2, T("Library"), Path.Combine(docs, "Library"), Own("Library"));
-        Folder(3, T("Worlds"), worlds, Directory.Exists(worlds) ? null : T("The game's Worlds folder was not found."));
+        Folder(3, T("Worlds"), worlds, Directory.Exists(worlds) ? null : T("The game's Worlds folder was not found"));
         // the place on screen, when it is a folder of its own
         if (_modPlace is AsiMods or OffMods || IsFolder(_modPlace) && _modPlace.Length > 0)
         {
@@ -138,14 +138,14 @@ public sealed partial class MainWindow
     async Task EditLinkAsync(ModRow r)
     {
         var was = ModNotes.LinkOf(r.File.Rel);
-        var body = new StackPanel { Spacing = 8, MinWidth = 360, MaxWidth = 460 };
+        var body = new StackPanel { Spacing = 8, Width = Design.Dialogs.Small };
         var box = new TextBox { Header = T("Address"), Text = was ?? "", PlaceholderText = "https://", MaxLength = 2000 };
         box.Loaded += (_, _) => { box.Focus(FocusState.Programmatic); box.SelectAll(); };
         body.Children.Add(box);
-        var wrong = Muted(T("Use a web address, such as https://example.com."));
+        var wrong = Design.Parts.FieldError(T("Use a web address, such as https://example.com."));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(wrong, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         body.Children.Add(wrong);
-        var d = new ContentDialog { Title = was is null ? T("Add the mod's page") : T("Edit link"), Content = body, PrimaryButtonText = T("Save"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "link", Title = was is null ? T("Add the mod's page") : T("Edit link"), Content = body, PrimaryButtonText = T("Save"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         void Check()
         {
             var ok = ModNotes.WebLink(box.Text) is not null;

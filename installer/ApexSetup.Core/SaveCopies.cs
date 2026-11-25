@@ -199,7 +199,7 @@ public static class SaveCopies
     // only: the folder of the zip to take (the rest of it is left)
     internal static void Unzip(string zip, string to, CancellationToken ct, string? only = null)
     {
-        static SetupException Bad(string why) => new("This copy can't be used: {0}", why);
+        static SetupException Bad(string why) => new("This save can't be used: {0}", why);
         try
         {
             using var z = ZipFile.OpenRead(zip);
@@ -272,7 +272,7 @@ public static class SaveCopies
             try
             {
                 if (from.Kind == CopyKind.Launcher) Unzip(from.Path, tmp, ct); else CopyDir(from.Path, tmp, ct);
-                if (!Directory.EnumerateFiles(tmp, "*.nhd").Any()) throw new SetupException("This copy can't be used: {0}", "no world file in it");
+                if (!Directory.EnumerateFiles(tmp, "*.nhd").Any()) throw new SetupException("This save can't be used: {0}", "no world file in it");
                 FailPoint("extract");
                 var here = Directory.Exists(s.Dir);
                 if (here) kept = Saves.Backup(s, docs, BeforeRestore);
@@ -329,7 +329,7 @@ public static class SaveCopies
             try
             {
                 fill(tmp);
-                if (!Directory.Exists(tmp) || !Directory.EnumerateFiles(tmp, "*.nhd").Any()) throw new SetupException("This copy can't be used: {0}", "no world file in it");
+                if (!Directory.Exists(tmp) || !Directory.EnumerateFiles(tmp, "*.nhd").Any()) throw new SetupException("This save can't be used: {0}", "no world file in it");
                 FailPoint("copy");
                 Engine.CheckWritable();
                 Fs.Retry(() => Directory.Move(tmp, to));
@@ -445,7 +445,7 @@ public static class SaveCopies
     static string NewName(string docs, string root, string name)
     {
         name = CleanIn(root, name);
-        return Kept(docs, root).Contains(name) ? throw new SetupException("Backups of a save named {0} are kept. Choose another name.", name) : name;
+        return Kept(docs, root).Contains(name) ? throw new SetupException("There are backups of a save named {0}. Choose another name.", name) : name;
     }
     static string CleanIn(string root, string name)
     {
