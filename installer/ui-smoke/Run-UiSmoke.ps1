@@ -76,7 +76,7 @@ function Step([string]$what, [scriptblock]$do) {
         try { $fs.Position = $before; $new = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
         $entries = $new -split "(?m)^(?=\d{4}-\d\d-\d\dT)" | Where-Object { $_.Trim() }
         foreach ($e in $entries) {
-            if ($e -match 'Dry run: (Setup changes nothing|the game is not started)') { continue }
+            if ($e -match 'Dry run: (Setup changes nothing|the game is not started)|Test run: the launcher changes nothing') { continue }
             $script:failures.Add("${what}: LOG $($e.Trim() -replace '\s+', ' ' | ForEach-Object { $_.Substring(0, [Math]::Min(600, $_.Length)) })")
         }
     }
