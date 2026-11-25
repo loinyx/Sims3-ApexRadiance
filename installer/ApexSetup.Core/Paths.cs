@@ -12,7 +12,24 @@ public static class Paths
     public static string Data => Path.Combine(LocalAppData, "Apex Launcher");
     public static string Ops => Path.Combine(Data, "ops");
     // the copy the Start menu and desktop shortcuts open, replaced in place by self-update without admin
-    public static string InstallDir => Path.Combine(LocalAppData, "Programs", "Apex Launcher");
+    public static string DefaultInstallDir => Path.Combine(LocalAppData, "Programs", "Apex Launcher");
+    // (the folder the player chose instead, kept with the launcher's data)
+    static string InstallDirFile => Path.Combine(Data, "install-folder.txt");
+    public static string InstallDir
+    {
+        get
+        {
+            try { if (File.Exists(InstallDirFile) && File.ReadAllText(InstallDirFile).Trim() is { Length: > 0 } d && Path.IsPathFullyQualified(d)) return d; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            return DefaultInstallDir;
+        }
+    }
+    public static void SetInstallDir(string? dir)
+    {
+        if (dir is null || string.Equals(dir, DefaultInstallDir, StringComparison.OrdinalIgnoreCase)) { if (File.Exists(InstallDirFile)) File.Delete(InstallDirFile); return; }
+        Directory.CreateDirectory(Data);
+        File.WriteAllText(InstallDirFile, dir);
+    }
     public static string InstalledExe => Path.Combine(InstallDir, "ApexLauncher.exe");
 
     // Apex Radiance Setup kept the same files in "Apex Radiance Setup": moved once, so the remembered games and the

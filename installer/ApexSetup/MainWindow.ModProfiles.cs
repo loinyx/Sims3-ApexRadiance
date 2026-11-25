@@ -77,7 +77,7 @@ public sealed partial class MainWindow
         {
             Content = g, MinHeight = help is null ? 44 : 52, Padding = new Thickness(10, 6, 10, 6), CornerRadius = new CornerRadius(6), IsEnabled = enabled,
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0),
+            Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0),
         });
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title);
         if (help is not null) Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(b, help);

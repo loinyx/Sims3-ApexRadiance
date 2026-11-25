@@ -341,7 +341,6 @@ public static partial class Strings
         ["Apex Launcher could not install itself"] = "Το Apex Launcher δεν μπόρεσε να εγκατασταθεί",
         ["Apex Launcher could not switch to portable"] = "Το Apex Launcher δεν μπόρεσε να γίνει φορητό",
         ["It keeps running from here."] = "Συνεχίζει να τρέχει από εδώ.",
-        ["Installed for this Windows account."] = "Εγκαταστάθηκε για αυτόν τον λογαριασμό Windows.",
         ["Use without installing?"] = "Χρήση χωρίς εγκατάσταση;",
         ["Apex Launcher moves to {0} and leaves the Start menu, the desktop and Installed apps. Your settings stay."] = "Το Apex Launcher μετακινείται στο {0} και φεύγει από το μενού Έναρξη, την επιφάνεια εργασίας και τις Εγκατεστημένες εφαρμογές. Οι ρυθμίσεις σου μένουν.",
         ["Move it"] = "Μετακίνηση",

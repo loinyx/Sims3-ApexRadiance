@@ -166,23 +166,7 @@ public sealed partial class MainWindow
     }
 
     // two choices side by side, one on
-    static Border ContentSwitch((string Text, bool On) a, (string Text, bool On) b, Action<int> pick)
-    {
-        var g = new Grid { ColumnSpacing = 4 };
-        foreach (var ((text, on), i) in new[] { (a, 0), (b, 1) })
-        {
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            var x = new Button { Content = new TextBlock { Text = text, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = Res(on ? "TextFillColorPrimaryBrush" : "ApexMutedBrush") },
-                Height = 30, Padding = new Thickness(8, 0, 8, 0), CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = new SolidColorBrush(on ? Pick(0x1FFFFFFF, 0x14000000) : Microsoft.UI.Colors.Transparent) };
-            AutomationProperties.SetName(x, text);
-            AutomationProperties.SetItemStatus(x, on ? T("Selected") : "");
-            if (!on) x.Click += (_, _) => pick(i);
-            Grid.SetColumn(x, i);
-            g.Children.Add(x);
-        }
-        return new Border { Child = g, Padding = new Thickness(2), CornerRadius = new CornerRadius(6), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
-    }
+    static Design.Segmented ContentSwitch((string Text, bool On) a, (string Text, bool On) b, Action<int> pick) => new Design.Segmented([(null, a.Text), (null, b.Text)], a.On ? 0 : 1, pick, fill: true);
 
     static StackPanel WaitLine(string text)
     {

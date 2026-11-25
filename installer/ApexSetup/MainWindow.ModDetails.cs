@@ -184,8 +184,8 @@ public sealed partial class MainWindow
         banner.Children.Add(tile);
         var close = IconButton("x", closeTip ?? T("Close"));
         close.Click += (_, _) => CloseModDetails();
-        Corner(close, VerticalAlignment.Top);
-        if (change is not null) Corner(change, VerticalAlignment.Bottom);
+        banner.Children.Add(Design.Parts.OverPicture(close, VerticalAlignment.Top));
+        if (change is not null) banner.Children.Add(Design.Parts.OverPicture(change, VerticalAlignment.Bottom));
         panel.Children.Add(banner);
         var names = new StackPanel { Spacing = Design.Space.TitleToSub };
         names.Children.Add(name);
@@ -198,24 +198,9 @@ public sealed partial class MainWindow
             panel.Children.Add(wrap);
         }
         return panel;
-
-        // (as far from the top, or the bottom, as from the side)
-        void Corner(Button b, VerticalAlignment at)
-        {
-            (b.Width, b.Height, b.CornerRadius, b.Background, b.HorizontalAlignment, b.VerticalAlignment, b.Margin) = (32, 32, new CornerRadius(16), Res("ApexVeilBrush"), HorizontalAlignment.Right, at, new Thickness(8));
-            banner.Children.Add(b);
-        }
     }
 
-    static Border StripBadge(string text, string icon, string color)
-    {
-        // (the colour only where something has to be seen)
-        var warn = color == "#E0A84F";
-        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        s.Children.Add(Lucide.Icon(icon, 14, Res(warn ? "ApexWarningBrush" : "ApexMutedBrush"), 1.75));
-        s.Children.Add(new TextBlock { Text = text, FontSize = 13, Foreground = Res(warn ? "ApexWarningTextBrush" : "ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center });
-        return new Border { Child = s, Height = 32, Padding = new Thickness(12, 0, 12, 0), CornerRadius = new CornerRadius(8), Background = Res(warn ? "ApexWarningSoftBrush" : "ApexTileBrush") };
-    }
+    static Border StripBadge(string text, string icon, string color) => Design.Parts.Chip(icon, text, warn: color == "#E0A84F");
 
     // ---------- Overview ----------
 
@@ -273,7 +258,7 @@ public sealed partial class MainWindow
     }
 
     // what the pane's cards are made of: one surface, one corner
-    static Border PaneCard(UIElement child, Thickness padding = default) => new() { Child = child, Padding = padding, CornerRadius = new CornerRadius(12), Background = Res("ApexRaisedBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
+    static Border PaneCard(UIElement child, Thickness padding = default) => Design.Parts.Card(child, padding);
 
     // facts, one to a row: what it is on the left, the value on the right edge
     static Border Facts(params (string Label, FrameworkElement Value)[] facts)
@@ -297,15 +282,8 @@ public sealed partial class MainWindow
 
     TextBox CreatorBox(string? who, bool guessed, bool mine, Action<string> save)
     {
-        var none = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 13, TextAlignment = TextAlignment.Right, MinWidth = 0, MinHeight = 0, Height = 32, Padding = new Thickness(7, 6, 7, 6),
-            Margin = new Thickness(0, 0, -8, 0), BorderThickness = new Thickness(1), BorderBrush = none, Background = none, IsReadOnly = !mine }; // (its text stands on the other values' edge)
-        // (a value until the pointer or the keyboard is on it, then a field like any other)
-        foreach (var k in new[] { "TextControlBackgroundPointerOver", "TextControlBackgroundFocused" }) creator.Resources[k] = mine ? Res("ApexTileBrush") : none;
-        creator.Resources["TextControlBorderBrushPointerOver"] = none;
-        creator.Resources["TextControlBorderBrushFocused"] = mine ? Res("ApexAccentBrush") : none;
-        creator.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(1);
-        creator.Resources["TextControlPlaceholderForeground"] = creator.Resources["TextControlPlaceholderForegroundPointerOver"] = creator.Resources["TextControlPlaceholderForegroundFocused"] = Res("ApexMutedBrush");
+        var creator = Design.Parts.QuietField(new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), TextAlignment = TextAlignment.Right,
+            Margin = new Thickness(0, 0, -8, 0) }, mine); // (its text stands on the other values' edge)
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(creator, T("Creator"));
         ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name. Type the maker's name to change it.") : T("The maker's name."));
         creator.LostFocus += (_, _) =>
@@ -321,10 +299,7 @@ public sealed partial class MainWindow
         var kinds = new WrapPanel { Spacing = 8 };
         foreach (var k in r.Kinds.Take(8))
         {
-            var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            chip.Children.Add(Lucide.Icon(KindIcon(k), 14, Res("ApexMutedBrush"), 1.75));
-            chip.Children.Add(new TextBlock { Text = KindLabel(k), FontSize = 13, Foreground = Res("ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center });
-            kinds.Children.Add(new Border { Child = chip, Height = 32, Padding = new Thickness(12, 0, 12, 0), CornerRadius = new CornerRadius(8), Background = Res("ApexTileBrush") });
+            kinds.Children.Add(Design.Parts.Chip(KindIcon(k), KindLabel(k)));
         }
         if (chosen) kinds.Children.Add(new TextBlock { Text = T("Chosen by you"), FontSize = 11, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
         return kinds;
@@ -335,7 +310,7 @@ public sealed partial class MainWindow
     {
         var s = new StackPanel { Spacing = 12 };
         var head = new Grid();
-        head.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        head.Children.Add(Design.Parts.Heading(title));
         linkButton = null;
         if (link is not null)
         {

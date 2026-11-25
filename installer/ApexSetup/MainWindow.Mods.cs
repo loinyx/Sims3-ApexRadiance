@@ -419,7 +419,7 @@ public sealed partial class MainWindow
     FrameworkElement PlaceItem(Place p)
     {
         // (as tall as the row, a little wider than its text: a held mod sees a full row light up, not a thin line)
-        var g = new Grid { ColumnSpacing = 12, Tag = p.Key, Padding = new Thickness(16 * p.Depth + 6, 0, 6, 0), Margin = new Thickness(-6, 2, -6, 2), MinHeight = 28, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var g = new Grid { ColumnSpacing = 12, Tag = p.Key, Padding = new Thickness(16 * p.Depth + 6, 0, 6, 0), Margin = new Thickness(-6, 2, -6, 2), MinHeight = 28, Background = Res("ApexClearBrush") };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -502,7 +502,7 @@ public sealed partial class MainWindow
         g.CornerRadius = new CornerRadius(4);
         g.BorderThickness = new Thickness(1);
         g.Padding = new Thickness(Math.Max(0, g.Padding.Left - 1), 0, Math.Max(0, g.Padding.Right - 1), 0); // (the edge it lights up takes no room)
-        g.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        g.BorderBrush = Res("ApexClearBrush");
         // (the tint fades in and out; no scaling, which blurred the text and shifted the row under the pointer)
         if (AnimationsOn) g.BackgroundTransition = new BrushTransition { Duration = TimeSpan.FromMilliseconds(100) };
         var lit = false;
@@ -511,7 +511,7 @@ public sealed partial class MainWindow
             if (on == lit) return;
             lit = on;
             g.Background = on ? new SolidColorBrush(((SolidColorBrush)Res("ApexAccentBrush")).Color) { Opacity = 0.28 } : normal;
-            g.BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            g.BorderBrush = on ? Res("ApexAccentBrush") : Res("ApexClearBrush");
         }
         g.DragEnter += (_, _) => { if (can()) Light(true); };
         void Out() => Light(false);
@@ -1078,7 +1078,7 @@ public sealed partial class MainWindow
                 g.Children.Add(badge);
             }
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 34, Padding = new Thickness(10, 0, 10, 0),
-                BorderThickness = new Thickness(0), Background = i == _filterGroup ? new SolidColorBrush(Pick(0x14FFFFFF, 0x0F000000)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+                BorderThickness = new Thickness(0), Background = i == _filterGroup ? new SolidColorBrush(Pick(0x14FFFFFF, 0x0F000000)) : Res("ApexClearBrush") };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, label);
             b.Click += (_, _) => { _filterGroup = at; FillFilterPanel(); };
             nav.Children.Add(b);
@@ -1303,7 +1303,7 @@ public sealed partial class MainWindow
         {
             var mark = Lucide.Icon(icon, 16, brush is null ? null : Res(brush));
             mark.VerticalAlignment = VerticalAlignment.Center;
-            var b = Dims(new Button { Content = mark, MinWidth = 36, Height = 36, Padding = new Thickness(0), IsEnabled = enabled, BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) });
+            var b = Dims(new Button { Content = mark, MinWidth = 36, Height = 36, Padding = new Thickness(0), IsEnabled = enabled, BorderThickness = new Thickness(0), Background = Res("ApexClearBrush") });
             if (label is not null && words)
             {
                 var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -1584,14 +1584,7 @@ public sealed partial class MainWindow
         return b;
     }
 
-    static Button IconButton(string icon, string tip, string? brush = null)
-    {
-        var b = new Button { Content = Lucide.Icon(icon, 15, brush is null ? null : Res(brush)), Width = 32, Height = 32, Padding = new Thickness(0),
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
-        ToolTipService.SetToolTip(b, tip);
-        return Dims(b);
-    }
+    static Button IconButton(string icon, string tip, string? brush = null) => Dims(Design.Parts.Icon(icon, tip, ink: brush is null ? null : Res(brush)));
 
     // (brush: the icon and the text in that colour, as the red of Remove)
     static Button WideButton(string icon, string text, Action click, string? brush = null)
@@ -1601,7 +1594,7 @@ public sealed partial class MainWindow
         var label = new TextBlock { Text = text, TextTrimming = TextTrimming.CharacterEllipsis };
         if (brush is not null) label.Foreground = Res(brush);
         s.Children.Add(label);
-        var b = new Button { Content = s, HorizontalAlignment = HorizontalAlignment.Stretch, Height = 34 };
+        var b = new Button { Content = s, HorizontalAlignment = HorizontalAlignment.Stretch, Height = Design.Size.Control };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
         b.Click += (_, _) => click();
         return Dims(b);
@@ -1883,7 +1876,7 @@ public sealed partial class MainWindow
             var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             chip.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 7, Height = 7, Fill = TagDot.BrushOf(t.Color), VerticalAlignment = VerticalAlignment.Center });
             chip.Children.Add(new TextBlock { Text = t.Name, FontSize = 12, Foreground = TagDot.BrushOf(t.Color), VerticalAlignment = VerticalAlignment.Center });
-            var x = new Button { Content = Lucide.Icon("x", 10, TagDot.BrushOf(t.Color)), Padding = new Thickness(3), MinWidth = 0, MinHeight = 0, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
+            var x = new Button { Content = Lucide.Icon("x", 10, TagDot.BrushOf(t.Color)), Padding = new Thickness(3), MinWidth = 0, MinHeight = 0, Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(x, T("Remove tag {0}", t.Name));
             var name = t.Name;
             x.Click += (_, _) => TagMods(rows, name, false);

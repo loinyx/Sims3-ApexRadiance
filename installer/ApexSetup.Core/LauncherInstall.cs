@@ -57,13 +57,66 @@ public static partial class LauncherInstall
 
     // Copied into the install folder, registered, and that copy started: the caller exits right after. Also the switch from
     // portable: the marker goes, the portable exe stays where it is (started again, it hands over to the installed copy).
-    public static void Install(string exe, IEnumerable<string>? args = null, Action<string, IEnumerable<string>>? start = null)
+    // folder: the install folder the player chose (null: the one it has, or the default). A copy installed elsewhere moves
+    // there: the old one goes once the new one is in place.
+    public static void Install(string exe, IEnumerable<string>? args = null, Action<string, IEnumerable<string>>? start = null, string? folder = null)
     {
-        CopyIn(exe);
+        var (dir, before) = (Paths.InstallDir, Paths.InstalledExe);
+        if (folder is not null) Paths.SetInstallDir(folder);
+        try { CopyIn(exe); }
+        catch { Paths.SetInstallDir(dir); throw; }
         Register(Paths.InstalledExe, VersionOf(Paths.InstalledExe), LauncherSettings.Load().DesktopShortcut);
-        if (!IsInstalledCopy(exe)) TryDelete(MarkerOf(exe));
+        if (RunsAtStartup()) SetRunAtStartup(Paths.InstalledExe, true); // (the folder it starts from)
+        TryDelete(MarkerOf(exe));
+        TryDelete(MarkerOf(Paths.InstalledExe));
         Handover(Paths.InstalledExe, args, start);
+        if (!string.Equals(before, Paths.InstalledExe, StringComparison.OrdinalIgnoreCase) && File.Exists(before)) RemoveInstall(dir);
     }
+
+    // ---------- the install folder ----------
+
+    // always a folder of the launcher's own, inside the one picked
+    public static string FolderFor(string picked) =>
+        string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(picked)), Name, StringComparison.OrdinalIgnoreCase) ? Path.TrimEndingDirectorySeparator(picked) : Path.Combine(picked, Name);
+
+    // a folder the launcher can live in and update itself in, with no administrator. Not among its data, nor inside the
+    // default install folder: both are removed whole.
+    public static bool CanInstallTo(string dir)
+    {
+        if (!Path.IsPathFullyQualified(dir) || dir.Contains('%') || string.Equals(dir, Paths.Data, StringComparison.OrdinalIgnoreCase) || Engine.Within(dir, Paths.Data, Paths.DefaultInstallDir)) return false;
+        var made = !Directory.Exists(dir);
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var probe = Path.Combine(dir, Path.GetRandomFileName());
+            File.WriteAllText(probe, "");
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException) { return false; }
+        finally { if (made) try { if (Directory.Exists(dir)) Directory.Delete(dir); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
+    }
+
+    // The default folder is the launcher's and goes whole. In a chosen one only its own files go, and the folder if that
+    // leaves it empty.
+    static bool OwnsFolder(string dir) => string.Equals(dir, Paths.DefaultInstallDir, StringComparison.OrdinalIgnoreCase);
+    static string[] OwnFiles(string dir) => [Path.Combine(dir, "ApexLauncher.exe"), Path.Combine(dir, "ApexLauncher.exe.old"), Path.Combine(dir, PortableMarker)];
+    static IEnumerable<string> RemoveInstallCommands(string dir) =>
+        OwnsFolder(dir) ? RemoveCommands([dir]) : Directory.Exists(dir) ? [.. RemoveCommands(OwnFiles(dir)), $"rd {SelfUpdate.Quote(dir)}"] : [];
+
+    static void RemoveInstall(string dir)
+    {
+        if (OwnsFolder(dir)) { RemoveNowOrAfterExit(dir); return; }
+        try
+        {
+            foreach (var f in OwnFiles(dir)) File.Delete(f);
+            if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { AfterExit(RemoveInstallCommands(dir)); }
+    }
+
+    // the install folder and what else goes with it, once this process has closed
+    public static void DeleteInstallAfterExit(string install, params string[] more) => AfterExit([.. RemoveInstallCommands(install), .. RemoveCommands(more)]);
 
     // Runs portable from folder (null: where it is; the installed copy needs a folder). Shortcuts, Run and the Installed apps
     // entry go, the launcher's data stays. Moved: the new copy is started, the caller exits, and the old exe (or the install
@@ -72,6 +125,7 @@ public static partial class LauncherInstall
     {
         var target = folder is null ? Path.GetFullPath(exe) : Path.Combine(Path.GetFullPath(folder), Path.GetFileName(exe));
         var installed = IsInstalledCopy(exe);
+        var dir = Paths.InstallDir;
         // (anywhere under the install folder, which goes once the copy is made, would take the copy with it)
         if (installed && (IsInstalledCopy(target) || Engine.Within(target, Paths.InstallDir))) throw new ArgumentException("A portable launcher needs a folder outside the install folder.", nameof(folder));
         var moved = !string.Equals(target, Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase);
@@ -85,7 +139,7 @@ public static partial class LauncherInstall
         if (installed || !File.Exists(Paths.InstalledExe)) RemoveTraces();
         if (!moved) return target;
         Handover(target, args, start);
-        if (installed) RemoveNowOrAfterExit(Paths.InstallDir);
+        if (installed) { Paths.SetInstallDir(null); RemoveInstall(dir); }
         else { TryDelete(MarkerOf(exe)); RemoveNowOrAfterExit(exe); }
         return target;
     }
@@ -223,9 +277,14 @@ public static partial class LauncherInstall
 
     // Folders (the install folder, the launcher's data) and files (a portable exe) removed once this process has closed: a
     // running exe cannot delete itself. The log being written goes with them.
-    public static void DeleteAfterExit(params string[] paths)
+    public static void DeleteAfterExit(params string[] paths) => AfterExit(RemoveCommands(paths));
+
+    static IEnumerable<string> RemoveCommands(IEnumerable<string> paths) =>
+        paths.Select(p => Directory.Exists(p) ? $"rd /s /q {SelfUpdate.Quote(p)}" : File.Exists(p) ? $"del /f /q {SelfUpdate.Quote(p)}" : null).OfType<string>();
+
+    static void AfterExit(IEnumerable<string> commands)
     {
-        var rd = string.Join(" & ", paths.Select(p => Directory.Exists(p) ? $"rd /s /q {SelfUpdate.Quote(p)}" : File.Exists(p) ? $"del /f /q {SelfUpdate.Quote(p)}" : null).OfType<string>());
+        var rd = string.Join(" & ", commands);
         if (rd.Length == 0) return;
         // (ping waits without a console; timeout refuses to run without one, and another timeout.exe can come first on the
         // PATH, so the delete ran at once while the exe was still open)

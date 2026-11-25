@@ -249,7 +249,7 @@ public sealed partial class MainWindow
     FrameworkElement? ResetOf(string id, string title)
     {
         if (!Available(id)) return null;
-        var reset = new Button { Content = Lucide.Icon("undo-2", 15, Res("ApexMutedBrush")), Width = 36, Height = 36, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var reset = new Button { Content = Lucide.Icon("undo-2", 15, Res("ApexMutedBrush")), Width = 36, Height = 36, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush") };
         reset.Click += (_, _) => Want(id, DefaultOf(id));
         ToolTipService.SetToolTip(reset, T("Reset"));
         _gsSync.Add(() => reset.Visibility = GameSettings.Same(Wanted(id), DefaultOf(id)) ? Visibility.Collapsed : Visibility.Visible);

@@ -219,7 +219,7 @@ public static class Lucide
         (Geometry)XamlBindingHelper.ConvertValue(typeof(Geometry), Paths.TryGetValue(name, out var d) ? d : Paths["puzzle"]);
 
     // the icon as an element: size in pixels; no brush takes the soft text colour
-    public static FrameworkElement Icon(string name, double size = 16, Brush? brush = null, double stroke = 2) =>
+    public static FrameworkElement Icon(string name, double size = 16, Brush? brush = null, double stroke = 1.75) =>
         new LucideIcon { Kind = name, Size = size, Stroke = brush ?? App.Brush("ApexSoftTextBrush"), StrokeWidth = stroke };
 }
 

@@ -367,7 +367,7 @@ public sealed partial class MainWindow
         if (mine)
         {
             var add = WideButton("plus", T("Add mods"), () => Safe(AddToMergeAsync(r)));
-            (add.Height, add.Padding, add.CornerRadius, add.HorizontalContentAlignment, add.BorderThickness, add.Background) = (44, new Thickness(8, 0, 12, 0), new CornerRadius(7), HorizontalAlignment.Left, new Thickness(0), new SolidColorBrush(Microsoft.UI.Colors.Transparent));
+            (add.Height, add.Padding, add.CornerRadius, add.HorizontalContentAlignment, add.BorderThickness, add.Background) = (44, new Thickness(8, 0, 12, 0), new CornerRadius(8), HorizontalAlignment.Left, new Thickness(0), Res("ApexClearBrush"));
             list.Footer = add;
         }
         list.ItemsSource = d.Items;
@@ -710,7 +710,7 @@ public sealed partial class MainWindow
 
     void FillInnerDetails(ModRow r, MergeRecord merge, MergeOriginal o, bool mine)
     {
-        var back = new Button { Padding = new Thickness(2, 4, 10, 4), Margin = new Thickness(-4, 0, 0, 0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var back = new Button { Padding = new Thickness(2, 4, 10, 4), Margin = new Thickness(-4, 0, 0, 0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush") };
         var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         label.Children.Add(Lucide.Icon("chevron-left", 16, Res("ApexSoftTextBrush")));
         label.Children.Add(new TextBlock { Text = _draft?.Name ?? r.Name, FontSize = 13, Foreground = Res("ApexSoftTextBrush"), MaxWidth = 250, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -809,7 +809,7 @@ public sealed partial class MainWindow
             var color = ModNotes.ColorOf(name);
             var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             chip.Children.Add(new TextBlock { Text = name, FontSize = 12, Foreground = TagDot.BrushOf(color), VerticalAlignment = VerticalAlignment.Center });
-            var x = new Button { Content = Lucide.Icon("x", 10, TagDot.BrushOf(color)), Padding = new Thickness(3), MinWidth = 0, MinHeight = 0, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
+            var x = new Button { Content = Lucide.Icon("x", 10, TagDot.BrushOf(color)), Padding = new Thickness(3), MinWidth = 0, MinHeight = 0, Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0) };
             AutomationProperties.SetName(x, T("Remove tag {0}", name));
             x.Click += (_, _) => Tag(name, false);
             chip.Children.Add(x);

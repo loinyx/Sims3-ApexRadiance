@@ -95,7 +95,7 @@ public sealed partial class MainWindow
         WatchPlaces();
         var query = _findPage is null ? "" : _findSearch.Text;
         // (Tag="dyn": its texts are set here, not translated in place)
-        var page = new Grid { Tag = "dyn", Padding = new Thickness(24, 24, 24, 0), RowSpacing = 14, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), AllowDrop = true };
+        var page = new Grid { Tag = "dyn", Padding = new Thickness(24, 24, 24, 0), RowSpacing = 14, Background = Res("ApexClearBrush"), AllowDrop = true };
         for (var i = 0; i < 4; i++) page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         page.RowDefinitions.Add(new RowDefinition());
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(page, T("Find custom content"));
@@ -105,7 +105,7 @@ public sealed partial class MainWindow
         var back = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         back.Children.Add(Lucide.Icon("chevron-left", 15));
         back.Children.Add(new TextBlock { Text = T("Mods") });
-        var backButton = new Button { Content = back, Height = 32, Padding = new Thickness(8, 0, 12, 0), Margin = new Thickness(-8, 0, 0, 2), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
+        var backButton = new Button { Content = back, Height = 32, Padding = new Thickness(8, 0, 12, 0), Margin = new Thickness(-8, 0, 0, 2), Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(backButton, T("Back to your mods"));
         ToolTipService.SetToolTip(backButton, T("Back to your mods"));
         backButton.Click += (_, _) => CloseFind(focus: true);
@@ -208,7 +208,7 @@ public sealed partial class MainWindow
         var icon = Lucide.Icon("scan-search", 20, Res("ApexAccentBrush"), 1.8);
         icon.HorizontalAlignment = HorizontalAlignment.Center;
         icon.VerticalAlignment = VerticalAlignment.Center;
-        g.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(9), Background = Res("ApexAccentSoftBrush"), Child = icon, VerticalAlignment = VerticalAlignment.Center });
+        g.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(10), Background = Res("ApexAccentSoftBrush"), Child = icon, VerticalAlignment = VerticalAlignment.Center });
         var busy = _findCts is not null;
         var r = _findResult;
         var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };

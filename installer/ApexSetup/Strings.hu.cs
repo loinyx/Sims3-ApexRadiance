@@ -342,7 +342,6 @@ public static partial class Strings
         ["Apex Launcher could not install itself"] = "Az Apex Launcher nem tudta telepíteni magát",
         ["Apex Launcher could not switch to portable"] = "Az Apex Launcher nem tudott hordozható módra váltani",
         ["It keeps running from here."] = "Továbbra is innen fut.",
-        ["Installed for this Windows account."] = "Telepítve ehhez a Windows-fiókhoz.",
         ["Use without installing?"] = "Használod telepítés nélkül?",
         ["Apex Launcher moves to {0} and leaves the Start menu, the desktop and Installed apps. Your settings stay."] = "Az Apex Launcher ide kerül: {0}, és lekerül a Start menüből, az asztalról és a Telepített alkalmazások közül. A beállításaid megmaradnak.",
         ["Move it"] = "Áthelyezés",

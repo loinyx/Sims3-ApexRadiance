@@ -157,6 +157,35 @@ static class InstallTests
             check(LauncherInstall.ModeOf(Paths.InstalledExe) == LauncherMode.Installed && File.ReadAllBytes(Paths.InstalledExe).SequenceEqual(File.ReadAllBytes(upd))
                 && started[^1].Args.SequenceEqual([LauncherInstall.HandoverArg]), "update of the installed copy: replaced in place, still Installed, one handover");
 
+            // 7b. a folder of the player's: moved there and back, and only the launcher's own files go from it
+            {
+                var games = Path.Combine(root, "D", "Games");
+                Directory.CreateDirectory(games);
+                var chosen = LauncherInstall.FolderFor(games);
+                check(chosen == Path.Combine(games, "Apex Launcher") && LauncherInstall.FolderFor(chosen) == chosen, "install folder: one of the launcher's own inside the one picked");
+                check(LauncherInstall.CanInstallTo(chosen) && !Directory.Exists(chosen), "install folder: the check leaves nothing");
+                check(!LauncherInstall.CanInstallTo(Paths.Data) && !LauncherInstall.CanInstallTo(Path.Combine(Paths.Data, "x")) && !LauncherInstall.CanInstallTo(Path.Combine(Paths.DefaultInstallDir, "x"))
+                    && !LauncherInstall.CanInstallTo("Apex") && !LauncherInstall.CanInstallTo(@"C:\%TEMP%\x"), "install folder: refused among the launcher's data, inside the default one, or not a full path");
+                LauncherInstall.SetRunAtStartup(Paths.InstalledExe, true);
+                started.Clear();
+                LauncherInstall.Install(Paths.InstalledExe, null, Start, chosen);
+                check(Paths.InstallDir == chosen && File.Exists(Path.Combine(chosen, "ApexLauncher.exe")) && Gone(Paths.DefaultInstallDir) && started.Single().Exe == Paths.InstalledExe
+                    && LauncherInstall.ModeOf(Paths.InstalledExe) == LauncherMode.Installed && LauncherInstall.Registered() && DataKept(), "install folder: moved, started from there, the old copy gone");
+                using (var run = Registry.CurrentUser.OpenSubKey(LauncherInstall.RegistryBase + @"\Run"))
+                    check(run?.GetValue("Apex Launcher") is string cmd && cmd.Contains(chosen), "install folder: Start with Windows follows");
+                check(LauncherInstall.FirstStep(oldSetup, false) == StartStep.HandToInstalled, "install folder: a downloaded copy hands over to it");
+                File.WriteAllText(Path.Combine(chosen, "mine.txt"), "");
+                LauncherInstall.Install(Paths.InstalledExe, null, Start, Paths.DefaultInstallDir);
+                check(Paths.InstallDir == Paths.DefaultInstallDir && File.Exists(Paths.InstalledExe) && File.Exists(Path.Combine(chosen, "mine.txt")) && !File.Exists(Path.Combine(chosen, "ApexLauncher.exe")),
+                    "install folder: moved back, a file of the player's in the chosen one stays");
+                LauncherInstall.Install(Paths.InstalledExe, null, Start, chosen);
+                Data();
+                Uninstall.Launcher(Paths.InstalledExe, keepData: true);
+                check(NoTraces() && Gone(Path.Combine(chosen, "ApexLauncher.exe")) && File.Exists(Path.Combine(chosen, "mine.txt")) && Paths.InstallDir == Paths.DefaultInstallDir,
+                    "install folder: uninstalled from it, only its own files went and the choice with them");
+                LauncherInstall.Install(NewExe(Path.Combine(root, "Again")), null, Start);
+            }
+
             // 8. uninstall from each mode: no key, shortcut, Run value, data or exe left; saves and mods untouched
             LauncherInstall.SetRunAtStartup(Paths.InstalledExe, true);
             Data();

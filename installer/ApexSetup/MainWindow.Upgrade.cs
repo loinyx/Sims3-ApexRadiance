@@ -13,7 +13,7 @@ public sealed partial class MainWindow
 {
     public const string MovedFromArg = "--moved-from=";
     int _upgradeStage;
-    bool _upgradeInstall = true, _upgradeDelete = true;
+    bool _upgradeDelete = true;
     string? _upgradeFrom; // (Ready: the copy this one was installed from)
 
     string[] UpgradeSteps => Paths.MovedFromSetup || _upgradeWasSetup ? [T("What's new"), T("Where it lives"), T("Ready")] : [T("Where it lives"), T("Ready")];
@@ -60,22 +60,6 @@ public sealed partial class MainWindow
 
     // ---------- the card's parts ----------
 
-    // the header: the launcher and a dot for each step
-    FrameworkElement UpgradeHeader(string[] steps, int current)
-    {
-        var g = new Grid { Padding = new Thickness(32, 17, 32, 17), ColumnSpacing = 12, BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Res("ApexHairlineBrush") };
-        for (int i = 0; i < 3; i++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = i == 2 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
-        g.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 30, Height = 30, VerticalAlignment = VerticalAlignment.Center });
-        var title = new TextBlock { Text = "Apex Launcher", FontSize = 16, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(title, 1);
-        g.Children.Add(title);
-        var dots = StepDots(steps, current);
-        dots.HorizontalAlignment = HorizontalAlignment.Right;
-        Grid.SetColumn(dots, 2);
-        g.Children.Add(dots);
-        return g;
-    }
-
     // the step's name and a piece of a bar for each step, filled up to it
     static StackPanel StepDots(string[] steps, int current)
     {
@@ -88,14 +72,6 @@ public sealed partial class MainWindow
         row.Children.Add(bar);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, $"{name}, {current + 1}/{steps.Length}");
         return row;
-    }
-
-    // the footer: the buttons on the right
-    static FrameworkElement UpgradeFooter(params Button[] buttons)
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right };
-        foreach (var b in buttons) { b.Height = 40; b.FontWeight = b.Style == (Style)Application.Current.Resources["AccentButtonStyle"] ? FontWeights.SemiBold : FontWeights.Normal; b.MinWidth = b.Style == (Style)Application.Current.Resources["AccentButtonStyle"] ? 140 : 96; row.Children.Add(b); }
-        return new Border { Height = 72, Padding = new Thickness(32, 0, 32, 0), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexFooterBrush"), Child = row };
     }
 
     static Image Logo(double size) => new() { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -166,65 +142,43 @@ public sealed partial class MainWindow
 
     // ---------- 2 Where it lives ----------
 
+    bool _upgradeStartup;
+    // installing is the way on; running without it is a line under the buttons
     void FillUpgradeWhere(StackPanel card, string[] steps)
     {
         var self = Environment.ProcessPath ?? "";
-        card.Children.Add(UpgradeHeader(steps, Array.IndexOf(steps, T("Where it lives"))));
-        var body = new StackPanel { Padding = new Thickness(32, 28, 32, 32), Spacing = 12 };
-        body.Children.Add(new TextBlock { Text = T("Where should it live?"), FontSize = 28, FontWeight = FontWeights.SemiBold, OpticalMarginAlignment = OpticalMarginAlignment.None });
-        body.Children.Add(new TextBlock { Text = T("Pick once; Settings can change it later."), FontSize = 14, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, -8, 0, 12) });
-        var cards = new List<(Border Card, Border Check, bool Value)>();
-        void Pick(bool v)
+        var (split, words) = SplitCard();
+        words.Children.Add(SplitTitle(T("Install Apex Launcher")));
+        words.Children.Add(SplitText(T("It opens from the Start menu and keeps itself up to date.")));
+        words.Children.Add(new StackPanel
         {
-            _upgradeInstall = v;
-            foreach (var c in cards)
+            Margin = new Thickness(0, Design.Space.X6, 0, 0),
+            Children =
             {
-                OptionLit(c.Card, c.Value == v);
-                OptionOn(c.Check, c.Value == v);
-            }
-        }
-        Button Option(bool value, string icon, string title, string text)
+                FolderRow(),
+                Toggle("monitor", T("Desktop shortcut"), "", _settings.DesktopShortcut, on => { _settings.DesktopShortcut = on; if (!DryRun) _settings.Save(); }),
+                Toggle("power", T("Start with Windows"), T("Opens quietly in the notification area."), _upgradeStartup, on => _upgradeStartup = on),
+            },
+        });
+        var install = SplitButton(Button(T("Install"), () => _ = UpgradeApply(self, true), accent: true));
+        var other = SplitButton(Array.IndexOf(steps, T("Where it lives")) > 0 ? Button(T("Back"), () => UpgradeShow(0)) : Button(T("Ask me later"), UpgradeClose));
+        (other.MinWidth, other.FontWeight, install.Margin, other.Margin) = (104, FontWeights.Normal, new Thickness(0), new Thickness(0));
+        words.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X2, Margin = new Thickness(0, Design.Space.X6, 0, 0), Children = { install, other } });
+        var portable = new HyperlinkButton { Content = T("Use without installing"), FontSize = 13, Padding = new Thickness(0) };
+        portable.Click += (_, _) => _ = UpgradeApply(self, false);
+        words.Children.Add(new WrapPanel
         {
-            var g = new Grid { ColumnSpacing = 16 };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(Design.IconTile.Of(icon));
-            var s = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            s.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
-            s.Children.Add(new TextBlock { Text = text, FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
-            Grid.SetColumn(s, 1);
-            g.Children.Add(s);
-            var check = OptionDot();
-            check.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(check, 2);
-            g.Children.Add(check);
-            var c = new Border { Child = g, Padding = new Thickness(Design.Space.CardPad), CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1) };
-            var b = new Button { Content = c, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(12), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-            b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            b.Click += (_, _) => Pick(value);
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title);
-            cards.Add((c, check, value));
-            return b;
-        }
-        body.Children.Add(Option(true, "hard-drive", T("Install it"), T("Recommended. In the Start menu and on the desktop")));
-        body.Children.Add(Option(false, "package", T("Keep it portable"), T("One file you can move anywhere")));
-        Pick(_upgradeInstall);
-        card.Children.Add(body);
-        var buttons = new List<Button>();
-        if (Array.IndexOf(steps, T("Where it lives")) > 0) buttons.Add(Button(T("Back"), () => UpgradeShow(0)));
-        else buttons.Add(Button(T("Ask me later"), UpgradeClose));
-        buttons.Add(Button(T("Continue"), async () => await UpgradeApply(self), accent: true));
-        card.Children.Add(UpgradeFooter([.. buttons]));
+            Spacing = 6, Margin = new Thickness(0, Design.Space.X4, 0, 0),
+            Children = { new TextBlock { Text = T("One file you can move anywhere:"), FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }, portable },
+        });
+        card.Children.Add(split);
     }
 
-    async Task UpgradeApply(string self)
+    async Task UpgradeApply(string self, bool install)
     {
         // (a dry run shows the way through and changes nothing)
-        if (DryRun) { if (_upgradeInstall) { _upgradeFrom = self; UpgradeShow(UpgradeSteps.Length - 1); } else UpgradeClose(); return; }
-        if (!_upgradeInstall)
+        if (DryRun) { if (install) { _upgradeFrom = self; UpgradeShow(UpgradeSteps.Length - 1); } else UpgradeClose(); return; }
+        if (!install)
         {
             try { LauncherInstall.MakePortable(self, null); UpgradeClose(); BuildSettingsIfShown(); }
             catch (Exception e) { App.Log(e); await Message(T("Apex Launcher could not switch to portable"), ErrorText(e) + "\n\n" + T("It keeps running from here.")); }
@@ -235,7 +189,8 @@ public sealed partial class MainWindow
             // the installed copy opens on Ready and can delete this one once it has closed
             var args = Environment.GetCommandLineArgs().Skip(1).Where(a => !a.StartsWith(MovedFromArg, StringComparison.Ordinal) && a != "--was-setup").Append(MovedFromArg + self);
             if (Paths.MovedFromSetup) args = args.Append("--was-setup");
-            LauncherInstall.Install(self, args);
+            if (_upgradeStartup) LauncherInstall.SetRunAtStartup(Paths.InstalledExe, true); // (Install points it at the chosen folder)
+            LauncherInstall.Install(self, args, folder: _installFolder);
             Application.Current.Exit();
         }
         catch (Exception e)

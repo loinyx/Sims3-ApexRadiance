@@ -411,7 +411,7 @@ public sealed partial class MainWindow
     static (FrameworkElement Corner, Action<bool> Over) PlayCorner(Button play)
     {
         const float size = (float)PlaySize, wave = 100, empty = 48, full = -22;
-        var none = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        var none = Res("ApexClearBrush");
         foreach (var state in new[] { "", "PointerOver", "Pressed", "Disabled" }) play.Resources["ButtonBackground" + state] = none;
         play.Background = none;
         var accent = Res("ApexAccentBrush");

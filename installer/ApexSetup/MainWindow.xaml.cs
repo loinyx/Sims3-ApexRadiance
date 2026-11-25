@@ -424,7 +424,7 @@ public sealed partial class MainWindow : Window
             }
             // (a copy not installed yet goes where the player chose: installed, it starts the installed copy and closes)
             case DoneStep when DoneChoice.Visibility == Visibility.Visible && Environment.ProcessPath is { } self:
-                _ = ApplyInstallMode(_doneInstall, self, null);
+                _ = ApplyInstallMode(_doneInstall, self, _doneInstall ? _installFolder : null);
                 if (!_doneInstall) Show(Home);
                 break;
             // (the install's end: Play starts the game from Home)
@@ -836,8 +836,7 @@ public sealed partial class MainWindow : Window
             S3ppToggle.Visibility == Visibility.Visible ? Mirror(S3ppToggle, "Sims 3 Performance Patch")
             : S3ppWait.Visibility == Visibility.Visible ? new ProgressRing { Width = 16, Height = 16, IsActive = true }
             : Button(T("Download on Nexus Mods"), () => OnS3ppDownload(this, new RoutedEventArgs())));
-        if (MonoCard.Visibility == Visibility.Visible)
-            Row(IconBox("file-code"), "MonoPatcher", Why(MonoToggle, MonoPill, T("Only some script mods need this. Turn it on if a mod asks for it.")), null, null, false, Mirror(MonoToggle, "MonoPatcher"));
+        Row(IconBox("file-code"), "MonoPatcher", Why(MonoToggle, MonoPill, T("Only some script mods need this. Turn it on if a mod asks for it.")), null, null, false, Mirror(MonoToggle, "MonoPatcher"));
     }
 
     void OnContentFrameSized(object sender, SizeChangedEventArgs e) { FitSide(); if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
@@ -1377,8 +1376,6 @@ public sealed partial class MainWindow : Window
         (_modExp ? ModExperimental : ModStable).IsChecked = true;
         MonoToggle.IsOn = s.MonoPatcher;
         RestartToggle.IsOn = s.RestartHost || s.ApexVersion is null; // (on in a new install; the player can turn it off)
-        // no longer offered (no mod Setup installs needs it, and it crashed the launcher on some PCs): shown only to keep or remove it
-        MonoCard.Visibility = s.MonoPatcher ? Visibility.Visible : Visibility.Collapsed;
         S3ppToggle.IsOn = true;
     }
 
@@ -1751,12 +1748,12 @@ public sealed partial class MainWindow : Window
     }
 
     // the round mark of a choice: a ring, filled with the accent and a dot when chosen (OptionOn)
-    static Border OptionDot() => new() { Width = 20, Height = 20, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1.5), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+    static Border OptionDot() => new() { Width = 20, Height = 20, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1.5), Background = Res("ApexClearBrush"),
         Child = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4) } };
     static void OptionOn(Border dot, bool on)
     {
-        dot.Background = on ? Design.DesignSystem.MainBrush : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        dot.BorderBrush = on ? new SolidColorBrush(Microsoft.UI.Colors.Transparent) : Res("ApexMutedBrush");
+        dot.Background = on ? Design.DesignSystem.MainBrush : Res("ApexClearBrush");
+        dot.BorderBrush = on ? Res("ApexClearBrush") : Res("ApexMutedBrush");
         ((Border)dot.Child).Background = on ? Res("ApexInkBrush") : null;
     }
     // a choice's whole card: lit when chosen

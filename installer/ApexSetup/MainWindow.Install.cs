@@ -10,6 +10,35 @@ namespace ApexSetup;
 // the launcher), and changeable in Settings. LauncherInstall does the work; the window closes when another copy takes over.
 public sealed partial class MainWindow
 {
+    string? _installFolder; // (chosen in place of the default, until it is installed)
+
+    // a folder for the launcher to live in; null when none was picked, or the one picked will not do (said)
+    async Task<string?> PickInstallFolder()
+    {
+        var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(AppWindow.Id);
+        if (await picker.PickSingleFolderAsync() is not { } f) return null;
+        var dir = LauncherInstall.FolderFor(f.Path);
+        if (string.Equals(dir, Paths.DefaultInstallDir, StringComparison.OrdinalIgnoreCase) || DryRun || LauncherInstall.CanInstallTo(dir)) return dir;
+        await Message(T("Choose another folder"), T("Apex Launcher can't keep itself up to date in {0} without administrator permission.", dir));
+        return null;
+    }
+
+    // where it will be installed, and the way to another folder
+    Border FolderRow()
+    {
+        var detail = new TextBlock { FontSize = 13, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis };
+        void Show()
+        {
+            var dir = _installFolder ?? Paths.InstallDir;
+            detail.Text = ShortPath(dir);
+            ToolTipService.SetToolTip(detail, dir);
+        }
+        Show();
+        var row = Row("folder", T("Folder"), "", Button(T("Change"), async () => { if (await PickInstallFolder() is { } dir) { _installFolder = dir; Show(); } }));
+        ((StackPanel)((Grid)row.Child).Children[1]).Children.Add(detail);
+        return row;
+    }
+
     // install (this copy starts the installed one and closes) or make it portable (where it is, or in a folder chosen)
     async Task ApplyInstallMode(bool install, string self, string? folder)
     {
@@ -18,7 +47,7 @@ public sealed partial class MainWindow
         {
             if (install)
             {
-                LauncherInstall.Install(self, Environment.GetCommandLineArgs().Skip(1));
+                LauncherInstall.Install(self, Environment.GetCommandLineArgs().Skip(1), folder: folder);
                 Application.Current.Exit();
                 return;
             }
@@ -78,7 +107,7 @@ public sealed partial class MainWindow
             g.Children.Add(check);
             var row = new Border { Child = g, Padding = new Thickness(Design.Space.CardPad), Background = on ? Res("ApexAccentSoftBrush") : null,
                 BorderThickness = new Thickness(0, list.Children.Count > 0 ? 1 : 0, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
-            var b = new Button { Content = row, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            var b = new Button { Content = row, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0), Background = Res("ApexClearBrush"),
                 HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             b.Click += (_, _) => { _doneInstall = value; FillDoneChoice(); UpdateFooter(); };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title);
@@ -86,6 +115,7 @@ public sealed partial class MainWindow
         }
         DoneChoice.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"),
             Background = Res("ApexHairlineBrush"), Margin = new Thickness(0, 10, 0, 0) });
+        if (_doneInstall) DoneChoice.Children.Add(FolderRow());
     }
 
     // Settings: this copy, installed or not, and the way to switch
@@ -93,18 +123,31 @@ public sealed partial class MainWindow
     {
         var self = Environment.ProcessPath ?? "";
         var mode = LauncherInstall.Mode;
-        var (text, action) = mode switch
+        (string, FrameworkElement) row = mode switch
         {
-            LauncherMode.Installed => (T("Installed for this Windows account."), Button(T("Use without installing"), async () =>
+            LauncherMode.Installed => (T("Installed in {0}.", ShortPath(Paths.InstallDir)), Pair(Button(T("Move…"), async () =>
+            {
+                if (await PickInstallFolder() is not { } dir || string.Equals(dir, Paths.InstallDir, StringComparison.OrdinalIgnoreCase)) return;
+                if (await Confirm(T("Move Apex Launcher?"), T("It moves to {0}. Your settings stay and the shortcuts follow.", dir), T("Move it")))
+                    await ApplyInstallMode(true, self, dir);
+            }), Button(T("Use without installing"), async () =>
             {
                 var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(AppWindow.Id);
                 if (await picker.PickSingleFolderAsync() is not { } f) return;
                 if (await Confirm(T("Use without installing?"), T("Apex Launcher moves to {0} and leaves the Start menu, the desktop and Installed apps. Your settings stay.", f.Path), T("Move it")))
                     await ApplyInstallMode(false, self, f.Path);
-            })),
+            }))),
             LauncherMode.Portable => (T("Not installed: running from {0}.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Install it"), () => _ = ApplyInstallMode(true, self, null))),
             _ => (T("Running from {0}, not installed yet.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Choose"), () => UpgradeShow(0))),
         };
+        var (text, action) = row;
         return Row("hard-drive", T("This copy of the launcher"), text, DryRun ? null : action);
+
+        static FrameworkElement Pair(params Button[] buttons)
+        {
+            var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X2 };
+            foreach (var b in buttons) s.Children.Add(b);
+            return s;
+        }
     }
 }

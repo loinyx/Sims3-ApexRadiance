@@ -302,7 +302,6 @@ public static partial class Strings
         ["Apex Launcher could not install itself"] = "Apex Launcher 無法完成自身安裝",
         ["Apex Launcher could not switch to portable"] = "Apex Launcher 無法轉為可攜式",
         ["It keeps running from here."] = "它會繼續從這裡執行。",
-        ["Installed for this Windows account."] = "已為此 Windows 帳戶安裝。",
         ["Use without installing?"] = "不安裝直接使用？",
         ["Apex Launcher moves to {0} and leaves the Start menu, the desktop and Installed apps. Your settings stay."] = "Apex Launcher 會移到 {0}，並從「開始」功能表、桌面和「已安裝的應用程式」中移除。你的設定會保留。",
         ["Move it"] = "移動",

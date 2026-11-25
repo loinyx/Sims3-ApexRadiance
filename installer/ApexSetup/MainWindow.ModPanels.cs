@@ -123,13 +123,14 @@ public sealed partial class MainWindow
     }
 
     // a full-width row: icon, what it does, a short hint under it
-    static Button ActionRow(string icon, string text, string? hint, Action click)
+    // (on: what it does is done already: its icon in the accent and a check at the end)
+    static Button ActionRow(string icon, string text, string? hint, Action click, bool on = false)
     {
         var g = new Grid { ColumnSpacing = 12 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var i = Lucide.Icon(icon, 16, Res("ApexSoftTextBrush"));
+        var i = Lucide.Icon(icon, 16, Res(on ? "ApexAccentBrush" : "ApexSoftTextBrush"));
         i.VerticalAlignment = VerticalAlignment.Center;
         g.Children.Add(i);
         var t = new TextBlock { Text = text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -145,7 +146,14 @@ public sealed partial class MainWindow
             Grid.SetColumn(both, 1);
             g.Children.Add(both);
         }
-        var b = new Button { Content = g, MinHeight = 48, Padding = new Thickness(16, 6, 16, 7), CornerRadius = new CornerRadius(11), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0),
+        if (on)
+        {
+            var check = Lucide.Icon("check", 16, Res("ApexAccentBrush"));
+            check.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(check, 2);
+            g.Children.Add(check);
+        }
+        var b = new Button { Content = g, MinHeight = 48, Padding = new Thickness(16, 6, 16, 7), CornerRadius = new CornerRadius(11), Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
         b.Click += (_, _) => click();

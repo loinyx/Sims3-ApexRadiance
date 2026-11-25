@@ -64,7 +64,7 @@ public sealed partial class MainWindow
         var home = _healthPage.Length == 0;
         var tint = StateTint(255);
         host.Children.Add(new SoftGlow(tint, _light ? (home ? 0.075 : 0.04) : home ? 0.1 : 0.045, home ? 0.22 : 0) { Height = home ? 640 : 340 });
-        var body = new StackPanel { MaxWidth = 984, Spacing = 28, Padding = new Thickness(32, 24, 32, 8) };
+        var body = new StackPanel { MaxWidth = Design.Size.Page + 2 * Design.Space.Page, Spacing = Design.Space.Section, Padding = new Thickness(Design.Space.Page, Design.Space.X6, Design.Space.Page, Design.Space.X2) };
         host.Children.Add(body);
         if (home) HealthHome(body);
         else if (_healthPage == HistoryPage) HealthHistory(body);
@@ -79,7 +79,7 @@ public sealed partial class MainWindow
         return new Border { Child = child, CornerRadius = new CornerRadius(radius), BorderThickness = new Thickness(1), Background = new SolidColorBrush(Tone("Card", 0xE6)), BorderBrush = Res("ApexCardBorderBrush") };
     }
 
-    static TextBlock SectionTitle(string text) => new() { Text = text, FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) };
+    static TextBlock SectionTitle(string text) => new() { Text = text, FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, Design.Space.SectionToBody) };
 
     static FrameworkElement IconTile(string icon, Windows.UI.Color tint) => Design.IconTile.Of(icon, Design.Oklch.From(tint).H, Design.Size.Tile);
 
@@ -211,7 +211,6 @@ public sealed partial class MainWindow
         foreach (var (e, i) in new (FrameworkElement, int)[] { (icon, 0), (name, 1), (how, 2), (go, 3) }) { Grid.SetColumn(e, i); e.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(e); }
         var b = new Button { Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = new SolidColorBrush(Tone("Card", 0xE6)), BorderBrush = new SolidColorBrush(Pick(0x12FFFFFF, 0x14000000)) };
-        b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Tone("Hover"));
         b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Tone("Strip"));
         b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Pick(0x24FFFFFF, 0x24000000));
         b.Click += (_, _) => HealthGo(area.ToString());
@@ -350,26 +349,10 @@ public sealed partial class MainWindow
         var goneToo = IgnoredIn(HealthArea.Mods);
         var other = _health.Where(i => i.Area == HealthArea.Mods && !i.Conflict).ToList();
 
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-        (string Name, int Count)[] tabs = [(T("To look at"), look.Count + other.Count(i => i.Finding.Severity != Severity.Info)), (T("Minor"), small.Count), (T("Ignored"), gone.Count + goneToo.Count)];
-        for (int i = 0; i < tabs.Length; i++)
-        {
-            var at = i;
-            var on = i == _conflictTab;
-            var words = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            words.Children.Add(new TextBlock { Text = tabs[i].Name, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Res(on ? "TextFillColorPrimaryBrush" : "ApexMutedBrush") });
-            words.Children.Add(new TextBlock { Text = tabs[i].Count.ToString(LangCulture()), FontSize = 13, Foreground = Res("ApexMutedBrush") });
-            var b = new Button { Content = words, Height = 30, Padding = new Thickness(14, 0, 14, 0), CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(0),
-                Background = new SolidColorBrush(on ? Pick(0x1FFFFFFF, 0x14000000) : Microsoft.UI.Colors.Transparent) };
-            b.Click += (_, _) => { (_conflictTab, _conflictOpen, _healthNote) = (at, "", null); BuildHealth(); };
-            AutomationProperties.SetName(b, $"{tabs[i].Name} {tabs[i].Count}");
-            AutomationProperties.SetItemStatus(b, on ? T("Selected") : "");
-            bar.Children.Add(b);
-        }
         var page = new StackPanel { Spacing = 12 };
-        var strip = Glass(bar, 6);
-        (strip.Height, strip.Padding) = (36, new Thickness(2));
-        strip.HorizontalAlignment = HorizontalAlignment.Left;
+        (string Name, int Count)[] tabs = [(T("To look at"), look.Count + other.Count(i => i.Finding.Severity != Severity.Info)), (T("Minor"), small.Count), (T("Ignored"), gone.Count + goneToo.Count)];
+        var strip = new Design.Segmented([.. tabs.Select(t => ((string?)null, $"{t.Name}  {t.Count.ToString(LangCulture())}"))], _conflictTab,
+            at => { (_conflictTab, _conflictOpen, _healthNote) = (at, "", null); DispatcherQueue.TryEnqueue(BuildHealth); }); // (later: the build removes it)
         strip.Margin = new Thickness(0, 0, 0, 4);
         page.Children.Add(strip);
         body.Children.Add(page);
@@ -484,7 +467,7 @@ public sealed partial class MainWindow
             if (c.CanOrder && file is not null && others.Count == files.Count - 1 && ModPriority.Moves(Docs, file, others) is { Count: > 0 } moves)
             {
                 var up = Button(T("Give priority"), async () => await GivePriority(c, party, moves));
-                (up.Background, up.BorderThickness, up.VerticalAlignment, up.IsEnabled) = (new SolidColorBrush(Microsoft.UI.Colors.Transparent), new Thickness(0), VerticalAlignment.Center, !_running && !_busy);
+                (up.Background, up.BorderThickness, up.VerticalAlignment, up.IsEnabled) = (Res("ApexClearBrush"), new Thickness(0), VerticalAlignment.Center, !_running && !_busy);
                 AutomationProperties.SetName(up, T("Give priority") + ", " + party);
                 ToolTipService.SetToolTip(up, string.Join("\n", moves.Select(x => T("Moves {0} to {1}", Path.GetFileNameWithoutExtension(x.Mod.Name), "Mods\\" + x.Folder))));
                 Grid.SetColumn(up, 1);
@@ -493,7 +476,7 @@ public sealed partial class MainWindow
             if (file is { Locked: false, FileType: "package" } m)
             {
                 var off = Button(T("Turn off"), async () => await TurnOffMod(m));
-                (off.Background, off.BorderThickness, off.VerticalAlignment, off.IsEnabled) = (new SolidColorBrush(Microsoft.UI.Colors.Transparent), new Thickness(0), VerticalAlignment.Center, !_running && !_busy);
+                (off.Background, off.BorderThickness, off.VerticalAlignment, off.IsEnabled) = (Res("ApexClearBrush"), new Thickness(0), VerticalAlignment.Center, !_running && !_busy);
                 AutomationProperties.SetName(off, T("Turn off {0}", party));
                 Grid.SetColumn(off, 2);
                 g.Children.Add(off);

@@ -339,7 +339,6 @@ public static partial class Strings
         ["Apex Launcher could not install itself"] = "Apex Launcher konnte sich nicht installieren",
         ["Apex Launcher could not switch to portable"] = "Apex Launcher konnte nicht auf portabel umstellen",
         ["It keeps running from here."] = "Er läuft weiter von hier.",
-        ["Installed for this Windows account."] = "Für dieses Windows-Konto installiert.",
         ["Use without installing?"] = "Ohne Installation nutzen?",
         ["Apex Launcher moves to {0} and leaves the Start menu, the desktop and Installed apps. Your settings stay."] = "Apex Launcher wird nach {0} verschoben und aus dem Startmenü, vom Desktop und aus den installierten Apps entfernt. Deine Einstellungen bleiben.",
         ["Move it"] = "Verschieben",

@@ -60,7 +60,7 @@ public sealed partial class MainWindow
             mark.HorizontalAlignment = HorizontalAlignment.Right;
             line.Children.Add(mark);
             var all = new Button { Content = line, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, MinHeight = 44, Padding = new Thickness(20, 0, 22, 0), CornerRadius = new CornerRadius(8),
-                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderBrush = Res("ApexCardBorderBrush") };
+                Background = Res("ApexClearBrush"), BorderBrush = Res("ApexCardBorderBrush") };
             all.Click += (_, _) => { _saveAllBackups = !_saveAllBackups; SavesAgain(); };
             AutomationProperties.SetName(all, text.Text);
             all.BorderThickness = new Thickness(0);
@@ -103,7 +103,7 @@ public sealed partial class MainWindow
     static Button MoreButton(string name, MenuFlyout menu)
     {
         var b = new Button { Width = 36, Height = 36, Padding = new Thickness(0), Content = Lucide.Icon("ellipsis", 16), Flyout = menu, VerticalAlignment = VerticalAlignment.Center,
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
+            Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0) };
         AutomationProperties.SetName(b, name);
         ToolTipService.SetToolTip(b, T("More options"));
         return b;
@@ -450,7 +450,7 @@ public sealed partial class MainWindow
     void DrawAutomatic(SavesNow now)
     {
         var (c, docs) = (BackupChoices.Load(), now.Docs);
-        var page = new StackPanel { Spacing = 4, MaxWidth = 920 };
+        var page = new StackPanel { Spacing = 4, MaxWidth = Design.Size.Page };
         page.Children.Add(SavesSubHead(T("Automatic backups"), null));
         page.Children.Add(Section(T("When")));
         page.Children.Add(Toggle("shield-check", T("When the game closes"), T("Only the saves that changed"), c.OnClose, on => ChangeBackups(x => x.OnClose = on), !DryRun));
@@ -606,7 +606,7 @@ public sealed partial class MainWindow
         void Act(string icon, string text, Func<Task> run, string? brush = null)
         {
             var b = new Button { Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Lucide.Icon(icon, 16, Res(brush ?? "ApexSoftTextBrush")), new TextBlock { Text = text, FontSize = 13 } } }, Height = 36, Padding = new Thickness(12, 0, 12, 0), BorderThickness = new Thickness(0), IsEnabled = !DryRun,
-                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+                Background = Res("ApexClearBrush") };
             AutomationProperties.SetName(b, text);
             b.Click += (_, _) => Safe(run());
             s.Children.Add(Dims(b));

@@ -110,7 +110,9 @@ public static class Uninstall
         exe ??= Environment.ProcessPath;
         LauncherInstall.RemoveTraces();
         var outside = exe is not null && !LauncherInstall.IsInstalledCopy(exe);
+        var install = Paths.InstallDir;
+        Paths.SetInstallDir(null);
         string[] data = keepData ? [Path.Combine(Paths.Data, "thumbs"), Paths.Ops] : [Paths.Data];
-        LauncherInstall.DeleteAfterExit(outside ? [Paths.InstallDir, .. data, exe!, LauncherInstall.MarkerOf(exe!)] : [Paths.InstallDir, .. data]);
+        LauncherInstall.DeleteInstallAfterExit(install, outside ? [.. data, exe!, LauncherInstall.MarkerOf(exe!)] : data);
     }
 }

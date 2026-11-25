@@ -41,6 +41,26 @@ of its own.
 
 Something in a corner of a card stands as far from the top as from the side.
 
+## Parts
+
+A new screen is made of the pieces in `Design/Parts.cs`. A shape drawn twice becomes one of them.
+
+| Part | For |
+|---|---|
+| `Parts.Icon`, `IconBoxed`, `Ghost` | an icon alone (32), the bin of a footer (40), any button with no fill of its own |
+| `Parts.OverPicture` | a round button in a picture's corner |
+| `Segmented` | two or more choices of one thing, one of them on; `Paint` gives it the ink of a board |
+| `Parts.SidePanel`, `PanelOf`, `FillFoot` | the rounded panel at a screen's side: mod details, picture, Customise |
+| `Parts.Card`, `Title`, `TitleText`, `Heading` | a card in a panel, its title and line, a section's heading |
+| `Parts.Chip` | what something is; amber only for what has to be seen |
+| `Parts.QuietField` | a value that can be typed over |
+
+What is pressed takes `Fill`, `FillOver` and `FillDown`, and `Clear` at rest with no fill: one ink at four strengths, so a fade never
+flashes. `DesignSystem.Into` gives them to every button, box and field; a screen does not set them.
+
+`ApexSetup.Tests/DesignTests.cs` reads the screens' source: an icon outside Lucide and Windows' `Transparent` fail, and text sizes,
+corners and colours off the scale may only become fewer.
+
 ## Rows
 
 Rows one under another are one card: `Join` gives them one outline, a line between them, and corners only on the first and

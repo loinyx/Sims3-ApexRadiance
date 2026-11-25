@@ -413,7 +413,7 @@ public sealed partial class MainWindow
             {
                 var card = new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), CornerRadius = new CornerRadius(12) };
                 var col = new StackPanel();
-                var pic = new Grid { Height = 150, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(14, 14, 0, 0) };
+                var pic = new Grid { Height = 150, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(12, 12, 0, 0) };
                 pic.SizeChanged += (_, e) => { var h = Math.Round(e.NewSize.Width * 0.56); if (Math.Abs(pic.Height - h) > 1) pic.Height = h; }; // (the picture keeps its shape as the card widens)
                 var world = w;
                 var packOf = w.Pack is { } wp ? Expansions.All.First(p => p.Short == wp) : null;
@@ -802,7 +802,7 @@ public sealed partial class MainWindow
             }
             var b = new Button
             {
-                Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), CornerRadius = new CornerRadius(Design.Radius.Card),
+                Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush"), CornerRadius = new CornerRadius(Design.Radius.Card),
                 HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Content = new StackPanel { Spacing = Design.Space.X2, Children = { colour, new TextBlock { Text = T(t.Name), FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
                     Foreground = on ? Res("TextFillColorPrimaryBrush") : Res("ApexMutedBrush") } } },
@@ -914,7 +914,7 @@ public sealed partial class MainWindow
             g.ColumnDefinitions.Add(new ColumnDefinition());
             FrameworkElement icon = c == Components.Apex
                 ? new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 32, Height = 32 }
-                : new Border { Width = 32, Height = 32, CornerRadius = new CornerRadius(9), Background = Res("ApexPillBrush"), Child = Lucide.Icon(c == Components.Modernization ? "hammer" : c is Components.Bridge or Components.Dxvk ? "layers" : "package", 15, Res("ApexAccentBrush")) };
+                : new Border { Width = 32, Height = 32, CornerRadius = new CornerRadius(8), Background = Res("ApexPillBrush"), Child = Lucide.Icon(c == Components.Modernization ? "hammer" : c is Components.Bridge or Components.Dxvk ? "layers" : "package", 15, Res("ApexAccentBrush")) };
             icon.VerticalAlignment = VerticalAlignment.Top;
             g.Children.Add(icon);
             var words = new StackPanel { Spacing = 2 };
@@ -1015,7 +1015,7 @@ public sealed partial class MainWindow
     static Button BackButtonTo(string name, Action go, string id)
     {
         var back = new Button { Content = Labeled("chevron-left", name), Padding = new Thickness(8, 6, 12, 6), Margin = new Thickness(-11, 0, 0, 6), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            Background = Res("ApexClearBrush") };
         back.Click += (_, _) => go();
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(back, id);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(back, T("Back to {0}", name));
@@ -1041,19 +1041,13 @@ public sealed partial class MainWindow
     static TextBox Field(TextBox b)
     {
         b.Padding = new Thickness(12, 8, 8, 8);
-        b.Background = Res("ApexCardBrush");
-        b.BorderBrush = Res("ApexInputBorderBrush");
-        b.Resources["TextControlBackgroundPointerOver"] = b.Resources["TextControlBackgroundFocused"] = Res("ApexCardBrush");
-        b.Resources["TextControlBorderBrushPointerOver"] = Res("ApexInputBorderHoverBrush");
-        b.Resources["TextControlBorderBrushFocused"] = Res("ApexAccentBrush");
-        b.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(1);
         return b;
     }
 
     // a field to search in with its glass, as the Mods page draws both of its own: the line turns to the accent with the keyboard in it
     static Border SearchField(TextBox b)
     {
-        var none = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        var none = Res("ApexClearBrush");
         (b.Background, b.BorderThickness, b.Padding, b.MinWidth, b.VerticalAlignment) = (none, new Thickness(0), new Thickness(0, 5, 0, 6), 0, VerticalAlignment.Center);
         foreach (var k in new[] { "TextControlBackgroundFocused", "TextControlBackgroundPointerOver", "TextControlBorderBrushFocused", "TextControlBorderBrushPointerOver" }) b.Resources[k] = none;
         b.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);

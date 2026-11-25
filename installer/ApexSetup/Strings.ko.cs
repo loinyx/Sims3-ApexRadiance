@@ -329,7 +329,6 @@ public static partial class Strings
         ["Apex Launcher could not install itself"] = "Apex Launcher를 설치하지 못했어요",
         ["Apex Launcher could not switch to portable"] = "Apex Launcher를 포터블로 전환하지 못했어요",
         ["It keeps running from here."] = "여기에서 계속 실행돼요.",
-        ["Installed for this Windows account."] = "이 Windows 계정에 설치했어요.",
         ["Use without installing?"] = "설치하지 않고 사용할까요?",
         ["Apex Launcher moves to {0} and leaves the Start menu, the desktop and Installed apps. Your settings stay."] = "Apex Launcher를 {0}(으)로 옮기고 시작 메뉴, 바탕 화면, 설치된 앱에서 제거해요. 설정은 그대로예요.",
         ["Move it"] = "옮기기",

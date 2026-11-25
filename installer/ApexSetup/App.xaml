@@ -45,6 +45,10 @@
                     <SolidColorBrush x:Key="ApexInputBorderHoverBrush" Color="#454545" />
                     <SolidColorBrush x:Key="ApexSelectedBrush" Color="#2C2C2C" />
                     <SolidColorBrush x:Key="ApexTileBrush" Color="#232323" />
+                    <SolidColorBrush x:Key="ApexClearBrush" Color="#00FFFFFF" />
+                    <SolidColorBrush x:Key="ApexFillBrush" Color="#0FFFFFFF" />
+                    <SolidColorBrush x:Key="ApexFillOverBrush" Color="#1AFFFFFF" />
+                    <SolidColorBrush x:Key="ApexFillDownBrush" Color="#0BFFFFFF" />
                     <SolidColorBrush x:Key="ApexVeilBrush" Color="#A6000000" />
                     <SolidColorBrush x:Key="ApexAccentBrush" Color="#B79CFF" />
                     <SolidColorBrush x:Key="ApexAccentTextBrush" Color="#C9B8FF" />
@@ -85,6 +89,10 @@
                     <SolidColorBrush x:Key="ApexInputBorderHoverBrush" Color="#B4B4B4" />
                     <SolidColorBrush x:Key="ApexSelectedBrush" Color="#E5E5E5" />
                     <SolidColorBrush x:Key="ApexTileBrush" Color="#EFEFEF" />
+                    <SolidColorBrush x:Key="ApexClearBrush" Color="#00000000" />
+                    <SolidColorBrush x:Key="ApexFillBrush" Color="#0A000000" />
+                    <SolidColorBrush x:Key="ApexFillOverBrush" Color="#12000000" />
+                    <SolidColorBrush x:Key="ApexFillDownBrush" Color="#08000000" />
                     <SolidColorBrush x:Key="ApexVeilBrush" Color="#B8FFFFFF" />
                     <SolidColorBrush x:Key="ApexAccentBrush" Color="#6A48B9" />
                     <SolidColorBrush x:Key="ApexAccentTextBrush" Color="#54359C" />

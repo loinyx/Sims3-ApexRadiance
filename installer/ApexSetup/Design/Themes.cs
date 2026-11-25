@@ -80,6 +80,7 @@ public sealed class Palette
             S("SuccessSoft", 0.600, 0.13, 158, 0.12); S("WarningSoft", 0.750, 0.13, 78, 0.16); S("WarningLine", 0.650, 0.13, 78, 0.35); S("WarningText", 0.430, 0.09, 72);
             S("DangerSoft", 0.600, 0.19, 25, 0.10); S("DangerText", 0.470, 0.17, 25);
             Put("Glass", Color.FromArgb(0xF0, 255, 255, 255)); Put("Hairline", Color.FromArgb(0x12, 0, 0, 0)); Put("Tile", Color.FromArgb(0x0B, 0, 0, 0)); Put("Veil", Color.FromArgb(0xB8, 255, 255, 255)); Put("GlassLine", Color.FromArgb(0x12, 0, 0, 0));
+            Touch(0, 0x0A, 0x12, 0x08);
             return;
         }
         N("Page", 0.115); N("Pane", 0.110); N("Content", 0.142); N("Card", 0.178); N("Raised", 0.222);
@@ -92,8 +93,15 @@ public sealed class Palette
         S("SuccessSoft", 0.780, 0.14, 158, 0.12); S("WarningSoft", 0.810, 0.13, 78, 0.10); S("WarningLine", 0.810, 0.13, 78, 0.28); S("WarningText", 0.860, 0.08, 82);
         S("DangerSoft", 0.720, 0.16, 22, 0.14); S("DangerText", 0.840, 0.09, 22);
         Put("Glass", Oklch.Of(0.165, 0, 0, 0.94)); Put("Hairline", Color.FromArgb(0x10, 255, 255, 255)); Put("Tile", Color.FromArgb(0x12, 255, 255, 255)); Put("Veil", Color.FromArgb(0xA6, 0, 0, 0)); Put("GlassLine", Color.FromArgb(0x12, 255, 255, 255));
+        Touch(255, 0x0F, 0x1A, 0x0B);
 
         void Put(string name, Color c) => Colors[name] = c;
+        // what is pressed, at rest, under the pointer and held: one ink at four strengths, so a fade from one to another never
+        // passes through a lighter colour (Windows' "Transparent" is a clear white)
+        void Touch(byte ink, byte rest, byte over, byte down)
+        {
+            foreach (var (name, a) in new[] { ("Clear", (byte)0), ("Fill", rest), ("FillOver", over), ("FillDown", down) }) Put(name, Color.FromArgb(a, ink, ink, ink));
+        }
         void N(string name, double l) => Put(name, Oklch.Of(l, 0, 0));
         void S(string name, double l, double c, double hue, double a = 1) => Put(name, Oklch.Of(l, c, hue, a));
     }

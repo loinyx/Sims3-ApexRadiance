@@ -52,7 +52,7 @@
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="local:TagDot">
-                                        <Border Background="{x:Bind Back}" CornerRadius="9" Padding="7,1,8,2">
+                                        <Border Background="{x:Bind Back}" CornerRadius="6" Padding="7,1,8,2">
                                             <StackPanel Orientation="Horizontal" Spacing="5">
                                                 <Ellipse Width="6" Height="6" Fill="{x:Bind Fill}" VerticalAlignment="Center" />
                                                 <TextBlock Text="{x:Bind Name}" FontSize="11" Foreground="{x:Bind Fill}" />
@@ -154,7 +154,7 @@
                     <TextBlock x:Name="WindowTitle" Tag="dyn" Text="Apex Launcher" FontSize="12" Foreground="{ThemeResource ApexSoftTextBrush}" VerticalAlignment="Center" />
                 </StackPanel>
             </Grid>
-            <Button x:Name="LangButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Padding="10,4" Click="OnLanguage"
+            <Button x:Name="LangButton" Grid.Column="1" Background="{ThemeResource ApexClearBrush}" BorderThickness="0" Padding="10,4" Click="OnLanguage"
                     AutomationProperties.Name="Language">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <local:LucideIcon Kind="globe" Size="15" StrokeWidth="1.75" Follow="True" VerticalAlignment="Center" />
@@ -358,14 +358,14 @@
                                                 <TextBlock Text="Required" FontSize="11" Foreground="{ThemeResource ApexMutedBrush}" />
                                             </Border>
                                         </StackPanel>
-                                        <TextBlock x:Name="ApexDesc" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="12" HorizontalAlignment="Center" TextAlignment="Center" />
+                                        <TextBlock x:Name="ApexDesc" Tag="dyn" Style="{StaticResource ApexMuted}" HorizontalAlignment="Center" TextAlignment="Center" />
                                     </StackPanel>
                                 </Grid>
                                 <Border x:Name="CoreModernization" Grid.Column="1" CornerRadius="20" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}" Padding="20">
                                     <StackPanel Spacing="8">
                                         <Grid>
-                                            <Border Width="38" Height="38" CornerRadius="11" Background="#226ED3A8" HorizontalAlignment="Left">
-                                                <local:LucideIcon Kind="hammer" Size="18" Stroke="#6ED3A8" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Border Width="40" Height="40" CornerRadius="10" Background="{ThemeResource ApexTileBrush}" HorizontalAlignment="Left">
+                                                <local:LucideIcon Kind="hammer" Size="20" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
                                             <Border Style="{StaticResource ApexPill}" Background="{ThemeResource ApexAccentSoftBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,52,0">
                                                 <TextBlock Text="Recommended" FontSize="11" Foreground="{ThemeResource ApexAccentTextBrush}" />
@@ -374,7 +374,7 @@
                                                           AutomationProperties.Name="Sims 3 Modernization" />
                                         </Grid>
                                         <TextBlock Text="Sims 3 Modernization" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,0" TextWrapping="Wrap" />
-                                        <TextBlock x:Name="ModDesc" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="12" />
+                                        <TextBlock x:Name="ModDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
                                         <TextBlock x:Name="ModPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                         <StackPanel x:Name="ModChannel" Spacing="2">
                                             <StackPanel Orientation="Horizontal" Spacing="12">
@@ -388,12 +388,12 @@
                                 <Border x:Name="CoreRenderer" Grid.Column="2" CornerRadius="20" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}" Padding="20">
                                     <Grid RowSpacing="8">
                                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                        <Border Width="38" Height="38" CornerRadius="11" Background="#228E9CFF" HorizontalAlignment="Left">
-                                            <local:LucideIcon Kind="layers" Size="18" Stroke="#8E9CFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <Border Width="40" Height="40" CornerRadius="10" Background="{ThemeResource ApexTileBrush}" HorizontalAlignment="Left">
+                                            <local:LucideIcon Kind="layers" Size="20" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel Grid.Row="1" Spacing="4" Margin="0,4,0,0">
                                             <TextBlock x:Name="RendererName" Tag="dyn" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock x:Name="RendererState" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="12" />
+                                            <TextBlock x:Name="RendererState" Tag="dyn" Style="{StaticResource ApexMuted}" />
                                         </StackPanel>
                                         <Button Grid.Row="3" Content="Change" MinWidth="96" HorizontalAlignment="Left" Click="OnChangeRenderer" />
                                     </Grid>
@@ -404,15 +404,15 @@
                                         <Border x:Name="SmoothCard" Padding="20" Visibility="Collapsed">
                                             <StackPanel Spacing="8">
                                                 <Grid>
-                                                    <Border Width="38" Height="38" CornerRadius="11" Background="#2262CBDD" HorizontalAlignment="Left">
-                                                        <local:LucideIcon Kind="waves" Size="18" Stroke="#62CBDD" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    <Border Width="40" Height="40" CornerRadius="10" Background="{ThemeResource ApexTileBrush}" HorizontalAlignment="Left">
+                                                        <local:LucideIcon Kind="waves" Size="20" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                     </Border>
                                                     <ToggleSwitch x:Name="SmoothToggle" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnSmoothToggle"
                                                                   AutomationProperties.Name="NVIDIA Smooth Motion" />
                                                 </Grid>
                                                 <TextBlock Text="NVIDIA Smooth Motion" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,0" />
-                                                <TextBlock Text="Your NVIDIA card adds an extra frame between every two the game draws, so motion looks about twice as smooth. Needs an RTX 40 or 50 series card. Works best with the frame limit at 60 to 90 fps." Style="{StaticResource ApexMuted}" FontSize="12" />
-                                                <TextBlock Text="While it is on, recording with the NVIDIA app freezes the game. To record, use OBS or Apex&apos;s recorder." Style="{StaticResource ApexMuted}" FontSize="12" />
+                                                <TextBlock Text="Your NVIDIA card adds an extra frame between every two the game draws, so motion looks about twice as smooth. Needs an RTX 40 or 50 series card. Works best with the frame limit at 60 to 90 fps." Style="{StaticResource ApexMuted}" />
+                                                <TextBlock Text="While it is on, recording with the NVIDIA app freezes the game. To record, use OBS or Apex&apos;s recorder." Style="{StaticResource ApexMuted}" />
                                                 <TextBlock x:Name="SmoothPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                                 <HyperlinkButton x:Name="SmoothHelp" Content="How to do it by hand" Padding="0" FontSize="12" Visibility="Collapsed" />
                                             </StackPanel>
@@ -420,21 +420,21 @@
                                         <Border x:Name="AfmfCard" Padding="20" Visibility="Collapsed">
                                             <StackPanel Spacing="8">
                                                 <Grid>
-                                                    <Border Width="38" Height="38" CornerRadius="11" Background="#22EF9872" HorizontalAlignment="Left">
-                                                        <local:LucideIcon Kind="waves" Size="18" Stroke="#EF9872" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    <Border Width="40" Height="40" CornerRadius="10" Background="{ThemeResource ApexTileBrush}" HorizontalAlignment="Left">
+                                                        <local:LucideIcon Kind="waves" Size="20" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                     </Border>
                                                     <ToggleSwitch x:Name="AfmfToggle" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnAfmfToggle"
                                                                   AutomationProperties.Name="AMD Fluid Motion Frames" />
                                                 </Grid>
                                                 <TextBlock Text="AMD Fluid Motion Frames" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,0" />
-                                                <TextBlock Text="The AMD driver adds extra frames, so motion looks about twice as smooth. Controls respond a little slower. This applies to every game on this PC." Style="{StaticResource ApexMuted}" FontSize="12" />
+                                                <TextBlock Text="The AMD driver adds extra frames, so motion looks about twice as smooth. Controls respond a little slower. This applies to every game on this PC." Style="{StaticResource ApexMuted}" />
                                                 <TextBlock x:Name="AfmfPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Border>
                                         <Border x:Name="FpsCard" Padding="20" Visibility="Collapsed">
                                             <StackPanel Spacing="8">
                                                 <TextBlock Text="Apex frame limit" FontSize="14" FontWeight="SemiBold" />
-                                                <TextBlock x:Name="FpsDesc" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="12" />
+                                                <TextBlock x:Name="FpsDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
                                                 <TextBlock x:Name="FpsPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                                     <ComboBox x:Name="FpsCombo" Tag="dyn" MinWidth="180" SelectionChanged="OnFpsPicked" AutomationProperties.Name="Apex frame limit" />
@@ -448,14 +448,14 @@
                                 <Border x:Name="CoreRestart" Grid.Row="1" Grid.Column="2" CornerRadius="20" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexCardBrush}" Padding="20">
                                     <StackPanel Spacing="8">
                                         <Grid>
-                                            <Border Width="38" Height="38" CornerRadius="11" Background="#22E0A84F" HorizontalAlignment="Left">
-                                                <local:LucideIcon Kind="rotate-ccw" Size="18" Stroke="#E0A84F" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Border Width="40" Height="40" CornerRadius="10" Background="{ThemeResource ApexTileBrush}" HorizontalAlignment="Left">
+                                                <local:LucideIcon Kind="rotate-ccw" Size="20" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
                                             <ToggleSwitch x:Name="RestartToggle" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
                                                           AutomationProperties.Name="TS3Wrap" />
                                         </Grid>
                                         <TextBlock Text="TS3Wrap" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,0" />
-                                        <TextBlock Text="If you save with low memory and then quit, offers to reopen the game in that save." Style="{StaticResource ApexMuted}" FontSize="12" />
+                                        <TextBlock Text="If you save with low memory and then quit, offers to reopen the game in that save." Style="{StaticResource ApexMuted}" />
                                         <TextBlock x:Name="RestartPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Border>
@@ -471,12 +471,12 @@
                                     <Grid ColumnSpacing="16" VerticalAlignment="Center">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="152" /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions>
                                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                        <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Center">
-                                            <local:LucideIcon Kind="sliders-horizontal" Size="18" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <Border Width="40" Height="40" CornerRadius="10" Background="{ThemeResource ApexTileBrush}" VerticalAlignment="Center">
+                                            <local:LucideIcon Kind="sliders-horizontal" Size="20" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                             <TextBlock Text="Sims3SettingsSetter" Style="{StaticResource ApexStrong}" />
-                                            <TextBlock Text="Fixes for game and graphics settings." ToolTipService.ToolTip="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" FontSize="12" TextTrimming="CharacterEllipsis" MaxLines="2" />
+                                            <TextBlock Text="Fixes for game and graphics settings." ToolTipService.ToolTip="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" MaxLines="2" />
                                         </StackPanel>
                                         <Grid Grid.Column="2" ColumnSpacing="8" VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="6" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Ellipse x:Name="S3ssDot" Width="6" Height="6" Fill="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" Visibility="Collapsed" /><TextBlock x:Name="S3ssPill" Tag="dyn" Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" /></Grid>
                                         <ToggleSwitch x:Name="S3ssToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
@@ -487,12 +487,12 @@
                                     <Grid ColumnSpacing="16" VerticalAlignment="Center">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="152" /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions>
                                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                        <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Center">
-                                            <local:LucideIcon Kind="zap" Size="18" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <Border Width="40" Height="40" CornerRadius="10" Background="{ThemeResource ApexTileBrush}" VerticalAlignment="Center">
+                                            <local:LucideIcon Kind="zap" Size="20" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                             <TextBlock Text="Sims 3 Performance Patch" Style="{StaticResource ApexStrong}" />
-                                            <TextBlock Text="Makes the game run faster. Needs a free Nexus Mods account." ToolTipService.ToolTip="Makes the game run faster. Needs a free Nexus Mods account." Style="{StaticResource ApexMuted}" FontSize="12" TextTrimming="CharacterEllipsis" MaxLines="2" />
+                                            <TextBlock Text="Makes the game run faster. Needs a free Nexus Mods account." ToolTipService.ToolTip="Makes the game run faster. Needs a free Nexus Mods account." Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" MaxLines="2" />
                                         </StackPanel>
                                         <Grid Grid.Column="2" ColumnSpacing="8" VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="6" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Ellipse x:Name="S3ppDot" Width="6" Height="6" Fill="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" Visibility="Collapsed" /><TextBlock x:Name="S3ppPill" Tag="dyn" Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" /></Grid>
                                         <ToggleSwitch x:Name="S3ppToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
@@ -518,12 +518,12 @@
                                     <Grid ColumnSpacing="16" VerticalAlignment="Center">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="152" /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions>
                                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                        <Border Width="36" Height="36" CornerRadius="8" Background="{ThemeResource ApexPillBrush}" VerticalAlignment="Center">
-                                            <local:LucideIcon Kind="file-code" Size="18" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <Border Width="40" Height="40" CornerRadius="10" Background="{ThemeResource ApexTileBrush}" VerticalAlignment="Center">
+                                            <local:LucideIcon Kind="file-code" Size="20" Stroke="{ThemeResource ApexSoftTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                             <TextBlock Text="MonoPatcher" Style="{StaticResource ApexStrong}" />
-                                            <TextBlock Text="Only some script mods need this. Turn it on if a mod asks for it." ToolTipService.ToolTip="Only some script mods need this. Turn it on if a mod asks for it." Style="{StaticResource ApexMuted}" FontSize="12" TextTrimming="CharacterEllipsis" MaxLines="2" />
+                                            <TextBlock Text="Only some script mods need this. Turn it on if a mod asks for it." ToolTipService.ToolTip="Only some script mods need this. Turn it on if a mod asks for it." Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" MaxLines="2" />
                                         </StackPanel>
                                         <Grid Grid.Column="2" ColumnSpacing="8" VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="6" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Ellipse x:Name="MonoDot" Width="6" Height="6" Fill="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" Visibility="Collapsed" /><TextBlock x:Name="MonoPill" Tag="dyn" Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" /></Grid>
                                         <ToggleSwitch x:Name="MonoToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="OnToggle"
@@ -774,7 +774,7 @@
                             <Border Grid.Column="3" Height="36" Padding="2" CornerRadius="8" BorderThickness="1" BorderBrush="{ThemeResource ApexInputBorderBrush}" Background="{ThemeResource ApexCardBrush}">
                             <StackPanel Orientation="Horizontal" Spacing="2">
                                 <StackPanel.Resources>
-                                    <SolidColorBrush x:Key="ToggleButtonBackground" Color="Transparent" />
+                                    <SolidColorBrush x:Key="ToggleButtonBackground" Color="#00808080" />
                                     <SolidColorBrush x:Key="ToggleButtonBorderBrush" Color="Transparent" />
                                     <SolidColorBrush x:Key="ToggleButtonBorderBrushChecked" Color="Transparent" />
                                     <SolidColorBrush x:Key="ToggleButtonBorderBrushCheckedPointerOver" Color="Transparent" />

@@ -49,7 +49,7 @@ public sealed partial class MainWindow
         var g = new Grid { Tag = "-", Margin = new Thickness(4, 16, 4, 4), Height = 32 };
         var head = new Button
         {
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(12, 0, 8, 0),
+            Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0), Padding = new Thickness(12, 0, 8, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch,
         };
         var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
