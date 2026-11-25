@@ -51,7 +51,7 @@ public static class Mods
             .ThenBy(m => m.Rel, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    static IEnumerable<string> Files(string dir, string pattern)
+    internal static IEnumerable<string> Files(string dir, string pattern)
     {
         // (hidden and system files too: the game loads them)
         try { return Directory.EnumerateFiles(dir, pattern, new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 }).ToList(); }
@@ -120,11 +120,12 @@ public static class Mods
         return n;
     }
 
-    // a file of the same name already there (the player put a copy back by hand): " (2)" before the extension. otherSide: the
-    // same folder on the other side, on or off, whose names are taken too (an on and an off mod there would share one Rel)
-    public static string Free(string path, string? otherSide = null)
+    // a file of the same name already there (the player put a copy back by hand): " (2)" before the extension. otherSides: the
+    // same folder on the other side, on or off, whose names are taken too (an on and an off mod there would share one Rel),
+    // and where a merge keeps its mods of that folder
+    public static string Free(string path, params string?[] otherSides)
     {
-        bool Taken(string p) => File.Exists(p) || otherSide is not null && File.Exists(Path.Combine(otherSide, Path.GetFileName(p)));
+        bool Taken(string p) => File.Exists(p) || otherSides.Any(o => o is not null && File.Exists(Path.Combine(o, Path.GetFileName(p))));
         if (!Taken(path)) return path;
         var dir = Path.GetDirectoryName(path)!;
         var name = Path.GetFileNameWithoutExtension(path);

@@ -244,7 +244,7 @@ public sealed class SharedData
         _order = _mods.Select(m =>
         {
             var under = Path.GetRelativePath("Mods", m.Rel).Replace('\\', '/');
-            return dirs is null ? (0, 0, under.ToLowerInvariant()) : ModConflicts.LoadKey(dirs, under);
+            return dirs is null ? (0, 0, ModConflicts.NameKey(under)) : ModConflicts.LoadKey(dirs, under);
         }).ToList();
 
         var first = new Dictionary<(uint, uint, ulong), (int Mod, Dbpf.Entry Entry)>();

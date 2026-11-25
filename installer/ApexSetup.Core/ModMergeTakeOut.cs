@@ -158,7 +158,8 @@ public static partial class ModMerge
             throw new SetupException("This merge changed since the change was planned. Plan it again.");
         log.WriteLine($"edit \"{rec.Name}\" {merged.Rel}: {rec.Originals.Count} originals, {p.Outs.Count} out, {plan?.Sources.Count ?? 0} in the new merge");
         // (the files that come in: not the merge's own originals, which stay where they are kept)
-        bool Stays(MergeSource s) => !p.Was.ContainsKey(s.Mod.Rel) && rec.Originals.Any(o => o.Rel.Equals(s.Mod.Rel, StringComparison.OrdinalIgnoreCase));
+        // (by its kept file: a mod of the list can come in under the name of one that goes out)
+        bool Stays(MergeSource s) => !p.Was.ContainsKey(s.Mod.Rel) && rec.Originals.Any(o => o.Rel.Equals(s.Mod.Rel, StringComparison.OrdinalIgnoreCase) && StorePath(rec, o).Equals(s.Mod.Path, StringComparison.OrdinalIgnoreCase));
         bool Copied(MergeSource s) => plan!.Of!.Held.Contains(s.Mod.Path); // (from outside Mods)
         string Store(MergeSource s) => Path.Combine(rec.Dir, UnderMods(s.Mod.Rel));
         var fresh = plan?.Sources.Where(s => !Stays(s)).ToList() ?? [];
@@ -226,6 +227,7 @@ public static partial class ModMerge
             rec.Pending = new MergePending { Moves = moves.Select(m => new MergeMove(Rel(m.From), Rel(m.To), m.Copy)).ToList(), Tmp = tmp is null ? null : Rel(tmp) };
             Save(rec);
             journal = true;
+            FailPoint("journal");
             var n = 0;
             foreach (var m in moves)
             {
@@ -311,6 +313,7 @@ public static partial class ModMerge
 
     // The moves of a change that did not finish, undone from the last to the first: each file back where it was, a copy the
     // change made removed, the new merged file deleted. Only inside Mods and the merges' folder, whatever the record says.
+    // It can run again on the same record (a start that ended halfway): what is already back is left alone.
     static void Undo(string docs, MergeRecord rec, TextWriter? log)
     {
         string Full(string rel) => Path.GetFullPath(Path.Combine(docs, rel));
@@ -323,6 +326,8 @@ public static partial class ModMerge
             try
             {
                 if (!Ours(to) || !File.Exists(to)) continue;
+                // (a file an earlier move was to take from this place and did not, or that is already back: not this move's)
+                if (pending.Moves.Take(i).Any(m => Full(m.From).Equals(to, StringComparison.OrdinalIgnoreCase) && !File.Exists(Full(m.To)))) continue;
                 if (pending.Moves[i].Copy) { if (Keeps(docs, to)) Fs.Retry(() => File.Delete(to)); }
                 else if (Ours(from) && !File.Exists(from))
                 {
@@ -354,15 +359,17 @@ public static partial class ModMerge
         if (!Directory.Exists(store)) return list;
         foreach (var d in Directory.GetDirectories(store, OutPrefix + "*"))
         {
-            foreach (var f in Directory.GetFiles(d, "*", SearchOption.AllDirectories))
+            foreach (var f in Kept(d))
             {
                 var under = Path.GetRelativePath(d, f);
-                var to = Mods.Free(Path.Combine(Mods.Disabled(docs), under), Path.Combine(docs, "Mods", Path.GetDirectoryName(under) ?? ""));
+                // (not under the name of a mod the merge keeps, the file that replaced it: that one could not go back at a split)
+                var to = Mods.Free(Path.Combine(Mods.Disabled(docs), under), Path.Combine(docs, "Mods", Path.GetDirectoryName(under) ?? ""), Path.Combine(store, Path.GetDirectoryName(under) ?? ""));
                 Directory.CreateDirectory(Path.GetDirectoryName(to)!);
                 Fs.Retry(() => File.Move(f, to));
                 list.Add(new ModFile(to, Path.Combine("Mods", Path.GetRelativePath(Mods.Disabled(docs), to)), new FileInfo(to).Length, ModKind.Package, false, false));
             }
-            Directory.Delete(d, true);
+            // (empty now; one Windows will not let go of goes at the next start, and the mods put back are still told)
+            try { Fs.DeleteClear(d); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
         return list;
     }

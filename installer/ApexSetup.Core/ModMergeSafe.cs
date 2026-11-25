@@ -61,10 +61,8 @@ public static partial class ModMerge
         var skip = ok.Select(o => Path.GetFullPath(o.Src.Mod.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (exclude is not null) skip.Add(Path.GetFullPath(exclude));
         var off = Path.GetFullPath(Mods.Disabled(docs)) + Path.DirectorySeparatorChar;
-        List<string> files = [];
-        try { files = Directory.EnumerateFiles(modsDir, "*.package", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true }).ToList(); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
-        foreach (var f in files)
+        // (as the Mods list reads them: a folder that is a link to another drive is loaded too)
+        foreach (var f in Mods.Files(modsDir, "*.package"))
         {
             if (skip.Contains(f) || f.StartsWith(off, StringComparison.OrdinalIgnoreCase) || Keeps(docs, f)) continue;
             if (ModConflicts.LoadKey(dirs, Slash(Path.GetRelativePath(modsDir, f))) is not { } lk) continue;
@@ -210,7 +208,7 @@ public static partial class ModMerge
     static IEnumerable<string> Stores(string docs) => new[] { Folder(docs), OldFolder(docs) }.Where(Directory.Exists).SelectMany(Directory.EnumerateDirectories);
 
     static bool Present(string docs, MergeRecord r) => File.Exists(Path.Combine(docs, r.Merged)) || File.Exists(Path.Combine(Mods.Disabled(docs), UnderMods(r.Merged)))
-        || Stores(docs).Any(d => File.Exists(Path.Combine(d, UnderMods(r.Merged)))); // (a merge inside another merge)
+        || Records(docs).Any(x => x.Dir != r.Dir && x.Originals.Any(o => o.Rel.Equals(r.Merged, StringComparison.OrdinalIgnoreCase) && o.Sha256 == r.Sha256)); // (a merge inside another merge)
 
     // what a store keeps: not what an antivirus adds for a moment beside a package it scans (NAME.PACKAGE.tmp; no mod with .tmp
     // in its name goes into a merge)
@@ -220,8 +218,7 @@ public static partial class ModMerge
         .Where(f => !f.Equals(Path.Combine(dir, "merge.json"), StringComparison.OrdinalIgnoreCase) && Path.GetFileName(f).ToLowerInvariant() is not ("desktop.ini" or "thumbs.db")).ToList();
 
     // a merged file of that name anywhere in Mods (a record that can't be read says only its folder's name)
-    static bool Named(string docs, string name) => Directory.EnumerateFiles(Path.Combine(docs, "Mods"), name + ".package", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint })
-        .Any(f => !Keeps(docs, f));
+    static bool Named(string docs, string name) => Mods.Files(Path.Combine(docs, "Mods"), name + ".package").Any(f => !Keeps(docs, f));
 
     // The merges whose file is no longer there (removed, or its record lost), with what they still keep: those mods are in
     // neither the game nor the Mods list. None while a merge is being made, nor with no Mods folder to go back to (a player
@@ -297,8 +294,7 @@ public static partial class ModMerge
         if (lost.Count == 0) return;
         var taken = Records(docs).Where(r => !lost.Contains(r)).Select(r => r.Merged).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var (mods, off) = (Path.Combine(docs, "Mods"), Mods.Disabled(docs));
-        var files = Directory.EnumerateFiles(mods, "*.package", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint })
-            .Where(f => !Keeps(docs, f)).Select(f => new FileInfo(f)).ToList();
+        var files = Mods.Files(mods, "*.package").Where(f => !Keeps(docs, f)).Select(f => new FileInfo(f)).ToList();
         foreach (var r in lost)
             try
             {

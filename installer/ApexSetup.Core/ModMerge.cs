@@ -122,7 +122,8 @@ public static partial class ModMerge
     public const long MaxBytes = int.MaxValue; // (the game is 32-bit and the index offsets are 32-bit)
     const int MaxEntries = 200_000;
 
-    // test hook: called at "write" (after the first resource), "verify", "move" (after each original) and "rename"
+    // test hook: called at "write" (after the first resource), "verify", "move" (after each original) and "rename"; in a
+    // change to a merge at "journal" (the moves written down), "edit" (after each move) and "commit"
     public static Action<string> FailPoint = _ => { };
     // test hook: the Recycle Bin (tests must not fill the real one)
     public static Action<string> Recycle = ModLibrary.Recycle;
@@ -649,7 +650,7 @@ public static partial class ModMerge
                 try
                 {
                     var to = Path.Combine(Folder(docs), Path.GetFileName(d));
-                    if (!Directory.Exists(to)) Fs.Retry(() => Directory.Move(d, to));
+                    if (!Directory.Exists(to)) Directory.Move(d, to); // (no waiting: across drives it never works, and the next start tries again)
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
             foreach (var d in new[] { old, Folder(docs) })
@@ -701,10 +702,18 @@ public static partial class ModMerge
                         if (!File.Exists(j)) continue;
                         var r = JsonSerializer.Deserialize(File.ReadAllText(j), SetupJson.Default.MergeRecord);
                         if (r is null) continue;
+                        // (a record is read from a folder anyone can put files in: one that names a place outside Mods, or
+                        // that is cut short, is no merge of the launcher's, and what its folder keeps shows as kept mods)
+                        var inMods = Path.Combine(docs, "Mods") + Path.DirectorySeparatorChar;
+                        if (r.Originals is null || r.Originals.Any(o => o is null) || r.Pending is { Moves: null }
+                            || r.Originals.Select(o => o.Rel).Append(r.Merged).Any(rel => string.IsNullOrEmpty(rel) || !Path.GetFullPath(Path.Combine(docs, rel)).StartsWith(inMods, StringComparison.OrdinalIgnoreCase)))
+                        { Engine.Log(new InvalidDataException("not a merge record: " + j)); continue; }
+                        r.Priority ??= new();
+                        r.Name ??= "";
                         r.Dir = d;
                         l.Add(r);
                     }
-                    catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { Engine.Log(e); read &= e is JsonException; }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException) { Engine.Log(e); read &= e is not (IOException or UnauthorizedAccessException); }
             if (read) _records[docs] = l; // (one held a moment by another program is read again the next time)
             return l;
         }

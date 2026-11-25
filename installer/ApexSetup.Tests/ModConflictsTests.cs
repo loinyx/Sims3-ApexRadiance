@@ -240,6 +240,9 @@ static class ModConflictsTests
             "mod conflicts: Resource.cfg priorities and pattern depth");
         check(ModConflicts.CompareKey(K("Overrides/z.package")!.Value, K("Packages/a.package")!.Value) < 0 && ModConflicts.CompareKey(K("Packages/B.package")!.Value, K("Packages/c.package")!.Value) < 0
             && ModConflicts.CompareKey(K("Packages/z.package")!.Value, K("Packages/a/a.package")!.Value) < 0, "mod conflicts: higher priority, then top folder, then case-insensitive name order load first");
+        // (as a folder is listed: capitals compared, so a name in brackets comes after the letters, and a folder before a longer name that starts with its own)
+        check(ModConflicts.CompareKey(K("Packages/Zeta.package")!.Value, K("Packages/[Creator]Hair.package")!.Value) < 0 && ModConflicts.CompareKey(K("Packages/CAS/z.package")!.Value, K("Packages/CAS 2/a.package")!.Value) < 0,
+            "mod conflicts: name order is the folder listing's, for names with brackets and folders that start alike");
 
         var game = new (string, int)[] { ("kSimDied", 3), ("kSimAgeTransition", 7), ("kBoughtObject", 9) };
         var stub = Asm("Sims3GameplaySystems", new Guid("11111111-1111-1111-1111-111111111111"), Array.Empty<(string, string, string, string, int)>(), game);

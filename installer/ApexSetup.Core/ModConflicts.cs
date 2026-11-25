@@ -509,8 +509,11 @@ public static partial class ModConflicts
     public static (int, int, string)? LoadKey(List<Directive> dirs, string rel)
     {
         var i = dirs.FindIndex(d => d.Pattern.IsMatch(rel));
-        return i < 0 ? null : (-dirs[i].Priority, i, rel.ToLowerInvariant());
+        return i < 0 ? null : (-dirs[i].Priority, i, NameKey(rel));
     }
+    // a path as a folder listing orders it: capitals (as Windows compares names, so [ ] ^ _ ` come after the letters), and
+    // folder by folder, a folder's name ending before any character of a longer one
+    public static string NameKey(string rel) => rel.ToUpperInvariant().Replace('/', '\0');
     public static int CompareKey((int, int, string) a, (int, int, string) b) =>
         a.Item1 != b.Item1 ? a.Item1.CompareTo(b.Item1) : a.Item2 != b.Item2 ? a.Item2.CompareTo(b.Item2) : string.CompareOrdinal(a.Item3, b.Item3);
 
