@@ -687,7 +687,7 @@
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                 <local:LucideIcon Kind="search" Size="16" Stroke="{ThemeResource ApexMutedBrush}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                <TextBox x:Name="ModSideSearch" Grid.Column="1" PlaceholderText="Search folders and tags" TextChanged="OnModSideSearch" KeyDown="OnModSideSearchKey" BorderThickness="0" Background="Transparent" Padding="0,5,0,6"
+                                <TextBox x:Name="ModSideSearch" Grid.Column="1" PlaceholderText="Search" TextChanged="OnModSideSearch" KeyDown="OnModSideSearchKey" BorderThickness="0" Background="Transparent" Padding="0,5,0,6"
                                          VerticalAlignment="Center" MinWidth="0" GotFocus="OnModSearchFocus" LostFocus="OnModSearchFocus" AutomationProperties.Name="Search folders and tags">
                                     <TextBox.Resources>
                                         <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
