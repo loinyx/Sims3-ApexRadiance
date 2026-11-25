@@ -95,7 +95,7 @@ public sealed partial class MainWindow
         WatchPlaces();
         var query = _findPage is null ? "" : _findSearch.Text;
         // (Tag="dyn": its texts are set here, not translated in place)
-        var page = new Grid { Tag = "dyn", Padding = new Thickness(24, 20, 24, 0), RowSpacing = 14, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), AllowDrop = true };
+        var page = new Grid { Tag = "dyn", Padding = new Thickness(24, 24, 24, 0), RowSpacing = 14, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), AllowDrop = true };
         for (var i = 0; i < 4; i++) page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         page.RowDefinitions.Add(new RowDefinition());
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(page, T("Find custom content"));
@@ -110,8 +110,7 @@ public sealed partial class MainWindow
         ToolTipService.SetToolTip(backButton, T("Back to your mods"));
         backButton.Click += (_, _) => CloseFind(focus: true);
         top.Children.Add(backButton);
-        top.Children.Add(Heading(T("Find custom content")));
-        top.Children.Add(Muted(T("See which mods a file uses and what is missing.")));
+        top.Children.Add(PageHead(T("Find custom content"), T("See which mods a file uses and what is missing.")));
         Put(top, 0);
 
         var info = new StackPanel();

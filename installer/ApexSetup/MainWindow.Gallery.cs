@@ -90,7 +90,7 @@ public sealed partial class MainWindow
         var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = Visibility.Collapsed,
             Flyout = new Flyout { Content = new StackPanel { Width = 260, Children = { GallerySearch(), new ScrollViewer { Content = GalleryAlbums(), MaxHeight = 520 } } } } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, T("Albums"));
-        main.Children.Add(picker);
+        if (_galBook) main.Children.Add(picker);
         page.SizeChanged += (_, e) =>
         {
             var narrow = e.NewSize.Width < (_galBook ? 900 : 980);
@@ -99,7 +99,7 @@ public sealed partial class MainWindow
             sideColumn.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
             picker.Visibility = narrow ? Visibility.Visible : Visibility.Collapsed;
         };
-        main.Children.Add(GalleryHead());
+        main.Children.Add(GalleryHead(_galBook ? null : picker));
         FullBleed(_galBook);
         _custDrawer = null;
         _boardPaper = null;
@@ -183,7 +183,7 @@ public sealed partial class MainWindow
     // the search box over the albums: kept while the list and the pictures under it are laid again as it is typed in
     FrameworkElement GallerySearch()
     {
-        var box = new TextBox { PlaceholderText = T("Search pictures"), Text = _galQuery, Margin = new Thickness(0, 0, 0, 12) };
+        var box = Field(new TextBox { PlaceholderText = T("Search pictures"), Text = _galQuery, Margin = new Thickness(0, 0, 0, 12) });
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Search pictures"));
         var typed = 0;
         box.TextChanged += (_, _) =>
@@ -365,7 +365,8 @@ public sealed partial class MainWindow
     }
 
     // the title, what it holds, and the controls of the open view; the switch between the two views on the right
-    UIElement GalleryHead()
+    // pick: the albums' list, where a narrow window has no room for them at the side
+    UIElement GalleryHead(FrameworkElement? pick)
     {
         var g = new Grid { ColumnSpacing = 12 };
         g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -383,6 +384,7 @@ public sealed partial class MainWindow
         titles.Children.Add(name);
         var hint = Muted(_galBook ? T("Drag to travel the timeline · click a picture to open it")
             : pics.Count == 1 ? T("1 picture · newest first") : T("{0} pictures · newest first", pics.Count));
+        hint.FontSize = 13;
         if (_galBook) { _boardHint = hint; hint.Foreground = Ink(look); hint.Opacity = 0.7; hint.TextWrapping = TextWrapping.NoWrap; hint.TextTrimming = TextTrimming.CharacterEllipsis; _boardTitle.TextTrimming = TextTrimming.CharacterEllipsis; }
         titles.Children.Add(hint);
         g.Children.Add(titles);
@@ -420,6 +422,7 @@ public sealed partial class MainWindow
         }
         else
         {
+            if (pick is not null) { pick.Height = 36; tools.Children.Add(pick); }
             var by = new ComboBox { MinWidth = 150 };
             by.Items.Add(T("By day"));
             by.Items.Add(T("By household"));
@@ -452,10 +455,10 @@ public sealed partial class MainWindow
     // Albums or Scrapbook: two buttons on a track, the pill sliding under the chosen one
     FrameworkElement ViewSwitch()
     {
-        var track = new Grid { Padding = new Thickness(3), CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center };
+        var track = new Grid { Height = 36, Padding = new Thickness(2), CornerRadius = new CornerRadius(6), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center };
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
-        var pill = new Border { CornerRadius = new CornerRadius(7), Background = new SolidColorBrush(Pick(0xFF2C2C2C, 0xFFE5E5E5)), Width = 118, HorizontalAlignment = HorizontalAlignment.Left,
+        var pill = new Border { CornerRadius = new CornerRadius(4), Background = new SolidColorBrush(Pick(0xFF2C2C2C, 0xFFE5E5E5)), Width = 118, HorizontalAlignment = HorizontalAlignment.Left,
             TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, Translation = new Vector3(_galBook ? 0 : 118, 0, 0) };
         Grid.SetColumnSpan(pill, 2);
         track.Children.Add(pill);
@@ -465,7 +468,7 @@ public sealed partial class MainWindow
             var c = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
             c.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
             c.Children.Add(new TextBlock { Text = text, FontSize = 13 });
-            var b = new Button { Content = c, Height = 34, HorizontalAlignment = HorizontalAlignment.Stretch, BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            var b = new Button { Content = c, Height = 30, HorizontalAlignment = HorizontalAlignment.Stretch, BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 Foreground = _galBook == book ? Res("TextFillColorPrimaryBrush") : Res("ApexSoftTextBrush") };
             b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -487,8 +490,8 @@ public sealed partial class MainWindow
     {
         var s = new StackPanel { Spacing = 26 };
         var pics = InAlbum();
-        if (pics.Count == 0 && _galQuery.Length > 0) { s.Children.Add(Muted(T("Nothing found for “{0}”.", _galQuery))); return s; }
-        if (pics.Count == 0) { s.Children.Add(Muted(_galAlbum == Gallery.Favourites ? T("No favourites yet: open a picture and add it.") : T("No pictures here yet."))); return s; }
+        if (pics.Count == 0 && _galQuery.Length > 0) { s.Children.Add(EmptyPlace("search", T("Nothing found for “{0}”.", _galQuery))); return s; }
+        if (pics.Count == 0) { s.Children.Add(EmptyPlace("image", _galAlbum == Gallery.Favourites ? T("No favourites yet: open a picture and add it.") : T("No pictures here yet."))); return s; }
         var shown = pics.Take(_galLimit).ToList();
         var groups = _galByHome
             ? shown.GroupBy(p => Gallery.HouseholdOf(p, _gal!, _galSaves) ?? T("Not sorted yet")).Select(x => (Key: x.Key, List: x.ToList()))
@@ -498,7 +501,7 @@ public sealed partial class MainWindow
         {
             var block = new StackPanel { Spacing = 10 };
             var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            head.Children.Add(new TextBlock { Text = key, FontSize = 17, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            head.Children.Add(new TextBlock { Text = key, FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
             head.Children.Add(new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 1, 8, 2), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock { Text = list.Count.ToString(), FontSize = 12, Foreground = Res("ApexSoftTextBrush") } });
             if (!_galByHome && string.Join(" · ", list.Select(p => Gallery.HouseholdOf(p, _gal!, _galSaves)).OfType<string>().Distinct()) is { Length: > 0 } homes)
@@ -2012,7 +2015,7 @@ public sealed partial class MainWindow
 
     void FullBleed(bool on)
     {
-        Scroller.Padding = on ? new Thickness(0) : new Thickness(24, 20, 24, 0);
+        Scroller.Padding = on ? new Thickness(0) : new Thickness(32, 24, 32, 0);
         Screens.Margin = on ? new Thickness(0) : new Thickness(0, 0, 0, 32);
         Scroller.VerticalScrollBarVisibility = on ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
         Scroller.VerticalScrollMode = on ? ScrollMode.Disabled : ScrollMode.Enabled;

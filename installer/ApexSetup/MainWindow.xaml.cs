@@ -550,11 +550,11 @@ public sealed partial class MainWindow : Window
         ContentFrame.BorderBrush = on ? Res("ApexCardBorderBrush") : null;
         ContentFrame.Background = on ? Res("ApexCardBrush") : null;
         ContentFrame.MaxHeight = on && Nav.ActualHeight > 0 ? Math.Max(320, Nav.ActualHeight - 48) : double.PositiveInfinity;
-        Footer.Padding = new Thickness(on ? 28 : 24, 0, on ? 28 : 24, 0);
+        Footer.Padding = new Thickness(on ? 28 : 32, 0, on ? 28 : 32, 0);
         if (on) Scroller.Padding = new Thickness(32, 24, 32, 0);
         // the card's own header: Apex Radiance, its version and the steps (each screen's own steps row then stays hidden)
         WizardBrand.Visibility = on && !(_step == DoneStep && _doneClean) ? Visibility.Visible : Visibility.Collapsed; // (the install's end has its own logo)
-        foreach (var host in new[] { StepsGame, StepsComponents, StepsRenderer, StepsInstall }) host.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        foreach (var host in new[] { StepsGame, StepsComponents, StepsRenderer, StepsInstall }) host.Visibility = on || host.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (on)
         {
             WizardVersion.Text = Latest(Components.Apex) ?? "";
@@ -641,7 +641,7 @@ public sealed partial class MainWindow : Window
         {
             WizardRows.Children.Add(wizard
                 ? new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(0, 14, 0, 2) }
-                : new TextBlock { Text = text, FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 24, 0, 6) });
+                : Section(text));
             group = null;
         }
         void Add(Border row)
@@ -655,7 +655,18 @@ public sealed partial class MainWindow : Window
             if (group.Children.Count > 0) { row.BorderThickness = new Thickness(0, 1, 0, 0); row.BorderBrush = Res("ApexHairlineBrush"); }
             group.Children.Add(row);
         }
-        foreach (var other in OtherModsSection.Children.OfType<Border>()) Soft(other);
+        foreach (var other in OtherModsSection.Children.OfType<Border>())
+        {
+            Soft(other);
+            if (other.Child is Grid row && _tight.TryAdd(row, row)) Tight(row);
+        }
+        // a narrow window: the words of a row get the room its state and control can spare
+        static void Tight(Grid g) => g.SizeChanged += (_, e) =>
+        {
+            var tight = e.NewSize.Width < 700;
+            g.ColumnDefinitions[2].Width = new GridLength(tight ? 128 : 180);
+            g.ColumnDefinitions[3].Width = tight ? GridLength.Auto : new GridLength(200);
+        };
         Border Card(UIElement child, double pad)
         {
             if (wizard) return new Border { Child = child, Padding = new Thickness(16, 12, 16, 12), MinHeight = 62 };
@@ -675,7 +686,7 @@ public sealed partial class MainWindow : Window
             g.Children.Add(icon);
             var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            title.Children.Add(new TextBlock { Text = name, FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            title.Children.Add(new TextBlock { Text = name, FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
             if (pill is not null)
                 title.Children.Add(new Border
                 {
@@ -706,6 +717,7 @@ public sealed partial class MainWindow : Window
             foreach (var e in ends) if (e is not null) { e.Margin = new Thickness(0); e.VerticalAlignment = VerticalAlignment.Center; Put(end, e); }
             Grid.SetColumn(end, 3);
             g.Children.Add(end);
+            if (!wizard) Tight(g);
             Add(Card(g, 8));
         }
         // (the install's rows have no state column: a switch that cannot be used says why in the row's own line)
@@ -767,7 +779,7 @@ public sealed partial class MainWindow : Window
             Grid.SetColumn(right, 2); g.Children.Add(right);
             var hero = Card(g, 18);
             hero.MinHeight = 88;
-            hero.CornerRadius = new CornerRadius(10);
+            hero.CornerRadius = new CornerRadius(12);
             // (the glow sits behind the card's own fill: a gradient from the logo's purple at the left into the card colour)
             var fill = ((SolidColorBrush)Res("ApexCardBrush")).Color;
             var glow = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 0.6) };
@@ -954,6 +966,7 @@ public sealed partial class MainWindow : Window
     // a Components card: read by its fill, a border just off it, a lighter fill under the pointer (handlers added once)
     // (weak keys: the rows are built again on every refresh, and a set would keep every old one alive)
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Border, object> _softened = new();
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Grid, Grid> _tight = new();
     static void Soft(Border b)
     {
         b.Background = Res("ApexCardBrush");
@@ -985,6 +998,11 @@ public sealed partial class MainWindow : Window
     {
         foreach (var (key, dark, light) in new[] { ("Success", 0xFF14231Bu, 0xFFE4F3EAu), ("Warning", 0xFF2A2214u, 0xFFFBF1DFu), ("Error", 0xFF2C1718u, 0xFFFBE6E5u), ("Informational", 0xFF1E1E1Eu, 0xFFEFEFEFu) })
             Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = new SolidColorBrush(Pick(dark, light));
+        Field(ModSideSearch);
+        // Mods' two views, as the gallery's: the one in use on a quiet pill
+        foreach (var view in new[] { ModsViewList, ModsViewGallery })
+            foreach (var state in new[] { "", "PointerOver", "Pressed" })
+                view.Resources["ToggleButtonBackgroundChecked" + state] = new SolidColorBrush(Pick(0xFF2C2C2C, 0xFFE5E5E5));
         if (AppWindow?.TitleBar is { } bar)
         {
             var fg = _light ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;

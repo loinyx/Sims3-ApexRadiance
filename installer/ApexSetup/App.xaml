@@ -80,6 +80,12 @@
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
+            <!-- one shape for every control, and one height for what is picked in a row: 36 -->
+            <CornerRadius x:Key="ControlCornerRadius">6</CornerRadius>
+            <CornerRadius x:Key="OverlayCornerRadius">12</CornerRadius>
+            <Style TargetType="ComboBox" BasedOn="{StaticResource DefaultComboBoxStyle}">
+                <Setter Property="MinHeight" Value="36" />
+            </Style>
             <Style x:Key="ApexCard" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource ApexCardBrush}" />
                 <Setter Property="BorderBrush" Value="{ThemeResource ApexCardBorderBrush}" />

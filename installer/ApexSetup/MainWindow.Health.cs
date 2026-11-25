@@ -54,7 +54,7 @@ public sealed partial class MainWindow
         Scroller.Padding = new Thickness(0);
         if (_game is null)
         {
-            var none = new StackPanel { Spacing = 8, Padding = new Thickness(24, 20, 24, 0) };
+            var none = new StackPanel { Spacing = 8, Padding = new Thickness(32, 24, 32, 0) };
             none.Children.Add(Heading(T("Health")));
             none.Children.Add(Muted(T("Choose the game first.")));
             host.Children.Add(none);
@@ -64,7 +64,7 @@ public sealed partial class MainWindow
         var home = _healthPage.Length == 0;
         var tint = StateTint(255);
         host.Children.Add(new SoftGlow(tint, _light ? (home ? 0.075 : 0.04) : home ? 0.1 : 0.045, home ? 0.22 : 0) { Height = home ? 640 : 340 });
-        var body = new StackPanel { MaxWidth = 860, Spacing = 32, Padding = new Thickness(24, 20, 24, 8) };
+        var body = new StackPanel { MaxWidth = 984, Spacing = 28, Padding = new Thickness(32, 24, 32, 8) };
         host.Children.Add(body);
         if (home) HealthHome(body);
         else if (_healthPage == HistoryPage) HealthHistory(body);
@@ -74,13 +74,13 @@ public sealed partial class MainWindow
     // ---------- the look of its parts ----------
 
     // a surface the light behind it reaches through a little
-    static Border Glass(UIElement child, double radius = 10)
+    static Border Glass(UIElement child, double radius = 12)
     {
         return new Border { Child = child, CornerRadius = new CornerRadius(radius), BorderThickness = new Thickness(1), Background = new SolidColorBrush(Pick(0xE0171717, 0xEBFFFFFF)),
             BorderBrush = new SolidColorBrush(Pick(0x12FFFFFF, 0x14000000)) };
     }
 
-    static TextBlock SectionTitle(string text) => new() { Text = text, FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) };
+    static TextBlock SectionTitle(string text) => new() { Text = text, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) };
 
     static FrameworkElement IconTile(string icon, Windows.UI.Color tint) => new Border
     {
@@ -177,7 +177,7 @@ public sealed partial class MainWindow
 
         var checks = new StackPanel { Spacing = 8 };
         checks.Children.Add(SectionTitle(T("Checks")));
-        var grid = new CardGrid { MinItemWidth = 300, Spacing = 8 };
+        var grid = new CardGrid { MinItemWidth = 310, Spacing = 8 };
         foreach (var a in HealthAreas) grid.Children.Add(AreaTile(a));
         checks.Children.Add(grid);
         body.Children.Add(checks);
@@ -237,8 +237,7 @@ public sealed partial class MainWindow
         AutomationProperties.SetName(back, T("Back to {0}", T("Health")));
         var head = new StackPanel { Spacing = 4 };
         head.Children.Add(back);
-        head.Children.Add(Heading(title));
-        if (sub.Length > 0) head.Children.Add(new TextBlock { Text = char.ToUpper(sub[0], LangCulture()) + sub[1..], FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        head.Children.Add(PageHead(title, sub.Length > 0 ? char.ToUpper(sub[0], LangCulture()) + sub[1..] : null));
         body.Children.Add(head);
         if (NoteStrip() is not { } strip) return;
         strip.Margin = new Thickness(0, -14, 0, -14);
@@ -370,7 +369,7 @@ public sealed partial class MainWindow
             var words = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             words.Children.Add(new TextBlock { Text = tabs[i].Name, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Res(on ? "TextFillColorPrimaryBrush" : "ApexMutedBrush") });
             words.Children.Add(new TextBlock { Text = tabs[i].Count.ToString(LangCulture()), FontSize = 13, Foreground = Res("ApexMutedBrush") });
-            var b = new Button { Content = words, Height = 34, Padding = new Thickness(14, 0, 14, 0), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(0),
+            var b = new Button { Content = words, Height = 30, Padding = new Thickness(14, 0, 14, 0), CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(0),
                 Background = new SolidColorBrush(on ? Pick(0x1FFFFFFF, 0x14000000) : Microsoft.UI.Colors.Transparent) };
             b.Click += (_, _) => { (_conflictTab, _conflictOpen, _healthNote) = (at, "", null); BuildHealth(); };
             AutomationProperties.SetName(b, $"{tabs[i].Name} {tabs[i].Count}");
@@ -378,8 +377,8 @@ public sealed partial class MainWindow
             bar.Children.Add(b);
         }
         var page = new StackPanel { Spacing = 12 };
-        var strip = Glass(bar, 9);
-        strip.Padding = new Thickness(4);
+        var strip = Glass(bar, 6);
+        (strip.Height, strip.Padding) = (36, new Thickness(2));
         strip.HorizontalAlignment = HorizontalAlignment.Left;
         strip.Margin = new Thickness(0, 0, 0, 4);
         page.Children.Add(strip);

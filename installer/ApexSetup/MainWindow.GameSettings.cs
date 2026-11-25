@@ -51,29 +51,13 @@ public sealed partial class MainWindow
         _gsSync.Clear();
         var host = ScreenGameSettings;
         host.Children.Clear();
-        var head = new Grid { ColumnSpacing = 16 };
-        head.ColumnDefinitions.Add(new ColumnDefinition());
-        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var sub = Muted(T("Graphics and speed options the game keeps in its files. Close the game before you apply."));
-        sub.FontSize = 13;
-        sub.TextWrapping = TextWrapping.Wrap;
-        head.Children.Add(Col(Heading(T("Game settings")), sub));
-        host.Children.Add(head);
+        var resetAll = Id(Button(T("Reset all to default"), GameSettingsToDefault), "GameSettingsReset");
+        host.Children.Add(PageHead(T("Game settings"), T("Graphics and speed options the game keeps in its files. Close the game before you apply."), _game is null ? null : resetAll));
         if (_game is not { } g) { host.Children.Add(Muted(T("Choose the game first."))); return; }
         if (_gsFor != g.Bin) LoadGameSettings();
-        var resetAll = Id(Button(T("Reset all to default"), GameSettingsToDefault), "GameSettingsReset");
-        resetAll.VerticalAlignment = VerticalAlignment.Center;
         resetAll.IsEnabled = !_busy;
-        Grid.SetColumn(resetAll, 1);
-        head.Children.Add(resetAll);
         var list = new SettingList(host, false);
-        void Label(string text, FrameworkElement? end = null)
-        {
-            var row = new Grid { Margin = new Thickness(0, 24, 0, 6) };
-            row.Children.Add(new TextBlock { Text = text, FontSize = 14, FontWeight = FontWeights.SemiBold });
-            if (end is not null) { end.HorizontalAlignment = HorizontalAlignment.Right; end.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(end); }
-            host.Children.Add(row);
-        }
+        void Label(string text, FrameworkElement? end = null) => host.Children.Add(Section(text, end));
 
         Label(T("Graphics"));
         GraphicsRows(list);
@@ -138,9 +122,7 @@ public sealed partial class MainWindow
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(list.Wizard ? 0 : 96) });
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
-        g.Children.Add(icon is null ? new Border { Width = 36 }
-            : new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Pick(0xFF232323, 0xFFF0F0F0)), VerticalAlignment = VerticalAlignment.Center,
-                Child = Lucide.Icon(icon, 18, Res("ApexSoftTextBrush")) });
+        g.Children.Add(icon is null ? new Border { Width = 36 } : RowIcon(icon));
         var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         words.Children.Add(new TextBlock { Text = name, FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         var line = new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 };

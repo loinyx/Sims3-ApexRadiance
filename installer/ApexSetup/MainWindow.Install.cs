@@ -114,6 +114,6 @@ public sealed partial class MainWindow
             LauncherMode.Portable => (T("Not installed: running from {0}.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Install it"), () => _ = ApplyInstallMode(true, self, null))),
             _ => (T("Running from {0}, not installed yet.", ShortPath(Path.GetDirectoryName(self) ?? self)), Button(T("Choose…"), () => UpgradeShow(0))),
         };
-        return Row(T("This copy of the launcher"), text, DryRun ? null : action);
+        return Row("hard-drive", T("This copy of the launcher"), text, DryRun ? null : action);
     }
 }

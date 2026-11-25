@@ -192,9 +192,8 @@ public sealed partial class MainWindow
             ModGrid.Visibility = _modsGrid ? Visibility.Visible : Visibility.Collapsed;
             ModsViewList.IsChecked = !_modsGrid;
             ModsViewGallery.IsChecked = _modsGrid;
-            // (the chosen one's icon in the colour that reads on the accent)
-            ModsViewListIcon.Stroke = Res(_modsGrid ? "ApexSoftTextBrush" : "TextOnAccentFillColorPrimaryBrush");
-            ModsViewGalleryIcon.Stroke = Res(_modsGrid ? "TextOnAccentFillColorPrimaryBrush" : "ApexSoftTextBrush");
+            ModsViewListIcon.Stroke = Res(_modsGrid ? "ApexMutedBrush" : "TextFillColorPrimaryBrush");
+            ModsViewGalleryIcon.Stroke = Res(_modsGrid ? "TextFillColorPrimaryBrush" : "ApexMutedBrush");
             HuntBanner();
             ShowMergeUpdates();
 

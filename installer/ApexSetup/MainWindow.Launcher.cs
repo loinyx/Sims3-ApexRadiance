@@ -626,7 +626,7 @@ public sealed partial class MainWindow
     {
         var host = ScreenNews;
         host.Children.Clear();
-        host.Children.Add(Col(Heading(T("What's new")), Muted(T("Release notes from each project's GitHub page."))));
+        host.Children.Add(PageHead(T("What's new"), T("Release notes from each project's GitHub page.")));
         var s = _state;
         var shown = new List<(string Name, Release? Release, string? Installed)>
         {
@@ -660,7 +660,7 @@ public sealed partial class MainWindow
             foreach (var l in lines)
             {
                 (used < Budget ? notes : more).Children.Add(l);
-                used += (l as TextBlock)?.Text.Length ?? 0;
+                used += (l as TextBlock ?? (l as Grid)?.Children[1] as TextBlock)?.Text.Length ?? 0;
             }
             if (more.Children.Count > 0)
             {
@@ -696,7 +696,22 @@ public sealed partial class MainWindow
             }
             if (skip || line.Trim().Trim('-', '*', '_').Length == 0 || line.TrimStart().StartsWith('|') || line.TrimStart().StartsWith("![") || line.TrimStart().StartsWith("<")) continue;
             var t = line.TrimStart();
-            yield return Body(t.StartsWith("- ") || t.StartsWith("* ") ? "• " + Plain(t[2..]) : Plain(t));
+            if (t.StartsWith("- ") || t.StartsWith("* "))
+            {
+                // (the lines of a long one start under its text, not under the dot)
+                var item = new Grid { ColumnSpacing = 8 };
+                item.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                item.ColumnDefinitions.Add(new ColumnDefinition());
+                var text = Body(Plain(t[2..]));
+                Grid.SetColumn(text, 1);
+                item.Children.Add(Body("•"));
+                item.Children.Add(text);
+                yield return item;
+                continue;
+            }
+            var line1 = Body(Plain(t));
+            if (t.StartsWith("**") && t.EndsWith("**") && t.Length > 4) (line1.FontWeight, line1.Foreground) = (FontWeights.SemiBold, Res("TextFillColorPrimaryBrush"));
+            yield return line1;
         }
     }
 
@@ -709,18 +724,18 @@ public sealed partial class MainWindow
     {
         var host = ScreenSettings;
         host.Children.Clear();
-        host.Children.Add(Heading(T("Settings")));
+        host.Children.Add(PageHead(T("Settings"), T("How the launcher works. Changes are saved as you make them.")));
         host.Children.Add(Section(T("Starting the game")));
         var installed = Environment.ProcessPath is { } exe && LauncherInstall.IsInstalledCopy(exe);
-        host.Children.Add(Toggle(T("Start with Windows"), T("Opens quietly in the notification area, so updates are ready before you play."), LauncherInstall.RunsAtStartup(),
+        host.Children.Add(Toggle("power", T("Start with Windows"), T("Opens quietly in the notification area, so updates are ready before you play."), LauncherInstall.RunsAtStartup(),
             on => LauncherInstall.SetRunAtStartup(Paths.InstalledExe, on), enabled: installed));
-        host.Children.Add(Toggle(T("Hide while playing"), T("The launcher goes to the notification area while the game runs and comes back when it closes."), _settings.HideWhilePlaying,
+        host.Children.Add(Toggle("eye-off", T("Hide while playing"), T("The launcher goes to the notification area while the game runs and comes back when it closes."), _settings.HideWhilePlaying,
             on => { _settings.HideWhilePlaying = on; _settings.Save(); }));
-        host.Children.Add(Toggle(T("Apply safe fixes without asking"), T("Like the Resource.cfg and Edge Smoothing fixes. Each file is copied first, so you can undo them."), _settings.FixSafeAutomatically,
+        host.Children.Add(Toggle("shield-check", T("Apply safe fixes without asking"), T("Like the Resource.cfg and Edge Smoothing fixes. Each file is copied first, so you can undo them."), _settings.FixSafeAutomatically,
             on => { _settings.FixSafeAutomatically = on; _settings.Save(); }));
         host.Children.Add(Section(T("Updates")));
-        host.Children.Add(Row(T("Apex Launcher {0}", App.Version), T("Updates itself from each Apex Radiance release."), null));
-        host.Children.Add(Toggle(T("Install updates when I press Play"), T("Ready updates install first, then the game starts. When off, Play starts the game as it is."), _settings.InstallUpdatesOnPlay,
+        host.Children.Add(Row("app-window", T("Apex Launcher {0}", App.Version), T("Updates itself from each Apex Radiance release."), null));
+        host.Children.Add(Toggle("wand-sparkles", T("Install updates when I press Play"), T("Ready updates install first, then the game starts. When off, Play starts the game as it is."), _settings.InstallUpdatesOnPlay,
             on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
         host.Children.Add(InstallModeRow());
         host.Children.Add(Section(T("Home")));
@@ -730,23 +745,23 @@ public sealed partial class MainWindow
         picture.SelectedIndex = Math.Max(0, Array.IndexOf(kinds, _settings.HomePicture));
         picture.SelectionChanged += (_, _) => { _settings.HomePicture = kinds[Math.Max(0, picture.SelectedIndex)]; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picture, T("Picture on top"));
-        host.Children.Add(Row(T("Picture on top"), T("The gallery picture you chose there or the newest one, the photo the game keeps of the household, or none."), picture));
+        host.Children.Add(Row("image", T("Picture on top"), T("The gallery picture you chose there or the newest one, the photo the game keeps of the household, or none."), picture));
         var chosen = (_gal ??= LoadGallery()).HomePicture is { } hp && File.Exists(hp);
         var choose = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         choose.Children.Add(Button(T("Choose in the gallery"), () => Show(GalleryScreen)));
         if (chosen) choose.Children.Add(Button(T("Use the newest"), () => { _gal!.HomePicture = null; Gallery.Save(_gal); BuildSettings(); }));
-        host.Children.Add(Row(T("Gallery picture"), chosen ? T("The one you chose in the gallery (Use on Home).") : T("The newest picture you took. In the gallery, Use on Home keeps one."), choose));
+        host.Children.Add(Row("image-plus", T("Gallery picture"), chosen ? T("The one you chose in the gallery (Use on Home).") : T("The newest picture you took. In the gallery, Use on Home keeps one."), choose));
         int[] heights = [240, 330, 440];
         var height = new ComboBox { MinWidth = 200 };
         foreach (var label in new[] { T("Low"), T("Medium"), T("Tall") }) height.Items.Add(label);
         height.SelectedIndex = Math.Max(0, Array.IndexOf(heights, _settings.HomePictureHeight) is var hi && hi >= 0 ? hi : 1);
         height.SelectionChanged += (_, _) => { _settings.HomePictureHeight = heights[Math.Max(0, height.SelectedIndex)]; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(height, T("Picture height"));
-        host.Children.Add(Row(T("Picture height"), T("How much of the page the picture takes."), height));
+        host.Children.Add(Row("arrow-up-down", T("Picture height"), T("How much of the page the picture takes."), height));
         var strength = new Slider { Minimum = 30, Maximum = 100, StepFrequency = 5, Width = 200, Value = Math.Clamp(_settings.HomePictureStrength, 30, 100) };
         strength.ValueChanged += (_, e) => { _settings.HomePictureStrength = (int)e.NewValue; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(strength, T("Picture strength"));
-        host.Children.Add(Row(T("Picture strength"), T("Lower it for a quieter picture behind the save's name."), strength));
+        host.Children.Add(Row("sliders-horizontal", T("Picture strength"), T("Lower it for a quieter picture behind the save's name."), strength));
         host.Children.Add(Section(T("Window")));
         string[] backs = ["mica", "micaalt", "acrylic", "solid"];
         var back = new ComboBox { MinWidth = 200 };
@@ -754,18 +769,17 @@ public sealed partial class MainWindow
         back.SelectedIndex = Math.Max(0, Array.IndexOf(backs, _settings.Backdrop));
         back.SelectionChanged += (_, _) => { _settings.Backdrop = backs[Math.Max(0, back.SelectedIndex)]; _settings.Save(); ApplyBackdrop(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(back, T("Window background"));
-        host.Children.Add(Row(T("Window background"), T("Mica and Acrylic take a tint from your desktop wallpaper; Solid colour takes none."), back));
+        host.Children.Add(Row("layers", T("Window background"), T("Mica and Acrylic take a tint from your desktop wallpaper; Solid colour takes none."), back));
         host.Children.Add(Section(T("General")));
-        host.Children.Add(Row(T("Language"), Languages.First(l => l.Code == Lang).Name, Button(T("Change"), () => OnLanguage(LangButton, new RoutedEventArgs()))));
-        host.Children.Add(Row(T("Game folder"), _game?.Root ?? T("No game chosen"), Id(Button(T("Change"), () => Show(GameStep)), "SettingsGame")));
-        host.Children.Add(Row(T("Logs"), T("What to attach when you ask for help."), Button(T("Open logs folder"), () => OpenFolder(App.LogDir))));
-        host.Children.Add(Row(T("Repair or remove"), T("Repair the files, remove a component, or go back to a restore point."), Id(Button(T("Open"), () => Show(Manage)), "SettingsManage")));
+        host.Children.Add(Row("languages", T("Language"), Languages.First(l => l.Code == Lang).Name, Button(T("Change"), () => OnLanguage(LangButton, new RoutedEventArgs()))));
+        host.Children.Add(Row("folder", T("Game folder"), _game?.Root ?? T("No game chosen"), Id(Button(T("Change"), () => Show(GameStep)), "SettingsGame")));
+        host.Children.Add(Row("file-down", T("Logs"), T("What to attach when you ask for help."), Button(T("Open logs folder"), () => OpenFolder(App.LogDir))));
+        host.Children.Add(Row("wrench", T("Repair or remove"), T("Repair the files, remove a component, or go back to a restore point."), Id(Button(T("Open"), () => Show(Manage)), "SettingsManage")));
         host.Children.Add(Section(T("Uninstall")));
-        host.Children.Add(Row(T("Uninstall Apex Launcher"), T("Removes Apex Radiance and everything the launcher installed, puts back every file it replaced, then the launcher itself. Your saves and your own mods stay."),
+        host.Children.Add(Row("trash-2", T("Uninstall Apex Launcher"), T("Removes Apex Radiance and everything the launcher installed, puts back every file it replaced, then the launcher itself. Your saves and your own mods stay."),
             Id(Button(T("Uninstall…"), async () => await UninstallAsync(), danger: true), "SettingsUninstall")));
         host.Children.Add(Section(T("About and licences")));
-        host.Children.Add(Row(T("Credits and licences"), T("Apex Radiance by loinyx, and the authors of every component the launcher installs."), Id(Button(T("Open"), () => Show(About)), "SettingsAbout")));
-        GroupCards(host);
+        host.Children.Add(Row("info", T("Credits and licences"), T("Apex Radiance by loinyx, and the authors of every component the launcher installs."), Id(Button(T("Open"), () => Show(About)), "SettingsAbout")));
     }
 
     // ---------- uninstall ----------
@@ -941,36 +955,64 @@ public sealed partial class MainWindow
     static TextBlock Body(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexBody"], Foreground = Res("ApexSoftTextBrush") };
     static TextBlock Muted(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexMuted"] };
     static TextBlock Eyebrow(string t) => new() { Text = t, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush") };
-    static TextBlock Section(string t) => new() { Text = t, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 16, 0, 0) };
 
-    // rows of one section in one card, divided by hairlines, instead of a card each (Settings): calmer, and the eye reads
-    // the section as one group
-    static void GroupCards(Panel host)
+    // every page opens the same: its title, one line under it, and what acts on the whole page on the right
+    static Grid PageHead(string title, string? sub = null, FrameworkElement? act = null)
     {
-        var kids = host.Children.ToList();
-        host.Children.Clear();
-        StackPanel? group = null;
-        foreach (var k in kids)
-        {
-            if (k is Border { Child: { } inner } card && card.Style == Application.Current.Resources["ApexCard"])
-            {
-                if (group is null)
-                {
-                    group = new StackPanel();
-                    host.Children.Add(new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), Child = group });
-                }
-                card.Child = null;
-                group.Children.Add(new Border
-                {
-                    Child = inner, Padding = new Thickness(18, 14, 18, 14), BorderBrush = Res("ApexCardBorderBrush"),
-                    BorderThickness = new Thickness(0, group.Children.Count == 0 ? 0 : 1, 0, 0),
-                });
-                continue;
-            }
-            group = null;
-            host.Children.Add(k);
-        }
+        var g = new Grid { ColumnSpacing = 16 };
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var name = Heading(title);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(name, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level1);
+        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { name } };
+        if (sub is not null) words.Children.Add(PageSub(sub));
+        g.Children.Add(words);
+        if (act is not null) { Grid.SetColumn(act, 1); act.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(act); }
+        return g;
     }
+    static TextBlock PageSub(string t) { var s = Muted(t); s.FontSize = 13; return s; }
+
+    // a section's title, with what acts on the section on the right
+    static Grid Section(string t, FrameworkElement? end = null)
+    {
+        var g = new Grid { Margin = new Thickness(0, 24, 0, 6) };
+        var title = new TextBlock { Text = t, FontSize = 15, FontWeight = FontWeights.SemiBold };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(title, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
+        g.Children.Add(title);
+        if (end is not null) { end.HorizontalAlignment = HorizontalAlignment.Right; end.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(end); }
+        return g;
+    }
+
+    // the icon at the start of a row
+    static Border RowIcon(string icon) => new()
+    {
+        Width = 36, Height = 36, CornerRadius = new CornerRadius(8), VerticalAlignment = VerticalAlignment.Center,
+        Background = new SolidColorBrush(Pick(0xFF232323, 0xFFF0F0F0)), Child = Lucide.Icon(icon, 18, Res("ApexSoftTextBrush")),
+    };
+
+    // a field to search in: a card's fill and one even line around it, in the height of the buttons beside it
+    static TextBox Field(TextBox b)
+    {
+        b.Padding = new Thickness(12, 8, 8, 8);
+        b.Background = Res("ApexCardBrush");
+        b.BorderBrush = Res("ApexInputBorderBrush");
+        b.Resources["TextControlBackgroundPointerOver"] = b.Resources["TextControlBackgroundFocused"] = Res("ApexCardBrush");
+        b.Resources["TextControlBorderBrushPointerOver"] = new SolidColorBrush(Pick(0xFF454545, 0xFFB4B4B4));
+        b.Resources["TextControlBorderBrushFocused"] = Res("ApexAccentBrush");
+        b.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(1);
+        return b;
+    }
+
+    // a place with nothing in it yet
+    static FrameworkElement EmptyPlace(string icon, string text)
+    {
+        var mark = Lucide.Icon(icon, 32, Res("ApexIconMutedBrush"), 1.6);
+        mark.HorizontalAlignment = HorizontalAlignment.Center;
+        var words = PageSub(text);
+        (words.TextAlignment, words.MaxWidth) = (TextAlignment.Center, 320);
+        return new StackPanel { Spacing = 12, Margin = new Thickness(0, 64, 0, 64), HorizontalAlignment = HorizontalAlignment.Center, Children = { mark, words } };
+    }
+
     static UIElement Col(params UIElement[] items) { var s = new StackPanel { Spacing = 4 }; foreach (var i in items) s.Children.Add(i); return s; }
     static Border Card(UIElement child, bool pad = true) => new() { Style = (Style)Application.Current.Resources["ApexCard"], Child = child, Padding = pad ? new Thickness(18, 14, 18, 14) : new Thickness(0) };
     static Border Card(UIElement a, UIElement b) => Card(Col(a, b));
@@ -985,7 +1027,7 @@ public sealed partial class MainWindow
 
     static Button Button(string text, Action click, bool accent = false, bool danger = false)
     {
-        var b = new Button { Content = text };
+        var b = new Button { Content = text, MinHeight = 36, Padding = new Thickness(14, 0, 14, 0) };
         if (accent) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         if (danger) b.Foreground = Res("ApexErrorBrush");
         b.Click += (_, _) => click();
@@ -1032,22 +1074,27 @@ public sealed partial class MainWindow
         return bar;
     }
 
-    static Border Row(string title, string detail, UIElement? action)
+    // a row of Settings, as Components and Game settings draw theirs: icon, name and what it does, the control on the right
+    static Border Row(string? icon, string title, string detail, UIElement? action)
     {
-        var g = new Grid { ColumnSpacing = 16 };
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.Children.Add(Col(new TextBlock { Text = title, FontSize = 14 }, Muted(detail)));
-        if (action is FrameworkElement a) { Grid.SetColumn(a, 1); a.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(a); }
-        return Card(g);
+        var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+        if (icon is not null) g.Children.Add(RowIcon(icon));
+        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }, Muted(detail) } };
+        Grid.SetColumn(words, 1);
+        g.Children.Add(words);
+        if (action is FrameworkElement a) { Grid.SetColumn(a, 2); a.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(a); }
+        var b = new Border { Child = g, CornerRadius = new CornerRadius(8), Padding = new Thickness(20, 10, 20, 10), MinHeight = 68 };
+        Soft(b);
+        return b;
     }
 
-    static Border Toggle(string title, string detail, bool on, Action<bool> set, bool enabled = true)
+    static Border Toggle(string? icon, string title, string detail, bool on, Action<bool> set, bool enabled = true)
     {
-        var t = new ToggleSwitch { IsOn = on, OnContent = "", OffContent = "", MinWidth = 0, IsEnabled = enabled };
+        var t = new ToggleSwitch { IsOn = on, OnContent = "", OffContent = "", MinWidth = 0, Width = 40, IsEnabled = enabled };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(t, title);
         t.Toggled += (_, _) => { try { set(t.IsOn); } catch (Exception e) { App.Log(e); } };
-        return Row(title, detail, t);
+        return Row(icon, title, detail, t);
     }
 
 

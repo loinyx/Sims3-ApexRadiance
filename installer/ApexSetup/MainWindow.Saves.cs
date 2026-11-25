@@ -70,17 +70,8 @@ public sealed partial class MainWindow
         _saveSums = null;
         SavesHost.Children.Clear();
 
-        var title = Heading(T("Saves"));
-        AutomationProperties.SetHeadingLevel(title, AutomationHeadingLevel.Level1);
-        var head = new Grid { ColumnSpacing = 16 };
-        head.ColumnDefinitions.Add(new ColumnDefinition());
-        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        head.Children.Add(Col(title, Body(now.Here.Count == 0 ? T("No saves yet. They show here after you save a game.") : T("Clean what makes a save grow. The household and the world stay the same."))));
-        var copies = Id(Button(T("Copies"), CopiesAsync), "SaveCopies");
-        (copies.Height, copies.Padding, copies.VerticalAlignment) = (36, new Thickness(18, 0, 18, 0), VerticalAlignment.Center);
-        Grid.SetColumn(copies, 1);
-        head.Children.Add(copies);
-        SavesHost.Children.Add(head);
+        SavesHost.Children.Add(PageHead(T("Saves"), now.Here.Count == 0 ? T("No saves yet. They show here after you save a game.") : T("Clean what makes a save grow. The household and the world stay the same."),
+            Id(Button(T("Copies"), CopiesAsync), "SaveCopies")));
         if (SavesBlocked() is { } why && now.Here.Count > 0) SavesHost.Children.Add(Warn(why, null));
         if (now.Here.Count == 0) return;
 
@@ -106,7 +97,7 @@ public sealed partial class MainWindow
             Grid.SetColumnSpan(panel, narrow ? 2 : 1);
             Grid.SetColumnSpan(list, narrow ? 2 : 1);
         }
-        Fit(Scroller.ActualWidth - 48);
+        Fit(Scroller.ActualWidth - 64);
         page.SizeChanged += (_, e) => Fit(e.NewSize.Width);
         SavesHost.Children.Add(page);
         _saveSums?.Invoke();

@@ -34,7 +34,7 @@ public sealed partial class MainWindow
         Screens.Margin = new Thickness(0, 0, 0, 32);
         var saves = Saves.List(Docs);
         host.Children.Add(HomeTop(saves.FirstOrDefault()));
-        var below = new StackPanel { Spacing = 28, Padding = new Thickness(40, 28, 40, 0) };
+        var below = new StackPanel { Spacing = 28, Padding = new Thickness(32, 28, 32, 0) };
         if (_healthState == HealthState.Blocked)
             below.Children.Add(Banner(InfoBarSeverity.Error, T("Apex Radiance can't start"), T("The game still starts, but without Apex Radiance until this is fixed."), T("Open Health"), () => Show(HealthScreen)));
         if (_offline) below.Children.Add(Banner(InfoBarSeverity.Warning, T("No internet"), T("You can still play. Updates wait until you're back online."), T("Try again"), async () => await LoadReleasesAsync()));
@@ -60,7 +60,6 @@ public sealed partial class MainWindow
         {
             var l = Link(link, go);
             l.Padding = new Thickness(0);
-            l.Foreground = Res("ApexSoftTextBrush");
             l.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(l, 1);
             g.Children.Add(l);
@@ -128,7 +127,7 @@ public sealed partial class MainWindow
                 }, TaskScheduler.FromCurrentSynchronizationContext());
             }
         }
-        g.Children.Add(new Border { Child = pic, CornerRadius = new CornerRadius(12), Margin = new Thickness(40, 40, 40, 0), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexCardBrush") });
+        g.Children.Add(new Border { Child = pic, CornerRadius = new CornerRadius(12), Margin = new Thickness(32, 24, 32, 0), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexCardBrush") });
 
         // the game, low in the corner of the picture or centred on the plain card
         var words = new StackPanel { Spacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
@@ -148,13 +147,13 @@ public sealed partial class MainWindow
         acts.Margin = new Thickness(0, 16, 0, 0);
         words.Children.Add(acts);
         words.VerticalAlignment = onPhoto ? VerticalAlignment.Bottom : VerticalAlignment.Center;
-        words.Margin = onPhoto ? new Thickness(72, 0, 40, 44) : new Thickness(72, 80, 40, 40);
+        words.Margin = onPhoto ? new Thickness(64, 0, 40, 40) : new Thickness(64, 64, 40, 40);
         g.Children.Add(words);
 
         var chip = HealthChip();
         chip.HorizontalAlignment = HorizontalAlignment.Right;
         chip.VerticalAlignment = VerticalAlignment.Top;
-        chip.Margin = new Thickness(0, 56, 56, 0);
+        chip.Margin = new Thickness(0, 40, 48, 0);
         g.Children.Add(chip);
         return g;
     }
@@ -322,7 +321,7 @@ public sealed partial class MainWindow
 
     UIElement HomeSaves(List<Save> saves)
     {
-        var s = new StackPanel { Spacing = 12 };
+        var s = new StackPanel { Spacing = 10 };
         s.Children.Add(Head(T("Your saves"), T("All saves"), () => Show(SavesScreen)));
         var grid = new Grid { ColumnSpacing = 16, RowSpacing = 16 };
         for (int i = 0; i < 4; i++) grid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -373,8 +372,9 @@ public sealed partial class MainWindow
         {
             var two = e.NewSize.Width < 760;
             while (grid.RowDefinitions.Count < 2) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            for (int i = 2; i < 4; i++) grid.ColumnDefinitions[i].Width = two ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
             var cols = two ? 2 : 4;
+            while (grid.ColumnDefinitions.Count > cols) grid.ColumnDefinitions.RemoveAt(cols); // (an empty column would still take its gap)
+            while (grid.ColumnDefinitions.Count < cols) grid.ColumnDefinitions.Add(new ColumnDefinition());
             var tw = (e.NewSize.Width - 16 * (cols - 1)) / cols;
             foreach (var t in tiles) t.Height = Math.Clamp(tw * 0.6, 200, 250);
             for (int i = 0; i < grid.Children.Count; i++) { var el = (FrameworkElement)grid.Children[i]; Grid.SetColumn(el, two ? i % 2 : i); Grid.SetRow(el, two ? i / 2 : 0); }

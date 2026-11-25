@@ -98,7 +98,7 @@ public sealed partial class MainWindow
         var scriptHost = new StackPanel { Spacing = 6, Visibility = Visibility.Collapsed };
         scriptHost.Children.Add(scriptBox);
         scriptHost.Children.Add(Muted(T("Their makers usually ask not to merge them. Apart, they are easy to put back.")));
-        var partsRow = Toggle(T("Split into parts of about 1 GB"), T("For very large merges."), false, on => { parts = on; Changed(0); });
+        var partsRow = Toggle(null, T("Split into parts of about 1 GB"), T("For very large merges."), false, on => { parts = on; Changed(0); });
         partsRow.Visibility = Visibility.Collapsed;
 
         var body = new StackPanel { Spacing = 14, Width = 560 };
