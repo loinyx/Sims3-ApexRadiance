@@ -73,7 +73,7 @@ public static class SaveCopies
         string Name(string p) => top + "/" + Path.GetRelativePath(dir, p).Replace('\\', '/');
         try
         {
-            var files = Directory.EnumerateFiles(dir, "*", Deep).ToList();
+            var files = Directory.EnumerateFiles(dir, "*", Deep).Where(f => !Saves.Passing(f)).ToList();
             using (var z = ZipFile.Open(part, ZipArchiveMode.Create))
             {
                 z.Comment = note ?? "";
@@ -183,7 +183,7 @@ public static class SaveCopies
     {
         Directory.CreateDirectory(to);
         foreach (var d in Directory.EnumerateDirectories(from, "*", Deep)) Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, d)));
-        foreach (var f in Directory.EnumerateFiles(from, "*", Deep))
+        foreach (var f in Directory.EnumerateFiles(from, "*", Deep).Where(f => !Saves.Passing(f)))
         {
             ct.ThrowIfCancellationRequested();
             var t = Path.Combine(to, Path.GetRelativePath(from, f));

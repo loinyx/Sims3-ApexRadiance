@@ -343,7 +343,7 @@ static class SavesTests
         {
             var hits = 0;
             SaveClean.FailPoint = p => { if (p == at && ++hits == (at is "swap" or "verify" ? 2 : 1)) throw new IOException("stop at " + at); };
-            asWas &= Throws<IOException>(() => SaveClean.Run(plan)) && Same(before, Snap(s.Dir)) && Directory.GetFiles(Saves.BackupDir(docs)).Length == 0;
+            asWas &= Throws<IOException>(() => SaveClean.Run(plan)) && Same(before, Snap(s.Dir)) && Snap(Saves.BackupDir(docs)).Count == 0;
         }
         SaveClean.FailPoint = _ => { };
         check(asWas, "clean: a failure while copying, writing, checking or swapping leaves the save exactly as it was");

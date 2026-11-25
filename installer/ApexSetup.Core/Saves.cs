@@ -21,7 +21,7 @@ public static class Saves
             var newest = DateTime.MinValue;
             try
             {
-                foreach (var f in Directory.EnumerateFiles(d))
+                foreach (var f in Directory.EnumerateFiles(d).Where(f => !Passing(f)))
                     if (!f.EndsWith(".backup", StringComparison.OrdinalIgnoreCase) && File.GetLastWriteTime(f) is var t && t > newest) newest = t;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
@@ -34,6 +34,9 @@ public static class Saves
 
     // the save's own household picture (a world file holds one of every household: Meta.data says which)
     public static byte[]? Photo(Save s) => SaveInfo.Photo(s.Dir);
+
+    // what an antivirus puts beside a file it scans and takes away at once (NAME.tmp); no file of a save ends so
+    internal static bool Passing(string file) => file.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
 
     public static string BackupDir(string docs) => Path.Combine(docs, "Saves backups (Apex Launcher)");
 

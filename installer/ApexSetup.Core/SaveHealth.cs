@@ -53,7 +53,7 @@ public static class SaveHealth
         foreach (var s in Saves.List(docs))
         {
             List<FileInfo> files;
-            try { files = new DirectoryInfo(s.Dir).EnumerateFiles().Where(f => !f.Name.EndsWith(".backup", StringComparison.OrdinalIgnoreCase)).ToList(); }
+            try { files = new DirectoryInfo(s.Dir).EnumerateFiles().Where(f => !f.Name.EndsWith(".backup", StringComparison.OrdinalIgnoreCase) && !Saves.Passing(f.Name)).ToList(); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
             var bytes = files.Sum(f => f.Length);
             var incomplete = !files.Any(f => f.Extension.Equals(".nhd", StringComparison.OrdinalIgnoreCase)) ? "no .nhd world file"

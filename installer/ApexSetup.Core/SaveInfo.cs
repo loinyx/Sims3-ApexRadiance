@@ -18,7 +18,7 @@ public sealed record SaveInfo(string World, IReadOnlyList<string> Worlds, string
     // the save's own files (the game's leftover .backup files do not count); a folder that can't be listed has none
     internal static List<FileInfo> FilesOf(string dir)
     {
-        try { return new DirectoryInfo(dir).EnumerateFiles().Where(f => !f.Name.EndsWith(".backup", StringComparison.OrdinalIgnoreCase)).ToList(); }
+        try { return new DirectoryInfo(dir).EnumerateFiles().Where(f => !f.Name.EndsWith(".backup", StringComparison.OrdinalIgnoreCase) && !Saves.Passing(f.Name)).ToList(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
     }
 
