@@ -501,6 +501,9 @@ bool RoomMapsFree();
 // FUN_0069f280 (pos, light, acc16) called alone on the light tree thread (false elsewhere, or when not installed)
 uintptr_t BasisSamplesVec();
 bool BasisStep(const float* pos, uintptr_t light, float* acc16);
+// True when the light is live: its vtable slot +0x24 is the position function of the nine light classes (a destroyed light has
+// the base class's vtable, a freed one whatever reused its memory). True when that function is not resolved (no test). SEH, any thread
+bool LightLive(uintptr_t light);
 // The light's whole part of a sample of the room as the room's solve would add it now, Apex's tests included (BasisLightHook's
 // body: the walls, openings and floors of its story at the lamp's place now), outside a solve. Light tree thread; false elsewhere
 bool BasisPartNow(void* room, const float* pos, uintptr_t light, float* acc16);

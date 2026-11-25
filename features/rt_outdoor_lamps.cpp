@@ -2765,7 +2765,7 @@ void Frame(IDirect3DDevice9* dev) {
     for (const LotLightBridge::BakeLamp& b : LotLightBridge::CurrentBakeLamps().lamps) {
         if (b.lot != g_lotId || !b.baked || !b.id || std::find(g_stampLights.begin(), g_stampLights.end(), b.id) != g_stampLights.end()) continue;
         LampRead r; // (the list is read every 20 frames: still that lot's lamp of that type)
-        if (ReadLamp(b.id, r) && r.f.lot == b.lot && r.f.type == b.type) g_stampLights.push_back(b.id);
+        if (LevelLightShare::LightLive(b.id) && ReadLamp(b.id, r) && r.f.lot == b.lot && r.f.type == b.type) g_stampLights.push_back(b.id); // (deleted since: freed)
     }
     std::vector<uint64_t> bakeKeys[8];
     for (int S = 0; S <= 7; S++) {

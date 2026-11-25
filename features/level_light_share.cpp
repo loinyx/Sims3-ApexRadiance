@@ -11980,8 +11980,29 @@ bool BasisPartTry(BYTE* room, const float* p, void* light, float* a) { // POD (S
         return false;
     }
 }
+// A lamp the physical snapshot still holds after its object was deleted (PhysLampPick::CarryMissing keeps a lamp missing from
+// the registry for kLotGoneMs) has the light base class's vtable once destroyed: its slot +0x24 is not the position function
+// the game's step calls there (kLightPos, all 9 classes), so the step ran string data as code. POD (SEH): true when the
+// light's vtable slot +0x24 is kLightPos, or kLightPos is not resolved (no test)
+std::atomic<long> g_basisDeadSkips{0};
+bool BasisLightLive(uintptr_t light) {
+    if (!kLightPos) return true;
+    __try {
+        const uintptr_t vt = *reinterpret_cast<const uintptr_t*>(light);
+        return vt && *reinterpret_cast<const uintptr_t*>(vt + 0x24) == kLightPos;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool BasisLightDead(uintptr_t light) {
+    if (BasisLightLive(light)) return false;
+    if (const long n = g_basisDeadSkips.fetch_add(1, std::memory_order_relaxed) + 1; n <= 8)
+        LOG_INFO(std::format("[LevelLightShare] Lamp {:08X} is destroyed: left out of the directional map step ({} so far)", light, n));
+    return true;
+}
 bool BasisStepImpl(const float* pos, uintptr_t light, float* acc16) {
     if (!g_basisGuardReady.load(std::memory_order_relaxed) || !light || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return false;
+    if (BasisLightDead(light)) return false;
     alignas(16) float p[4], a[16] = {};
     std::memcpy(p, pos, sizeof p);
     if (!BasisStepTry(p, reinterpret_cast<void*>(light), a)) return false;
@@ -18242,9 +18263,11 @@ bool StackedWithEdit(const void* room) {
 }
 
 uintptr_t BasisSamplesVec() { return BasisSamplesVecImpl(); }
+bool LightLive(uintptr_t light) { return light && BasisLightLive(light); }
 bool BasisStep(const float* pos, uintptr_t light, float* acc16) { return pos && acc16 && BasisStepImpl(pos, light, acc16); }
 bool BasisPartNow(void* room, const float* pos, uintptr_t light, float* acc16) {
     if (!room || !pos || !acc16 || !light || !g_basisGuardReady.load(std::memory_order_relaxed) || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return false;
+    if (BasisLightDead(light)) return false;
     alignas(16) float p[4], a[16] = {};
     std::memcpy(p, pos, sizeof p);
     t_basisPreview = true;
