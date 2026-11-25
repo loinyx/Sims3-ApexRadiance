@@ -79,8 +79,8 @@ public sealed partial class MainWindow
             {
                 // (a merge cut off during its move, by a closed window or a crash: its originals go back before anything reads the mods or the game starts)
                 try { ModMerge.Recover(docs); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { App.Log(e); }
-                // (the same for a change to a save; only in the first check after the start, so it never meets a change being made)
-                if (!_savesRecovered && !Maintenance) { _savesRecovered = true; SaveCopies.Recover(docs); }
+                // (the same for a change to a save, until it has run: it waits while the game runs or a change is being made)
+                if (!_savesRecovered && !Maintenance) _savesRecovered = SaveCopies.Recover(docs);
                 if (mods is null) try { mods = read = Mods.List(g, docs, kinds: false); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
                 return Health.Gather(g, s, docs, apex, mods, mods is null ? null : conflicts);
             }

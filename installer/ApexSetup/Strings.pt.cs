@@ -2233,5 +2233,6 @@ public static partial class Strings
         ["No portraits in this save. The game makes them as you play."] = "Este save não tem retratos. O jogo faz enquanto você joga.",
         ["Some of the Sims this save knows. The game makes these portraits again by itself."] = "Alguns dos Sims que este save conhece. O jogo refaz estes retratos sozinho.",
         ["Portrait of a Sim"] = "Retrato de Sim",
+        ["A save can't be kept out of the game or put back while the Saves folder is on another drive."] = "Não dá para guardar um save fora do jogo nem colocar de volta enquanto a pasta Saves está em outro disco.",
     };
 }

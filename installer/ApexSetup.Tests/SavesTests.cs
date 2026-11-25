@@ -156,6 +156,7 @@ static class SavesTests
             Clean(check, docs, s);
             Copies(check, docs, s);
             Whole(check, docs, recycled);
+            Namesakes(check, Path.Combine(root, "Docs2"), recycled);
             if (Environment.GetEnvironmentVariable("APEX_SAVES_REAL") is { Length: > 0 } real) Real(check, real, Path.Combine(root, "Real"), recycled);
         }
         catch (Exception e) { check(false, "saves: exception " + e); }
@@ -432,9 +433,16 @@ static class SavesTests
         var asWas = true;
         foreach (var at in new[] { "extract", "swap" })
         {
-            SaveCopies.FailPoint = p => { if (p == at) throw new IOException("stop at " + at); };
+            // (what is on its way waits inside Saves, on the saves' own drive, and is not listed as a save)
+            SaveCopies.FailPoint = p =>
+            {
+                if (p != at) return;
+                asWas &= Directory.Exists(Path.Combine(docs, "Saves", ".apex-work")) && Directory.GetDirectories(docs).All(d => !d.EndsWith(".apex-work"))
+                         && Saves.List(docs).Concat(SaveCopies.Lost(docs)).All(x => x.Name.StartsWith("Town"));
+                throw new IOException("stop at " + at);
+            };
             asWas &= Throws<IOException>(() => SaveCopies.Restore(docs, s, line[1])) && Same(played, Snap(s.Dir)) && Directory.GetFiles(Saves.BackupDir(docs)).Length == zips
-                     && !Directory.Exists(Path.Combine(docs, "Saves.apex-work"));
+                     && !Directory.Exists(Path.Combine(docs, "Saves", ".apex-work"));
         }
         SaveCopies.FailPoint = _ => { };
         check(asWas, "copies: a restore that fails leaves the save as it was, and nothing behind");
@@ -461,7 +469,7 @@ static class SavesTests
         using (var z = ZipFile.OpenRead(keptZip.Path))
             check(Same(first.ToDictionary(x => x.Key, x => x.Value[..64]), Snap(back.Dir).ToDictionary(x => x.Key, x => x.Value[..64])) && Math.Abs((back.LastPlayed - new DateTime(2024, 3, 9, 10, 0, 0)).TotalSeconds) <= 2
                   && new StreamReader(z.GetEntry("Town.sims3/TravelDB.package")!.Open()).ReadToEnd().EndsWith("played on") && keptZip.Bytes == line[3].Bytes
-                  && !Directory.Exists(Path.Combine(docs, "Saves.apex-work")) && Directory.GetFiles(Saves.BackupDir(docs)).Length == zips + 1,
+                  && !Directory.Exists(Path.Combine(docs, "Saves", ".apex-work")) && Directory.GetFiles(Saves.BackupDir(docs)).Length == zips + 1,
                 "copies: going back to a copy gives its files again, and the save of now is kept as one more copy first");
 
         var prev = SaveCopies.Restore(docs, back, now.First(p => p.Kind == CopyKind.Game));
@@ -482,7 +490,7 @@ static class SavesTests
         check(lost.Count == 1 && lost[0].Name == "Gone" && SaveInfo.Of(lost[0]).Household == "Davis" && SaveInfo.Photo(lost[0].Dir) is not null && Saves.List(docs).All(x => x.Name != "Gone"),
             "lost: a save that is only a .sims3.backup is found, with its household and picture");
         SaveCopies.FailPoint = p => { if (p == "copy") throw new IOException("stop"); };
-        var failed = Throws<IOException>(() => SaveCopies.Rescue(docs, lost[0])) && !Directory.Exists(Path.Combine(saves, "Gone.sims3")) && !Directory.Exists(saves + ".apex-work");
+        var failed = Throws<IOException>(() => SaveCopies.Rescue(docs, lost[0])) && !Directory.Exists(Path.Combine(saves, "Gone.sims3")) && !Directory.Exists(Path.Combine(saves, ".apex-work"));
         SaveCopies.FailPoint = _ => { };
         var rescued = SaveCopies.Rescue(docs, lost[0]);
         check(failed && rescued.Name == "Gone" && Same(game, Snap(rescued.Dir)) && Same(game, Snap(lost[0].Dir)) && SaveCopies.Lost(docs).Count == 0 && Throws<SetupException>(() => SaveCopies.Rescue(docs, lost[0])),
@@ -546,19 +554,121 @@ static class SavesTests
         File.Move(nhd, nhd + ".apex-old");                        // moved aside, nothing in its place
         File.Copy(travel, travel + ".apex-old");                  // moved aside, the new file in
         File.WriteAllText(Path.Combine(s.Dir, "Uni_0x0e41c954.nhd.apex-new"), "half written");
-        var work = saves + ".apex-work";
+        var work = Path.Combine(saves, ".apex-work");
         Directory.CreateDirectory(Path.Combine(work, "Twin.sims3.new-1"));
         Directory.Move(named.Dir, Path.Combine(work, "Twin.sims3.old-2"));        // a save moved aside, nothing in its place
         Directory.CreateDirectory(Path.Combine(work, "Town.sims3.old-3"));        // one whose place was taken
         File.WriteAllText(Path.Combine(work, "Town.sims3.old-3", "x"), "old");
+        // (a save left aside whose name looks free, because only the game's copy of it shows)
+        var aside = SaveCopies.Lost(docs).First(x => x.Name == "VILA (2)");
+        Directory.CreateDirectory(Path.Combine(work, "VILA (2).sims3.old-4"));
+        File.WriteAllText(Path.Combine(work, "VILA (2).sims3.old-4", "newer.nhd"), "the save as last played");
         bin = Directory.GetFileSystemEntries(recycled).Length;
         Games.IsRunning = () => true;
-        SaveCopies.Recover(docs);
-        var waited = File.Exists(nhd + ".apex-old") && Directory.Exists(work);
+        var waited = !SaveCopies.Recover(docs) && File.Exists(nhd + ".apex-old") && Directory.Exists(work);
         Games.IsRunning = () => false;
-        SaveCopies.Recover(docs);
-        check(waited && Same(files, Snap(s.Dir)) && Same(files, Snap(named.Dir)) && !Directory.Exists(work) && Directory.GetFileSystemEntries(recycled).Length == bin + 2,
-            "recover: a file or a save left aside goes back when its place is empty and to the Recycle Bin when it is taken; half-made copies go (not while the game runs)");
+        var first = Throws<SetupException>(() => SaveCopies.Rescue(docs, aside)) && File.ReadAllText(Path.Combine(saves, "VILA (2).sims3", "newer.nhd")) == "the save as last played";
+        check(waited && SaveCopies.Recover(docs) && Same(files, Snap(s.Dir)) && Same(files, Snap(named.Dir)) && !Directory.Exists(work) && Directory.GetFileSystemEntries(recycled).Length == bin + 2,
+            "recover: a file or a save left aside goes back when its place is empty and to the Recycle Bin when it is taken; half-made copies go (not while the game runs, and it says it did not run)");
+        check(first, "recover: bringing a lost save back puts a save left aside home first, so the game's older copy never takes its place");
+    }
+
+    // two saves with one name, one of them out of the game: what the launcher keeps by name stays with the one that keeps
+    // the name. And the launcher's own copies do not pile up.
+    static void Namesakes(Action<bool, string> check, string docs, string recycled)
+    {
+        var kept = SaveCopies.StoredDir(docs);
+        int Zips(string name) => Directory.Exists(Saves.BackupDir(docs)) ? Directory.GetFiles(Saves.BackupDir(docs), name + " 20*.zip").Length : 0;
+
+        // put back in the game while a newer save has its name
+        var old = Make(docs, "Smith");
+        SaveStars.Set("Smith", "old-star", true);
+        Saves.Backup(old, docs);
+        SaveCopies.Store(docs, old);
+        var live = Make(docs, "Smith");
+        File.AppendAllText(Path.Combine(live.Dir, "TravelDB.package"), "another family");
+        live = Saves.List(docs).First(x => x.Name == "Smith");
+        SaveStars.Set("Smith", "new-star", true);
+        Saves.Backup(live, docs);
+        SaveHealth.Check(docs);
+        var back = SaveCopies.Unstore(docs, SaveCopies.Stored(docs)[0]);
+        check(back.Name == "Smith (2)" && Zips("Smith") == 2 && Zips("Smith (2)") == 0 && SaveCopies.Timeline(docs, live).Count(p => p.Kind == CopyKind.Launcher) == 2
+              && SaveStars.Of("Smith").SetEquals(["old-star", "new-star"]) && SaveStars.Of("Smith (2)").Contains("old-star")
+              && SaveHealth.History("Smith").Count == 1 && SaveHealth.History("Smith (2)").Count == 0 && !Directory.Exists(kept),
+            "namesakes: a save put back under a free name leaves the copies, the stars and the history of the save that has its name; its own stars come with it");
+
+        // renamed while a save out of the game has its name; kept out while one there has its name
+        var r1 = Make(docs, "R");
+        Directory.CreateDirectory(r1.Dir + ".backup");
+        File.WriteAllText(Path.Combine(r1.Dir + ".backup", "x.nhd"), "the game's copy");
+        SaveStars.Set("R", "r-star", true);
+        Saves.Backup(r1, docs);
+        r1 = SaveCopies.Store(docs, r1);
+        var r2 = SaveCopies.Rename(docs, Make(docs, "R"), "R new");
+        var renamed = r2.Name == "R new" && Zips("R") == 1 && Zips("R new") == 0 && SaveStars.Of("R").Contains("r-star") && SaveStars.Of("R new").Contains("r-star");
+        var r3 = Make(docs, "R");
+        SaveStars.Set("R", "third", true);
+        r3 = SaveCopies.Store(docs, r3);
+        check(renamed && r3.Name == "R (2)" && Zips("R") == 1 && Zips("R (2)") == 0 && SaveStars.Of("R").Contains("third") && SaveStars.Of("R (2)").Contains("third"),
+            "namesakes: the same when a save is renamed, or kept out of the game, while another one has its name");
+
+        // a save out of the game is deleted with the game's copy of it; the last one takes the folder with it
+        SaveCopies.Delete(r1);
+        var gone = !Directory.Exists(r1.Dir) && !Directory.Exists(r1.Dir + ".backup") && SaveCopies.Stored(docs).Count == 1 && Directory.Exists(kept);
+        var again = SaveCopies.Store(docs, Make(docs, "R"));
+        SaveCopies.Delete(again);
+        SaveCopies.Delete(r3);
+        check(gone && again.Name == "R" && !Directory.Exists(kept), "delete: a save kept out of the game goes with the game's copy of it, so its name is free again there; the empty folder goes too");
+
+        // the launcher's own copies: the newest three of a save stay, the ones the player made all stay
+        var asked = SaveCopies.Timeline(docs, live).First(p => p.Kind == CopyKind.Launcher);
+        var bin = Directory.GetFiles(recycled).Length;
+        for (var i = 0; i < 5; i++) live = SaveCopies.Restore(docs, live, asked);
+        var line = SaveCopies.Timeline(docs, live);
+        check(line.Count(p => p.Note == SaveCopies.BeforeRestore) == 3 && line.Count(p => p.Kind == CopyKind.Launcher && p.Note is null) == 2 && Zips("Smith") == 5 && Directory.GetFiles(recycled).Length == bin + 2,
+            "copies: of the ones the launcher makes by itself the newest three of a save stay and older ones go to the Recycle Bin; a copy the player made is never removed");
+    }
+
+    // a failure at every step of every change to a save leaves it, its copies and the folders around it as they were
+    static bool Fuzz(string docs, Save s, CleanParts parts)
+    {
+        var copy = s.Dir + ".backup";
+        Directory.CreateDirectory(copy);
+        File.WriteAllText(Path.Combine(copy, "x.nhd"), "the game's copy");
+        var zip = Saves.Backup(s, docs);
+        var point = SaveCopies.Timeline(docs, s).First(p => p.Path == zip);
+        var plan = SaveClean.Plan(docs, s, parts);
+        var ok = true;
+        void Fails(string what, string[] steps, Action act)
+        {
+            var before = Snap(docs);
+            var dirs = Directory.GetDirectories(docs, "*", SearchOption.AllDirectories).Length;
+            foreach (var at in steps)
+            {
+                SaveClean.FailPoint = SaveCopies.FailPoint = p => { if (p == at) throw new IOException("stop at " + at); };
+                var held = Throws<IOException>(act);
+                SaveClean.FailPoint = SaveCopies.FailPoint = _ => { };
+                held = held && Same(before, Snap(docs)) && Directory.GetDirectories(docs, "*", SearchOption.AllDirectories).Length == dirs && SaveCopies.Recover(docs) && Same(before, Snap(docs));
+                if (!held) Console.WriteLine($"     {s.Name}: {what} stopped at {at} left something changed");
+                ok &= held;
+            }
+        }
+        if (plan.CanRun) Fails("clean", ["copy", "write", "verify", "swap", "finish"], () => SaveClean.Run(plan));
+        Fails("restore", ["extract", "swap"], () => SaveCopies.Restore(docs, s, point));
+        Fails("rename", ["move"], () => SaveCopies.Rename(docs, s, "Fuzz name"));
+        Fails("duplicate", ["copy"], () => SaveCopies.Duplicate(docs, s));
+        Fails("rescue", ["copy"], () => SaveCopies.Rescue(docs, new Save(copy, "Fuzz ghost", s.LastPlayed)));
+        Fails("store", ["move"], () => SaveCopies.Store(docs, s));
+        // and each one done and undone gives the same files again
+        var whole = Snap(docs);
+        var stored = SaveCopies.Store(docs, s);
+        Fails("put back", ["move"], () => SaveCopies.Unstore(docs, stored));
+        var home = SaveCopies.Unstore(docs, stored);
+        ok &= home.Dir == s.Dir && Same(whole, Snap(docs));
+        ok &= SaveCopies.Rename(docs, SaveCopies.Rename(docs, home, "Fuzz name"), s.Name).Dir == s.Dir && Same(whole, Snap(docs));
+        var files = Snap(s.Dir);
+        ok &= Same(files.ToDictionary(x => x.Key, x => x.Value[..64]), Snap(SaveCopies.Restore(docs, home, point).Dir).ToDictionary(x => x.Key, x => x.Value[..64]));
+        return ok;
     }
 
     // every save of a real Saves folder (a COPY: it is only read), each copied to the temporary folder first
@@ -638,6 +748,7 @@ static class SavesTests
                 ok &= Same(before.ToDictionary(x => x.Key, x => x.Value[..64]), Snap(undone.Dir).ToDictionary(x => x.Key, x => x.Value[..64]));
             }
             check(ok, $"REAL {name}: the plan is exact for every choice; cleaned of everything, each game resource and lot texture and its own household picture are as they were; undo brings every file back identical");
+            check(Fuzz(docs, Saves.List(docs).First(x => x.Dir == dir), everything), $"REAL {name}: clean, go back, rename, duplicate, rescue, keep out and put back, each stopped at every step, leave everything as it was; done and undone they give the same files");
             Directory.Delete(docs, true);
             foreach (var d in Directory.GetDirectories(recycled)) Directory.Delete(d, true);
         }
