@@ -413,36 +413,8 @@ public sealed partial class MainWindow
 
     void SelectPlace() => ModFolders.SelectedItem = (ModFolders.ItemsSource as List<FrameworkElement>)?.FirstOrDefault(i => i.Tag as string == _modPlace);
 
-    FrameworkElement GroupHeader(string key, string label, string? add)
-    {
-        // the whole row is the heading's button (hover and click across it); the + sits on its right end
-        var g = new Grid { Tag = "-", Margin = new Thickness(4, 16, 4, 4), Height = 32 };
-        var head = new Button
-        {
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(12, 0, 8, 0),
-            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch,
-        };
-        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        s.Children.Add(new TextBlock { Text = label, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
-        var fold = Lucide.Icon(_collapsed.Contains(key) ? "chevron-right" : "chevron-down", 12, Res("ApexMutedBrush"));
-        fold.VerticalAlignment = VerticalAlignment.Center;
-        s.Children.Add(fold);
-        head.Content = s;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(head, label);
-        head.Click += (_, _) => { if (!_collapsed.Remove(key)) _collapsed.Add(key); SaveViewPrefs(); _folderSig = ""; FillSide(); };
-        g.Children.Add(head);
-        if (add is not null)
-        {
-            var tip = add == "tag" ? T("New tag") : T("New folder");
-            var plus = IconButton("plus", tip);
-            plus.Width = plus.Height = 26;
-            plus.HorizontalAlignment = HorizontalAlignment.Right;
-            plus.Margin = new Thickness(0, 0, 6, 0);
-            plus.Click += (_, _) => { if (add == "tag") Safe(NewTagAsync(null)); else Safe(NewFolderAsync(NewFolderParent())); };
-            g.Children.Add(plus);
-        }
-        return g;
-    }
+    FrameworkElement GroupHeader(string key, string label, string? add) => SideGroup(key, label, () => { _folderSig = ""; FillSide(); },
+        add is null ? null : (add == "tag" ? T("New tag") : T("New folder"), () => { if (add == "tag") Safe(NewTagAsync(null)); else Safe(NewFolderAsync(NewFolderParent())); }));
 
     FrameworkElement PlaceItem(Place p)
     {

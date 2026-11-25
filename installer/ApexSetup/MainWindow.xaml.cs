@@ -313,6 +313,7 @@ public sealed partial class MainWindow : Window
         _step = step;
         SavesNote.IsOpen = false;
         (SavesBar.Visibility, _savesPage) = (Visibility.Collapsed, "");
+        HideSide();
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
         if (step != GalleryScreen) FullBleed(false);
         if (step == GameStep && FirstInstall) _wizardFlow = true;
@@ -839,7 +840,7 @@ public sealed partial class MainWindow : Window
             Row(IconBox("file-code"), "MonoPatcher", Why(MonoToggle, MonoPill, T("Only some script mods need this. Turn it on if a mod asks for it.")), null, null, false, Mirror(MonoToggle, "MonoPatcher"));
     }
 
-    void OnContentFrameSized(object sender, SizeChangedEventArgs e) { if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
+    void OnContentFrameSized(object sender, SizeChangedEventArgs e) { FitSide(); if (Wizard) ContentFrame.MaxHeight = Math.Max(320, Nav.ActualHeight - 48); }
     void OnNotThisGame(object sender, RoutedEventArgs e) => Show(GameStep);
 
     // the install's steps, as dots

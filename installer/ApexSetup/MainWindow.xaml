@@ -78,6 +78,30 @@
                     </Grid>
                 </Grid>
             </DataTemplate>
+            <!-- the rows of a side pane (Mods, Saves): a place is a row that lights up and can be picked; a group heading is plain -->
+            <local:SideStyleSelector x:Key="SidePlaces">
+                <local:SideStyleSelector.Item>
+                    <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                        <Setter Property="MinHeight" Value="38" />
+                        <Setter Property="CornerRadius" Value="8" />
+                        <Setter Property="Padding" Value="16,0,16,0" />
+                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                    </Style>
+                </local:SideStyleSelector.Item>
+                <local:SideStyleSelector.Header>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="IsTabStop" Value="False" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListViewItem">
+                                    <ContentPresenter HorizontalContentAlignment="Stretch" />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </local:SideStyleSelector.Header>
+            </local:SideStyleSelector>
             <!-- a mod in Mods (grid view): its picture (or kind icon), name on two lines, tag dots -->
             <!-- a mod in the grid: a square picture that grows with the window, one line of name, its type and tags under it -->
             <DataTemplate x:Key="ThumbTemplate" x:DataType="local:ModRow">
@@ -186,7 +210,11 @@
                     <TextBlock Grid.Column="1" Text="Apex Radiance" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
                     <StackPanel x:Name="WizardSteps" Tag="dyn" Grid.Column="2" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Center" />
                 </Grid>
-                <ScrollViewer x:Name="Scroller" Grid.Row="1" Padding="32,24,32,0">
+                <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <!-- the pane at the side of Saves and the gallery (MainWindow.SidePane.cs), as Mods' own -->
+                <Border x:Name="SideHost" Tag="dyn" Width="248" Visibility="Collapsed" Padding="0,24,0,10" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,0,1,0" />
+                <ScrollViewer x:Name="Scroller" Grid.Column="1" Padding="32,28,32,0">
                     <Grid x:Name="Screens" Margin="0,0,0,32">
 
                         <!-- 0 Welcome -->
@@ -607,6 +635,7 @@
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
+                </Grid>
                 <!-- 11 what Saves did, at the foot of the window (MainWindow.Saves.cs) -->
                 <InfoBar x:Name="SavesNote" Grid.Row="1" Tag="dyn" IsOpen="False" MinWidth="420" MaxWidth="720" Margin="24,0,24,16" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
                 <Border x:Name="SavesBar" Grid.Row="1" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="12,0,12,16" Padding="5,5,8,5"
@@ -648,34 +677,9 @@
                                 </TextBox>
                             </Grid>
                         </Border>
-                        <ListView x:Name="ModFolders" Grid.Row="2" SelectionMode="Single" SelectionChanged="OnModFolderPicked" AutomationProperties.Name="Folders" Padding="12,0,12,0"
+                        <ListView x:Name="ModFolders" Grid.Row="2" ItemContainerStyleSelector="{StaticResource SidePlaces}" SelectionMode="Single" SelectionChanged="OnModFolderPicked" AutomationProperties.Name="Folders" Padding="12,0,12,0"
                                   CanDragItems="True" DragItemsStarting="OnFolderDragStart" DragItemsCompleted="OnFolderDragDone">
-                            <!-- a place is a row that lights up and can be picked; a group heading (LIBRARY, FOLDERS...) is plain -->
-                            <ListView.ItemContainerStyleSelector>
-                                <local:SideStyleSelector>
-                                    <local:SideStyleSelector.Item>
-                                        <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
-                                            <Setter Property="MinHeight" Value="38" />
-                                            <Setter Property="CornerRadius" Value="8" />
-                                            <Setter Property="Padding" Value="16,0,16,0" />
-                                            <Setter Property="VerticalContentAlignment" Value="Stretch" />
-                                        </Style>
-                                    </local:SideStyleSelector.Item>
-                                    <local:SideStyleSelector.Header>
-                                        <Style TargetType="ListViewItem">
-                                            <Setter Property="IsTabStop" Value="False" />
-                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                            <Setter Property="Template">
-                                                <Setter.Value>
-                                                    <ControlTemplate TargetType="ListViewItem">
-                                                        <ContentPresenter HorizontalContentAlignment="Stretch" />
-                                                    </ControlTemplate>
-                                                </Setter.Value>
-                                            </Setter>
-                                        </Style>
-                                    </local:SideStyleSelector.Header>
-                                </local:SideStyleSelector>
-                            </ListView.ItemContainerStyleSelector>
+                            
                         </ListView>
                     </Grid>
                     <!-- the list -->

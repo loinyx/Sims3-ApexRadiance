@@ -46,6 +46,13 @@ Something in a corner of a card stands as far from the top as from the side.
 Rows one under another are one card: `Join` gives them one outline, a line between them, and corners only on the first and
 the last. A page's rows come from `Row` and `Toggle`, Game settings' from `SettingRow`.
 
+## Side pane
+
+Saves, Mods and the gallery have the same pane: 248 wide, the whole height, its own line on the right; a search, then groups
+that fold (`SideGroup`) over places 38 high, or 64 with a picture. The place shown has the list's own mark. Under 860 wide
+there is no pane and the screen offers a list in its place. Code: `MainWindow.SidePane.cs` (Mods' own is in XAML, on the same
+parts).
+
 ## Text
 
 Segoe UI Variable. Title 28 semibold, section 16 semibold, row 14 semibold, detail 13, page line 14, small label 12.

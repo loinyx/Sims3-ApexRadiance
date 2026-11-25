@@ -2240,5 +2240,7 @@ public static partial class Strings
         ["Last backup"] = "Último backup",
         ["{0} can go"] = "Dá para liberar {0}",
         ["Nothing to free with these choices"] = "Nada para liberar com essas escolhas",
+        ["In the game"] = "No jogo",
+        ["Search saves"] = "Buscar saves",
     };
 }

@@ -73,32 +73,15 @@ public sealed partial class MainWindow
         _lastKept ??= System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         _galPics = Gallery.List(Docs);
         _galSaves = Saves.List(Docs);
-        var page = new Grid { ColumnSpacing = 28 };
-        page.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(248) }); // (the Mods pane's width)
-        page.ColumnDefinitions.Add(new ColumnDefinition());
-        var albums = new ScrollViewer { Content = GalleryAlbums(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var page = new Grid();
+        var albums = new ScrollViewer { Content = GalleryAlbums(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(12, 0, 12, 12) };
         _galSide = albums;
-        var sideColumn = new Grid();
-        sideColumn.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        sideColumn.RowDefinitions.Add(new RowDefinition());
-        sideColumn.Children.Add(GallerySearch());
-        Grid.SetRow(albums, 1);
-        sideColumn.Children.Add(albums);
-        page.Children.Add(sideColumn);
-        var side = 220.0;
         var main = new StackPanel { Spacing = 18 };
-        var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = Visibility.Collapsed,
+        var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible,
             Flyout = new Flyout { Content = new StackPanel { Width = 260, Children = { GallerySearch(), new ScrollViewer { Content = GalleryAlbums(), MaxHeight = 520 } } } } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, T("Albums"));
         if (_galBook) main.Children.Add(picker);
-        page.SizeChanged += (_, e) =>
-        {
-            var narrow = e.NewSize.Width < (_galBook ? 900 : 980);
-            page.ColumnDefinitions[0].Width = new GridLength(narrow ? 0 : side);
-            page.ColumnSpacing = narrow || _galBook ? 0 : 28;
-            sideColumn.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
-            picker.Visibility = narrow ? Visibility.Visible : Visibility.Collapsed;
-        };
+        ShowSide(GallerySearch(), albums, () => picker.Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible);
         main.Children.Add(GalleryHead(_galBook ? null : picker));
         FullBleed(_galBook);
         _custDrawer = null;
@@ -107,22 +90,15 @@ public sealed partial class MainWindow
         {
             _galRowsHost = new Border { Child = GalleryRows() };
             main.Children.Add(_galRowsHost);
-            Grid.SetColumn(main, 1);
             page.Children.Add(main);
             host.Children.Add(page);
             return;
         }
         var look = Gallery.Look(_gal!, _galAlbum);
-        side = 256;
-        page.ColumnDefinitions[0].Width = new GridLength(side);
-        page.ColumnSpacing = 0;
         page.Height = Math.Max(420, Scroller.ActualHeight);
         page.Loaded += (_, _) => page.Height = Math.Max(420, Scroller.ActualHeight);
         _galPage = page;
         WatchBoardSize();
-        // (the search and the list under it on the same margins)
-        sideColumn.Padding = new Thickness(22, 26, 14, 0);
-        albums.Padding = new Thickness(0, 0, 0, 18);
         // the title row, then the board in all the room left: the room measured, the board laid to it
         var head = (FrameworkElement)main.Children[^1];
         main.Children.Clear();
@@ -160,7 +136,6 @@ public sealed partial class MainWindow
         book.Children.Add(paper);
         book.Children.Add(column);
         book.Children.Add(CustomizeDrawer());
-        Grid.SetColumn(book, 1);
         page.Children.Add(book);
         host.Children.Add(page);
     }
@@ -200,7 +175,6 @@ public sealed partial class MainWindow
         };
         box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Escape && box.Text.Length > 0) { box.Text = ""; e.Handled = true; } };
         var field = SearchField(box);
-        field.Margin = new Thickness(0, 0, 0, 14);
         return field;
     }
     string AlbumName(string a) => a == Gallery.All ? T("All pictures") : a == Gallery.Favourites ? T("Favourites")
@@ -267,26 +241,21 @@ public sealed partial class MainWindow
 
     UIElement GalleryAlbums()
     {
-        var s = new StackPanel { Spacing = 2 };
+        var s = new StackPanel { Spacing = 0 };
+        var folded = false;
         var found = Found.ToList();
-        Button Album(string key, string name, int count, Windows.UI.Color dot, string? glyph = null)
+        Button Album(string key, string name, int count, string icon, string? glyph = null)
         {
             var on = key == _galAlbum;
-            var g = new Grid { ColumnSpacing = 10 };
             // (searching: what holds nothing found stays out of the list)
             var none = _galQuery.Length > 0 && count == 0 && !on;
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            // (a dot or an icon in a 16 px column, as the Mods pane's icons)
-            g.Children.Add(glyph is null ? new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 8, Height = 8, Margin = new Thickness(4, 0, 4, 0), Fill = new SolidColorBrush(dot), VerticalAlignment = VerticalAlignment.Center }
-                : new FontIcon { Glyph = glyph, FontSize = 16, Width = 16, Foreground = new SolidColorBrush(dot), VerticalAlignment = VerticalAlignment.Center });
-            var t = new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(t, 1);
-            g.Children.Add(t);
-            if (count > 0) { var n = new TextBlock { Text = count.ToString(), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(n, 2); g.Children.Add(n); }
-            var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 32, Padding = new Thickness(10, 0, 10, 0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(4),
-                Background = on ? Res("ApexSelectedBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            var g = SideLine(icon, name, count > 0 ? count.ToString() : "");
+            if (glyph is not null) { g.Children.RemoveAt(0); g.Children.Insert(0, new FontIcon { Glyph = glyph, FontSize = 16, Width = 16, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }); }
+            // (the mark of the place shown, as a list draws it)
+            if (on) g.Children.Add(new Border { Width = 3, Height = 16, CornerRadius = new CornerRadius(1.5), Background = Res("ApexAccentBrush"), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(-16, 0, 0, 0) });
+            var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 38, Padding = new Thickness(16, 0, 16, 0), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(0),
+                Background = on ? Res("ApexTileBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
             b.Resources["ButtonBackgroundPointerOver"] = Res("ApexHoverBrush");
             b.Click += (_, _) => { _galAlbum = key; _galLimit = 60; BuildGallery(); };
             if (none) b.Visibility = Visibility.Collapsed;
@@ -307,30 +276,28 @@ public sealed partial class MainWindow
             }
             return b;
         }
-        Windows.UI.Color[] dots = [Rgb(0x7D, 0xBE, 0x9A), Rgb(0x57, 0xB6, 0xE8), Rgb(0xE0, 0xA8, 0x4F), Rgb(0xE8, 0x6F, 0xB8), Rgb(0xB4, 0xAE, 0xF2), Rgb(0x8E, 0x8E, 0x8E)];
-        s.Children.Add(SideHeading(T("Library"), first: true));
-        s.Children.Add(Album(Gallery.All, T("All pictures"), _galPics.Count, AccentInk));
-        s.Children.Add(Album(Gallery.Favourites, T("Favourites"), found.Count(p => Gallery.InAlbum(p, Gallery.Favourites, _gal!, _galSaves)), Rgb(0xF2, 0xC9, 0x4C)));
-        s.Children.Add(SideHeading(T("Households")));
+        Group("library", T("Library"));
+        Into(Album(Gallery.All, T("All pictures"), _galPics.Count, "image"));
+        Into(Album(Gallery.Favourites, T("Favourites"), found.Count(p => Gallery.InAlbum(p, Gallery.Favourites, _gal!, _galSaves)), "star"));
+        Group("households", T("Households"));
         // the player's own albums (a trip, a family's story) under the household they belong to, each with its icon;
         // right-click one to rename or delete it, a household to make an album in it
         var homes = _gal!.Custom.ToDictionary(c => c, c => Gallery.HomeOf(c, _gal, _galPics, _galSaves));
-        var i = 0;
         foreach (var save in _galSaves)
         {
-            var hb = Album(save.Name, HouseTitle(save.Name, brief: true), found.Count(p => Gallery.InAlbum(p, save.Name, _gal!, _galSaves)), dots[i++ % dots.Length]);
+            var hb = Album(save.Name, HouseTitle(save.Name, brief: true), found.Count(p => Gallery.InAlbum(p, save.Name, _gal!, _galSaves)), "users");
             var here = new MenuFlyoutItem { Text = T("New album in {0}", save.Name), Icon = new FontIcon { Glyph = "\uE710" } };
             var home = save.Name;
             here.Click += async (_, _) => { if (await AlbumDialog(null, home) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
             hb.ContextFlyout = new MenuFlyout { Items = { here } };
-            s.Children.Add(hb);
+            Into(hb);
             foreach (var c in _gal.Custom.Where(c => string.Equals(homes[c], save.Name, StringComparison.OrdinalIgnoreCase)))
-                s.Children.Add(Mine(c, true));
+                Into(Mine(c, true));
         }
         var loose = _gal.Custom.Where(c => !_galSaves.Any(v => string.Equals(homes[c], v.Name, StringComparison.OrdinalIgnoreCase))).ToList();
         Button Mine(CustomAlbum c, bool inside)
         {
-            var b = Album(c.Key, c.Name, found.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), AccentInk, c.Icon);
+            var b = Album(c.Key, c.Name, found.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), "layers", c.Icon);
             if (inside) b.Margin = new Thickness(14, 0, 0, 0); // (one level in, as a folder inside a folder in Mods)
             var menu = new MenuFlyout();
             var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = new FontIcon { Glyph = "\uE70F" } };
@@ -351,21 +318,17 @@ public sealed partial class MainWindow
             b.ContextFlyout = menu;
             return b;
         }
-        var mine = new Grid { Margin = new Thickness(10, 14, 2, 2), Height = 30 };
-        mine.ColumnDefinitions.Add(new ColumnDefinition());
-        mine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var mineHead = Eyebrow(T("Albums"));
-        mineHead.VerticalAlignment = VerticalAlignment.Center;
-        mine.Children.Add(mineHead);
-        var make = new Button { Content = new FontIcon { Glyph = "\uE710", FontSize = 12 }, Width = 26, Height = 26, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(make, T("New album…"));
-        ToolTipService.SetToolTip(make, T("New album…"));
-        make.Click += async (_, _) => { if (await AlbumDialog(null) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
-        Grid.SetColumn(make, 1);
-        mine.Children.Add(make);
-        s.Children.Add(mine);
-        foreach (var c in loose) s.Children.Add(Mine(c, false));
+        Group("albums", T("Albums"), (T("New album\u2026"), () => Safe(NewAlbum())));
+        foreach (var c in loose) Into(Mine(c, false));
         return s;
+
+        async Task NewAlbum() { if (await AlbumDialog(null) is { } made) { _galAlbum = made.Key; BuildGallery(); } }
+        void Group(string key, string label, (string, Action)? add = null)
+        {
+            s.Children.Add(SideGroup("gallery:" + key, label, () => { if (_galSide is not null) _galSide.Content = GalleryAlbums(); }, add));
+            folded = _collapsed.Contains("gallery:" + key) && _galQuery.Length == 0;
+        }
+        void Into(UIElement e) { if (!folded) s.Children.Add(e); }
     }
 
     // the title, what it holds, and the controls of the open view; the switch between the two views on the right
@@ -2019,7 +1982,7 @@ public sealed partial class MainWindow
 
     void FullBleed(bool on)
     {
-        Scroller.Padding = on ? new Thickness(0) : new Thickness(32, 24, 32, 0);
+        Scroller.Padding = on ? new Thickness(0) : new Thickness(32, 28, 32, 0);
         Screens.Margin = on ? new Thickness(0) : new Thickness(0, 0, 0, 32);
         Scroller.VerticalScrollBarVisibility = on ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
         Scroller.VerticalScrollMode = on ? ScrollMode.Disabled : ScrollMode.Enabled;

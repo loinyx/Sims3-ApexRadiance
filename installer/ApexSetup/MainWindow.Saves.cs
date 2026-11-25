@@ -103,12 +103,13 @@ public sealed partial class MainWindow
 
     // what the screen shows, as one text
     string SavesSig(SavesNow now) => string.Join('\n', now.Entries.Select(e => $"{e.Kind}|{e.Key}|{e.Look?.Info.LastPlayed.Ticks}|{e.Look?.Info.Bytes}|" + string.Join('|', e.Points.Select(p => p.Path + p.When.Ticks + p.Label + p.Pinned + p.Stored)))
-            .Prepend($"{Lang}|{_light}|{_running}|{_busy}|{Maintenance}|{_settings.InstallUpdatesOnPlay}|{_savePick}|{_savesPage}|{now.FolderGone}|{_autoError}"));
+            .Prepend($"{SideFits}|{Lang}|{_light}|{_running}|{_busy}|{Maintenance}|{_settings.InstallUpdatesOnPlay}|{_savePick}|{_savesPage}|{now.FolderGone}|{_autoError}"));
 
     void DrawSaves(SavesNow now)
     {
         if (_saveWant is not null && now.Entries.Any(e => e.Key.Equals(_saveWant, StringComparison.OrdinalIgnoreCase))) (_savePick, _saveWant, _saveAllBackups) = (_saveWant, null, false);
         if (_savePick is null || now.Entries.All(e => !e.Key.Equals(_savePick, StringComparison.OrdinalIgnoreCase))) { _savePick = now.Entries.FirstOrDefault()?.Key; _saveAllBackups = false; }
+        FillSaveSide(now);
         var sig = SavesSig(now);
         if (sig == _savesSig) return;
         _savesSig = sig;
@@ -127,38 +128,18 @@ public sealed partial class MainWindow
         var auto = Id(Button("", () => SavesGo("auto")), "SaveAutoPage");
         auto.Content = Labeled("calendar-clock", T("Automatic backups"));
         var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        foreach (var b in new[] { several, import, auto }) if (now.Here.Count > 0 || b != several) acts.Children.Add(Dims(b));
+        foreach (var b in new[] { several, import, auto }) if (b != auto ? now.Here.Count > 0 || b != several : !SideFits) acts.Children.Add(Dims(b));
         SavesHost.Children.Add(PageHead(T("Saves"), now.Here.Count switch { 0 => "", 1 => T("1 save"), var n => T("{0} saves", n) } + (now.Here.Count > 0 ? ", " + SaveSize(now.Here.Sum(l => l.Info.Bytes)) : ""), acts));
         if (SavesBlocked() is { } why && now.Here.Count > 0) SavesHost.Children.Add(Warn(why, null));
         if (now.Entries.Count == 0) { SavesHost.Children.Add(EmptyPlace("users", T("No saves yet. They show here after you save a game."))); return; }
 
         var at = now.Entries.First(e => e.Key.Equals(_savePick, StringComparison.OrdinalIgnoreCase));
-        var page = new Grid { RowSpacing = 18 };
-        page.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        page.ColumnDefinitions.Add(new ColumnDefinition());
-        page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var list = _saveList = SaveList(now);
+        var page = new StackPanel { Spacing = 18 };
+        // (a narrow window has no pane: the save is chosen in one line over it)
         var pick = _savePicker = SavePicker(now);
-        var detail = _saveDetail = new Border { Child = SaveDetail(now, at), BorderBrush = Res("ApexHairlineBrush") };
-        page.Children.Add(list);
-        page.Children.Add(pick);
-        page.Children.Add(detail);
-        // beside the list; a narrow window chooses the save in one line over it
-        void Fit(double w)
-        {
-            var narrow = w < 800;
-            (list.Visibility, pick.Visibility) = narrow ? (Visibility.Collapsed, Visibility.Visible) : (Visibility.Visible, Visibility.Collapsed);
-            list.Width = (w < 1000 ? 244 : 288) + 24; // (the 24 is the room of the scroll bar, which stands on the line beside it)
-            Grid.SetColumnSpan(pick, 2);
-            Grid.SetRow(detail, narrow ? 1 : 0);
-            Grid.SetColumn(detail, narrow ? 0 : 1);
-            Grid.SetColumnSpan(detail, narrow ? 2 : 1);
-            (detail.BorderThickness, detail.Padding) = (new Thickness(0), new Thickness(narrow ? 0 : 8, 0, 0, 0));
-            several.Visibility = w < 640 ? Visibility.Collapsed : Visibility.Visible;
-        }
-        Fit(Scroller.ActualWidth - 64);
-        page.SizeChanged += (_, e) => { if (e.PreviousSize.Width != e.NewSize.Width) Fit(e.NewSize.Width); };
+        if (!SideFits) page.Children.Add(pick);
+        page.Children.Add(_saveDetail = new Border { Child = SaveDetail(now, at) });
+        page.SizeChanged += (_, e) => several.Visibility = e.NewSize.Width < 520 ? Visibility.Collapsed : Visibility.Visible;
         SavesHost.Children.Add(page);
     }
 
@@ -254,52 +235,93 @@ public sealed partial class MainWindow
         if (_savesNow is not { } now || _saveDetail is null || _saveList is null || _savePicker is null || now.Entries.FirstOrDefault(e => e.Key == key) is not { } at) { SavesAgain(); return; }
         _savesSig = SavesSig(now);
         _saveDetail.Child = SaveDetail(now, at);
-        _saveList.SelectedItem = _saveList.Items.FirstOrDefault(i => i is ListViewItem { Tag: string k } && k == key);
+        SaveSideAt();
         _savePicker.SelectedItem = _savePicker.Items.FirstOrDefault(i => i is ComboBoxItem { Tag: string k } && k == key);
     }
 
-    ListView SaveList(SavesNow now)
+    // the pane: the backups' own pages, then the saves by where they are
+    string _saveQuery = "", _saveSideSig = "";
+    void FillSaveSide(SavesNow now)
     {
-        var list = new ListView { Margin = new Thickness(-4, -2, 0, 0), SelectionMode = ListViewSelectionMode.Single, VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(0, 0, 24, 0), MaxHeight = Math.Max(320, Scroller.ActualHeight - 150) };
-        AutomationProperties.SetName(list, T("Your saves"));
-        AutomationProperties.SetAutomationId(list, "SaveList");
-        list.ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection();
-        var kind = SaveKindOf.Here;
-        foreach (var e in now.Entries.OrderBy(e => e.Kind switch { SaveKindOf.Here => 0, SaveKindOf.Stored => 1, _ => 2 }))
+        if (now.Entries.Count == 0) { HideSide(); return; }
+        var sig = $"{Lang}|{_light}|{_saveQuery}|{string.Join(',', _collapsed.Order())}|" + string.Join('\n', now.Entries.Select(e => $"{e.Kind}|{e.Key}|{e.Name}|{EntrySub(now, e)}|{e.Points.Count}"));
+        if (_sideOn && sig == _saveSideSig) { SaveSideAt(); return; }
+        _saveSideSig = sig;
+        var items = new List<FrameworkElement>();
+        void Group(string key, string label, IEnumerable<FrameworkElement> rows)
         {
-            if (e.Kind != kind)
-            {
-                var head = Eyebrow(EntryGroup(kind = e.Kind));
-                AutomationProperties.SetHeadingLevel(head, AutomationHeadingLevel.Level2);
-                list.Items.Add(new ListViewItem { Content = head, IsEnabled = false, IsTabStop = false, MinHeight = 0, Padding = new Thickness(12, 20, 0, 8) });
-            }
-            var sub = EntrySub(now, e);
-            var line = new Grid { ColumnSpacing = 14 };
-            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            line.ColumnDefinitions.Add(new ColumnDefinition());
-            line.Children.Add(SavePhoto(e.Look, 48));
-            var words = (StackPanel)Col(SaveText(e.Name, 14, strong: true), SaveText(sub, 13, "ApexMutedBrush"));
-            (words.Spacing, words.VerticalAlignment) = (2, VerticalAlignment.Center);
-            Grid.SetColumn(words, 1);
-            line.Children.Add(words);
-            if (e.Kind != SaveKindOf.Here) line.Opacity = 0.75;
-            var item = new ListViewItem { Content = line, Tag = e.Key, MinHeight = 72, Padding = new Thickness(12, 0, 12, 0), Margin = new Thickness(0, 2, 0, 2), HorizontalContentAlignment = HorizontalAlignment.Stretch, CornerRadius = new CornerRadius(Design.Radius.Card) };
-            ToolTipService.SetToolTip(item, e.Look is null ? e.Name : e.Name + "\n" + SavePlace(e.Look.Save, e.Look.Info));
-            AutomationProperties.SetName(item, $"{e.Name}, {sub}");
-            if (e.Kind == SaveKindOf.Here) item.ContextFlyout = SaveMenu(e.Look!);
-            else
-            {
-                var menu = new MenuFlyout();
-                menu.Items.Add(MenuItem(T("Delete"), () => Safe(DeleteGone(e)), "trash-2", danger: true));
-                menu.Opening += (_, _) => menu.Items[0].IsEnabled = SavesBlocked() is null;
-                item.ContextFlyout = menu;
-            }
-            list.Items.Add(item);
-            if (e.Key.Equals(_savePick, StringComparison.OrdinalIgnoreCase)) list.SelectedItem = item;
+            var all = rows.ToList();
+            if (all.Count == 0) return;
+            items.Add(SideGroup(key, label, () => { _saveSideSig = ""; FillSaveSide(now); }));
+            if (!_collapsed.Contains(key) || _saveQuery.Length > 0) items.AddRange(all);
         }
-        list.SelectionChanged += (_, _) => { if (list.SelectedItem is ListViewItem { Tag: string key }) SavePicked(key); };
-        list.Loaded += (_, _) => { if (list.SelectedItem is { } at) list.ScrollIntoView(at); };
-        return list;
+        bool Has(string t) => t.Contains(_saveQuery, StringComparison.CurrentCultureIgnoreCase);
+        if (_saveQuery.Length == 0)
+            Group("saves:backups", T("Backups"),
+            [
+                Place("@all", "archive", T("All backups"), now.Entries.Sum(e => e.Points.Count) is var n && n > 0 ? n.ToString() : "", "SavesAll"),
+                Place("@auto", "calendar-clock", T("Automatic backups"), BackupChoices.Load() is { OnClose: false, BeforePlay: false, Daily: false } ? T("Off") : T("On"), "SaveAutoPage"),
+            ]);
+        foreach (var (kind, label) in new[] { (SaveKindOf.Here, T("In the game")), (SaveKindOf.Stored, T("Kept out of the game")), (SaveKindOf.Gone, T("Gone from the game")) })
+            Group("saves:" + kind, label, now.Entries.Where(e => e.Kind == kind && (_saveQuery.Length == 0 || Has(e.Name) || Has(e.Save) || e.Look is { } l && Has(SavePlace(l.Save, l.Info)))).Select(e => SaveLine(now, e)));
+        var list = _saveList = SideList(items, T("Your saves"), "SaveList", key =>
+        {
+            if (key[0] == '@') { if (_savesPage != key[1..]) SavesGo(key[1..]); }
+            else if (_savesPage.Length == 0) SavePicked(key);
+            else { (_savePick, _saveAllBackups) = (key, false); SavesGo(""); }
+        });
+        if (_sideOn && SideHost.Child is Grid { Children.Count: 2 } open) { open.Children.RemoveAt(1); Grid.SetRow(list, 1); open.Children.Add(list); }
+        else ShowSide(SaveSearch(), list, SavesAgain);
+        SaveSideAt();
+
+        static FrameworkElement Place(string key, string icon, string label, string count, string id)
+        {
+            var g = SideLine(icon, label, count);
+            g.Tag = key;
+            AutomationProperties.SetAutomationId(g, id);
+            AutomationProperties.SetName(g, label);
+            return g;
+        }
+    }
+
+    void SaveSideAt()
+    {
+        var key = _savesPage.Length > 0 ? "@" + _savesPage : _savePick;
+        if (_saveList?.ItemsSource is List<FrameworkElement> rows) _saveList.SelectedItem = rows.FirstOrDefault(r => r.Tag is string k && k.Equals(key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    FrameworkElement SaveSearch()
+    {
+        var box = new TextBox { PlaceholderText = T("Search"), Text = _saveQuery };
+        AutomationProperties.SetName(box, T("Search saves"));
+        box.TextChanged += (_, _) => { if (box.Text.Trim() == _saveQuery) return; _saveQuery = box.Text.Trim(); if (_savesNow is { } now) FillSaveSide(now); };
+        box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Escape && box.Text.Length > 0) { box.Text = ""; e.Handled = true; } };
+        return SearchField(box);
+    }
+
+    FrameworkElement SaveLine(SavesNow now, SaveEntry e)
+    {
+        var sub = EntrySub(now, e);
+        var line = new Grid { ColumnSpacing = 12, MinHeight = 60, Tag = e.Key };
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.ColumnDefinitions.Add(new ColumnDefinition());
+        line.Children.Add(SavePhoto(e.Look, 40));
+        var words = (StackPanel)Col(SaveText(e.Name, 13, strong: true), SaveText(sub, 12, "ApexMutedBrush"));
+        (words.Spacing, words.VerticalAlignment) = (2, VerticalAlignment.Center);
+        Grid.SetColumn(words, 1);
+        line.Children.Add(words);
+        if (e.Kind != SaveKindOf.Here) line.Opacity = 0.75;
+        ToolTipService.SetToolTip(line, e.Look is null ? e.Name : e.Name + "\n" + SavePlace(e.Look.Save, e.Look.Info));
+        AutomationProperties.SetName(line, $"{e.Name}, {sub}");
+        if (e.Kind == SaveKindOf.Here) line.ContextFlyout = SaveMenu(e.Look!);
+        else
+        {
+            var menu = new MenuFlyout();
+            menu.Items.Add(MenuItem(T("Delete"), () => Safe(DeleteGone(e)), "trash-2", danger: true));
+            menu.Opening += (_, _) => menu.Items[0].IsEnabled = SavesBlocked() is null;
+            line.ContextFlyout = menu;
+        }
+        return line;
     }
 
     ComboBox SavePicker(SavesNow now)

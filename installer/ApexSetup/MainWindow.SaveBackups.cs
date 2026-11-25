@@ -433,8 +433,9 @@ public sealed partial class MainWindow
 
     StackPanel SavesSubHead(string title, string? sub, FrameworkElement? act = null)
     {
-        var back = BackButtonTo(T("Saves"), () => SavesGo(""), "SavesBack");
-        return new StackPanel { Spacing = 4, Children = { back, PageHead(title, sub, act) } };
+        var head = new StackPanel { Spacing = 4, Children = { PageHead(title, sub, act) } };
+        if (!SideFits) head.Children.Insert(0, BackButtonTo(T("Saves"), () => SavesGo(""), "SavesBack")); // (no pane to go back in)
+        return head;
     }
 
     void SavesGo(string page)
