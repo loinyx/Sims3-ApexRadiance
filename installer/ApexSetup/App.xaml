@@ -54,7 +54,7 @@
                     <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#D4D4D4" />
                     <SolidColorBrush x:Key="ApexMutedBrush" Color="#6E6E6E" />
                     <SolidColorBrush x:Key="ApexSoftTextBrush" Color="#454545" />
-                    <SolidColorBrush x:Key="ApexSuccessBrush" Color="#2F8A5B" />
+                    <SolidColorBrush x:Key="ApexSuccessBrush" Color="#28774E" />
                     <SolidColorBrush x:Key="ApexWarningBrush" Color="#B5771C" />
                     <SolidColorBrush x:Key="ApexErrorBrush" Color="#C53A35" />
                     <SolidColorBrush x:Key="ApexPillBrush" Color="#EFEFEF" />

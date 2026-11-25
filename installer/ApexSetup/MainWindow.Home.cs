@@ -493,7 +493,7 @@ public sealed partial class MainWindow
         el.PointerExited += (_, _) => { el.Translation = System.Numerics.Vector3.Zero; el.Scale = System.Numerics.Vector3.One; exit?.Invoke(); };
     }
 
-    // one quiet line for the saves with no backup, and one link that backs them all up
+    // one quiet line for the saves with no copy, and one link that copies them all
     void BackupLine(StackPanel line, List<Save> bare, string docs)
     {
         line.Children.Clear();
@@ -502,21 +502,24 @@ public sealed partial class MainWindow
         var icon = Lucide.Icon("hard-drive", 14, Res("ApexMutedBrush"));
         icon.VerticalAlignment = VerticalAlignment.Center;
         line.Children.Add(icon);
-        var text = Muted(bare.Count == 1 ? T("1 of these saves has no backup") : T("{0} of these saves have no backup", bare.Count));
+        var text = Muted(bare.Count == 1 ? T("1 of these saves has no copy") : T("{0} of these saves have no copy", bare.Count));
         text.VerticalAlignment = VerticalAlignment.Center;
         line.Children.Add(text);
-        var now = Link(bare.Count == 1 ? T("Back up now") : T("Back up all"), () => { });
+        var now = Link(bare.Count == 1 ? T("Make a copy") : T("Copy all"), () => { });
         now.Padding = new Thickness(0);
         now.VerticalAlignment = VerticalAlignment.Center;
         line.Children.Add(now);
         now.Click += async (_, _) =>
         {
+            if (_savesBusy) return;
+            SavesBusy(true); // (the window stays open until they are made)
             now.IsEnabled = false;
             now.Content = new ProgressRing { IsActive = true, Width = 12, Height = 12 };
             var left = new List<Save>();
             foreach (var save in bare)
                 try { await Task.Run(() => Saves.Backup(save, docs)); }
                 catch (Exception e) { App.Log(e); left.Add(save); ToolTipService.SetToolTip(line, ErrorText(e)); }
+            SavesBusy(false);
             BackupLine(line, left, docs);
         };
     }

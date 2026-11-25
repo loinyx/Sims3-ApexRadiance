@@ -888,7 +888,7 @@ public sealed partial class MainWindow
 
     public bool QuitForNewerCopy()
     {
-        if (_busy) return false;
+        if (_busy || _savesBusy) return false;
         _tray?.Dispose();
         Application.Current.Exit();
         return true;

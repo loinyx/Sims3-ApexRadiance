@@ -95,7 +95,7 @@ public sealed partial class MainWindow
         void Count()
         {
             var n = p.Picked.Count;
-            picked.Text = n == 0 ? T("Tap a memory to choose it") : n == 1 ? T("1 memory chosen") : T("{0} memories chosen", n);
+            picked.Text = n == 0 ? T("Choose a memory") : n == 1 ? T("1 memory chosen") : T("{0} memories chosen", n);
             var kept = p.Memories.Count(i => p.Stars.Contains(i.Key));
             starred.Text = T("{0} starred", kept);
             var shown = SpShown(p);
@@ -292,13 +292,14 @@ public sealed partial class MainWindow
         var many = mem.Bytes > 50L << 20;
         string N(int n) => n.ToString("N0", LangCulture());
         var lots = p.Contents.Sample(SaveKind.LotThumbnail, 4);
+        var bare = lots.Count == 0; // (its thumbnails were cleaned: faces stand in for the houses)
         var all = new List<(CleanParts Part, string Name, string Info, long Bytes, IReadOnlyList<SaveItem> Pics, int Cols, int Rows)>
         {
-            (CleanParts.None, T("World, houses and Sims"), T("It is the save itself. It stays"), plan.Before - mem.Bytes - rep.Bytes - faces.Bytes - thumbs.Bytes, lots, 4, 1),
+            (CleanParts.None, T("World, houses and Sims"), T("It is the save itself. It stays"), plan.Before - mem.Bytes - rep.Bytes - faces.Bytes - thumbs.Bytes, bare ? p.Contents.Sample(SaveKind.Portrait, 18) : lots, bare ? 6 : 4, bare ? 3 : 1),
             (CleanParts.Memories, T("Memories"), mem.Count == 1 ? T("1 picture the game took") : T("{0} pictures the game took", N(mem.Count)), mem.Bytes, p.Contents.Sample(SaveKind.Memory, many ? 32 : 6), many ? 8 : 3, many ? 4 : 2),
             (CleanParts.RepeatedMemories, T("Repeated memories"), rep.Count == 1 ? T("1 copy of the same picture") : T("{0} copies of the same picture", N(rep.Count)), rep.Bytes, p.Repeated is { Count: > 0 } same ? same.Take(6).ToList() : [], 3, 2),
             (CleanParts.Portraits, T("Portraits"), T("{0}, the game makes them again", N(faces.Count)), faces.Bytes, p.Contents.Sample(SaveKind.Portrait, 8), 4, 2),
-            (CleanParts.Thumbnails, T("Thumbnails"), T("{0}, the game makes them again", N(thumbs.Count)), thumbs.Bytes, lots.Take(1).ToList(), 1, 1),
+            (CleanParts.Thumbnails, T("Thumbnails"), T("{0}, the game makes them again", N(thumbs.Count)), thumbs.Bytes, bare ? p.Contents.Sample(SaveKind.HouseholdPicture, 1) : lots.Take(1).ToList(), 1, 1),
         };
         all = all.Where(t => t.Part == CleanParts.None || t.Bytes > 0).OrderByDescending(t => t.Bytes).ToList();
         p.Marked &= all.Aggregate(CleanParts.None, (a, t) => a | t.Part); // (a part that has nothing is not marked)
@@ -372,7 +373,7 @@ public sealed partial class MainWindow
             if (p.Marked != CleanParts.None) notes.Children.Add(Note("shield-check", "ApexSuccessBrush", T("A copy is made first, and the save is checked afterwards.")));
             else
             {
-                notes.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Tap what you want to take out. Nothing changes until you clean.")));
+                notes.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Choose what you want to take out. Nothing changes until you clean.")));
                 if (mem.Count + rep.Count > 0)
                 {
                     notes.Children.Add(Note("image", "ApexAccentTextBrush", T("The game takes the memories by itself. You can turn that off in Game settings.")));
@@ -425,10 +426,13 @@ public sealed partial class MainWindow
         }
         // (marked to go, the pictures lose their colour: the same ones in grey, made the first time it is marked)
         var (mosaic, faded) = (Pictures(false), (Grid?)null);
+        // (with no house to show: faces, or the household, on the launcher's tint)
+        if (part == CleanParts.None && !pics.Any(i => i.Kind == SaveKind.LotThumbnail)) g.Children.Add(SaveTint());
         g.Children.Add(mosaic);
-        g.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(Windows.UI.Color.FromArgb(255, 8, 9, 10), [(0.04, 0xF2), (0.4, 0x80), (0.72, 0)]) });
+        if (pics.Count == 0 && p.Family is not null) g.Children.Add(new Image { Source = p.Family, Stretch = Stretch.Uniform, MaxHeight = 340, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 24, 0, 24) });
         var label = new TextBlock { Text = name, FontWeight = FontWeights.SemiBold, Foreground = white, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis };
-        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(16, 0, 12, 14) };
+        // (the shade is the words' own: they read over the lightest picture in a tile of any height)
+        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(16, 56, 12, 14), Background = Fade(Windows.UI.Color.FromArgb(255, 8, 9, 10), [(0, 0xF2), (0.6, 0xC0), (1, 0)]) };
         words.Children.Add(new TextBlock { Text = SpSize(bytes), FontSize = bytes > 18L << 20 ? 26 : 18, FontWeight = FontWeights.SemiBold, Foreground = white });
         words.Children.Add(label);
         words.Children.Add(new TextBlock { Text = info, FontSize = 12, Foreground = new SolidColorBrush(Rgb(0xC8, 0xC8, 0xC8)), TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -498,7 +502,7 @@ public sealed partial class MainWindow
         var body = new StackPanel { Spacing = 12, Width = 480 };
         if (top.Children.Count > 0) body.Children.Add(new Border { Child = top, CornerRadius = new CornerRadius(12), Background = new SolidColorBrush(Rgb(0x0F, 0x1A, 0x14)) });
         body.Children.Add(new TextBlock { Text = T("{0} became {1}", SpSize(r.Before), SpSize(r.After)), FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 30, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap });
-        var text = Body(T("Everything was checked: the family, the houses and the relationships are the same. The copy from before is kept."));
+        var text = Body(T("Everything was checked: the household, the houses and the relationships are the same. The copy from before is kept."));
         text.TextAlignment = TextAlignment.Center;
         body.Children.Add(text);
         var d = new ContentDialog { Content = body, PrimaryButtonText = T("Done"), SecondaryButtonText = T("Undo"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
@@ -522,7 +526,7 @@ public sealed partial class MainWindow
         var culture = LangCulture();
         var blue = new SolidColorBrush(Pick(0xFF8EC2F5, 0xFF2B6CB0));
         var accent = Res("ApexAccentBrush");
-        string When(SavePoint x) => x.Kind == CopyKind.Now ? T("Today") : x.When.ToString(x.When.Year == DateTime.Now.Year ? "d MMMM, HH:mm" : "d MMMM yyyy, HH:mm", culture);
+        string When(SavePoint x) => x.Kind == CopyKind.Now ? T("Today") : x.When.ToString(x.When.Year == DateTime.Now.Year ? "M" : "d", culture) + ", " + x.When.ToString("t", culture);
         string What(SavePoint x) => x.Kind switch
         {
             CopyKind.Now => T("The save as it is now, {0}", SpSize(x.Bytes)),
@@ -553,7 +557,7 @@ public sealed partial class MainWindow
         var line = new Shape.Path { Stroke = accent, StrokeThickness = 2.5, IsHitTestVisible = false };
         plot.Children.Add(area);
         plot.Children.Add(line);
-        var card = new Grid { ColumnSpacing = 18, RowSpacing = 12 };
+        var card = new Grid();
         page.Children.Add(new Border { Child = card, Padding = new Thickness(18, 16, 18, 16), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexRaisedBrush") });
         page.Children.Add(Muted(points.Count > 1 ? T("When you go back, today's save becomes one more point here. Nothing is lost.") : T("No copy of this save yet. Make a copy and it shows here as a point.")));
         p.Host.Children.Add(new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(24, 20, 24, 18), Child = page });
@@ -561,13 +565,14 @@ public sealed partial class MainWindow
         // the chosen point: a picture, when it is from, and the way back to it
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) card.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         var photo = new Grid { Width = 92, Height = 92 };
-        card.Children.Add(new Border { Child = photo, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(4), BorderBrush = new SolidColorBrush(Rgb(0xF1, 0xEF, 0xEA)), Background = Res("ApexPillBrush"), Visibility = p.Memories.Count > 0 ? Visibility.Visible : Visibility.Collapsed });
+        var print = new Border { Child = photo, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(4), BorderBrush = new SolidColorBrush(Rgb(0xF1, 0xEF, 0xEA)), Background = Res("ApexPillBrush"), Margin = new Thickness(0, 0, 18, 0), Visibility = Visibility.Collapsed };
+        card.Children.Add(print);
         var (title, text) = (new TextBlock { FontSize = 18, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }, Body(""));
         var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { title, text } };
         AutomationProperties.SetLiveSetting(title, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         Grid.SetColumn(words, 1);
         card.Children.Add(words);
-        var act = new Button { Height = 48, Padding = new Thickness(22, 0, 22, 0), CornerRadius = new CornerRadius(8), Style = (Style)Application.Current.Resources["AccentButtonStyle"], VerticalAlignment = VerticalAlignment.Center };
+        var act = new Button { Height = 48, Padding = new Thickness(22, 0, 22, 0), CornerRadius = new CornerRadius(8), Style = (Style)Application.Current.Resources["AccentButtonStyle"], VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 0, 0) };
         Dims(act);
         act.Click += async (_, _) => { if (points[p.Point].Kind == CopyKind.Now) await PlayAsync(p.Save.Name, update: _settings.InstallUpdatesOnPlay); else await SpRestore(p, points[p.Point], When(points[p.Point]), undo: true); };
         Grid.SetColumn(act, 2);
@@ -587,9 +592,16 @@ public sealed partial class MainWindow
             (title.Text, text.Text) = (When(x), What(x));
             act.Content = x.Kind == CopyKind.Now ? T("Play") : T("Go back to here");
             act.IsEnabled = x.Kind == CopyKind.Now ? !_busy && !Maintenance && !_running && !p.Stored : p.Blocked is null;
-            photo.Children.Clear();
             // (one of the save's memories, earlier ones for earlier points)
-            if (p.Memories.Count > 0) photo.Children.Add(SpPicture(p, p.Memories[points.Count > 1 ? (int)((long)i * (p.Memories.Count - 1) / (points.Count - 1)) : p.Memories.Count - 1], (int)(96 * SpScale)));
+            if (p.Memories.Count > 0) _ = Picture(p.Memories[points.Count > 1 ? (int)((long)i * (p.Memories.Count - 1) / (points.Count - 1)) : p.Memories.Count - 1]);
+            async Task Picture(SaveItem memory)
+            {
+                var src = await SpImage(memory, (int)(96 * SpScale), p.Stop.Token);
+                if (p.Point != i) return;
+                print.Visibility = src is null ? Visibility.Collapsed : Visibility.Visible;
+                photo.Children.Clear();
+                photo.Children.Add(new Image { Source = src, Stretch = Stretch.UniformToFill, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+            }
         }
         for (var i = 0; i < points.Count; i++)
         {

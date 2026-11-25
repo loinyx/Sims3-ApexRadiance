@@ -87,8 +87,9 @@ public sealed partial class MainWindow : Window
         // closing in the middle of an install or a removal would leave the game half changed
         AppWindow.Closing += (w, a) =>
         {
-            if (!_busy && AskLeaveMerge(() => QuitForNewerCopy())) { a.Cancel = true; return; }
-            if (!_busy) { _tray?.Dispose(); return; }
+            var busy = _busy || _savesBusy;
+            if (!busy && AskLeaveMerge(() => QuitForNewerCopy())) { a.Cancel = true; return; }
+            if (!busy) { _tray?.Dispose(); return; }
             a.Cancel = true;
             _ = Message(T("The launcher is applying changes"), T("Don't close the launcher until it finishes."));
         };
