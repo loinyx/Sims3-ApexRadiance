@@ -354,7 +354,7 @@ public sealed partial class MainWindow
     // can still be stopped). Null when it was stopped or failed: then the page says so.
     async Task<TR?> SpWork<TR>(string title, Func<Action<string, double, bool>, CancellationToken, TR> work) where TR : class
     {
-        if (_busy) return null;
+        if (_busy || _savesBusy) { SpSay(InfoBarSeverity.Informational, T("The launcher is applying changes")); return null; }
         var bar = new ProgressBar { IsIndeterminate = true, Maximum = 1 };
         var text = Body(T("Reading the save…"));
         AutomationProperties.SetLiveSetting(text, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
@@ -393,7 +393,7 @@ public sealed partial class MainWindow
     // the Gallery's own file was changed for it (its undo steps hold the old one)
     void SpGalleryAgain(string? from = null, string? to = null)
     {
-        if (_gal is not null) _gal = Gallery.Load();
+        if (_gal is not null) _gal = LoadGallery();
         if (from is not null && to is not null && _galAlbum == from) _galAlbum = to;
         _lastKept = null;
         _undoSteps.Clear();

@@ -139,7 +139,7 @@ public static class RestorePoints
     // Undoes that point and every newer one, newest first. Restoring is final: the points restored are deleted (one with a path
     // that could not be put back stays, to try again, and the older ones are left untouched: each point's copies are the state
     // after the older ones, so they are undone only once every newer one is). Returns the paths that could not be put back.
-    public static List<string> Restore(string bin, RestorePoint point)
+    public static List<string> Restore(string bin, RestorePoint point, string? docs = null)
     {
         Engine.CheckWritable();
         if (_open is not null) throw new InvalidOperationException("The launcher is applying changes");
@@ -151,7 +151,7 @@ public static class RestorePoints
             var before = failed.Count;
             // last change first: a file goes before the folder it was created in
             foreach (var e in Enumerable.Reverse(p.Entries))
-                try { Undo(p, e); }
+                try { Undo(p, e, docs); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failed.Add(e.Path); }
             if (failed.Count > before) break;
             DeleteTree(p.Dir);
@@ -163,8 +163,10 @@ public static class RestorePoints
         return failed;
     }
 
-    static void Undo(RestorePoint p, RestoreEntry e)
+    static void Undo(RestorePoint p, RestoreEntry e, string? docs)
     {
+        // (Apex's settings moved to the game's folder since: the key goes back where they are now)
+        var toml = File.Exists(e.Path) || docs is null ? e.Path : Engine.ApexToml(docs);
         if (e.Dir)
         {
             if (e.Existed) Directory.CreateDirectory(e.Path);
@@ -176,22 +178,22 @@ public static class RestorePoints
         if (e.FpsLimitKey)
         {
             // only the key goes back: the game may have saved other settings since
-            if (!File.Exists(e.Path)) return;
-            var text = File.ReadAllText(e.Path);
+            if (!File.Exists(toml)) return;
+            var text = File.ReadAllText(toml);
             // only while the file still holds what Setup wrote: a limit the player changed since stays (Restore checked the game is closed)
             if (Engine.FpsLimitKey(text) == (e.FpsLimitSet ?? Engine.FrameGenFps))
-                Fs.WriteAtomic(e.Path, e.FpsLimitWas is { } was ? Engine.WithFpsLimit(text, was) : Engine.WithoutFpsLimit(text));
+                Fs.WriteAtomic(toml, e.FpsLimitWas is { } was ? Engine.WithFpsLimit(text, was) : Engine.WithoutFpsLimit(text));
             return;
         }
         if (e.RestartHostKey)
         {
             // the game may have saved other settings in the file since: only the key goes back (the whole file when the game
             // never wrote it after Setup created it)
-            if (!File.Exists(e.Path)) return;
-            var text = File.ReadAllText(e.Path);
-            if (!e.Existed && text == Engine.NewApexToml) File.Delete(e.Path);
+            if (!File.Exists(toml)) return;
+            var text = File.ReadAllText(toml);
+            if (!e.Existed && text == Engine.NewApexToml && toml == e.Path) File.Delete(e.Path);
             else if (Engine.RestartHostKey(text) != e.RestartHostWas)
-                Fs.WriteAtomic(e.Path, e.RestartHostWas is { } was ? Engine.WithRestartHost(text, was) : Engine.WithoutRestartHost(text));
+                Fs.WriteAtomic(toml, e.RestartHostWas is { } was ? Engine.WithRestartHost(text, was) : Engine.WithoutRestartHost(text));
             return;
         }
         if (!e.Existed) { if (File.Exists(e.Path)) File.Delete(e.Path); return; }

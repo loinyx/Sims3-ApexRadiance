@@ -115,14 +115,14 @@ public static class Gallery
     {
         var toml = ApexToml(docs);
         var chosen = Chosen(docs, Setting(toml, "ui", "screenshot_folder"), Setting(toml, "ui", "screenshot_custom_folder"), "Screenshots", "Screenshots");
-        return Folders(chosen, Path.Combine(docs, "Screenshots"), Path.Combine(Scan.ApexDir(docs), "Screenshots"));
+        return Folders(chosen, Path.Combine(docs, "Screenshots"), Path.Combine(Scan.ApexDir(docs), "Screenshots"), Path.Combine(Scan.WindowsDocs(docs), "Screenshots"));
     }
 
     public static List<string> VideoFolders(string docs)
     {
         var toml = ApexToml(docs);
         var chosen = Chosen(docs, Setting(toml, "capture.video", "folder"), Setting(toml, "capture.video", "custom_folder"), "Recorded Videos", "Videos");
-        return Folders(chosen, Path.Combine(docs, "Recorded Videos"), Path.Combine(Scan.ApexDir(docs), "Videos"));
+        return Folders(chosen, Path.Combine(docs, "Recorded Videos"), Path.Combine(Scan.ApexDir(docs), "Videos"), Path.Combine(Scan.WindowsDocs(docs), "Recorded Videos"));
     }
 
     static string ApexToml(string docs)
@@ -223,6 +223,32 @@ public static class Gallery
 
     public static PictureInfo Info(GalleryData d, string path) => d.Pictures.TryGetValue(path, out var i) ? i : d.Pictures[path] = new PictureInfo();
     public static AlbumLook Look(GalleryData d, string album) => d.Albums.TryGetValue(album, out var l) ? l : d.Albums[album] = new AlbumLook();
+
+    // Pictures that moved with Apex's folder (framework/apex_paths.cpp) keep what was set on them: every stored path under the
+    // old place whose file is gone and is at the new one.
+    public static void Follow(GalleryData d, string windows, string docs)
+    {
+        if (docs.Equals(windows, StringComparison.OrdinalIgnoreCase)) return;
+        var (from, to) = (Path.Combine(windows, "Apex Radiance") + Path.DirectorySeparatorChar, Path.Combine(docs, "Apex Radiance") + Path.DirectorySeparatorChar);
+        var changed = false;
+        string Now(string p)
+        {
+            if (!p.StartsWith(from, StringComparison.OrdinalIgnoreCase) || File.Exists(p) || to + p[from.Length..] is var n && !File.Exists(n)) return p;
+            changed = true;
+            return n;
+        }
+        Dictionary<string, T> Keys<T>(Dictionary<string, T> all)
+        {
+            var now = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in all) now.TryAdd(Now(k), v);
+            return now;
+        }
+        d.Pictures = Keys(d.Pictures);
+        foreach (var look in d.Albums.Values) look.Places = Keys(look.Places);
+        foreach (var c in d.Custom) c.Pictures = c.Pictures.Select(Now).ToList();
+        if (d.HomePicture is { } home) d.HomePicture = Now(home);
+        if (changed) Save(d);
+    }
 
     public static GalleryData Load()
     {

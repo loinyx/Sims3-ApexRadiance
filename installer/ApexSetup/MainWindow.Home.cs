@@ -569,7 +569,7 @@ public sealed partial class MainWindow
             pin.Click += (_, _) =>
             {
                 if (isTop) return;
-                (_gal ??= Gallery.Load()).HomePicture = p.Path;
+                (_gal ??= LoadGallery()).HomePicture = p.Path;
                 Gallery.Save(_gal);
                 if (_settings.HomePicture != "gallery") { _settings.HomePicture = "gallery"; _settings.Save(); }
                 BuildHome();

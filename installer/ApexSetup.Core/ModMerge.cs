@@ -437,6 +437,7 @@ public static partial class ModMerge
                 foreach (var t in tags.Distinct(StringComparer.OrdinalIgnoreCase)) ModNotes.SetTag(plan.TargetRel, t, true);
             }
             catch (Exception e) { log.WriteLine("notes not moved: " + e.Message); Engine.Log(e); } // (the merge is done whatever becomes of them)
+            Inner(plan.Docs, record.Originals);
             Forget(plan.Docs);
             var merged = new ModFile(plan.TargetPath, plan.TargetRel, record.Size, Mods.KindOf(plan.TargetPath), true, false);
             log.WriteLine($"done in {sw.ElapsedMilliseconds} ms");
@@ -456,6 +457,16 @@ public static partial class ModMerge
             if (stuck.Count > 0) throw new SetupException("The merge failed and {0} files could not be put back. They are in {1}.", stuck.Count.ToString(), plan.StoreDir);
             throw;
         }
+    }
+
+    // a merge that went into another one after its file was changed outside the launcher: its record follows the file, so it
+    // is still found there
+    static void Inner(string docs, IEnumerable<MergeOriginal> originals)
+    {
+        foreach (var o in originals)
+            foreach (var r in Records(docs).Where(r => r.Merged.Equals(o.Rel, StringComparison.OrdinalIgnoreCase) && r.Sha256 != o.Sha256).ToList())
+                try { (r.Sha256, r.Size) = (o.Sha256, o.Size); Save(r); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }
 
     static void Unchanged(MergeSource s)
@@ -587,7 +598,7 @@ public static partial class ModMerge
         // (a change to a merge that did not finish is undone first: the merge as it was)
         foreach (var r in Records(docs).Where(r => r.Pending is not null).ToList())
             try { Undo(docs, r, null); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException or ArgumentException) { Engine.Log(e); }
         try
         {
             var busy = Records(docs).Where(r => r.Pending is not null).Select(r => Path.GetFullPath(r.Dir)).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -616,7 +627,7 @@ public static partial class ModMerge
                 DeleteStore(r.Dir);
                 foreach (var t in tmps) Fs.Retry(() => File.Delete(t));
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { Engine.Log(e); }
         // a write cut short before its record was made leaves a .package.tmp-* with nothing naming it: the game never loads
         // it, so it only takes space (one of a record still waiting stays; so does one younger than this launcher)
         try
@@ -705,7 +716,8 @@ public static partial class ModMerge
                         // (a record is read from a folder anyone can put files in: one that names a place outside Mods, or
                         // that is cut short, is no merge of the launcher's, and what its folder keeps shows as kept mods)
                         var inMods = Path.Combine(docs, "Mods") + Path.DirectorySeparatorChar;
-                        if (r.Originals is null || r.Originals.Any(o => o is null) || r.Pending is { Moves: null }
+                        if (r.Originals is null || r.Originals.Any(o => o is null) || r.Pending is { } p && (p.Moves is null || p.Moves.Any(m => m is null || string.IsNullOrEmpty(m.From) || string.IsNullOrEmpty(m.To)))
+                            || r.Name is { } name && (Path.GetFileName(name) != name || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
                             || r.Originals.Select(o => o.Rel).Append(r.Merged).Any(rel => string.IsNullOrEmpty(rel) || !Path.GetFullPath(Path.Combine(docs, rel)).StartsWith(inMods, StringComparison.OrdinalIgnoreCase)))
                         { Engine.Log(new InvalidDataException("not a merge record: " + j)); continue; }
                         r.Priority ??= new();

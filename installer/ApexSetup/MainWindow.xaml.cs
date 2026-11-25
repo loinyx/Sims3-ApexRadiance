@@ -2106,7 +2106,7 @@ public sealed partial class MainWindow : Window
             {
                 string? left = null;
                 if (point?.Committed is { } wp)
-                    try { if (RestorePoints.Restore(g.Bin, wp) is { Count: > 0 } kept) left = string.Join(", ", kept); }
+                    try { if (RestorePoints.Restore(g.Bin, wp, Scan.DocumentsFor(g)) is { Count: > 0 } kept) left = string.Join(", ", kept); }
                     catch (Exception re) { App.Log(re); left = ErrorText(re); }
                 _state = Scan.Run(g);
                 _defaultsFor = null;
@@ -2370,7 +2370,7 @@ public sealed partial class MainWindow : Window
         if (ask && !await Confirm(T("Restore this point?"), T("The launcher puts back the files as they were before this change, and undoes every change made after it. Close the game first."), T("Restore"))) return;
         await Guarded(() =>
         {
-            if (RestorePoints.Restore(g.Bin, p) is { Count: > 0 } failed)
+            if (RestorePoints.Restore(g.Bin, p, Scan.DocumentsFor(g)) is { Count: > 0 } failed)
                 throw new IOException(T("The launcher couldn't restore {0}.", string.Join(", ", failed)));
         }, T("Changes undone."), bar);
     }

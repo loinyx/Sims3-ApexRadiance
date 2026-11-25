@@ -44,7 +44,14 @@ public sealed partial class MainWindow
     static readonly Windows.UI.Color[] Tapes = [Windows.UI.Color.FromArgb(0x8C, 0x7F, 0x77, 0xDD), Windows.UI.Color.FromArgb(0x99, 0xE0, 0xA8, 0x4F), Windows.UI.Color.FromArgb(0x8C, 0x7D, 0xBE, 0x9A), Windows.UI.Color.FromArgb(0x80, 0xE8, 0x6F, 0xB8)];
 
     // the picture Home opens on: the one chosen in the Gallery, else the newest
-    string? HomePicture() => (_gal ??= Gallery.Load()).HomePicture is { } p && File.Exists(p) ? p : Screenshots(1).FirstOrDefault();
+    GalleryData LoadGallery()
+    {
+        var d = Gallery.Load();
+        if (_game is not null) Gallery.Follow(d, Scan.WindowsDocs(Docs), Docs);
+        return d;
+    }
+
+    string? HomePicture() => (_gal ??= LoadGallery()).HomePicture is { } p && File.Exists(p) ? p : Screenshots(1).FirstOrDefault();
 
     void BuildGallery()
     {
@@ -52,7 +59,7 @@ public sealed partial class MainWindow
         var host = ScreenGallery;
         host.Children.Clear();
         if (_game is null) { host.Children.Add(Heading(T("Gallery"))); host.Children.Add(Muted(T("Choose the game first."))); return; }
-        _gal ??= Gallery.Load();
+        _gal ??= LoadGallery();
         if (!_galRestored)
         {
             // (Home may have read the gallery already; the view and album come back once, on the first visit)

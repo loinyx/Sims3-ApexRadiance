@@ -752,6 +752,7 @@ public sealed partial class MainWindow
     {
         if (!_busy) return false;
         _dragRows = null;
+        SetInfo(ModsInfo, InfoBarSeverity.Informational, T("The launcher is applying changes"), "");
         DispatcherQueue.TryEnqueue(FillMods);
         return true;
     }
@@ -796,7 +797,7 @@ public sealed partial class MainWindow
 
     ModFile? ToggleMod(ModRow row, bool on)
     {
-        if (_busy) return null;
+        if (ModsBusy()) return null;
         try
         {
             var path = Mods.SetEnabled(row.File, on, Docs);
@@ -823,7 +824,7 @@ public sealed partial class MainWindow
         if (todo.Count == 0) return;
         // (one or many: the moves off the UI thread, which a file held by an antivirus could otherwise freeze for seconds): the moves off the UI thread, then the rows and the list once (a refresh per mod froze it for minutes)
         var docs = Docs;
-        var done = await Task.Run(() =>
+        var done = await ModWork(() =>
         {
             var list = new List<(ModRow Row, string? Path, Exception? Error)>();
             foreach (var r in todo)

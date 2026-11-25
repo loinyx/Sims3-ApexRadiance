@@ -259,6 +259,7 @@ public static partial class ModMerge
                     }).ToList(),
                 };
                 Save(record);
+                Inner(docs, record.Originals.Where(o => !rec.Merged.Equals(o.Rel, StringComparison.OrdinalIgnoreCase)));
             }
             done = true;
             log.WriteLine("step finish: the record written");

@@ -68,7 +68,10 @@ public static class Scan
 
     // Sims3SettingsSetter goes by Windows' language, so its file is in that folder or the game's: the one saved last, or with
     // neither the place it will read (framework/apex_paths.cpp has the same rule).
-    public static string SetterFile(string docs) => SetterFile(docs, _beside.TryGetValue(docs, out var b) ? b.Windows : docs);
+    public static string SetterFile(string docs) => SetterFile(docs, WindowsDocs(docs));
+
+    // the Documents folder of Windows' language, where Apex 4.1.0 and older kept everything (docs itself when they are one)
+    public static string WindowsDocs(string docs) => _beside.TryGetValue(docs, out var b) ? b.Windows : docs;
 
     public static string SetterFile(string docs, string windows)
     {

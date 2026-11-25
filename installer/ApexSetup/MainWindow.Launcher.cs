@@ -287,7 +287,7 @@ public sealed partial class MainWindow
     // the same questions and refusal as closing the window
     void QuitFromTray()
     {
-        var asks = !_busy && AskLeaveMerge(() => QuitForNewerCopy());
+        var asks = !_busy && !_savesBusy && AskLeaveMerge(() => QuitForNewerCopy());
         if (!asks && QuitForNewerCopy()) return;
         AppWindow.Show();
         Activate();
@@ -734,7 +734,7 @@ public sealed partial class MainWindow
         picture.SelectionChanged += (_, _) => { _settings.HomePicture = kinds[Math.Max(0, picture.SelectedIndex)]; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picture, T("Picture on top"));
         host.Children.Add(Row(T("Picture on top"), T("The gallery picture you chose there or the newest one, the photo the game keeps of the household, or none."), picture));
-        var chosen = (_gal ??= Gallery.Load()).HomePicture is { } hp && File.Exists(hp);
+        var chosen = (_gal ??= LoadGallery()).HomePicture is { } hp && File.Exists(hp);
         var choose = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         choose.Children.Add(Button(T("Choose in the gallery"), () => Show(GalleryScreen)));
         if (chosen) choose.Children.Add(Button(T("Use the newest"), () => { _gal!.HomePicture = null; Gallery.Save(_gal); BuildSettings(); }));
