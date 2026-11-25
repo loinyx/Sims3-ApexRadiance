@@ -19,6 +19,23 @@ constexpr const char* k407Improved[] = {
     "RTX Remix bridge: the game keeps its graphics settings on every start",
     nullptr};
 
+constexpr const char* k411Added[] = {
+    "Apex Launcher: a Game settings page for shadows, Sim textures, bloom and loading",
+    "Apex Launcher: Add puts mods, Sims, lots, worlds and archives in their places",
+    "Apex Launcher: profiles keep which mods are on",
+    "Apex Launcher: Saves cleans a save, with a checked copy and undo",
+    nullptr};
+
+constexpr const char* k411Improved[] = {
+    "Apex Launcher: merging thousands of mods keeps the window responsive",
+    "Apex Launcher: each Health check has its own page, and any notice can be ignored",
+    nullptr};
+
+constexpr const char* k411Fixed[] = {
+    "Night Lights: deleting lamps in Buy mode no longer crashes the game",
+    "Settings: Apex uses the Documents folder of the game's language",
+    nullptr};
+
 constexpr const char* k410Added[] = {
     "Apex Launcher: replaces Apex Radiance Setup, to play, check the game and sort mods, saves and pictures",
     nullptr};
@@ -810,6 +827,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.1.1", "", k411Added, k411Improved, k411Fixed, "Apex Launcher 2.3: Game settings, save cleaning and merges that stay responsive"},
     {"4.1.0", "2026-11-24", k410Added, nullptr, nullptr, "Apex Radiance Setup becomes Apex Launcher, your home for playing The Sims 3"},
     {"4.0.14", "2026-11-23", nullptr, k4014Improved, k4014Fixed},
     {"4.0.13", "2026-11-20", k4013Added, k4013Improved, k4013Fixed, "4K videos, and ReShade looks that leave Sims' hair alone"},

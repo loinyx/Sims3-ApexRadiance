@@ -24,6 +24,10 @@ described in [features/installer.md](../features/installer.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-25 | `5166d9cd` and the review fixes after it | `installer/ApexSetup.Tests` | All passed, with new checks of packages that look damaged and of files replaced between two plans of a merge | none |
+| 2026-11-25 | `5166d9cd` and the review fixes after it | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `5166d9cd` and the review fixes after it | Merge of 4000 generated packages (1.9 GB, NVMe): core run, and the launcher in a sandbox | Run 6.6 s to 3.4 s, plan again 1.3 s to 0.4 s, 234,857 progress reports to 53, peak 208 MB, same SHA-256; in the launcher 4.1.0's dialog answered again after about 8 minutes, this one stayed responsive and took 5.7 s | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `5166d9cd` and the review fixes after it | Published exe in a sandbox: Mods, its details pane and menus, merge dialogs and Health, dark and light, 780 to 1920 wide, English, Portuguese and German | Rendered as expected; captures reviewed | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-24 | `e64890dd` | `installer/ApexSetup.Tests` | All passed, with the new folder-guard and crash-timeline checks | none |
 | 2026-11-24 | `1a2b53e6` | The move from Apex Radiance Setup on this PC (separate `%LOCALAPPDATA%`, the old data folder, `ApexRadianceSetup.exe` in a Downloads folder, a copied `TS3W.exe` with the ASI loader) | What's new, Where it lives and Ready rendered; Install copied it, the installed copy opened on Ready, the old copy in Downloads was deleted, Start menu entry made | Windows 11 |
 | 2026-11-24 | `a19e0296` | Stability timeline on the player's real logs (read only) | Sessions, crashes and freezes matched to Windows events, RTX Remix and Apex Radiance logs; no crash put on a plugin that was only further down the stack | Windows 11, RTX 4070 Ti SUPER |
@@ -68,3 +72,8 @@ described in [features/installer.md](../features/installer.md).
 - Home (2.0.10): *Continue* opening the game into the save shown (`-worldFile`), a save picked from *Another save* with a
   real click, and the crash or low-memory state with *Start again into this save*.
 - The Acrylic and stronger Mica window backgrounds.
+- In game: a cleaned save, a package merged by 2.3, the Game settings values, and which of two packages of one folder is in
+  use.
+- The merge on a hard disk and with a player's own thousands of mods; the question about a package that looks damaged, on
+  screen.
+- A theme switch with the launcher open after 2.3 (menus and lists), and a contrast theme.
