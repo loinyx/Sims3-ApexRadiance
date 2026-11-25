@@ -323,9 +323,9 @@ public sealed partial class MainWindow
         {
             var wide = w >= 700;
             family.Height = wide ? 350 : 250;
-            family.MaxWidth = Math.Max(120, w * 0.46);
-            family.Margin = new Thickness(0, 0, w * 0.05, 22);
-            words.MaxWidth = wide ? Math.Min(500, w * 0.62) : w;
+            family.MaxWidth = Math.Max(120, w * 0.42);
+            family.Margin = new Thickness(0, 0, w * 0.04, 22);
+            words.MaxWidth = wide ? Math.Min(500, w * 0.5 - 16) : w;
         }
         Fit(640);
         card.SizeChanged += (_, e) => { if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 0.5) Fit(e.NewSize.Width); };
@@ -513,7 +513,8 @@ public sealed partial class MainWindow
         var (name, place, size) = (FamilyName(l), SavePlace(l), SpSize(l.Info.Bytes));
         var g = new Grid { Height = 244 };
         var lot = SaveImage(LotPicture(l), 0.62);
-        (lot.Width, lot.Height, lot.Margin, lot.HorizontalAlignment, lot.VerticalAlignment) = (290, 250, new Thickness(0, -14, 0, 0), HorizontalAlignment.Center, VerticalAlignment.Top);
+        // (it fills the card however wide: a lot's picture has an edge of its own)
+        (lot.Stretch, lot.Height, lot.Margin, lot.HorizontalAlignment, lot.VerticalAlignment) = (Stretch.UniformToFill, 250, new Thickness(0, -14, 0, 0), HorizontalAlignment.Center, VerticalAlignment.Top);
         g.Children.Add(lot);
         g.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(((SolidColorBrush)Res("ApexCardBrush")).Color, [(0, 0xF8), (0.14, 0xF5), (0.52, 0x59), (0.8, 0)]) });
         var stand = new Grid { Height = 150, MaxWidth = 190, Margin = new Thickness(22, 0, 0, 74), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom };

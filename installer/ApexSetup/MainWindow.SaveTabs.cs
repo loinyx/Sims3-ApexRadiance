@@ -64,16 +64,18 @@ public sealed partial class MainWindow
             return;
         }
         var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var top = new WrapPanel { Spacing = 12 };
+        var top = new Grid { ColumnSpacing = 14 };
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        top.ColumnDefinitions.Add(new ColumnDefinition());
         top.Children.Add(chips);
-        var say = Muted(T("The starred ones never leave in a clean."));
-        say.Margin = new Thickness(0, 8, 0, 0);
+        // (what the star is for, why a save grows, and where that stops: one line that wraps beside the choices)
+        var say = Muted(T("The starred ones never leave in a clean.") + " " + T("The game takes these pictures by itself, and the save grows with them.") + " ");
+        var off = new Microsoft.UI.Xaml.Documents.Hyperlink { Foreground = Res("ApexAccentTextBrush"), Inlines = { new Microsoft.UI.Xaml.Documents.Run { Text = T("Turn that off in Game settings") } } };
+        off.Click += (_, _) => Show(GameSettingsScreen);
+        say.Inlines.Add(off);
+        say.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(say, 1);
         top.Children.Add(say);
-        // (why a save grows, and where that stops)
-        var why = new WrapPanel { Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
-        why.Children.Add(Muted(T("The game takes these pictures by itself, and the save grows with them.")));
-        why.Children.Add(Link(T("Turn that off in Game settings"), () => Show(GameSettingsScreen)));
-        top.Children.Add(why);
         var page = new StackPanel { Spacing = 14 };
         page.Children.Add(top);
         var place = new Grid();
@@ -544,13 +546,13 @@ public sealed partial class MainWindow
         var plot = new Canvas { Height = 300 };
         SpBare(plot);
         page.Children.Add(plot);
-        var area = new Shape.Path { Fill = new SolidColorBrush(A(((SolidColorBrush)accent).Color, 0x17)), IsHitTestVisible = false };
+        var area = new Shape.Path { Fill = Fade(((SolidColorBrush)accent).Color, [(0, 0), (1, 0x30)]), IsHitTestVisible = false };
         var line = new Shape.Path { Stroke = accent, StrokeThickness = 2.5, IsHitTestVisible = false };
         plot.Children.Add(area);
         plot.Children.Add(line);
         var card = new Grid { ColumnSpacing = 18, RowSpacing = 12 };
         page.Children.Add(new Border { Child = card, Padding = new Thickness(18, 16, 18, 16), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexRaisedBrush") });
-        page.Children.Add(Muted(T("When you go back, today's save becomes one more point here. Nothing is lost.")));
+        page.Children.Add(Muted(points.Count > 1 ? T("When you go back, today's save becomes one more point here. Nothing is lost.") : T("No copy of this save yet. Make a copy and it shows here as a point.")));
         p.Host.Children.Add(new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(24, 20, 24, 18), Child = page });
 
         // the chosen point: a picture, when it is from, and the way back to it

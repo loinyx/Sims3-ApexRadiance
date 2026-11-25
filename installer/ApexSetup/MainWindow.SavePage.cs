@@ -47,7 +47,7 @@ public sealed partial class MainWindow
         public Dictionary<string, SelectorBarItem> Tabs { get; } = [];
         public Action? Repaint { get; set; }            // the memories in sight, when many are chosen at once
         public Action? ShowRepeated { get; set; }       // the Memories' third choice, once the memories were compared
-        public string Title => Info.Household.Length > 0 ? T("{0} family", Info.Household) : Save.Name;
+        public string Title => Info.Household.Length > 0 ? T("{0} household", Info.Household) : Save.Name;
     }
 
     SavePageState? _sp;
@@ -193,7 +193,7 @@ public sealed partial class MainWindow
 
     Button SpBack(bool glass = false)
     {
-        var b = new Button { Content = Lucide.Icon("chevron-left", 18), Width = 44, Height = 44, CornerRadius = new CornerRadius(22), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        var b = new Button { Content = Lucide.Icon("chevron-left", 18, glass ? new SolidColorBrush(Microsoft.UI.Colors.White) : null), Width = 44, Height = 44, CornerRadius = new CornerRadius(22), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         if (glass) b.Background = Glass(0.4);
         AutomationProperties.SetName(b, T("Back to Saves"));
         AutomationProperties.SetAutomationId(b, "SaveBack");
@@ -281,7 +281,7 @@ public sealed partial class MainWindow
         // (the world being played first; a save that also has a university or a holiday names both)
         var worlds = new[] { p.Info.World }.Concat(p.Info.Worlds).Where(w => w.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).Select(Worlds.Pretty).ToList();
         words.Children.Add(new TextBlock { Text = worlds.Count == 2 ? T("{0} and {1}", worlds[0], worlds[1]) : string.Join(" · ", worlds), FontSize = 14, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
-        words.Children.Add(new TextBlock { Text = SavedWhen(p.Info.LastPlayed) + " · " + Path.GetFileName(p.Save.Dir), FontSize = 12, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
+        words.Children.Add(new TextBlock { Text = PlayedWhen(p.Info.LastPlayed) + " · " + Path.GetFileName(p.Save.Dir), FontSize = 12, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(words, 2);
         row.Children.Add(words);
 
@@ -311,7 +311,7 @@ public sealed partial class MainWindow
         Item(T("Open folder"), () => { OpenFolder(p.Save.Dir); return Task.CompletedTask; }, "folder", changes: false);
         menu.Items.Add(new MenuFlyoutSeparator());
         Item(T("Move to the Recycle Bin"), () => SpDelete(p), "trash-2", danger: true);
-        var more = Big(new Button { Width = 48, Flyout = menu, Content = Lucide.Icon("ellipsis", 18) }, 0);
+        var more = Big(new Button { Width = 48, Flyout = menu, Content = Lucide.Icon("ellipsis", 18, onCover ? text : null) }, 0);
         if (onCover) more.Background = Glass(0.4);
         AutomationProperties.SetName(more, T("More options"));
         ToolTipService.SetToolTip(more, T("More options"));
