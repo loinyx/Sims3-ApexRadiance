@@ -9,7 +9,8 @@ namespace ApexSetup;
 
 // What a copy of a resource means to the game, so only a real difference is a conflict. XML tuning: its elements, attributes
 // and values, whatever the comments, the layout, the attribute order and the encoding. A text table (STBL): its texts by
-// id, in any order. Everything else, and anything that can't be read that way: its bytes.
+// id, in any order. A settings file (INI): its sections, names and values, whatever the comments and the layout. Everything
+// else, and anything that can't be read that way: its bytes.
 public static partial class ModConflicts
 {
     // a larger resource is compared by its bytes only (tuning is far smaller; the game's own text tables are about 5 MB)
@@ -102,6 +103,96 @@ public static partial class ModConflicts
         catch (XmlException) { return null; }
     }
 
+    // A settings file of the game as "section > name" and value, in order. A value ends at its ';' (a comment, or the end of
+    // the line as the game's own files write it); 1, 1.0 and 1.0f are one number. Null when a line is none of these.
+    static List<(string Name, string Value)>? IniValues(byte[] b)
+    {
+        if (XmlText(b) is not { } text || text.Contains('\0')) return null;
+        var o = new List<(string, string)>();
+        var section = "";
+        foreach (var raw in text.Split('\n'))
+        {
+            var l = raw.Split(';')[0].Trim();
+            if (l.Length == 0 || l.StartsWith("//", StringComparison.Ordinal)) continue;
+            if (l[0] == '[' && l[^1] == ']') { section = l[1..^1].Trim(); continue; }
+            if (l.IndexOf('=') is not (> 0 and var at)) return null;
+            var v = l[(at + 1)..].Trim();
+            o.Add(((section.Length > 0 ? section + " > " : "") + l[..at].Trim(), Number(v) ?? v));
+        }
+        return o;
+    }
+
+    static string? Number(string v) =>
+        double.TryParse(v.EndsWith('f') || v.EndsWith('F') ? v[..^1] : v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n)
+            ? n.ToString("R", System.Globalization.CultureInfo.InvariantCulture) : null;
+
+    // The values of an XML tuning by where they are ("kCarTuning > Speed"), null when it is not one.
+    static List<(string Name, string Value)>? XmlValues(byte[] b)
+    {
+        if (XmlMeaning(b) is null || XmlText(b) is not { } text) return null;
+        var o = new List<(string, string)>();
+        using var r = XmlReader.Create(new StringReader(text), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
+        var path = new List<string>();
+        while (r.Read())
+            if (r.NodeType == XmlNodeType.Element)
+            {
+                var name = r.GetAttribute("name") ?? r.GetAttribute("n") ?? r.Name;
+                var empty = r.IsEmptyElement;
+                path.Add(name);
+                if (r.GetAttribute("value") is { } v) o.Add((string.Join(" > ", path.TakeLast(2)), Number(v) ?? v));
+                if (empty) path.RemoveAt(path.Count - 1);
+            }
+            else if (r.NodeType == XmlNodeType.EndElement) path.RemoveAt(path.Count - 1);
+        return o;
+    }
+
+    // what two copies of a tuning or a settings file set to something else, in the player's sight: the name, its value in
+    // the first and in the second; empty when they can't be told that way
+    public static List<(string Name, string First, string Second)> ValuesThatDiffer(uint type, byte[] a, byte[] b)
+    {
+        if (a.Length > MeaningCap || b.Length > MeaningCap || type == TypeStbl) return [];
+        var (x, y) = type == TypeIni ? (IniValues(a), IniValues(b)) : (XmlValues(a), XmlValues(b));
+        if (x is null || y is null) return [];
+        // (a name set more than once: which counts is not known, so it is left out)
+        static Dictionary<string, string> Once(List<(string Name, string Value)> l) => l.GroupBy(v => v.Name).Where(g => g.Count() == 1).ToDictionary(g => g.Key, g => g.First().Value);
+        var (p, q) = (Once(x), Once(y));
+        return p.Where(v => q.TryGetValue(v.Key, out var w) && w != v.Value).Select(v => (v.Key, v.Value, q[v.Key])).ToList();
+    }
+
+    // One window layout, resized: the same objects and properties in the same order, and only numbers (places and sizes) that
+    // differ. Tiny UI Fix makes such a copy of every window, another mod's among them.
+    public static bool Resized(byte[] a, byte[] b)
+    {
+        static List<string>? Parts(byte[] b)
+        {
+            if (b.Length > MeaningCap || XmlText(b) is not { } text) return null;
+            try
+            {
+                using var r = XmlReader.Create(new StringReader(text), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
+                var o = new List<string>();
+                while (r.Read())
+                    switch (r.NodeType)
+                    {
+                        case XmlNodeType.Element:
+                            o.Add("<" + r.Name);
+                            var empty = r.IsEmptyElement;
+                            while (r.MoveToNextAttribute())
+                            {
+                                var v = r.Name == "value" ? string.Join(',', r.Value.Split(',').Select(n => n.Contains("0x", StringComparison.OrdinalIgnoreCase) ? n.Trim() : Number(n.Trim()) is null ? n.Trim() : "#")) : r.Value;
+                                o.Add(r.Name + "=" + v);
+                            }
+                            if (empty) o.Add(">");
+                            break;
+                        case XmlNodeType.EndElement: o.Add(">"); break;
+                        case XmlNodeType.Text or XmlNodeType.CDATA: if (r.Value.Trim() is { Length: > 0 } t) o.Add(Number(t) is null ? t : "#"); break;
+                    }
+                return o;
+            }
+            catch (XmlException) { return null; }
+        }
+        return Parts(a) is { Count: > 2 } x && Parts(b) is { } y && x.SequenceEqual(y);
+    }
+
     static UInt128 Digest(byte tag, ReadOnlySpan<byte> data)
     {
         using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -136,6 +227,7 @@ public static partial class ModConflicts
                 }
                 return Digest(1, w.GetBuffer().AsSpan(0, (int)w.Length));
             }
+            if (type == TypeIni && IniValues(b) is { } ini) return Digest(3, MemoryMarshal.AsBytes(string.Join('\u0001', ini.Select(v => v.Name + '\u0002' + v.Value)).AsSpan()));
             if (type != TypeStbl && XmlMeaning(b) is { } xml) return Digest(2, MemoryMarshal.AsBytes(xml.AsSpan()));
         }
         return null;

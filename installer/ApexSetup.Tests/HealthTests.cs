@@ -284,7 +284,7 @@ static class HealthTests
             "conflicts: identical copies go to Duplicates, not to findings");
 
         var only = c.Found.Single();
-        check(only is { Level: ConflictLevel.Look, Files.Length: 2, SayArgs.Length: 1 } && !new ConflictCheck { Offline = true, Ignored = [only.Id] }.Check(Mods(), g, docs).Any(x => x.Finding.Severity == Severity.Warning),
+        check(only is { Level: ConflictLevel.Look, Files.Length: 2, SayArgs.Length: 2 } && !new ConflictCheck { Offline = true, Ignored = [only.Id] }.Check(Mods(), g, docs).Any(x => x.Finding.Severity == Severity.Warning),
             "conflicts: a game data conflict is one to look at, and an ignored one warns no more");
         ModConflict Kind(string kind, string text, params string[] parties) => ModConflict.Of(new ConflictEntry(kind, text, parties, null), []);
         var debug = Kind("interaction", "2 mods replace Sims3.Gameplay.Abstracts.GameObject+DEBUG_Clone (store its Singleton): the last one to run wins", "icarusallsorts.Transmogrifier", "S3DecoratingTools_V.1.2");

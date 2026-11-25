@@ -6,6 +6,7 @@ namespace ApexSetup;
 public sealed record ConflictEntry(string Kind, string Text, string[] Parties, string? Winner)
 {
     public string[] Labels { get; init; } = []; // each party's file, as the scan names it
+    public string[] Values { get; init; } = []; // what differs: name, value in use, the other's value
 }
 public sealed record OverlapEntry(string Label, string Risk, string[] Parties);
 public sealed record DuplicateEntry(string[] Parties, string Text);
@@ -37,7 +38,7 @@ public sealed class ConflictCheck : IModCheck
     public List<DuplicateEntry> Duplicates => Last?.Duplicates ?? [];
 
     // (Rules goes up when the scan's rules change, so a result kept from older rules is scanned again)
-    const int Rules = 7;
+    const int Rules = 8;
     public static string Fingerprint(IEnumerable<ModFile> mods) => $"rules {Rules}\n" +
         string.Join("\n", mods.Where(Scanned).OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
             .Select(m => $"{m.Path}|{m.Size}|{(File.Exists(m.Path) ? File.GetLastWriteTimeUtc(m.Path).Ticks : 0)}"));
@@ -87,7 +88,7 @@ public sealed class ConflictCheck : IModCheck
         {
             var r = Scan(o);
             var result = new ConflictResult(fp,
-                r.Conflicts.Select(c => new ConflictEntry(c.Kind, c.Text, c.Parties, Winner.Match(c.Text) is { Success: true } w ? Path.GetFileNameWithoutExtension(w.Groups[1].Value.Trim()) : null) { Labels = c.Labels }).ToList(),
+                r.Conflicts.Select(c => new ConflictEntry(c.Kind, c.Text, c.Parties, Winner.Match(c.Text) is { Success: true } w ? Path.GetFileNameWithoutExtension(w.Groups[1].Value.Trim()) : null) { Labels = c.Labels, Values = c.Values }).ToList(),
                 r.Warnings.Select(w => new OverlapEntry(w.Label, w.Risk, w.Parties.Select(p => p.Name).ToArray())).ToList(),
                 r.Info.Where(i => i.Text.StartsWith("duplicate copy", StringComparison.Ordinal)).Select(i => new DuplicateEntry(i.Party.Split(" + "), i.Text)).ToList(),
                 r.NeedsSevenZip);

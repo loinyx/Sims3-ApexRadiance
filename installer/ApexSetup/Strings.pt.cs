@@ -2145,5 +2145,11 @@ public static partial class Strings
         ["{0} of {1} saves put back"] = "{0} de {1} saves voltaram",
         ["That did not work"] = "Não deu certo",
         ["Which save"] = "Qual save",
+        ["A mod that does nothing"] = "Um mod sem efeito",
+        ["{0} does nothing: {1} replaces all of it."] = "{0} não faz nada: {1} substitui tudo o que ele tem.",
+        ["{0} does nothing. {1} replaces all of it."] = "{0} não faz nada. {1} substitui tudo o que ele tem.",
+        ["What differs"] = "O que muda",
+        ["The other"] = "No outro",
+        ["Does nothing"] = "Não faz nada",
     };
 }

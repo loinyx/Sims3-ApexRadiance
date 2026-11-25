@@ -19,6 +19,10 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
     // each mod's file as the scan names it (as Files has their paths), and the one in use: two mods can share a name
     public string[] Labels { get; init; } = [];
     public string? InUse { get; init; }
+    // the files (Labels) that do nothing: the one in use replaces all they have
+    public string[] Dead { get; init; } = [];
+    // what differs, name by name: its value in use and the other mod's (Ini and tuning of two mods)
+    public (string Name, string Used, string Other)[] Values { get; init; } = [];
     // the mods' names, with the folder where two share one
     public string[] Names { get; init; } = Parties;
     // one conflict and no other: an Id is shared by the same conflict of two versions of a mod
@@ -27,7 +31,7 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
     // resources that only look or read differently: texts, pictures, icons, sounds and videos
     static readonly HashSet<string> LooksOnly = new(StringComparer.OrdinalIgnoreCase)
         { "STBL", "_IMG", "PNG", "ICON", "0xb1cc1af6", "0x01a527db", "0x01eef63a", "0x8070223d" };
-    static readonly Regex Types = new(@"different content \(([^)]*)\)"), Type = new(@"(\w+) \d+"), Texts = new(@"; (\d+) texts differ\)"), Same = new(@"; same copy as the winner: (.+)$"), Used = new(@"likely winner: ([^;]+)"),
+    static readonly Regex Types = new(@"different content \(([^)]*)\)"), Type = new(@"(\w+) \d+"), Texts = new(@"; (\d+) texts differ\)"), Same = new(@"; same copy as the winner: ([^;]+)"), NoEffect = new(@"; no effect: ([^;]+)$"), Used = new(@"likely winner: ([^;]+)"),
         Version = new(@"[\s_\-.]*\(?(v\.?\s*\d+([._]\d+)*|\d+([._]\d+)+)\)?$", RegexOptions.IgnoreCase); // ("V.1.2", "_v130", "1.2": not a bare number, which is part of a name)
 
     public static ModConflict Of(ConflictEntry c, string[] files)
@@ -56,17 +60,25 @@ public sealed record ModConflict(string Id, ConflictLevel Level, string Title, s
         var names = c.Parties.Select((p, i) => i < c.Labels.Length && c.Parties.Count(x => x.Equals(p, StringComparison.OrdinalIgnoreCase)) > 1 ? $"{p} ({Path.GetDirectoryName(c.Labels[i])})" : p).ToArray();
         var used = Used.Match(c.Text) is { Success: true } u ? u.Groups[1].Value.Trim() : null;
         var winner = Array.IndexOf(c.Labels, used) is >= 0 and var at ? names[at] : c.Winner;
-        string[] args = c.Kind is "translation" or "add-on" ? names[..2]
+        var dead = NoEffect.Match(c.Text) is { Success: true } gone ? gone.Groups[1].Value.Split(" | ") : [];
+        if (dead.Length == 1 && winner is { } by && Array.IndexOf(c.Labels, dead[0]) is >= 0 and var none && c.Kind is "resource key" or "decided")
+        {
+            if (level == ConflictLevel.Look) title = "A mod that does nothing";
+            if (level == ConflictLevel.Look || c.Kind == "decided") say = "{0} does nothing: {1} replaces all of it.";
+        }
+        string[] args = say.StartsWith("{0} does nothing", StringComparison.Ordinal) ? [names[Array.IndexOf(c.Labels, dead[0])], winner!] : c.Kind is "translation" or "add-on" ? names[..2]
             : say.StartsWith("Texts", StringComparison.Ordinal) ? (winner is { } first ? [first, texts!] : [texts!])
             : say.Contains("{0}") && winner is { } w ? [w] : [];
         var what = c.Kind == "interaction" ? c.Text[(c.Text.IndexOf("replace ", StringComparison.Ordinal) + 8)..].Split(' ')[0] : "";
         // (one id whatever the scan calls two mods with the same data, so one the player ignored stays ignored)
         var id = string.Join("|", c.Parties.Select(Plain).Order(StringComparer.Ordinal).Prepend(what).Prepend(c.Kind is "translation" or "add-on" or "decided" ? "resource key" : c.Kind));
         var finding = level == ConflictLevel.Small ? null
+            : say.StartsWith("{0} does nothing", StringComparison.Ordinal) ? new Finding(Severity.Warning, "{0} does nothing. {1} replaces all of it.", args)
             : winner is { } win ? new Finding(Severity.Warning, "{0} change the same game data. {1} likely wins and the others' changes are lost.", [string.Join(", ", names), win])
             : new Finding(Severity.Warning, title, []);
         return new(id, level, title, say, args, c.Parties, c.Winner, files, $"{c.Kind}: {c.Text}") { Finding = finding, CanOrder = level != ConflictLevel.Fix && c.Kind != "interaction",
-            Labels = c.Labels, InUse = used, Names = names, Alike = Same.Match(c.Text) is { Success: true } a ? a.Groups[1].Value.Split(" | ") : [] };
+            Labels = c.Labels, InUse = used, Names = names, Alike = Same.Match(c.Text) is { Success: true } a ? a.Groups[1].Value.Split(" | ") : [],
+            Dead = dead, Values = c.Values.Chunk(3).Where(v => v.Length == 3).Select(v => (v[0], v[1], v[2])).ToArray() };
     }
 
     // a mod's name without its version ("S3DecoratingTools_V.1.2"), as two versions of it share

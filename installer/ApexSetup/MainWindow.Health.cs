@@ -425,6 +425,7 @@ public sealed partial class MainWindow
         {
             var inner = new StackPanel { Spacing = 16, Padding = new Thickness(74, 16, 18, 18), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
             inner.Children.Add(new TextBlock { Text = T(c.Say, c.SayArgs), FontSize = 14, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap, MaxWidth = 620, HorizontalAlignment = HorizontalAlignment.Left });
+            if (c.Values.Length > 0) inner.Children.Add(ConflictValues(c));
             inner.Children.Add(ConflictMods(c));
             var foot = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             if (ModsFor(c.Files) is { Count: > 0 } hits) foot.Children.Add(Button(T("Show in Mods"), () => ShowInMods(hits)));
@@ -441,6 +442,34 @@ public sealed partial class MainWindow
         return Glass(all);
     }
 
+    // what two mods set to something else: each name with its value in use and the other mod's
+    static FrameworkElement ConflictValues(ModConflict c)
+    {
+        var g = new Grid { ColumnSpacing = 24, RowSpacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
+        foreach (var w in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+        void Cell(string text, int col, int row, string brush, bool strong = false)
+        {
+            var t = new TextBlock { Text = text, FontSize = 12, Foreground = Res(brush), FontWeight = strong ? FontWeights.SemiBold : FontWeights.Normal, MaxWidth = 280, TextTrimming = TextTrimming.CharacterEllipsis };
+            ToolTipService.SetToolTip(t, text);
+            Grid.SetColumn(t, col);
+            Grid.SetRow(t, row);
+            g.Children.Add(t);
+        }
+        g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Cell(T("What differs"), 0, 0, "ApexMutedBrush");
+        Cell(T("In use"), 1, 0, "ApexMutedBrush");
+        Cell(T("The other"), 2, 0, "ApexMutedBrush");
+        foreach (var (name, used, other) in c.Values)
+        {
+            var row = g.RowDefinitions.Count;
+            g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Cell(name, 0, row, "ApexSoftTextBrush");
+            Cell(used, 1, row, "TextFillColorPrimaryBrush", strong: true);
+            Cell(other, 2, row, "ApexMutedBrush");
+        }
+        return g;
+    }
+
     // the mods of a conflict, what each one has in it, and a way to switch one off
     FrameworkElement ConflictMods(ModConflict c)
     {
@@ -451,7 +480,7 @@ public sealed partial class MainWindow
         for (int i = 0; i < files.Count; i++)
         {
             var (party, file) = files[i];
-            var info = c.InUse is { } w ? (w == c.Labels[i] ? T("In use") : c.Alike.Contains(c.Labels[i]) ? T("Same as the one in use") : T("Replaced by the other"))
+            var info = c.InUse is { } w ? (w == c.Labels[i] ? T("In use") : c.Alike.Contains(c.Labels[i]) ? T("Same as the one in use") : c.Dead.Contains(c.Labels[i]) ? T("Does nothing") : T("Replaced by the other"))
                 : c.Title == "Two versions of the same mod" && dates[i] is { } d ? (d == newest ? T("Newest, from {0}", d.ToString("d MMM yyyy", LangCulture())) : T("From {0}", d.ToString("d MMM yyyy", LangCulture()))) : "";
             var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(14, 8, 8, 8), MinHeight = 48, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition());

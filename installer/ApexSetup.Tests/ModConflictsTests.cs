@@ -115,7 +115,7 @@ static class ModConflictsTests
             File.WriteAllText(Path.Combine(mods, "Resource.cfg"), "Priority 500\nPackedFile Packages/*.package\nPriority 1000\nPackedFile Overrides/*.package\n");
             return ModConflicts.Scan(new() { Roots = { mods }, Rules = rules }).Conflicts;
         }
-        ModConflict Of(ModConflicts.Conflict c) => ModConflict.Of(new ConflictEntry(c.Kind, c.Text, c.Parties, Regex.Match(c.Text, "likely winner: ([^;]+)") is { Success: true } w ? Path.GetFileNameWithoutExtension(w.Groups[1].Value.Trim()) : null) { Labels = c.Labels }, []);
+        ModConflict Of(ModConflicts.Conflict c) => ModConflict.Of(new ConflictEntry(c.Kind, c.Text, c.Parties, Regex.Match(c.Text, "likely winner: ([^;]+)") is { Success: true } w ? Path.GetFileNameWithoutExtension(w.Groups[1].Value.Trim()) : null) { Labels = c.Labels, Values = c.Values }, []);
 
         // written another way in two mods: nothing; with a real difference among them: that one only
         var layout = In("Layout", ("Packages/a.package", Pkg(Xml(1, doc), Xml(2, doc), Texts(3, (1, "a"), (2, "b")), (ModConflicts.TypeKey, 0, 0, U("names a")))),
@@ -135,6 +135,24 @@ static class ModConflictsTests
         var beside = In("AdaptedBeside", ("Packages/fix.package", Script(build, 8)), ("Packages/mod.package", Script(build, 0)));
         check(!adapted.Any(c => c.Kind is "decided" or "resource key") && other.Any(c => c.Kind == "decided") && beside.Any(c => c.Kind == "resource key"),
             $"mod conflicts: a script's adapted copy of the same build in a folder that loads first is no conflict, another build is ({string.Join(" / ", adapted.Concat(other).Concat(beside).Select(c => c.Kind))})");
+        // a window layout resized for a folder that loads first is the other mod's own window; one with other objects is a conflict
+        byte[] Layout(string area, string extra = "") => Pkg((ModConflicts.TypeLayout, 0, 4, U($"<graph><object id=\"0x1\"><prop name=\"Area\" value=\"{area}\" />{extra}<prop name=\"Fill\" value=\"0x00ff\" /></object></graph>")));
+        var resized = In("Resized", ("Overrides/ui.package", Layout("0.0,0.0,1331.0,998.0")), ("Packages/mod.package", Layout("0,0,1024,768")));
+        var redone = In("Redone", ("Overrides/ui.package", Layout("0,0,1331,998", "<prop name=\"New\" value=\"1\" />")), ("Packages/mod.package", Layout("0,0,1024,768")));
+        var colour = In("Colour", ("Overrides/ui.package", Layout("0,0,1024,768")), ("Packages/mod.package", Pkg((ModConflicts.TypeLayout, 0, 4, U("<graph><object id=\"0x1\"><prop name=\"Area\" value=\"0,0,1024,768\" /><prop name=\"Fill\" value=\"0x00fe\" /></object></graph>")))));
+        var same = In("ResizedBeside", ("Packages/ui.package", Layout("0,0,1331,998")), ("Packages/mod.package", Layout("0,0,1024,768")));
+        check(resized.Count == 0 && redone is [{ Kind: "decided" }] && colour is [{ Kind: "decided" }] && same is [{ Kind: "resource key" }],
+            "mod conflicts: a window another tool only resized is no conflict; one with other objects or colours is");
+        // settings files: comments, layout and how a number is written don't count; a value does, and the mod that loses all of itself is told so, with the values
+        static byte[] Ini(string v, string note = "") => U($";; {note}\r\n[Lighting]\r\nSunlightScale = {v};{note}\r\n\r\nGamma = 0.4f;\r\n");
+        byte[] IniPkg(byte[] b, bool more = false) => more ? Pkg((ModConflicts.TypeIni, 0, 1, b), (ModConflicts.TypeIni, 0, 2, b)) : Pkg((ModConflicts.TypeIni, 0, 1, b));
+        var notes = In("IniSame", ("Packages/a.package", IniPkg(Ini("1.0f", "mine"))), ("Packages/b.package", IniPkg(Ini("1", "was 2"))));
+        var lights = In("IniOther", ("Packages/a.package", IniPkg(Ini("1.35"), more: true)), ("Packages/b.package", IniPkg(Ini("1.5"))));
+        check(notes.Count == 0 && lights is [{ Kind: "resource key" } li] && li.Values.SequenceEqual(["Lighting > SunlightScale", "1.35", "1.5"])
+              && Of(li) is { Level: ConflictLevel.Look, Title: "A mod that does nothing", SayArgs: ["b", "a"], Dead: ["Mods/Packages/b.package"], Finding: not null } lo && lo.Values is [("Lighting > SunlightScale", "1.35", "1.5")],
+            $"mod conflicts: settings files are compared by their values, and a mod that loses all of itself does nothing ({string.Join(" / ", lights.Select(c => c.Text))})");
+        check(ModConflicts.ValuesThatDiffer(ModConflicts.TypeXml, U("<base><kCar><Speed value=\"13\"/><Pace value=\"1\"/></kCar></base>"), U("<base><kCar><Speed value=\"25\"/><Pace value=\"1.0\"/></kCar></base>")) is [("kCar > Speed", "13", "25")],
+            "mod conflicts: the values two tunings set differently are told");
         var off = Path.Combine(tmp, "Off", "Mods");
         foreach (var f in new[] { "Packages/a.package", "Disabled (Apex Launcher)/Packages/b.package" })
         { Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(off, f))!); File.WriteAllBytes(Path.Combine(off, f), Pkg(Xml(1, f))); }
@@ -167,12 +185,12 @@ static class ModConflictsTests
         // the folder Resource.cfg puts first decides; the id is the one it had before, so an ignored one stays ignored
         var first = In("First", ("Overrides/zeta.package", Pkg(Xml(1, doc))), ("Packages/alpha.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))));
         var level = In("Level", ("Packages/zeta.package", Pkg(Xml(1, doc))), ("Packages/alpha.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))));
-        check(first is [{ Kind: "decided" } fc] && Of(fc) is { Level: ConflictLevel.Small, Winner: "zeta", SayArgs: ["zeta"], Finding: null, CanOrder: true }
+        check(first is [{ Kind: "decided" } fc] && Of(fc) is { Level: ConflictLevel.Small, Winner: "zeta", SayArgs: ["alpha", "zeta"], Finding: null, CanOrder: true }
               && level is [{ Kind: "resource key" } lc] && Of(lc) is { Level: ConflictLevel.Look, Winner: "alpha" } && Of(fc).Id == Of(lc).Id,
             "mod conflicts: a mod in a folder that loads first is the one set to win, a lower conflict with the same id");
         // two mods of one name in two folders: each is told by its folder
         var twins = In("Twins", ("Packages/Tuning.package", Pkg(Xml(1, doc))), ("Overrides/Tuning.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))));
-        check(twins is [var tw] && Of(tw) is { InUse: "Mods/Overrides/Tuning.package", Winner: "Tuning", SayArgs: [@"Tuning (Mods\Overrides)"], Parties: ["Tuning", "Tuning"] } m2
+        check(twins is [var tw] && Of(tw) is { InUse: "Mods/Overrides/Tuning.package", Winner: "Tuning", SayArgs: [@"Tuning (Mods\Packages)", @"Tuning (Mods\Overrides)"], Parties: ["Tuning", "Tuning"] } m2
               && m2.Labels.Order().SequenceEqual(["Mods/Overrides/Tuning.package", "Mods/Packages/Tuning.package"]) && m2.Names.Order().SequenceEqual([@"Tuning (Mods\Overrides)", @"Tuning (Mods\Packages)"]),
             "mod conflicts: two files of one name are told apart by their folders");
         // a size no packed data can have
