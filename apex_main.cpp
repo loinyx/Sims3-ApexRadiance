@@ -30,6 +30,7 @@
 #include "conflict_guard.h"
 #include "crash_report.h"
 #include "delegate_sig_fix.h"
+#include "save_name_fix.h"
 #include "bone_index_guard.h"
 #include "pick_readback.h"
 #include "readback_bench.h"
@@ -175,6 +176,7 @@ DWORD InitBody() {
     // Apex's HLSL shaders (every quality and mode) compile now on a background thread, so the render thread never runs
     // D3DCompile: the features only create the shader objects from the bytecode (shader_cache.h).
     ShaderCache::Start();
+    SaveNameFix::Start(); // game fix, only with -worldFile on the command line: the save keeps its name (save_name_fix.h)
 
 
     S3SSDetect::Scan();

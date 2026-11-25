@@ -112,6 +112,7 @@
     <ClCompile Include="features\memory_guard.cpp" />
     <ClCompile Include="features\restart_host.cpp" />
     <ClCompile Include="features\delegate_sig_fix.cpp" />
+    <ClCompile Include="features\save_name_fix.cpp" />
     <ClCompile Include="features\bone_index_guard.cpp" />
     <ClCompile Include="features\window_repaint.cpp" />
     <ClCompile Include="features\screen_control.cpp" />
@@ -314,6 +315,8 @@
     <ClInclude Include="features\memory_guard.h" />
     <ClInclude Include="features\restart_host.h" />
     <ClInclude Include="features\delegate_sig_fix.h" />
+    <ClInclude Include="features\save_name_fix.h" />
+    <ClInclude Include="features\save_name_patch.h" />
     <ClInclude Include="features\bone_index_guard.h" />
     <ClInclude Include="features\window_repaint.h" />
     <ClInclude Include="features\screen_control.h" />

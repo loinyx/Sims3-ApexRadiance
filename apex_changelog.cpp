@@ -34,6 +34,7 @@ constexpr const char* k411Improved[] = {
 
 constexpr const char* k411Fixed[] = {
     "Night Lights: deleting lamps in Buy mode no longer crashes the game",
+    "Saving: Save As shows in a save opened from Apex Launcher, and Save goes to that save",
     "Settings: Apex uses the Documents folder of the game's language",
     nullptr};
 
