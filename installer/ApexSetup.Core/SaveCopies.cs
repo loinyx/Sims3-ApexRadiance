@@ -6,9 +6,9 @@ namespace ApexSetup;
 
 public enum CopyKind { Launcher, Game, Now }
 
-// A moment a save can go back to: a zip the launcher made (Note says why, when it made it by itself), the previous version
+// A moment a save can go back to: a zip the launcher made (Note says why, when it made it by itself; Label and Pinned are the player's; Stored is what it takes on disk), the previous version
 // the game keeps (<name>.sims3.backup), or the save as it is. When: the day the save was like that; Bytes: its size then.
-public sealed record SavePoint(CopyKind Kind, string Path, DateTime When, long Bytes, string? Note);
+public sealed record SavePoint(CopyKind Kind, string Path, DateTime When, long Bytes, string? Note, string? Label = null, bool Pinned = false, long Stored = 0);
 
 // Copies of a save and what is done with whole save folders: the list of them, going back to one, bringing back a save
 // that is gone or that the game only has a previous version of, keeping a save out of the game's sight, duplicate, rename, delete.
@@ -35,11 +35,21 @@ public static class SaveCopies
     // test hooks: called at "extract", "swap", "copy" and "move"; and the Recycle Bin (tests must not fill the real one)
     public static Action<string> FailPoint = _ => { };
     public static Action<string> Recycle = ModLibrary.Recycle;
+    public static Action<string> RecycleOwn = ModLibrary.RecycleQuiet; // the launcher's own, with nobody there to ask
 
     internal static string Sha(string path)
     {
         using var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20);
         return Convert.ToHexString(SHA256.HashData(f));
+    }
+    // a save's file, read without standing in the way of the game writing it (a read that met a write does not compare)
+    static FileStream Open(string path) => new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 20);
+    static string Hash(Stream s, CancellationToken ct)
+    {
+        using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buf = new byte[1 << 20];
+        for (int n; (n = s.Read(buf)) > 0;) { ct.ThrowIfCancellationRequested(); h.AppendData(buf, 0, n); }
+        return Convert.ToHexString(h.GetHashAndReset());
     }
     static Save SaveOf(string dir) => new(dir, Path.GetFileNameWithoutExtension(dir), SaveInfo.Read(dir).LastPlayed);
     static void Drop(string dir)
@@ -66,7 +76,8 @@ public static class SaveCopies
     // A zip of a save folder that is known to be whole: written beside as .part, opened again and every file compared by
     // hash with what the zip gives back, then moved in. A save that changed meanwhile, a locked file or a full disk leaves
     // no zip.
-    internal static void Zip(string dir, string zip, string? note)
+    // check: each file compared with what the zip gives back. mods: the ones on, a list kept in the zip beside the save.
+    internal static void Zip(string dir, string zip, string? note, bool check = true, List<string>? mods = null, CancellationToken ct = default, bool overwrite = false)
     {
         var part = zip + ".part";
         var top = Path.GetFileName(dir);
@@ -74,24 +85,40 @@ public static class SaveCopies
         try
         {
             var files = Directory.EnumerateFiles(dir, "*", Deep).Where(f => !Saves.Passing(f)).ToList();
+            File.Delete(part); // (one a closed launcher left)
             using (var z = ZipFile.Open(part, ZipArchiveMode.Create))
             {
                 z.Comment = note ?? "";
                 foreach (var d in Directory.EnumerateDirectories(dir, "*", Deep).Where(d => !Directory.EnumerateFileSystemEntries(d).Any())) z.CreateEntry(Name(d) + "/");
-                foreach (var f in files) z.CreateEntryFromFile(f, Name(f), CompressionLevel.Fastest);
+                var buf = new byte[1 << 20];
+                foreach (var f in files)
+                {
+                    var entry = z.CreateEntry(Name(f), CompressionLevel.Fastest);
+                    if (File.GetLastWriteTime(f) is { Year: >= 1980 and <= 2107 } day) entry.LastWriteTime = day;
+                    using var from = Open(f);
+                    using var o = entry.Open();
+                    for (int n; (n = from.Read(buf)) > 0;) { ct.ThrowIfCancellationRequested(); o.Write(buf, 0, n); }
+                }
+                if (mods is not null)
+                {
+                    using var o = new StreamWriter(z.CreateEntry(top + "/" + SaveBackups.ModsName, CompressionLevel.Fastest).Open());
+                    o.Write(string.Join('\n', mods));
+                }
             }
             using (var z = ZipFile.OpenRead(part))
             {
-                var same = z.Entries.Count(e => !e.FullName.EndsWith('/')) == files.Count;
-                foreach (var f in files)
+                var same = z.Entries.Count(e => !e.FullName.EndsWith('/') && !SaveBackups.IsMods(e)) == files.Count;
+                foreach (var f in check ? files : [])
                 {
+                    ct.ThrowIfCancellationRequested();
                     if (!same || z.GetEntry(Name(f)) is not { } entry) { same = false; break; }
                     using var s = entry.Open();
-                    same = Convert.ToHexString(SHA256.HashData(s)) == Sha(f);
+                    using var of = Open(f);
+                    same = Hash(s, ct) == Hash(of, ct);
                 }
                 if (!same) throw new SetupException("The copy of {0} did not match the save. Try again.", Path.GetFileNameWithoutExtension(top));
             }
-            File.Move(part, zip);
+            File.Move(part, zip, overwrite);
         }
         catch { try { File.Delete(part); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } throw; }
     }
@@ -102,34 +129,47 @@ public static class SaveCopies
     {
         var points = Zips(docs, n => n.Equals(s.Name, StringComparison.OrdinalIgnoreCase)).Select(z => z.Point).ToList();
         if (Directory.Exists(s.Dir + ".backup") && SaveInfo.Read(s.Dir + ".backup") is { Bytes: > 0 } game)
-            points.Add(new(CopyKind.Game, s.Dir + ".backup", game.LastPlayed, game.Bytes, null));
+            points.Add(new(CopyKind.Game, s.Dir + ".backup", game.LastPlayed, game.Bytes, null, Stored: game.Bytes));
         points.Sort((a, b) => a.When.CompareTo(b.When));
         points.Add(new(CopyKind.Now, s.Dir, s.LastPlayed, SaveInfo.Of(s).Bytes, null));
         return points;
     }
 
     // the launcher's zips of the saves it is asked for
-    static List<(string Name, SavePoint Point)> Zips(string docs, Func<string, bool> wanted)
+    public static List<(string Name, SavePoint Point)> Zips(string docs, Func<string, bool> wanted)
     {
         var zips = new List<(string, SavePoint)>();
         try
         {
-            if (Directory.Exists(Saves.BackupDir(docs)))
-                foreach (var zip in Directory.EnumerateFiles(Saves.BackupDir(docs), "*.zip"))
+            foreach (var (name, zip, when) in ZipFiles(docs).Where(f => wanted(f.Name)))
+                try
                 {
-                    var n = Path.GetFileNameWithoutExtension(zip);
-                    if (n.Length < 21 || n[^20] != ' ' || !wanted(n[..^20])
-                        || !DateTime.TryParseExact(n[^19..], "yyyy-MM-dd HH.mm.ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)) continue;
+                    var size = new FileInfo(zip).Length;
                     try
                     {
                         using var z = ZipFile.OpenRead(zip);
-                        zips.Add((n[..^20], new(CopyKind.Launcher, zip, when, z.Entries.Sum(e => e.Length), z.Comment is { Length: > 0 } c ? c : null)));
+                        var (note, label, pinned) = SaveBackups.Said(z.Comment);
+                        zips.Add((name, new(CopyKind.Launcher, zip, when, z.Entries.Where(e => !SaveBackups.IsMods(e)).Sum(e => e.Length), note, label, pinned, size)));
                     }
                     catch (InvalidDataException) { } // (a zip that does not open is not a copy to offer)
+                    // (one another program holds for a moment is there; what it says is not known, so it counts as the player's own)
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { zips.Add((name, new(CopyKind.Launcher, zip, when, size, null, Stored: size))); }
                 }
+                catch (FileNotFoundException) { }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return zips;
+    }
+
+    // the launcher's zips by their names alone; a folder that can't be listed throws
+    public static List<(string Name, string Path, DateTime When)> ZipFiles(string docs)
+    {
+        var list = new List<(string, string, DateTime)>();
+        if (!Directory.Exists(Saves.BackupDir(docs))) return list;
+        foreach (var zip in Directory.EnumerateFiles(Saves.BackupDir(docs), "*.zip"))
+            if (Path.GetFileNameWithoutExtension(zip) is var n && n.Length >= 21 && n[^20] == ' '
+                && DateTime.TryParseExact(n[^19..], "yyyy-MM-dd HH.mm.ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)) list.Add((n[..^20], zip, when));
+        return list;
     }
 
     // the zips of saves that are gone (neither in the game nor kept out of it), newest first; Restore brings one back
@@ -137,18 +177,19 @@ public static class SaveCopies
         Zips(docs, n => !Directory.Exists(Path.Combine(SavesDir(docs), n + ".sims3")) && !Directory.Exists(Path.Combine(StoredDir(docs), n + ".sims3")))
             .OrderByDescending(z => z.Point.When).Select(z => (new Save(Path.Combine(SavesDir(docs), z.Name + ".sims3"), z.Name, z.Point.When), z.Point)).ToList();
 
-    // Each zip the launcher makes by itself (before a clean, before going back) is a whole save: past the newest three of
-    // a save they go to the Recycle Bin. Call after a change went through. A copy the player asked for carries no note
-    // and is never touched.
-    internal static void Thin(string docs, Save s)
+    // Each zip the launcher makes by itself is a whole save: past the newest of a save (three of those before a clean or
+    // before going back, as many of the automatic ones as the player chose) and past the limit they go to the Recycle Bin.
+    // Call after a change went through. One the player asked for, named or pinned is never touched (SaveBackups.Extra).
+    public static void Thin(string docs, Save s)
     {
-        try { foreach (var p in Timeline(docs, s).Where(p => p.Kind == CopyKind.Launcher && p.Note is BeforeClean or BeforeRestore).Reverse().Skip(KeepOwn)) Recycle(p.Path); }
-        catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        try { lock (Gate) foreach (var p in SaveBackups.Extra(docs, s, KeepOwn)) SaveBackups.RemoveOwn(p); }
+        catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { Engine.Log(e); } // (choices that can't be read remove nothing)
     }
 
     // a zip's files into a new folder. Untrusted input: the names are kept inside the folder, the count and the size are
     // bounded, and each file is read back and compared with what the zip gave.
-    static void Unzip(string zip, string to, CancellationToken ct)
+    // only: the folder of the zip to take (the rest of it is left)
+    internal static void Unzip(string zip, string to, CancellationToken ct, string? only = null)
     {
         static SetupException Bad(string why) => new("This copy can't be used: {0}", why);
         try
@@ -165,13 +206,15 @@ public static class SaveCopies
             for (var i = 0; i < names.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                var rel = names[i][top..];
-                if (rel.Length == 0) continue;
+                if (only is not null && !names[i].StartsWith(only, StringComparison.Ordinal)) continue;
+                var rel = names[i][(only?.Length ?? top)..];
+                if (rel.Length == 0 || rel == SaveBackups.ModsName) continue;
                 var path = Path.GetFullPath(Path.Combine(to, rel));
                 if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase) || rel.Contains(':')) throw Bad("a file name points outside the save");
                 if (rel.EndsWith('/')) { Directory.CreateDirectory(path); continue; }
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var crc = 0u;
                 using (var from = z.Entries[i].Open())
                 using (var o = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
@@ -180,9 +223,11 @@ public static class SaveCopies
                         if ((total += n) > MaxBytes) throw Bad("too large");
                         o.Write(buf, 0, n);
                         hash.AppendData(buf, 0, n);
+                        crc = SaveBackups.Crc(crc, buf.AsSpan(0, n));
                     }
                     o.Flush(true);
                 }
+                if (crc != z.Entries[i].Crc32) throw new InvalidDataException(names[i]);
                 if (Sha(path) != Convert.ToHexString(hash.GetHashAndReset())) throw new IOException("a restored file did not read back as written");
                 File.SetLastWriteTime(path, z.Entries[i].LastWriteTime.DateTime); // (the save is as old as the copy says)
             }
@@ -250,6 +295,43 @@ public static class SaveCopies
         }
     }
 
+    // A point as a save of its own, beside the one that is there.
+    public static Save RestoreAs(string docs, Save s, SavePoint from, CancellationToken ct = default)
+    {
+        Engine.CheckWritable();
+        var made = Bring(docs, s.Name, to => { if (from.Kind == CopyKind.Launcher) Unzip(from.Path, to, ct); else CopyDir(from.Path, to, ct); });
+        try { if (made.Name != s.Name) SaveStars.Renamed(s.Name, made.Name, keep: true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); }
+        return made;
+    }
+
+    // a save laid out and checked beside the others, then in the game under its name or the next free one
+    internal static Save Bring(string docs, string name, Action<string> fill)
+    {
+        Recover(docs); // (a save a cut-short change left aside goes home first: its name must not look free)
+        lock (Gate)
+        {
+            var root = SavesDir(docs);
+            Directory.CreateDirectory(root);
+            name = ModLibrary.CleanName(name);
+            // (nor the name of a save that is gone: its backups are not this one's)
+            var kept = ZipFiles(docs).Select(z => z.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (Taken(root, name) || kept.Contains(name)) name = FreeName(root, name, kept);
+            var to = Path.Combine(root, CleanIn(root, name) + ".sims3");
+            var tmp = Work(to, "new");
+            try
+            {
+                fill(tmp);
+                if (!Directory.Exists(tmp) || !Directory.EnumerateFiles(tmp, "*.nhd").Any()) throw new SetupException("This copy can't be used: {0}", "no world file in it");
+                FailPoint("copy");
+                Engine.CheckWritable();
+                Fs.Retry(() => Directory.Move(tmp, to));
+            }
+            catch { Drop(tmp); throw; }
+            finally { Tidy(root); }
+            return SaveOf(to);
+        }
+    }
+
     // What a change that was cut short (the launcher closed, the power went) left behind, put right: a save folder or a
     // save file that was moved aside goes back when nothing took its place, and to the Recycle Bin when something did
     // (what took its place was checked before the swap); copies that never got in place are removed. Call at start-up.
@@ -285,6 +367,9 @@ public static class SaveCopies
                     }
                 }
             }
+            // (a backup cut short; one being made is newer)
+            if (Directory.Exists(Saves.BackupDir(docs)))
+                foreach (var f in Directory.EnumerateFiles(Saves.BackupDir(docs), "*.zip.part").Where(f => File.GetLastWriteTime(f) < DateTime.Now.AddDays(-1)).ToList()) File.Delete(f);
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); return false; }
@@ -335,10 +420,10 @@ public static class SaveCopies
     }
 
     static bool Taken(string root, string name) => Directory.Exists(Path.Combine(root, name + ".sims3")) || Directory.Exists(Path.Combine(root, name + ".sims3.backup"));
-    static string FreeName(string root, string name)
+    static string FreeName(string root, string name, HashSet<string>? not = null)
     {
         for (var i = 2; ; i++)
-            if (!Taken(root, $"{name} ({i})")) return $"{name} ({i})";
+            if (!Taken(root, $"{name} ({i})") && not?.Contains($"{name} ({i})") != true) return $"{name} ({i})";
     }
 
     // a name a save can take, trimmed, or why not (SetupException)
@@ -423,6 +508,7 @@ public static class SaveCopies
                 if (Path.GetFileName(zip) is var n && n.Length == from.Length + 24 && n.StartsWith(from + " ", StringComparison.OrdinalIgnoreCase)
                     && Path.Combine(dir, to + n[from.Length..]) is var z && !File.Exists(z)) File.Move(zip, z);
         });
+        Try(() => BackupChoices.Change(c => { if (c.Saves.Remove(from, out var own)) c.Saves[to] = own; }));
         Try(() => SaveHealth.Renamed(from, to));
         Try(() => SaveStars.Renamed(from, to));
         Try(() =>

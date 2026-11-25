@@ -243,6 +243,7 @@ public sealed partial class MainWindow
     async Task StartGameAsync(Game g, string? save)
     {
         Process p;
+        await BackupsBeforePlay();
         PlayPendingOptions(g);
         try { p = Launch.Start(g, save); }
         catch (Exception e) { App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
@@ -265,6 +266,7 @@ public sealed partial class MainWindow
         _tray?.Hide();
         RefreshGame(); // (starts the full check too)
         RefreshAll();
+        if (!_running) AutoBackup(BackupMoment.Close);
         if (Session.ShouldOffer(info, _state?.RestartHost ?? false))
         {
             var low = info.End == SessionEnd.LowMemory;
@@ -972,7 +974,7 @@ public sealed partial class MainWindow
     static Grid Section(string t, FrameworkElement? end = null)
     {
         var g = new Grid { Margin = new Thickness(0, 24, 0, 6) };
-        var title = new TextBlock { Text = t, FontSize = 15, FontWeight = FontWeights.SemiBold };
+        var title = new TextBlock { Text = t, FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(title, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
         g.Children.Add(title);
         if (end is not null) { end.HorizontalAlignment = HorizontalAlignment.Right; end.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(end); }

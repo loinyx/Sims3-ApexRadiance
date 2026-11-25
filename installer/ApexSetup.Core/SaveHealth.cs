@@ -56,9 +56,7 @@ public static class SaveHealth
             try { files = new DirectoryInfo(s.Dir).EnumerateFiles().Where(f => !f.Name.EndsWith(".backup", StringComparison.OrdinalIgnoreCase) && !Saves.Passing(f.Name)).ToList(); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
             var bytes = files.Sum(f => f.Length);
-            var incomplete = !files.Any(f => f.Extension.Equals(".nhd", StringComparison.OrdinalIgnoreCase)) ? "no .nhd world file"
-                : !files.Any(f => f.Name.Equals("Meta.data", StringComparison.OrdinalIgnoreCase)) ? "no Meta.data"
-                : files.FirstOrDefault(f => f.Length == 0) is { } empty ? $"{empty.Name} is empty" : null;
+            var incomplete = Incomplete(files);
             var points = history.GetValueOrDefault(s.Name) ?? [];
             // one point a day, or when the size changed
             if (record && (points.Count == 0 || points[^1].Bytes != bytes || points[^1].When.Date != now.Date)) points.Add(new(now, bytes));
@@ -70,6 +68,12 @@ public static class SaveHealth
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         return list;
     }
+
+    // why a save folder with these files looks cut short, or null
+    internal static string? Incomplete(IReadOnlyCollection<FileInfo> files) =>
+        !files.Any(f => f.Extension.Equals(".nhd", StringComparison.OrdinalIgnoreCase)) ? "no .nhd world file"
+        : !files.Any(f => f.Name.Equals("Meta.data", StringComparison.OrdinalIgnoreCase)) ? "no Meta.data"
+        : files.FirstOrDefault(f => f.Length == 0) is { } empty ? $"{empty.Name} is empty" : null;
 
     // the newest zip Saves.Backup made of this save ("<name> yyyy-MM-dd HH.mm.ss.zip")
     public static DateTime? LastBackup(Save s, string docs)

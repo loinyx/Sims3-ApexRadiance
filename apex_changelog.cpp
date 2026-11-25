@@ -23,7 +23,8 @@ constexpr const char* k411Added[] = {
     "Apex Launcher: a Game settings page for shadows, Sim textures, bloom and loading",
     "Apex Launcher: Add puts mods, Sims, lots, worlds and archives in their places",
     "Apex Launcher: profiles keep which mods are on",
-    "Apex Launcher: Saves cleans a save, with a checked copy and undo",
+    "Apex Launcher: Saves cleans a save, with a backup first and Undo",
+    "Apex Launcher: backups of your saves, made by themselves when the game closes",
     nullptr};
 
 constexpr const char* k411Improved[] = {
@@ -827,7 +828,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
-    {"4.1.1", "", k411Added, k411Improved, k411Fixed, "Apex Launcher 2.3: Game settings, save cleaning and merges that stay responsive"},
+    {"4.1.1", "", k411Added, k411Improved, k411Fixed, "Apex Launcher 2.3: Game settings, backups of your saves and merges that stay responsive"},
     {"4.1.0", "2026-11-24", k410Added, nullptr, nullptr, "Apex Radiance Setup becomes Apex Launcher, your home for playing The Sims 3"},
     {"4.0.14", "2026-11-23", nullptr, k4014Improved, k4014Fixed},
     {"4.0.13", "2026-11-20", k4013Added, k4013Improved, k4013Fixed, "4K videos, and ReShade looks that leave Sims' hair alone"},

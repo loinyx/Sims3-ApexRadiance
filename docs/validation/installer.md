@@ -72,8 +72,10 @@ described in [features/installer.md](../features/installer.md).
 - Home (2.0.10): *Continue* opening the game into the save shown (`-worldFile`), a save picked from *Another save* with a
   real click, and the crash or low-memory state with *Start again into this save*.
 - The Acrylic and stronger Mica window backgrounds.
-- In game: a cleaned save, a package merged by 2.3, the Game settings values, and which of two packages of one folder is in
+- In game: a save restored from a backup, a cleaned save, a package merged by 2.3, the Game settings values, and which of two packages of one folder is in
   use.
 - The merge on a hard disk and with a player's own thousands of mods; the question about a package that looks damaged, on
   screen.
+- Automatic backups when a real game closes and before Play (once a day was run on a copy of real saves), the pickers of
+  Import, Export and the folder, and a folder on a USB or network drive.
 - A theme switch with the launcher open after 2.3 (menus and lists), and a contrast theme.

@@ -432,11 +432,14 @@ public static partial class ModLibrary
     }
 
     // (a file, or a whole folder: a save)
-    public static void Recycle(string path)
+    public static void Recycle(string path) => Recycle(path, FOF_WANTNUKEWARNING);
+    // never asks: what the Recycle Bin can't take (it is off, or full) is deleted. Only for what the launcher made by itself.
+    public static void RecycleQuiet(string path) => Recycle(path, 0);
+    static void Recycle(string path, ushort ask)
     {
         if (!File.Exists(path) && !Directory.Exists(path)) return;
         // (Windows asks before it deletes for good a file the Recycle Bin can't take: a network folder, a file too big)
-        var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = Path.GetFullPath(path) + "\0\0", fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_WANTNUKEWARNING };
+        var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = Path.GetFullPath(path) + "\0\0", fFlags = (ushort)(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | ask) };
         var r = SHFileOperation(ref op);
         if (r != 0 || op.fAnyOperationsAborted || File.Exists(path) || Directory.Exists(path)) throw new SetupException("Windows couldn't move the file to the Recycle Bin.");
     }

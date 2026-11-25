@@ -84,13 +84,13 @@ public sealed partial class MainWindow : Window
         Lang = Environment.GetEnvironmentVariable("APEX_LAUNCHER_LANG") ?? SavedChoice() ?? SystemLanguage(System.Globalization.CultureInfo.CurrentUICulture); // (the variable: UI tests in one language)
         Root.Language = Bcp47(Lang);
         // every screen's buttons follow the game starting or closing (the status and Manage rows are built with that state)
-        _timer.Tick += (_, _) => { if (_session is not null) return; var r = Games.IsRunning(); if (r != _running) { _running = r; RefreshAll(); } }; // (a watched game: its Session tells the end)
+        _timer.Tick += (_, _) => { if (_session is not null) return; var r = Games.IsRunning(); var closed = _running && !r; if (r != _running) { _running = r; RefreshAll(); } AutoBackupTick(closed); }; // (a watched game: its Session tells the end)
         // closing in the middle of an install or a removal would leave the game half changed
         AppWindow.Closing += (w, a) =>
         {
             var busy = _busy || _savesBusy;
             if (!busy && AskLeaveMerge(() => QuitForNewerCopy())) { a.Cancel = true; return; }
-            if (!busy) { _tray?.Dispose(); return; }
+            if (!busy) { _autoStop?.Cancel(); _tray?.Dispose(); return; }
             a.Cancel = true;
             SayBusy();
         };
@@ -312,6 +312,7 @@ public sealed partial class MainWindow : Window
         if (step == HealthScreen && _step != step) (_healthPage, _healthNote) = ("", null); // (Health opens on its overview)
         _step = step;
         SavesNote.IsOpen = false;
+        (SavesBar.Visibility, _savesPage) = (Visibility.Collapsed, "");
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
         if (step != GalleryScreen) FullBleed(false);
         if (step == GameStep && FirstInstall) _wizardFlow = true;

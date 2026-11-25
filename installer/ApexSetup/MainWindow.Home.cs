@@ -502,10 +502,10 @@ public sealed partial class MainWindow
         var icon = Lucide.Icon("hard-drive", 14, Res("ApexMutedBrush"));
         icon.VerticalAlignment = VerticalAlignment.Center;
         line.Children.Add(icon);
-        var text = Muted(bare.Count == 1 ? T("1 of these saves has no copy") : T("{0} of these saves have no copy", bare.Count));
+        var text = Muted(bare.Count == 1 ? T("1 of these saves has no backup") : T("{0} of these saves have no backup", bare.Count));
         text.VerticalAlignment = VerticalAlignment.Center;
         line.Children.Add(text);
-        var now = Link(bare.Count == 1 ? T("Make a copy") : T("Copy all"), () => { });
+        var now = Link(bare.Count == 1 ? T("Back up now") : T("Back up all"), () => { });
         now.Padding = new Thickness(0);
         now.VerticalAlignment = VerticalAlignment.Center;
         line.Children.Add(now);

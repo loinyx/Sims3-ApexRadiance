@@ -845,6 +845,8 @@ public static partial class ModMerge
     public static MergeRecord? Info(string docs, ModFile m) => Records(docs).FirstOrDefault(r => r.Merged.Equals(m.Rel, StringComparison.OrdinalIgnoreCase));
     public static MergeRecord? Info(ModFile m) => DocsOf(m) is { } d ? Info(d, m) : null;
     public static bool IsMerged(ModFile m) => Info(m) is not null;
+    // the mods in a merged file; null when it is not one (rel: from Documents\...\The Sims 3)
+    public static IEnumerable<string>? OriginalsOf(string docs, string rel) => Records(docs).FirstOrDefault(r => r.Merged.Equals(rel, StringComparison.OrdinalIgnoreCase))?.Originals.Select(o => o.Rel);
 
     // the merged file moved or was renamed (a folder: every merged file under it); merge.json follows
     public static void Moved(string docs, string oldRel, string newRel, bool folder = false)

@@ -455,9 +455,11 @@ public static class Engine
     public static Action<Exception> Log = _ => { };
 
     // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
+    internal static bool DryRun => Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1";
+    internal static void CheckDry() { if (DryRun) throw new InvalidOperationException("Test run: the launcher changes nothing."); }
     public static void CheckWritable()
     {
-        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Test run: the launcher changes nothing.");
+        CheckDry();
         if (Games.IsRunning()) throw new SetupException(CloseGameText);
     }
 

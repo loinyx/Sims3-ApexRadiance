@@ -241,10 +241,20 @@ as the signed-in user, not as administrator: a change to the game folder or to a
   - **Conflicts** compares what the game would read: tuning without comments, layout and attribute order, text tables by
     id, settings files by their values, window layouts without their size. Identical copies are no conflict. Health shows
     each conflict with its level, and a mod can be given priority where `Resource.cfg` allows it.
-- **Saves.** One list of saves and one panel with what can be cleaned and how much it frees (`SaveClean.cs`): the plan is
-  exact to the byte, a checked zip is made first, the save is rewritten and read back, and the clean can be undone. The
-  copies (with lost saves and the ones kept out of the game) and the pictures that stay are dialogs; rename, duplicate,
-  keep out of the game and delete are in each save's menu.
+- **Saves.** The saves on one side, with the ones gone from the game and the ones kept out of it, and the chosen one on
+  the other: its backups and what can be cleaned (`SaveClean.cs`: the plan is exact to the byte, a checked zip is made
+  first, the save is rewritten and read back, and the clean can be undone). *Clean several* cleans more than one at once;
+  the pictures that stay are a dialog; rename, duplicate, keep out of the game and delete are in the save's menu.
+  - **Backups** (`SaveCopies.cs`, `SaveBackups.cs`) are zips of the save's folder. Each can be restored over the save
+    (which becomes one more backup, with Undo) or opened as another save, named, pinned, checked against its checksums,
+    exported and moved to the Recycle Bin. A name and a pin are kept in the zip's own comment; the list of mods that were
+    on is a file inside (`apex-mods.txt`), used to tell which are missing on a restore and never written into the save.
+  - **Automatic backups** are made when the game closes, before Play or once a day, only of saves that changed and never
+    while the game runs. Older automatic ones leave past the number to keep and past the space limit; ones the player
+    made, named or pinned, and a save's newest one, never do. Each save can have its own choice. *All backups* lists them
+    with filters and actions for a selection.
+  - The backups can be kept in another folder: they are copied and compared there before they leave the old one.
+    *Import* takes a zip with one save in it.
 - **Gallery.** The pictures and videos Apex Radiance and the game save, from the folders `ApexRadiance.toml` names
   (`[ui] screenshot_folder`, `[capture.video] folder`: the game's, Apex's own or a chosen one), all of them at once so
   changing the setting hides nothing. *Albums* lists them by day or by household (the save written soonest after a
@@ -267,6 +277,14 @@ as the signed-in user, not as administrator: a change to the game folder or to a
 | Hide while playing | None (`settings.json` `HideWhilePlaying`) | switch | On | | The launcher goes to the notification area while the game runs |
 | Fix safe things without asking | None (`settings.json` `FixSafeAutomatically`) | switch | On | | Health applies the fixes that keep a copy of each file |
 | Install updates when I press Play | None (`settings.json` `InstallUpdatesOnPlay`) | switch | On | | The ready updates go in before the game starts; off, Play starts the game as it is |
+| When the game closes (Saves, Automatic backups) | None (`backups.json` `OnClose`) | switch | On | | A backup of each save played lately that changed since its newest one |
+| Before playing | None (`backups.json` `BeforePlay`) | switch | Off | | The same before the game starts; *Play without waiting* skips it |
+| Once a day | None (`backups.json` `Daily`) | switch | Off | | The same once a day, while the launcher is open and the game is closed |
+| Backups of each save | None (`backups.json` `Keep`) | choice | 5 | 1, 3, 5, 10, 20 | How many automatic backups of a save stay |
+| Space limit | None (`backups.json` `LimitGb`) | choice | 10 GB | 2, 5, 10, 20, 50 GB, No limit | Past it the oldest backups the launcher made by itself leave |
+| Folder | None (`backups.json` `Folders`) | folder | `Saves backups (Apex Launcher)` in the game's Documents folder | | Where the backups are |
+| Check each backup | None (`backups.json` `Check`) | switch | On | | Compares the zip with the save after copying; a backup before a clean or a restore is always compared |
+| Remember the mods that are on | None (`backups.json` `RememberMods`) | switch | On | | Keeps the list of mods in the backup |
 | Picture on top (Home) | None (`settings.json` `HomePicture`) | choice | A picture from the gallery | A picture from the gallery, The household's photo, No picture | What shows behind the save on top of Home |
 | Gallery picture (Home) | None (`gallery.json` `HomePicture`) | buttons | The newest picture | *Choose in the gallery*, *Use the newest* | The gallery picture on Home: the one marked *Use on Home* in the Gallery, else the newest |
 | Picture height (Home) | None (`settings.json` `HomePictureHeight`) | choice | Medium (330 px) | Low (240 px), Medium, Tall (440 px) | How much of the page the gallery picture takes |
@@ -302,7 +320,7 @@ folder*; the log is in the player's `%LOCALAPPDATA%\Apex Radiance Setup\`. The f
 ## Limitations
 
 - Windows 10 version 1809 or later, 64-bit.
-- A cleaned save, a merged package written by 2.3 and the Game settings values are not yet verified in game.
+- A backup made or restored by 2.3, a cleaned save, a merged package written by 2.3 and the Game settings values are not yet verified in game.
 - Not yet verified on a real install: the upgrade from Apex Radiance Setup 1.2.x, a full uninstall,
   the administrator window on a game under Program Files, Play and the session with the EA app edition, the tray.
   A save opened from Home, the crash state on Home, and the Acrylic and stronger Mica backgrounds are unverified.

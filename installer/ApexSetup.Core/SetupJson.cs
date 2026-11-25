@@ -8,6 +8,7 @@ namespace ApexSetup;
 [JsonSerializable(typeof(Manifest))]
 [JsonSerializable(typeof(RestorePoint))]
 [JsonSerializable(typeof(LauncherSettings))]
+[JsonSerializable(typeof(BackupChoices))]
 [JsonSerializable(typeof(ModNotesFile))]
 [JsonSerializable(typeof(ModProfilesFile))]
 [JsonSerializable(typeof(MergeRecord))]

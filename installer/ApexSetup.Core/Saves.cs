@@ -38,18 +38,28 @@ public static class Saves
     // what an antivirus puts beside a file it scans and takes away at once (NAME.tmp); no file of a save ends so
     internal static bool Passing(string file) => file.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
 
-    public static string BackupDir(string docs) => Path.Combine(docs, "Saves backups (Apex Launcher)");
+    // the folder the player chose, else the launcher's own in Documents
+    public static string BackupDir(string docs) => BackupChoices.Load().FolderOf(docs) ?? OwnBackupDir(docs);
+    public static string OwnBackupDir(string docs) => Path.Combine(docs, "Saves backups (Apex Launcher)");
 
     // a zip of the save folder, checked file by file before it counts (SaveCopies.Zip); the save itself is only read.
     // note: why the launcher made it by itself (SaveCopies.BeforeClean). The uninstall never deletes these.
-    public static string Backup(Save s, string docs, string? note = null)
+    public static string Backup(Save s, string docs, string? note = null, CancellationToken ct = default)
     {
-        Directory.CreateDirectory(BackupDir(docs));
+        lock (SaveCopies.Gate) return BackupNow(s, docs, note, ct);
+    }
+
+    static string BackupNow(Save s, string docs, string? note, CancellationToken ct)
+    {
+        var (choices, dir) = (BackupChoices.Load(), BackupDir(docs));
+        try { Directory.CreateDirectory(dir); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException && choices.FolderOf(docs) is not null) { Engine.Log(e); throw new SetupException("The backup folder isn't available: {0}", dir); }
         var when = DateTime.Now;
         string zip;
         // (never over an older copy: one made in the same second takes the next)
-        while (File.Exists(zip = Path.Combine(BackupDir(docs), $"{s.Name} {when:yyyy-MM-dd HH.mm.ss}.zip"))) when = when.AddSeconds(1);
-        SaveCopies.Zip(s.Dir, zip, note);
+        while (File.Exists(zip = Path.Combine(dir, $"{s.Name} {when:yyyy-MM-dd HH.mm.ss}.zip"))) when = when.AddSeconds(1);
+        // (a copy that lets a change go ahead is always compared with the save)
+        SaveCopies.Zip(s.Dir, zip, note, choices.Check || note is SaveCopies.BeforeClean or SaveCopies.BeforeRestore || Games.IsRunning(), choices.RememberMods ? SaveBackups.ModsNow(docs) : null, ct);
         return zip;
     }
 }

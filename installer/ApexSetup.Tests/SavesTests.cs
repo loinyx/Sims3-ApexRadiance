@@ -147,7 +147,7 @@ static class SavesTests
         {
             Paths.LocalAppData = Path.Combine(root, "Local");
             Directory.CreateDirectory(recycled);
-            SaveCopies.Recycle = p => { var to = Path.Combine(recycled, Guid.NewGuid().ToString("N")); if (Directory.Exists(p)) Directory.Move(p, to); else File.Move(p, to); };
+            SaveCopies.RecycleOwn = SaveCopies.Recycle = p => { var to = Path.Combine(recycled, Guid.NewGuid().ToString("N")); if (Directory.Exists(p)) Directory.Move(p, to); else File.Move(p, to); };
             Pictures(check);
             var docs = Path.Combine(root, "Docs");
             var s = Make(docs, "Town");
@@ -157,12 +157,14 @@ static class SavesTests
             Copies(check, docs, s);
             Whole(check, docs, recycled);
             Namesakes(check, Path.Combine(root, "Docs2"), recycled);
+            Backups(check, Path.Combine(root, "Docs3"), recycled);
             if (Environment.GetEnvironmentVariable("APEX_SAVES_REAL") is { Length: > 0 } real) Real(check, real, Path.Combine(root, "Real"), recycled);
         }
         catch (Exception e) { check(false, "saves: exception " + e); }
         finally
         {
             SaveCopies.Recycle = oldRecycle;
+            SaveCopies.RecycleOwn = ModLibrary.RecycleQuiet;
             SaveClean.FailPoint = SaveCopies.FailPoint = _ => { };
             Games.IsRunning = () => false;
             Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
@@ -330,7 +332,7 @@ static class SavesTests
 
         var cancel = new CancellationTokenSource();
         cancel.Cancel();
-        check(Throws<OperationCanceledException>(() => SaveClean.Run(plan, null, cancel.Token)) && Same(before, Snap(s.Dir)) && Directory.GetFiles(Saves.BackupDir(docs)).Length == 0, "clean: cancelled, the save is as it was");
+        check(Throws<OperationCanceledException>(() => SaveClean.Run(plan, null, cancel.Token)) && Same(before, Snap(s.Dir)) && Snap(Saves.BackupDir(docs)).Count == 0, "clean: cancelled, the save is as it was");
 
         // the clean itself: a starred memory stays, a memory picked by key goes
         SaveStars.Keep(s.Name, [], ["00b2d882:0269d005:00000000000000a3"]);
@@ -562,6 +564,158 @@ static class SavesTests
         check(waited && SaveCopies.Recover(docs) && Same(files, Snap(s.Dir)) && Same(files, Snap(named.Dir)) && !Directory.Exists(work) && Directory.GetFileSystemEntries(recycled).Length == bin + 2,
             "recover: a file or a save left aside goes back when its place is empty and to the Recycle Bin when it is taken; half-made copies go (not while the game runs, and it says it did not run)");
         check(first, "recover: bringing a lost save back puts a save left aside home first, so the game's older copy never takes its place");
+    }
+
+    // the automatic backups and how many stay, a zip's name and pin, the mods of the day, another save, the folder, and a
+    // zip taken to and from somewhere else
+    static void Backups(Action<bool, string> check, string docs, string recycled)
+    {
+        var choices = Path.Combine(Paths.Data, "backups.json");
+        File.Delete(choices);
+        Directory.CreateDirectory(Path.Combine(docs, "Mods", "Packages", "Sub"));
+        foreach (var m in new[] { "one.package", @"Sub\two.package" }) File.WriteAllText(Path.Combine(docs, "Mods", "Packages", m), "x");
+        var (a, b) = (Make(docs, "A"), Make(docs, "B"));
+        SavePoint[] Zips(string n) => SaveCopies.Zips(docs, x => x == n).Select(z => z.Point).OrderBy(p => p.When).ToArray();
+        var dir = Saves.BackupDir(docs);
+        var beside = Path.GetDirectoryName(docs)!;
+
+        // only the saves chosen for the moment, and only when they changed
+        var none = SaveBackups.Run(docs, BackupMoment.Play).Made.Count + SaveBackups.Run(docs, BackupMoment.Day).Made.Count;
+        var old = SaveBackups.Run(docs, BackupMoment.Close).Made.Count;
+        foreach (var s in new[] { a, b }) File.SetLastWriteTime(Path.Combine(s.Dir, "TravelDB.package"), DateTime.Now.AddMinutes(-1));
+        var first = SaveBackups.Run(docs, BackupMoment.Close);
+        var again = SaveBackups.Run(docs, BackupMoment.Close);
+        check(none + old == 0 && first is { Made.Count: 2, Error: null } && again.Made.Count == 0 && Zips("A") is [{ Note: SaveBackups.AutoClose, Pinned: false, Label: null, Stored: > 0 }]
+              && Zips("A")[0].Bytes == SaveInfo.Of(a).Bytes, "backups: when the game closes each save played lately gets one (an old one with none does not), the list of mods not counted as the save; with nothing new there is none");
+        foreach (var s in new[] { a, b }) File.SetLastWriteTime(Path.Combine(s.Dir, "TravelDB.package"), DateTime.Now.AddMinutes(1));
+        BackupChoices.Change(c => c.Saves["A"] = new() { Off = true });
+        Games.IsRunning = () => true;
+        var running = SaveBackups.Run(docs, BackupMoment.Close).Made.Count;
+        Games.IsRunning = () => false;
+        check(running == 0 && SaveBackups.Run(docs, BackupMoment.Close).Made.Select(x => x.Name).SequenceEqual(["B"]), "backups: a save set to none gets none, and nothing is made while the game runs");
+        BackupChoices.Change(c => { c.Saves["A"] = new() { Daily = true, Keep = 2 }; c.OnClose = false; });
+        var now = BackupChoices.Load();
+        check(now.Of("a") == (false, false, true, 2) && now.Of("B") == (false, false, false, 5) && SaveBackups.Due(docs, BackupMoment.Close).Count == 0 && SaveBackups.Due(docs, BackupMoment.Day).Count == 0,
+            "backups: a save's own choices win over those of every save, the rest follows them; one a day is one a day");
+
+        // one cut short by a crash is not backed up
+        var cut = Make(docs, "Cut");
+        File.Delete(Path.Combine(cut.Dir, "Meta.data"));
+        File.SetLastWriteTime(Path.Combine(cut.Dir, "TravelDB.package"), DateTime.Now);
+        BackupChoices.Change(c => c.Saves["Cut"] = new() { OnClose = true });
+        var skipped = SaveBackups.Due(docs, BackupMoment.Close).Count == 1 && SaveBackups.Run(docs, BackupMoment.Close).Made.Count == 0;
+        Directory.Delete(cut.Dir, true);
+        // read while another program writes it: the writer is not stopped, and a torn read is no backup
+        var held = Path.Combine(a.Dir, "TravelDB.package");
+        using (var w = new FileStream(held, FileMode.Open, FileAccess.ReadWrite, FileShare.Read)) skipped &= File.Exists(Saves.Backup(a, docs));
+        check(skipped, "backups: a save cut short is left out; a save another program has open for writing is still read");
+        SaveBackups.Delete(Zips("A")[^1..]);
+
+        // a name and a pin go in the zip; the zip stays whole and keeps its day
+        var p = Zips("A")[0];
+        var day = File.GetLastWriteTimeUtc(p.Path);
+        SaveBackups.Mark(p, " Antes do casamento é 日\n", true);
+        var named = Zips("A")[0];
+        SaveBackups.Verify(named);
+        SaveBackups.Mark(named, null, true);
+        var pinned = Zips("A")[0];
+        check(named is { Label: "Antes do casamento é 日", Pinned: true, Note: SaveBackups.AutoClose } && pinned is { Label: null, Pinned: true, Note: SaveBackups.AutoClose } && File.GetLastWriteTimeUtc(p.Path) == day,
+            "backups: a name and a pin are kept in the zip, which still opens, and its day stays");
+
+        // the newest of the automatic ones stay; pinned, named and asked-for ones are not counted
+        Saves.Backup(a, docs);
+        var bin = Directory.GetFiles(recycled).Length;
+        for (var i = 0; i < 4; i++) Saves.Backup(a, docs, SaveBackups.AutoDay);
+        SaveCopies.Thin(docs, a);
+        check(Zips("A").Count(x => x.Note == SaveBackups.AutoDay) == 2 && Zips("A").Any(x => x.Pinned) && Zips("A").Any(x => x.Note is null) && Directory.GetFiles(recycled).Length == bin + 2,
+            "backups: of the automatic ones as many stay as chosen; pinned and asked-for ones are not touched");
+        var over = SaveBackups.Extra(docs, a, 3, limit: 1);
+        check(SaveBackups.Extra(docs, a, 3).Count == 0 && over.Count == 2 && over.All(x => SaveBackups.IsAuto(x.Note) && !x.Pinned) && !over.Any(x => x.Path == Zips("A")[^1].Path || x.Path == Zips("B")[^1].Path),
+            "backups: past the limit the launcher's own go, never a save's newest, a pinned one or one asked for");
+
+        // the mods of the day
+        File.Delete(Path.Combine(docs, "Mods", "Packages", "Sub", "two.package"));
+        var gone = SaveBackups.MissingMods(docs, Zips("A")[0]);
+        var back = SaveCopies.Restore(docs, a, Zips("A")[0]);
+        check(gone.SequenceEqual(["two.package"]) && !File.Exists(Path.Combine(back.Dir, SaveBackups.ModsName)), "backups: the mods that were on that day and are not now are told; the list is not put in the save");
+
+        // as another save; the first one stays
+        var was = Snap(back.Dir);
+        var other = SaveCopies.RestoreAs(docs, back, Zips("A")[0]);
+        check(other.Name == "A (2)" && Same(was, Snap(back.Dir)) && Snap(other.Dir).Count == was.Count, "backups: one opens as another save beside the first");
+
+        // to another folder and back; one that stops moves nothing
+        var away = Path.Combine(beside, "Away");
+        var here = Snap(dir);
+        using (var stop = new CancellationTokenSource())
+            check(Throws<OperationCanceledException>(() => SaveBackups.MoveTo(docs, away, (i, _) => { if (i == 1) stop.Cancel(); }, stop.Token)) && Same(here, Snap(dir)) && Snap(away).Count == 0 && Saves.BackupDir(docs) == dir
+                  && Throws<SetupException>(() => SaveBackups.MoveTo(docs, Path.Combine(docs, "Saves", "x"))), "backups: a stopped move to another folder moves nothing, and the game's own folders are refused");
+        SaveBackups.MoveTo(docs, away);
+        var moved = Saves.BackupDir(docs) == away && Same(here, Snap(away)) && !Directory.Exists(dir) && Zips("A").Length > 0;
+        var file = Path.Combine(beside, "not-a-folder");
+        File.WriteAllText(file, "");
+        BackupChoices.Change(c => c.SetFolder(docs, file));
+        var refused = Throws<SetupException>(() => Saves.Backup(a, docs));
+        BackupChoices.Change(c => c.SetFolder(docs, away));
+        // the same folder by another path moves nothing and removes nothing; nor can a folder out of reach
+        var link = Path.Combine(beside, "Link");
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{away}\"") { CreateNoWindow = true })!.WaitForExit();
+        SaveBackups.MoveTo(docs, link);
+        var linked = Directory.Exists(link) && Same(here, Snap(away)) && Saves.BackupDir(docs) == link;
+        Directory.Delete(link);
+        linked &= Throws<SetupException>(() => SaveBackups.MoveTo(docs, null)) && Saves.BackupDir(docs) == link;
+        SaveBackups.MoveTo(docs, away, leave: true);
+        check(linked && Same(here, Snap(away)) && Saves.BackupDir(docs) == away, "backups: the same folder by a link moves and removes nothing; a folder out of reach is told, not left behind");
+        BackupChoices.Change(c => c.SetFolder(docs + "-other", Path.Combine(beside, "Other")));
+        check(Throws<SetupException>(() => SaveBackups.MoveTo(docs, Path.Combine(beside, "Other"))), "backups: two games do not share a folder");
+        // one held by another program stays listed, as the player's own; and goes with a move or stops it whole
+        using (new FileStream(Zips("A")[0].Path, FileMode.Open, FileAccess.Read, FileShare.None))
+            check(Zips("A").Length == SaveCopies.ZipFiles(docs).Count(z => z.Name == "A") && !SaveBackups.IsOwn(Zips("A")[0]) && Throws<IOException>(() => SaveBackups.MoveTo(docs, null)) && Saves.BackupDir(docs) == away && !Directory.Exists(dir) | Snap(dir).Count == 0,
+                "backups: one another program holds stays listed and protected, and a move stops whole");
+        // choices that can't be read remove nothing
+        var text = File.ReadAllText(choices);
+        File.WriteAllText(choices, "{");
+        var kept = Snap(away);
+        SaveCopies.Thin(docs, a);
+        File.WriteAllText(choices, text);
+        check(Same(kept, Snap(away)), "backups: choices that can't be read remove nothing");
+        SaveBackups.MoveTo(docs, null);
+        check(moved && refused && Saves.BackupDir(docs) == dir && Same(here, Snap(dir)), "backups: they move to the chosen folder and back, each the same; a folder that is not there is told");
+
+        // out and in
+        var outside = Path.Combine(beside, "out.zip");
+        SaveBackups.Export(Zips("B")[0], outside);
+        var came = SaveBackups.Import(docs, outside);
+        var deep = Path.Combine(beside, "deep.zip");
+        using (var z = ZipFile.Open(deep, ZipArchiveMode.Create))
+        {
+            z.CreateEntry("readme.txt").Open().Dispose();
+            foreach (var f in Directory.GetFiles(b.Dir)) z.CreateEntryFromFile(f, "My saves/From a friend.sims3/" + Path.GetFileName(f));
+        }
+        var friend = SaveBackups.Import(docs, deep);
+        File.WriteAllText(deep, "no zip");
+        var bad = Throws<SetupException>(() => SaveBackups.Import(docs, deep));
+        File.Delete(deep);
+        using (var z = ZipFile.Open(deep, ZipArchiveMode.Create)) z.CreateEntry("a.txt").Open().Dispose();
+        bad &= Throws<SetupException>(() => SaveBackups.Import(docs, deep));
+        check(came.Name == "B (2)" && friend.Name == "From a friend" && Snap(friend.Dir).Count == Snap(b.Dir).Count && bad && !Directory.Exists(Path.Combine(docs, "Saves", ".apex-work")),
+            "backups: one goes out and comes in as a save of its own, a save inside folders too; a file with no save in it is refused");
+
+        // a damaged one is found, and not restored
+        var hurt = Zips("B")[^1];
+        var bytes = File.ReadAllBytes(hurt.Path);
+        var at = bytes.AsSpan().IndexOf("TravelDB.package"u8) + 40;
+        for (var i = 0; i < 24; i++) bytes[at + i] ^= 0x5A;
+        File.WriteAllBytes(hurt.Path, bytes);
+        was = Snap(b.Dir);
+        check(Throws<SetupException>(() => SaveBackups.Verify(hurt)) && Throws<SetupException>(() => SaveCopies.Restore(docs, b, hurt)) && Same(was, Snap(b.Dir)), "backups: a damaged one is told, and restoring it changes nothing");
+
+        // a renamed save keeps its own choices
+        SaveCopies.Rename(docs, Saves.List(docs).First(x => x.Name == "A"), "Z");
+        check(BackupChoices.Load().Saves.TryGetValue("Z", out var mine) && mine.Keep == 2 && !BackupChoices.Load().Saves.ContainsKey("A"), "backups: a renamed save keeps its own choices");
+        SaveBackups.Delete(Zips("Z"));
+        check(Zips("Z").Length == 0, "backups: the ones chosen go");
+        File.Delete(choices);
     }
 
     // two saves with one name, one of them out of the game: what the launcher keeps by name stays with the one that keeps

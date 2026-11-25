@@ -8,88 +8,11 @@ using static ApexSetup.Strings;
 
 namespace ApexSetup;
 
-// The two dialogs of Saves: the copies (with the saves that are gone and the ones kept out of the game), and the pictures
-// that stay whatever is cleaned.
+// The work of Saves that goes back to a backup or brings a save back, and the dialog of the pictures that stay whatever is
+// cleaned.
 public sealed partial class MainWindow
 {
-    // ---------- copies ----------
-
-    sealed record CopyLine(string Name, string Sub, string Act, DateTime When, Func<Task> Go);
-
-    List<CopyLine> ReadCopies(string docs)
-    {
-        var lines = new List<CopyLine>();
-        string Why(SavePoint p) => p.Kind == CopyKind.Game ? T("copy by the game") : p.Note == SaveCopies.BeforeClean ? T("before cleaning") : p.Note == SaveCopies.BeforeRestore ? T("before restoring") : T("copy by Apex");
-        string Sub(params string[] parts) => string.Join(" · ", parts.Where(p => p.Length > 0));
-        foreach (var s in Saves.List(docs))
-        {
-            var info = SaveInfo.Of(s);
-            foreach (var p in SaveCopies.Timeline(docs, s).Where(p => p.Kind != CopyKind.Now))
-                lines.Add(new(FamilyName(s, info), Sub(SavePlace(s, info), SaveDay(p.When, hour: true), Why(p), SaveSize(p.Bytes)), T("Restore"), p.When, () => RestoreSave(s, p, FamilyName(s, info))));
-        }
-        foreach (var s in SaveCopies.Lost(docs))
-        {
-            var info = SaveInfo.Of(s);
-            lines.Add(new(FamilyName(s, info), Sub(SavePlace(s, info), T("the save is gone"), T("copy by the game"), SaveSize(info.Bytes)), T("Bring back"), s.LastPlayed, () => BringBack(FamilyName(s, info), (d, ct) => SaveCopies.Rescue(d, s, ct))));
-        }
-        foreach (var (s, p) in SaveCopies.Gone(docs))
-            lines.Add(new(s.Name, Sub(SaveDay(p.When, hour: true), T("the save is gone"), Why(p), SaveSize(p.Bytes)), T("Bring back"), p.When, () => BringBack(s.Name, (d, ct) => SaveCopies.Restore(d, s, p, ct))));
-        foreach (var s in SaveCopies.Stored(docs))
-        {
-            var info = SaveInfo.Of(s);
-            lines.Add(new(FamilyName(s, info), Sub(SavePlace(s, info), T("out of the game"), SaveSize(info.Bytes)), T("Put back"), s.LastPlayed, () => PutBack(s)));
-        }
-        return lines.OrderByDescending(l => l.When).ToList();
-    }
-
-    async Task CopiesAsync()
-    {
-        var docs = Docs;
-        var host = new Grid { MinHeight = 160 };
-        host.Children.Add(new ProgressRing { IsActive = true, Width = 28, Height = 28, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
-        var about = Body(T("When you restore, today's save becomes one more copy."));
-        var body = new StackPanel { Spacing = 16, Width = 620, Children = { about, host } };
-        var d = new ContentDialog { Title = T("Copies"), Content = body, PrimaryButtonText = T("Copy all now"), SecondaryButtonText = T("Open folder"), CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
-        d.Resources["ContentDialogMaxWidth"] = 700.0;
-        d.IsPrimaryButtonEnabled = !DryRun && _savesNow?.Here.Count > 0;
-        d.IsSecondaryButtonEnabled = Directory.Exists(Saves.BackupDir(docs));
-        Func<Task>? go = null;
-        _ = Fill();
-        var answer = await ShowDialog(d);
-        if (go is not null) await go();
-        else if (answer == ContentDialogResult.Primary) await CopySaves(_savesNow!.Here.Select(l => l.Save).ToList());
-        else if (answer == ContentDialogResult.Secondary) OpenFolder(Saves.BackupDir(docs));
-
-        async Task Fill()
-        {
-            try
-            {
-                var lines = await Task.Run(() => ReadCopies(docs));
-                host.Children.Clear();
-                host.MinHeight = 0;
-                if (lines.Count == 0) { about.Text = T("No copies yet. Each clean makes one by itself."); return; }
-                var rows = new StackPanel();
-                foreach (var l in lines)
-                {
-                    var row = new Grid { ColumnSpacing = 14, MinHeight = 60, Padding = new Thickness(16, 8, 12, 8), BorderThickness = new Thickness(0, rows.Children.Count > 0 ? 1 : 0, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
-                    row.ColumnDefinitions.Add(new ColumnDefinition());
-                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    var words = (StackPanel)Col(SaveText(l.Name, 14, strong: true), SaveText(l.Sub, 12, "ApexMutedBrush"));
-                    (words.Spacing, words.VerticalAlignment) = (1, VerticalAlignment.Center);
-                    ToolTipService.SetToolTip(words, l.Sub);
-                    row.Children.Add(words);
-                    var act = Dims(Button(l.Act, () => { go = l.Go; d.Hide(); }));
-                    (act.Height, act.VerticalAlignment, act.IsEnabled) = (36, VerticalAlignment.Center, SavesBlocked() is null);
-                    AutomationProperties.SetName(act, $"{l.Act}, {l.Name}, {l.Sub}");
-                    Grid.SetColumn(act, 1);
-                    row.Children.Add(act);
-                    rows.Children.Add(row);
-                }
-                host.Children.Add(new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), Child = new ScrollViewer { Content = rows, MaxHeight = 380 } });
-            }
-            catch (Exception e) { App.Log(e); host.Children.Clear(); about.Text = ErrorText(e); }
-        }
-    }
+    // ---------- backups ----------
 
     async Task RestoreSave(Save s, SavePoint to, string name, bool undo = true)
     {
@@ -101,7 +24,7 @@ public sealed partial class MainWindow
             return Tuple.Create(now, SaveCopies.Timeline(docs, now).LastOrDefault(x => x.Note == SaveCopies.BeforeRestore));
         });
         FillSaves();
-        if (done is not null) SavesSay(InfoBarSeverity.Success, T("{0} restored", name), "", undo && done.Item2 is not null ? T("Undo") : null, () => _ = RestoreSave(done.Item1, done.Item2!, name, undo: false));
+        if (done is not null) SavesSay(InfoBarSeverity.Success, undo ? T("{0} restored", name) : T("The save is back to how it was"), "", undo && done.Item2 is not null ? T("Undo") : null, () => _ = RestoreSave(done.Item1, done.Item2!, name, undo: false), stays: undo);
     }
 
     // a save that is gone; undone, it leaves again (its copy never left its place)
@@ -109,6 +32,7 @@ public sealed partial class MainWindow
     {
         var docs = Docs;
         var back = await SaveWork(T("Bringing the save back"), (say, ct) => { say(T("Copying the save and checking the copy"), -1, true); return bring(docs, ct); });
+        if (back is not null) _saveWant = back.Dir;
         FillSaves();
         if (back is null) return;
         SavesSay(InfoBarSeverity.Success, T("{0} is back in the game", name), "", T("Undo"), () => _ = Undo());
