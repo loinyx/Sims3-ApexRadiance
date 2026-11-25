@@ -45,7 +45,7 @@ std::wstring FolderOf(const std::wstring& locale, bool sameLanguage) {
 bool IsSteamExe() {
     const char* const base = reinterpret_cast<const char*>(GetModuleHandleW(nullptr));
     const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
-    static const char kKey[] = "Software\\Sims(Steam)"; // with its ending zero
+    static const char kKey[] = "Software\\Sims(Steam)"; // with its ending zero (the launcher tells this rule by this text: Scan.cs)
     const IMAGE_SECTION_HEADER* s = IMAGE_FIRST_SECTION(nt);
     for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++s) {
         if (memcmp(s->Name, ".rdata", 6) != 0) continue;
@@ -88,6 +88,22 @@ bool IsFile(const std::wstring& p) {
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+// A folder's files into another: what is not there yet, nothing replaced.
+void MoveMissing(const std::wstring& from, const std::wstring& to) {
+    if (MoveFileW(from.c_str(), to.c_str())) return;
+    const DWORD a = GetFileAttributesW(from.c_str());
+    if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY) || (a & FILE_ATTRIBUTE_REPARSE_POINT)) return;
+    CreateDirectoryW(to.c_str(), nullptr);
+    WIN32_FIND_DATAW found;
+    const HANDLE find = FindFirstFileW((from + L"\\*").c_str(), &found);
+    if (find == INVALID_HANDLE_VALUE) return;
+    do {
+        if (wcscmp(found.cFileName, L".") != 0 && wcscmp(found.cFileName, L"..") != 0) MoveMissing(from + L"\\" + found.cFileName, to + L"\\" + found.cFileName);
+    } while (FindNextFileW(find, &found));
+    FindClose(find);
+    RemoveDirectoryW(from.c_str()); // only when nothing stayed
+}
+
 std::once_flag g_once;
 std::wstring g_game, g_s3ss, g_apex;
 std::string g_iniUtf8;
@@ -111,16 +127,20 @@ void Resolve() {
         g_apex = game + L"Apex Radiance\\";
         g_s3ss = game + L"S3SS\\";
         if (_wcsicmp(game.c_str(), windows.c_str()) != 0) {
-            // Apex's own folder left in the one of Windows' language comes along, where this one has none yet.
-            if (!IsDirectory(g_apex) && IsDirectory(windows + L"Apex Radiance\\")) {
+            // Apex's own folder left in the one of Windows' language comes along, while this one has no settings. The launcher
+            // goes by the same rule (Scan.cs ApexDir).
+            const std::wstring old = windows + L"Apex Radiance";
+            if (!IsFile(g_apex + L"ApexRadiance.toml") && IsDirectory(old)) {
                 SHCreateDirectoryExW(nullptr, game.c_str(), nullptr);
-                MoveFileW((windows + L"Apex Radiance").c_str(), (game + L"Apex Radiance").c_str());
+                MoveMissing(old, game + L"Apex Radiance");
+                // Settings that could not come (in use): read there until the next start moves them.
+                if (!IsFile(g_apex + L"ApexRadiance.toml") && IsFile(old + L"\\ApexRadiance.toml")) g_apex = old + L"\\";
             }
-            // Sims3SettingsSetter keeps using that one: the file saved last is in use.
+            // Sims3SettingsSetter keeps using that one: the file saved last is in use, or with none the place it will read.
             WIN32_FILE_ATTRIBUTE_DATA here = {}, there = {};
             const bool hasHere = GetFileAttributesExW((g_s3ss + L"S3SS.toml").c_str(), GetFileExInfoStandard, &here) != 0;
             const bool hasThere = GetFileAttributesExW((windows + L"S3SS\\S3SS.toml").c_str(), GetFileExInfoStandard, &there) != 0;
-            if (hasThere && (!hasHere || CompareFileTime(&there.ftLastWriteTime, &here.ftLastWriteTime) > 0)) g_s3ss = windows + L"S3SS\\";
+            if (hasHere ? hasThere && CompareFileTime(&there.ftLastWriteTime, &here.ftLastWriteTime) > 0 : IsDirectory(windows)) g_s3ss = windows + L"S3SS\\";
         }
         g_iniUtf8 = ApexUtil::ToUtf8(g_apex + L"apex_radiance_imgui.ini");
     });

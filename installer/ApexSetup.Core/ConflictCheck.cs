@@ -3,7 +3,10 @@ using System.Text.RegularExpressions;
 
 namespace ApexSetup;
 
-public sealed record ConflictEntry(string Kind, string Text, string[] Parties, string? Winner);
+public sealed record ConflictEntry(string Kind, string Text, string[] Parties, string? Winner)
+{
+    public string[] Labels { get; init; } = []; // each party's file, as the scan names it
+}
 public sealed record OverlapEntry(string Label, string Risk, string[] Parties);
 public sealed record DuplicateEntry(string[] Parties, string Text);
 public sealed record ConflictResult(string Fingerprint, List<ConflictEntry> Conflicts, List<OverlapEntry> Overlaps, List<DuplicateEntry> Duplicates, bool NeedsSevenZip);
@@ -22,7 +25,7 @@ public sealed class ConflictCheck : IModCheck
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(60);
     public Func<ModConflicts.Options, ModConflicts.Report> Scan { get; init; } = ModConflicts.Scan; // (tests)
     public int Scans { get; private set; }                               // scans run (tests: none when the cache is reused)
-    public ConflictResult? Last { get; private set; }
+    public ConflictResult? Last { get; private set; }                    // null: the last check did not finish
     public ICollection<string> Ignored { get; init; } = [];              // ModConflict.Id of the ones the player ignored
     public IReadOnlyList<ModConflict> Found { get; private set; } = [];  // the last check's, ignored ones too
 
@@ -34,7 +37,7 @@ public sealed class ConflictCheck : IModCheck
     public List<DuplicateEntry> Duplicates => Last?.Duplicates ?? [];
 
     // (Rules goes up when the scan's rules change, so a result kept from older rules is scanned again)
-    const int Rules = 6;
+    const int Rules = 7;
     public static string Fingerprint(IEnumerable<ModFile> mods) => $"rules {Rules}\n" +
         string.Join("\n", mods.Where(Scanned).OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
             .Select(m => $"{m.Path}|{m.Size}|{(File.Exists(m.Path) ? File.GetLastWriteTimeUtc(m.Path).Ticks : 0)}"));
@@ -42,10 +45,22 @@ public sealed class ConflictCheck : IModCheck
     // what the scan reads: the switched-on packages under Mods and the ASIs
     static bool Scanned(ModFile m) => m.Enabled && (m.FileType == "asi" || m.FileType == "package" && m.Rel.StartsWith("Mods", StringComparison.OrdinalIgnoreCase));
 
+    // Resource.cfg says which packages load and which comes first (where the scan looks for it)
+    static string Order(string docs) =>
+        new[] { Path.Combine(docs, "Mods", "Resource.cfg"), Path.Combine(docs, "Resource.cfg") }.Select(f => new FileInfo(f)).FirstOrDefault(f => f.Exists) is { } cfg
+            ? $"\n{cfg.FullName}|{cfg.Length}|{cfg.LastWriteTimeUtc.Ticks}" : "";
+
     public ConflictResult? Result(IReadOnlyList<ModFile> mods, Game game, string docs)
     {
-        var fp = Fingerprint(mods);
-        if (Load() is { } cached && cached.Fingerprint == fp) return Last = cached;
+        ConflictResult? r = null;
+        try { return r = Read(mods, game, docs); }
+        finally { Last = r; }
+    }
+
+    ConflictResult? Read(IReadOnlyList<ModFile> mods, Game game, string docs)
+    {
+        var fp = Fingerprint(mods) + Order(docs);
+        if (Load() is { } cached && cached.Fingerprint == fp) return cached;
         // one scan at a time per set of mods: a second check while it runs (Play checks twice) waits on that one
         Task<ConflictResult> scan;
         lock (Gate)
@@ -54,7 +69,7 @@ public sealed class ConflictCheck : IModCheck
             else { scan = Start(fp, game, docs); Running = (fp, scan); }
         }
         if (!scan.Wait(Timeout)) { Engine.Log(new TimeoutException($"Mod conflict scan over {Timeout.TotalSeconds:0} s; kept for the next check when it ends")); return null; }
-        return Last = scan.Result;
+        return scan.Result;
     }
 
     static (string Fp, Task<ConflictResult> Scan)? Running;
@@ -72,7 +87,7 @@ public sealed class ConflictCheck : IModCheck
         {
             var r = Scan(o);
             var result = new ConflictResult(fp,
-                r.Conflicts.Select(c => new ConflictEntry(c.Kind, c.Text, c.Parties, Winner.Match(c.Text) is { Success: true } w ? Path.GetFileNameWithoutExtension(w.Groups[1].Value.Trim()) : null)).ToList(),
+                r.Conflicts.Select(c => new ConflictEntry(c.Kind, c.Text, c.Parties, Winner.Match(c.Text) is { Success: true } w ? Path.GetFileNameWithoutExtension(w.Groups[1].Value.Trim()) : null) { Labels = c.Labels }).ToList(),
                 r.Warnings.Select(w => new OverlapEntry(w.Label, w.Risk, w.Parties.Select(p => p.Name).ToArray())).ToList(),
                 r.Info.Where(i => i.Text.StartsWith("duplicate copy", StringComparison.Ordinal)).Select(i => new DuplicateEntry(i.Party.Split(" + "), i.Text)).ToList(),
                 r.NeedsSevenZip);
@@ -85,16 +100,16 @@ public sealed class ConflictCheck : IModCheck
     public IEnumerable<ModFinding> Check(IReadOnlyList<ModFile> mods, Game game, string docs)
     {
         if (Result(mods, game, docs) is not { } r) return [];
-        string[] FilesOf(IEnumerable<string> parties) => parties.SelectMany(p => mods.Where(m => Path.GetFileNameWithoutExtension(m.Path).Equals(p, StringComparison.OrdinalIgnoreCase)).Select(m => m.Path)).Distinct().ToArray();
+        string FileOf(string label) => Path.GetFullPath(label.StartsWith("Bin/", StringComparison.Ordinal) ? Path.Combine(game.Bin, label[4..]) : Path.Combine(docs, label));
         var f = new List<ModFinding>();
         var found = new List<ModConflict>();
         // (ccmerged.package, the game's own merged store lists, is the player's choice to keep in Mods: never a conflict)
         static bool Ccmerged(string party) => party.Equals("ccmerged", StringComparison.OrdinalIgnoreCase);
         foreach (var c in r.Conflicts.Where(c => !c.Parties.Any(Ccmerged)))
         {
-            var m = ModConflict.Of(c, FilesOf(c.Parties));
-            // (the same mods again: the worse of the two stays)
-            if (found.FindIndex(x => x.Id == m.Id) is >= 0 and var at)
+            var m = ModConflict.Of(c, c.Labels.Select(FileOf).ToArray());
+            // (the same mods again: the worse of the two stays. Two versions of a mod share an id, each against the others on its own)
+            if (found.FindIndex(x => x.Id == m.Id && x.Files.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(m.Files)) is >= 0 and var at)
             {
                 if (m.Level >= found[at].Level) continue;
                 if (found[at].Finding is { } milder) f.RemoveAll(x => ReferenceEquals(x.Finding, milder));

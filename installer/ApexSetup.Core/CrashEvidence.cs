@@ -164,7 +164,7 @@ public static class CrashEvidence
     // Apex Radiance's log of that session (its errors before the end) and the next start's report on it ("[Session]")
     static void ApexLog(List<Clue> clues, string docs, DateTime at, DateTime from)
     {
-        var dir = Path.Combine(docs, "Apex Radiance");
+        var dir = Scan.ApexDir(docs);
         foreach (var name in new[] { "ApexRadiance_LOG.old.txt", "ApexRadiance_LOG.txt" })
         {
             var path = Path.Combine(dir, name);

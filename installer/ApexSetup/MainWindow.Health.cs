@@ -135,7 +135,7 @@ public sealed partial class MainWindow
         {
             HealthState.Blocked => T("The game still starts, but without Apex Radiance until this is fixed."),
             HealthState.NeedsYou => T("The game starts fine. Have a look when you have a minute."),
-            _ when _healthAll.Count(i => i.Finding.Severity != Severity.Info) > 0 => T("Nothing else needs your attention."),
+            _ when ModsUnread || _healthAll.Count(i => i.Finding.Severity != Severity.Info) > 0 => T("Nothing else needs your attention."),
             _ => T("Every check passed. The launcher checks again each time you press Play."),
         }, 14, Res("ApexSoftTextBrush")));
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0) };
@@ -165,7 +165,7 @@ public sealed partial class MainWindow
                 var see = Button(T("See"), () => HealthGo(nameof(HealthArea.Mods)), accent: true);
                 see.MinWidth = 84;
                 list.Children.Add(Glass(Line(IconTile(AreaIcon(HealthArea.Mods), ((SolidColorBrush)Res("ApexWarningBrush")).Color),
-                    mine.Count == 1 ? T(mine[0].Title) : T("{0} conflicts between mods", mine.Count), mine.Count == 1 ? string.Join(", ", mine[0].Parties) : T("They change the same things in the game."), see)));
+                    mine.Count == 1 ? T(mine[0].Title) : T("{0} conflicts between mods", mine.Count), mine.Count == 1 ? string.Join(", ", mine[0].Names) : T("They change the same things in the game."), see)));
             }
             foreach (var it in needs)
             {
@@ -203,13 +203,15 @@ public sealed partial class MainWindow
         var bad = items.Count(i => i.Finding.Severity != Severity.Info);
         var gone = IgnoredIn(area).Count + (area == HealthArea.Mods ? ConflictsNow(ignored: true).Count : 0);
         var brush = bad == 0 ? gone > 0 ? "ApexMutedBrush" : "ApexSuccessBrush" : items.Any(i => i.Finding.Severity == Severity.Error) ? "ApexErrorBrush" : "ApexWarningBrush";
-        var state = bad == 0 ? gone == 0 ? T("All good") : gone == 1 ? T("1 ignored") : T("{0} ignored", gone) : bad == 1 ? T("1 to look at") : T("{0} to look at", bad);
+        var unread = bad == 0 && area == HealthArea.Mods && ModsUnread;
+        if (unread) brush = "ApexMutedBrush";
+        var state = unread ? T("Not checked") : bad == 0 ? gone == 0 ? T("All good") : gone == 1 ? T("1 ignored") : T("{0} ignored", gone) : bad == 1 ? T("1 to look at") : T("{0} to look at", bad);
         var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(16, 0, 14, 0), Height = 58 };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         var icon = Lucide.Icon(AreaIcon(area), 18, Res("ApexSoftTextBrush"));
         var name = new TextBlock { Text = AreaName(area), FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
         var how = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
-        how.Children.Add(bad == 0 ? Lucide.Icon("check", 14, Res(brush)) : new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Res(brush), VerticalAlignment = VerticalAlignment.Center });
+        how.Children.Add(bad == 0 && !unread ? Lucide.Icon("check", 14, Res(brush)) : new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Res(brush), VerticalAlignment = VerticalAlignment.Center });
         how.Children.Add(new TextBlock { Text = state, FontSize = 13, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Center });
         var go = Lucide.Icon("chevron-right", 14, Res("ApexMutedBrush"));
         foreach (var (e, i) in new[] { (icon, 0), (name, 1), ((FrameworkElement)how, 2), (go, 3) }) { Grid.SetColumn(e, i); e.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(e); }
@@ -347,6 +349,9 @@ public sealed partial class MainWindow
 
     // ---------- Mods: the conflicts ----------
 
+    // the last check did not get through the mods: no conflict shown is not no conflict
+    bool ModsUnread => !_healthChecking && _conflicts?.Last is null;
+
     void HealthMods(StackPanel body)
     {
         var live = ConflictsNow();
@@ -387,11 +392,12 @@ public sealed partial class MainWindow
             page.Children.Add(Glass(wait));
             return;
         }
+        if (ModsUnread) page.Children.Add(Empty(T("Your mods were not checked"), T("The conflict check didn't finish. Check again in a moment.")));
         var shown = _conflictTab switch { 1 => small, 2 => gone, _ => look };
         foreach (var c in shown) page.Children.Add(ConflictCard(c));
         if (_conflictTab == 0 && other.Count > 0) page.Children.Add(Rows(other.OrderByDescending(i => i.Finding.Severity != Severity.Info).Select(FindingLine)));
         else if (_conflictTab == 2 && goneToo.Count > 0) page.Children.Add(Rows(goneToo.Select(FindingLine)));
-        else if (shown.Count == 0)
+        else if (shown.Count == 0 && (!ModsUnread || _conflictTab == 2))
             page.Children.Add(_conflictTab switch
             {
                 1 => Empty(T("No minor conflicts"), T("None of your mods share a command, a picture or text.")),
@@ -404,18 +410,18 @@ public sealed partial class MainWindow
     Border ConflictCard(ModConflict c)
     {
         var ignored = _settings.IgnoredConflicts.Contains(c.Id);
-        var open = _conflictOpen == c.Id;
+        var open = _conflictOpen == c.Key;
         var all = new StackPanel();
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var more = Button(open ? T("Close") : T("Details"), () => { (_conflictOpen, _conflictTech) = (open ? "" : c.Id, false); BuildHealth(); });
+        var more = Button(open ? T("Close") : T("Details"), () => { (_conflictOpen, _conflictTech) = (open ? "" : c.Key, false); BuildHealth(); });
         var ignore = Button(ignored ? T("Show again") : T("Ignore"), () => IgnoreConflict(c, !ignored));
-        AutomationProperties.SetName(more, (open ? T("Close") : T("Details")) + ", " + string.Join(", ", c.Parties));
-        AutomationProperties.SetName(ignore, (ignored ? T("Show again") : T("Ignore")) + ", " + string.Join(", ", c.Parties));
+        AutomationProperties.SetName(more, (open ? T("Close") : T("Details")) + ", " + string.Join(", ", c.Names));
+        AutomationProperties.SetName(ignore, (ignored ? T("Show again") : T("Ignore")) + ", " + string.Join(", ", c.Names));
         more.MinWidth = ignore.MinWidth = 88;
         buttons.Children.Add(more);
         buttons.Children.Add(ignore);
         var color = ((SolidColorBrush)Res(c.Level switch { ConflictLevel.Fix => "ApexErrorBrush", ConflictLevel.Look => "ApexWarningBrush", _ => "ApexMutedBrush" })).Color;
-        all.Children.Add(Line(IconTile(AreaIcon(HealthArea.Mods), color), T(c.Title), string.Join(", ", c.Parties), buttons));
+        all.Children.Add(Line(IconTile(AreaIcon(HealthArea.Mods), color), T(c.Title), string.Join(", ", c.Names), buttons));
         if (open)
         {
             var inner = new StackPanel { Spacing = 16, Padding = new Thickness(74, 16, 18, 18), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
@@ -440,13 +446,13 @@ public sealed partial class MainWindow
     FrameworkElement ConflictMods(ModConflict c)
     {
         var rows = new StackPanel();
-        var files = c.Parties.Select(p => (Party: p, File: _mods.FirstOrDefault(m => Path.GetFileNameWithoutExtension(m.Path).Equals(p, StringComparison.OrdinalIgnoreCase) && m.Enabled))).ToList();
+        var files = c.Names.Zip(c.Files, (n, f) => (Party: n, File: _mods.FirstOrDefault(m => m.Enabled && m.Path.Equals(f, StringComparison.OrdinalIgnoreCase)))).ToList();
         var dates = files.Select(f => f.File is { } m && File.Exists(m.Path) ? File.GetLastWriteTime(m.Path) : (DateTime?)null).ToList();
         var newest = dates.Max();
         for (int i = 0; i < files.Count; i++)
         {
             var (party, file) = files[i];
-            var info = c.Winner is { } w ? (w.Equals(party, StringComparison.OrdinalIgnoreCase) ? T("In use") : c.Alike.Contains(party, StringComparer.OrdinalIgnoreCase) ? T("Same as the one in use") : T("Replaced by the other"))
+            var info = c.InUse is { } w ? (w == c.Labels[i] ? T("In use") : c.Alike.Contains(c.Labels[i]) ? T("Same as the one in use") : T("Replaced by the other"))
                 : c.Title == "Two versions of the same mod" && dates[i] is { } d ? (d == newest ? T("Newest, from {0}", d.ToString("d MMM yyyy", LangCulture())) : T("From {0}", d.ToString("d MMM yyyy", LangCulture()))) : "";
             var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(14, 8, 8, 8), MinHeight = 48, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -486,10 +492,11 @@ public sealed partial class MainWindow
         else _settings.IgnoredConflicts.Remove(c.Id);
         _settings.Save();
         // (what Health counts follows at once; the next check finds the same)
-        if (c.Finding is { } f)
+        var same = (_conflicts?.Found ?? [c]).Where(x => x.Id == c.Id && x.Finding is not null).ToList();
+        if (same.Count > 0)
         {
-            var rest = _healthAll.Where(i => !ReferenceEquals(i.Finding, f)).ToList();
-            SetHealth(on ? rest : [.. rest, new(f, HealthArea.Mods, c.Files) { Conflict = true }]);
+            var rest = _healthAll.Where(i => !same.Any(x => ReferenceEquals(x.Finding, i.Finding))).ToList();
+            SetHealth(on ? rest : [.. rest, .. same.Select(x => new Health.Item(x.Finding!, HealthArea.Mods, x.Files) { Conflict = true })]);
         }
         _conflictOpen = "";
         IgnoreDone(on, note, () => IgnoreConflict(c, false, note: false));

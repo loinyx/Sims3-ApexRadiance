@@ -36,37 +36,45 @@ public static class Scan
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DOCUMENTS") is { } test) return test;
         var ea = Path.Combine(PlayerShellFolder("Personal") ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Electronic Arts");
-        return Path.Combine(ea, PickFolder(Folders(g.ExePath), GameLocale(g.ExePath), System.Globalization.CultureInfo.CurrentCulture.Name, f => File.Exists(Path.Combine(ea, f, "Options.ini"))));
+        var (folders, windows) = (Folders(g.ExePath), System.Globalization.CultureInfo.CurrentCulture.Name);
+        var docs = Path.Combine(ea, PickFolder(folders, GameLocale(g.ExePath), windows, f => File.Exists(Path.Combine(ea, f, "Options.ini"))));
+        _beside[docs] = (Path.Combine(ea, WindowsFolder(folders, windows)), g.Bin);
+        return docs;
+    }
+    // for each Documents folder handed out, the one of Windows' language and the game it is for
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Windows, string Bin)> _beside = new(StringComparer.OrdinalIgnoreCase);
+
+    // Apex's own folder, where the installed ASI reads it. The ASI moves the one left in the folder of Windows' language at its
+    // start (framework/apex_paths.cpp): the launcher never does, an older ASI still reads it there.
+    public static string ApexDir(string docs) =>
+        _beside.TryGetValue(docs, out var b) ? ApexDir(docs, b.Windows, FindAsi(b.Bin, "ApexRadiance.asi")) : Path.Combine(docs, "Apex Radiance");
+
+    public static string ApexDir(string docs, string windows, string? asi)
+    {
+        var (now, old, english) = (Path.Combine(docs, "Apex Radiance"), Path.Combine(windows, "Apex Radiance"), Path.Combine(Path.GetDirectoryName(docs)!, "The Sims 3"));
+        if (docs.Equals(windows, StringComparison.OrdinalIgnoreCase)) return now;
+        // (4.1.0 and older go by Windows' language alone, or English when that folder is not there)
+        if (asi is not null && !GoesByGame(asi)) return Directory.Exists(windows) || !Directory.Exists(english) ? old : Path.Combine(english, "Apex Radiance");
+        return File.Exists(Path.Combine(now, "ApexRadiance.toml")) || !Directory.Exists(old) ? now : old;
     }
 
-    // Earlier versions went by Windows' language alone. Apex's own folder left in that one comes along, where the right one
-    // has none yet (framework/apex_paths.cpp does the same).
-    public static void BringApex(Game g)
+    // the ASI that finds the folder by the game's language holds the game's registry key, a text no older one has
+    static bool GoesByGame(string asi)
     {
-        if (Environment.GetEnvironmentVariable("APEX_SETUP_DOCUMENTS") is not null) return;
-        var docs = DocumentsFor(g);
-        var old = Path.Combine(Path.GetDirectoryName(docs)!, WindowsFolder(Folders(g.ExePath), System.Globalization.CultureInfo.CurrentCulture.Name), "Apex Radiance");
-        var now = Path.Combine(docs, "Apex Radiance");
-        try
-        {
-            if (Directory.Exists(now) || !Directory.Exists(old)) return;
-            Engine.CheckWritable();
-            Directory.CreateDirectory(docs);
-            Directory.Move(old, now);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) { Engine.Log(e); }
+        try { return _goesByGame.GetOrAdd((asi, File.GetLastWriteTimeUtc(asi)), k => Contains(k.Item1, "Software\\Sims(Steam)")); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); return true; }
     }
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, DateTime), bool> _goesByGame = new();
 
-    // Sims3SettingsSetter goes by Windows' language: its file may be beside the game's folder. The one saved last is in use.
-    public static string SetterFile(string docs)
+    // Sims3SettingsSetter goes by Windows' language, so its file is in that folder or the game's: the one saved last, or with
+    // neither the place it will read (framework/apex_paths.cpp has the same rule).
+    public static string SetterFile(string docs) => SetterFile(docs, _beside.TryGetValue(docs, out var b) ? b.Windows : docs);
+
+    public static string SetterFile(string docs, string windows)
     {
-        var own = Path.Combine(docs, "S3SS", "S3SS.toml");
-        try
-        {
-            return Directory.EnumerateDirectories(Path.GetDirectoryName(Path.GetFullPath(docs)) ?? docs).Select(d => Path.Combine(d, "S3SS", "S3SS.toml"))
-                .Where(File.Exists).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault() ?? own;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return own; }
+        var (own, other) = (Path.Combine(docs, "S3SS", "S3SS.toml"), Path.Combine(windows, "S3SS", "S3SS.toml"));
+        if (!File.Exists(own)) return Directory.Exists(windows) ? other : own;
+        return File.Exists(other) && File.GetLastWriteTimeUtc(other) > File.GetLastWriteTimeUtc(own) ? other : own;
     }
 
     // Setup runs elevated (app.manifest): a standard player who types an administrator's password runs it as that account, whose

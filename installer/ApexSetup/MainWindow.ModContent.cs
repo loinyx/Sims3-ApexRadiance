@@ -521,7 +521,7 @@ public sealed partial class MainWindow
                 return ModLine(r, give);
             }).ToList());
         if (other.Count > 0)
-            Part(T("Other conflicts"), "ApexWarningBrush", other.Select(c => Row(string.Join(", ", c.Parties.Where(p => !p.Equals(Path.GetFileNameWithoutExtension(m.Path), StringComparison.OrdinalIgnoreCase))), T(c.Title) + ". " + T(c.Say, c.SayArgs), c)));
+            Part(T("Other conflicts"), "ApexWarningBrush", other.Select(c => Row(string.Join(", ", c.Names.Zip(c.Files).Where(x => !x.Second.Equals(m.Path, StringComparison.OrdinalIgnoreCase)).Select(x => x.First)), T(c.Title) + ". " + T(c.Say, c.SayArgs), c)));
         // (identical copies change nothing, whichever the game uses: they are no conflict)
         if (over.Count + under.Count + other.Count == 0)
         {
@@ -555,7 +555,7 @@ public sealed partial class MainWindow
     {
         Show(HealthScreen);
         HealthGo(nameof(HealthArea.Mods));
-        (_conflictTab, _conflictOpen) = (_settings.IgnoredConflicts.Contains(c.Id) ? 2 : c.Level == ConflictLevel.Small ? 1 : 0, c.Id);
+        (_conflictTab, _conflictOpen) = (_settings.IgnoredConflicts.Contains(c.Id) ? 2 : c.Level == ConflictLevel.Small ? 1 : 0, c.Key);
         BuildHealth();
     }
 

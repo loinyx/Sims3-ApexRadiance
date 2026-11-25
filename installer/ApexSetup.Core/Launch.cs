@@ -96,7 +96,7 @@ public sealed class Session
         bool Newer(string f) => File.GetLastWriteTime(f) >= started;
         try
         {
-            var apex = Path.Combine(docs, "Apex Radiance");
+            var apex = Scan.ApexDir(docs);
             return Directory.Exists(docs) && Directory.EnumerateFiles(docs, "xcpt *.txt").Any(Newer)
                    || new[] { "ApexRadiance_Crash.txt", "ApexRadiance_Crash.dmp" }.Select(n => Path.Combine(apex, n)).Any(f => File.Exists(f) && Newer(f));
         }

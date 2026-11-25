@@ -115,26 +115,26 @@ public static class Gallery
     {
         var toml = ApexToml(docs);
         var chosen = Chosen(docs, Setting(toml, "ui", "screenshot_folder"), Setting(toml, "ui", "screenshot_custom_folder"), "Screenshots", "Screenshots");
-        return Folders(chosen, Path.Combine(docs, "Screenshots"), Path.Combine(docs, "Apex Radiance", "Screenshots"));
+        return Folders(chosen, Path.Combine(docs, "Screenshots"), Path.Combine(Scan.ApexDir(docs), "Screenshots"));
     }
 
     public static List<string> VideoFolders(string docs)
     {
         var toml = ApexToml(docs);
         var chosen = Chosen(docs, Setting(toml, "capture.video", "folder"), Setting(toml, "capture.video", "custom_folder"), "Recorded Videos", "Videos");
-        return Folders(chosen, Path.Combine(docs, "Recorded Videos"), Path.Combine(docs, "Apex Radiance", "Videos"));
+        return Folders(chosen, Path.Combine(docs, "Recorded Videos"), Path.Combine(Scan.ApexDir(docs), "Videos"));
     }
 
     static string ApexToml(string docs)
     {
-        try { var f = Path.Combine(docs, "Apex Radiance", "ApexRadiance.toml"); return File.Exists(f) ? File.ReadAllText(f) : ""; }
+        try { var f = Path.Combine(Scan.ApexDir(docs), "ApexRadiance.toml"); return File.Exists(f) ? File.ReadAllText(f) : ""; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return ""; }
     }
 
     // game, apex or custom (a folder that resolves to a full path; else the game's, as Apex falls back)
     static string Chosen(string docs, string? mode, string? custom, string gameSub, string apexSub)
     {
-        if (mode == "apex") return Path.Combine(docs, "Apex Radiance", apexSub);
+        if (mode == "apex") return Path.Combine(Scan.ApexDir(docs), apexSub);
         if (mode == "custom" && custom is { Length: > 0 } && Environment.ExpandEnvironmentVariables(custom) is var c && !c.Contains('%') && Path.IsPathFullyQualified(c)) return c;
         return Path.Combine(docs, gameSub);
     }

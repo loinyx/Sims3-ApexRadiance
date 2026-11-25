@@ -2233,5 +2233,8 @@ public static partial class Strings
         ["No portraits in this save. The game makes them as you play."] = "Este save não tem retratos. O jogo faz enquanto você joga.",
         ["Some of the Sims this save knows. The game makes these portraits again by itself."] = "Alguns dos Sims que este save conhece. O jogo refaz estes retratos sozinho.",
         ["Portrait of a Sim"] = "Retrato de Sim",
+        ["Not checked"] = "Não verificado",
+        ["Your mods were not checked"] = "Seus mods não foram verificados",
+        ["The conflict check didn't finish. Check again in a moment."] = "A verificação de conflitos não terminou. Verifique de novo daqui a pouco.",
     };
 }

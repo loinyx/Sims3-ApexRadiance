@@ -309,6 +309,51 @@ static class HealthTests
         again.Check(Mods(), g, docs).ToList();
         check(again.Scans == 1, "conflicts: a changed file scans again");
 
+        // what Resource.cfg loads counts, also when no mod file changed
+        var cfg = Path.Combine(docs, "Mods", "Resource.cfg");
+        File.WriteAllText(cfg, "Priority 500\nPackedFile Other/*.package\n");
+        check(!again.Check(Mods(), g, docs).Any() && again.Scans == 2, "conflicts: a changed Resource.cfg scans again");
+        File.WriteAllText(cfg, "Priority 500\nPackedFile Packages/*.package\nPackedFile Packages/*/*.package\n");
+        check(again.Check(Mods(), g, docs).Any() && again.Scans == 3, "conflicts: and finds the conflict it hid");
+        List<ModFile> All() => Directory.EnumerateFiles(packages, "*.package", SearchOption.AllDirectories).Select(p => new ModFile(p, Path.GetRelativePath(docs, p), new FileInfo(p).Length, ModKind.Package, true, false)).ToList();
+        // two files of one name: each party is its own file
+        var twin = Path.Combine(packages, "Old", "alpha.package");
+        Directory.CreateDirectory(Path.GetDirectoryName(twin)!);
+        File.WriteAllBytes(twin, Res(1, "alpha tuning, older"));
+        again.Check(All(), g, docs).ToList();
+        check(again.Found is [{ Parties.Length: 3 } t] && t.Files.Order().SequenceEqual(new[] { twin, Path.Combine(packages, "alpha.package"), Path.Combine(packages, "beta.package") }.Order())
+              && t.Labels.Select(Path.GetFileName).SequenceEqual(t.Files.Select(Path.GetFileName)), "conflicts: two mods of one name are two files");
+        Directory.Delete(Path.GetDirectoryName(twin)!, true);
+        // two versions of a mod, each against another on its own data: both show, under the one id an ignore keeps
+        var versions = new[] { "Mod_v1", "Mod_v2", "X" }.Select(n => Path.Combine(packages, n + ".package")).ToArray();
+        byte[] Two(string data, params ulong[] at) => ModConflicts.WritePackage(at.Select(i => (0x0333406Cu, 0u, i, Encoding.UTF8.GetBytes(data))).ToArray());
+        File.WriteAllBytes(versions[0], Two("v1", 11));
+        File.WriteAllBytes(versions[1], Two("v2", 12));
+        File.WriteAllBytes(versions[2], Two("x", 11, 12));
+        again.Check(All(), g, docs).ToList();
+        var both = again.Found.Where(x => x.Parties.Contains("X")).ToList();
+        check(both.Count == 2 && both[0].Id == both[1].Id && both[0].Key != both[1].Key && both.SelectMany(x => x.Parties).Order().SequenceEqual(["Mod_v1", "Mod_v2", "X", "X"]),
+            "conflicts: one conflict each for two versions of a mod against another");
+        foreach (var v in versions) File.Delete(v);
+        // a damaged package (an index size no file has) is left out, and the rest is checked
+        var damaged = Path.Combine(packages, "damaged.package");
+        var bytes = Res(3, "damaged");
+        bytes[47] = 0x80;
+        File.WriteAllBytes(damaged, bytes);
+        check(again.Check(All(), g, docs).Any(x => x.Finding.Severity == Severity.Warning) && again.Last is not null, "conflicts: a damaged package does not stop the check");
+        File.Delete(damaged);
+        // a check that failed is not taken for the one before it
+        again.Check(Mods(), g, docs).ToList();
+        var failing = false;
+        var later = new ConflictCheck { Offline = true, Scan = o => failing ? throw new InvalidOperationException("broken scan") : ModConflicts.Scan(o) };
+        later.Check(Mods(), g, docs).ToList();
+        var first = later.Last;
+        failing = true;
+        File.AppendAllText(cfg, "# other\n");
+        try { later.Check(Mods(), g, docs).ToList(); } catch (AggregateException) { }
+        check(first is not null && later.Last is null, "conflicts: a check that failed leaves no result of the one before");
+        File.Delete(cfg);
+
         var s = Scan.Run(g, docs);
         var broken = new ConflictCheck { Offline = true, Scan = _ => throw new InvalidOperationException("broken scan") };
         File.Delete(Path.Combine(Paths.Data, "conflicts.json"));

@@ -115,7 +115,7 @@ static class ModConflictsTests
             File.WriteAllText(Path.Combine(mods, "Resource.cfg"), "Priority 500\nPackedFile Packages/*.package\nPriority 1000\nPackedFile Overrides/*.package\n");
             return ModConflicts.Scan(new() { Roots = { mods }, Rules = rules }).Conflicts;
         }
-        ModConflict Of(ModConflicts.Conflict c) => ModConflict.Of(new ConflictEntry(c.Kind, c.Text, c.Parties, Regex.Match(c.Text, "likely winner: ([^;]+)") is { Success: true } w ? Path.GetFileNameWithoutExtension(w.Groups[1].Value.Trim()) : null), []);
+        ModConflict Of(ModConflicts.Conflict c) => ModConflict.Of(new ConflictEntry(c.Kind, c.Text, c.Parties, Regex.Match(c.Text, "likely winner: ([^;]+)") is { Success: true } w ? Path.GetFileNameWithoutExtension(w.Groups[1].Value.Trim()) : null) { Labels = c.Labels }, []);
 
         // written another way in two mods: nothing; with a real difference among them: that one only
         var layout = In("Layout", ("Packages/a.package", Pkg(Xml(1, doc), Xml(2, doc), Texts(3, (1, "a"), (2, "b")), (ModConflicts.TypeKey, 0, 0, U("names a")))),
@@ -125,7 +125,7 @@ static class ModConflictsTests
         // two mods with the same copy and one with another: one conflict, which says who loses nothing
         var three = In("Three", ("Packages/a.package", Pkg(Xml(1, doc))), ("Packages/b.package", Pkg(Xml(1, " " + doc))), ("Packages/c.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))));
         var threeLast = In("ThreeLast", ("Packages/a.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))), ("Packages/b.package", Pkg(Xml(1, doc))), ("Packages/c.package", Pkg(Xml(1, doc))));
-        check(three is [{ Parties.Length: 3 } t3] && Of(t3) is { Winner: "a", Alike: ["b"], Level: ConflictLevel.Look } && threeLast is [var tl] && Of(tl) is { Winner: "a", Alike.Length: 0 },
+        check(three is [{ Parties.Length: 3 } t3] && Of(t3) is { Winner: "a", InUse: "Mods/Packages/a.package", Alike: ["Mods/Packages/b.package"], Level: ConflictLevel.Look } && threeLast is [var tl] && Of(tl) is { Winner: "a", Alike.Length: 0 },
             "mod conflicts: of two mods with the same copy and one with another, the one like the copy in use loses nothing");
         // a script adapted for a folder that loads first is the same build, no conflict; another build is, and so are two in one folder
         var build = Guid.NewGuid();
@@ -170,6 +170,15 @@ static class ModConflictsTests
         check(first is [{ Kind: "decided" } fc] && Of(fc) is { Level: ConflictLevel.Small, Winner: "zeta", SayArgs: ["zeta"], Finding: null, CanOrder: true }
               && level is [{ Kind: "resource key" } lc] && Of(lc) is { Level: ConflictLevel.Look, Winner: "alpha" } && Of(fc).Id == Of(lc).Id,
             "mod conflicts: a mod in a folder that loads first is the one set to win, a lower conflict with the same id");
+        // two mods of one name in two folders: each is told by its folder
+        var twins = In("Twins", ("Packages/Tuning.package", Pkg(Xml(1, doc))), ("Overrides/Tuning.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))));
+        check(twins is [var tw] && Of(tw) is { InUse: "Mods/Overrides/Tuning.package", Winner: "Tuning", SayArgs: [@"Tuning (Mods\Overrides)"], Parties: ["Tuning", "Tuning"] } m2
+              && m2.Labels.Order().SequenceEqual(["Mods/Overrides/Tuning.package", "Mods/Packages/Tuning.package"]) && m2.Names.Order().SequenceEqual([@"Tuning (Mods\Overrides)", @"Tuning (Mods\Packages)"]),
+            "mod conflicts: two files of one name are told apart by their folders");
+        // a size no packed data can have
+        bool Rejects(params byte[] b) { try { ModConflicts.RefPack(b); return false; } catch (InvalidDataException) { return true; } }
+        check(Rejects(0x90, 0xfb, 0x80, 0, 0, 0, 0xfc) && Rejects(0x90, 0xfb, 0x7f, 0xff, 0xff, 0xff, 0xfc) && ModConflicts.RefPack([0x10, 0xfb, 0, 0, 1, 0xfd, 7]) is [7],
+            "mod conflicts: packed data that says an impossible size is not read");
         // a mod alone on a key (a default replacement of game data) is no conflict
         check(In("Alone", ("Packages/a.package", Pkg(Xml(1, doc))), ("Packages/b.package", Pkg(Xml(2, doc)))).Count == 0, "mod conflicts: a mod that alone replaces a resource is no conflict");
     }
