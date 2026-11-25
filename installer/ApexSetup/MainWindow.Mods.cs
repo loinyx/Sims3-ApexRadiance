@@ -344,11 +344,11 @@ public sealed partial class MainWindow
             for (var d = DirOf(m); d.Length > 0; d = Path.GetDirectoryName(d) ?? "") perDir[d] = perDir.GetValueOrDefault(d) + 1;
         var groups = new List<(string Key, string Label, string? Add, List<Place> Items)>
         {
-            ("library", T("LIBRARY"), null, new List<Place> { new(AllMods, T("All mods"), "layers", N(AllMods)) }
+            ("library", T("Library"), null, new List<Place> { new(AllMods, T("All mods"), "layers", N(AllMods)) }
                 .Concat(new[] { new Place(AsiMods, T("Game plugins (ASI)"), "plug", N(AsiMods)), new(NewMods, T("New since last play"), "sparkles", N(NewMods)), new(DefaultMods, T("Default replacements"), "replace", N(DefaultMods)), new(LookMods, T("Needs a look"), "triangle-alert", N(LookMods), Warn: true),
                     new(DupMods, T("Duplicates"), "copy", N(DupMods)), new(MergedMods, T("Merges"), "merge", N(MergedMods)), new(OffMods, T("Turned off"), "power-off", N(OffMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace)).ToList()),
-            ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", perDir.GetValueOrDefault(d), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
-            ("tags", T("TAGS"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
+            ("folders", T("Folders"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", perDir.GetValueOrDefault(d), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
+            ("tags", T("Tags"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
         };
         if (!groups.SelectMany(g => g.Items).Any(p => p.Key.Equals(_modPlace, StringComparison.OrdinalIgnoreCase))) _modPlace = AllMods;
 
@@ -402,16 +402,17 @@ public sealed partial class MainWindow
     FrameworkElement GroupHeader(string key, string label, string? add)
     {
         // the whole row is the heading's button (hover and click across it); the + sits on its right end
-        var g = new Grid { Tag = "-", Margin = new Thickness(0, 12, 0, 2), Height = 30 };
+        var g = new Grid { Tag = "-", Margin = new Thickness(4, 14, 4, 2), Height = 30 };
         var head = new Button
         {
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(10, 0, 8, 0),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(12, 0, 8, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch,
-            CornerRadius = new CornerRadius(4),
         };
-        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        s.Children.Add(Lucide.Icon(_collapsed.Contains(key) ? "chevron-right" : "chevron-down", 12, Res("ApexMutedBrush")));
-        s.Children.Add(new TextBlock { Text = label, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush") });
+        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        s.Children.Add(new TextBlock { Text = label, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+        var fold = Lucide.Icon(_collapsed.Contains(key) ? "chevron-right" : "chevron-down", 12, Res("ApexMutedBrush"));
+        fold.VerticalAlignment = VerticalAlignment.Center;
+        s.Children.Add(fold);
         head.Content = s;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(head, label);
         head.Click += (_, _) => { if (!_collapsed.Remove(key)) _collapsed.Add(key); SaveViewPrefs(); _folderSig = ""; FillSide(); };
@@ -422,7 +423,7 @@ public sealed partial class MainWindow
             var plus = IconButton("plus", tip);
             plus.Width = plus.Height = 26;
             plus.HorizontalAlignment = HorizontalAlignment.Right;
-            plus.Margin = new Thickness(0, 0, 2, 0);
+            plus.Margin = new Thickness(0, 0, 6, 0);
             plus.Click += (_, _) => { if (add == "tag") Safe(NewTagAsync(null)); else Safe(NewFolderAsync(NewFolderParent())); };
             g.Children.Add(plus);
         }
@@ -432,7 +433,7 @@ public sealed partial class MainWindow
     FrameworkElement PlaceItem(Place p)
     {
         // (as tall as the row, a little wider than its text: a held mod sees a full row light up, not a thin line)
-        var g = new Grid { ColumnSpacing = 10, Tag = p.Key, Padding = new Thickness(14 * p.Depth + 6, 0, 6, 0), Margin = new Thickness(-6, 2, -6, 2), MinHeight = 28, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var g = new Grid { ColumnSpacing = 12, Tag = p.Key, Padding = new Thickness(16 * p.Depth + 6, 0, 6, 0), Margin = new Thickness(-6, 2, -6, 2), MinHeight = 28, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -440,12 +441,13 @@ public sealed partial class MainWindow
         var fg = p.Warn ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
         g.Children.Add(p.Color is { } c
             ? new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 10, Height = 10, Fill = TagDot.BrushOf(c), Margin = new Thickness(3, 0, 3, 0), VerticalAlignment = VerticalAlignment.Center }
-            : Lucide.Icon(p.Icon, 16, fg));
-        var name = new TextBlock { Text = p.Label, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Opacity = dim ? 0.55 : 1 };
+            : PlaceIcon());
+        FrameworkElement PlaceIcon() { var i = Lucide.Icon(p.Icon, 16, fg); (i.VerticalAlignment, i.Opacity) = (VerticalAlignment.Center, dim || p.Count == 0 ? 0.55 : 1); return i; }
+        var name = new TextBlock { Text = p.Label, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Opacity = dim || p.Count == 0 ? 0.55 : 1 };
         if (p.Warn) name.Foreground = fg;
         Grid.SetColumn(name, 1);
         g.Children.Add(name);
-        var n = new TextBlock { Text = p.Count < 0 ? "" : p.Count.ToString(), FontSize = 12, Foreground = fg, VerticalAlignment = VerticalAlignment.Center };
+        var n = new TextBlock { Text = p.Count <= 0 ? "" : p.Count.ToString(), FontSize = 12, Foreground = fg, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(n, 2);
         g.Children.Add(n);
         ToolTipService.SetToolTip(g, dim ? T("{0}: the game does not load packages from this folder (Mods\\Resource.cfg).", p.Label) : p.Label);
@@ -513,6 +515,7 @@ public sealed partial class MainWindow
         var normal = g.Background;
         g.CornerRadius = new CornerRadius(4);
         g.BorderThickness = new Thickness(1);
+        g.Padding = new Thickness(Math.Max(0, g.Padding.Left - 1), 0, Math.Max(0, g.Padding.Right - 1), 0); // (the edge it lights up takes no room)
         g.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         // (the tint fades in and out; no scaling, which blurred the text and shifted the row under the pointer)
         if (AnimationsOn) g.BackgroundTransition = new BrushTransition { Duration = TimeSpan.FromMilliseconds(100) };
@@ -874,8 +877,11 @@ public sealed partial class MainWindow
         await InstallFilesAsync(items.Select(i => i.Path).Where(p => p is { Length: > 0 }).ToList());
     }
 
-    void OnModSearchFocus(object sender, RoutedEventArgs e) =>
-        ModSearchBox.BorderBrush = ModSearch.FocusState != FocusState.Unfocused ? Res("ApexAccentBrush") : Res("ApexInputBorderBrush");
+    void OnModSearchFocus(object sender, RoutedEventArgs e)
+    {
+        foreach (var (box, field) in new[] { (ModSearchBox, ModSearch), (ModSideBox, ModSideSearch) })
+            box.BorderBrush = field.FocusState != FocusState.Unfocused ? Res("ApexAccentBrush") : Res("ApexInputBorderBrush");
+    }
 
     // the list follows the search once typing pauses (each keystroke refiltered every mod before)
     Microsoft.UI.Dispatching.DispatcherQueueTimer? _searchTimer;
@@ -928,6 +934,21 @@ public sealed partial class MainWindow
         r.Picked = list.SelectedItems.Contains(r);
     }
     void OnModsSelectAll(object sender, RoutedEventArgs e) { if (_modsGrid) ModGrid.SelectAll(); else ModList.SelectAll(); }
+    void OnModsPickAll(object sender, RoutedEventArgs e)
+    {
+        if (_modShown.Count > 0 && Picked().Count < _modShown.Count) ModList.SelectAll(); else CloseModDetails();
+        FillFooter();
+    }
+
+    // a click on a column's name sorts by it
+    void OnModColumn(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string t } || !int.TryParse(t, out var at) || at == _modSort) return;
+        _modSort = at;
+        SaveViewPrefs();
+        FillMods();
+    }
+
     void OnModsSelectNone(object sender, RoutedEventArgs e) => CloseModDetails();
     void FillFooter()
     {
@@ -939,6 +960,10 @@ public sealed partial class MainWindow
             picked.Count > 0 ? ModRow.SizeText(picked.Sum(r => r.File.Size)) : null,
         }.Where(x => x is not null));
         ModsSelectNone.Visibility = picked.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ModsSelectAll.Visibility = _modsGrid && picked.Count < _modShown.Count ? Visibility.Visible : Visibility.Collapsed; // (the list has its box over the column)
+        // (with all of the place shown and none chosen, the head already says it)
+        ModsFoot.Visibility = _modShown.Count > 0 && (_modsGrid && picked.Count > 0 || ModSearch.Text.Trim().Length > 0 || FilterCount > 0) ? Visibility.Visible : Visibility.Collapsed;
+        ModsPickAll.IsChecked = picked.Count == 0 ? false : picked.Count == _modShown.Count ? true : null;
         FillSelectionBar(picked);
     }
 
@@ -1018,16 +1043,18 @@ public sealed partial class MainWindow
             (T("File type"), "package", _fFiles.Count), (T("What it is"), "blocks", _fKinds.Count), (T("State"), "power", _fStates.Count),
             (T("Tags"), "tag", _fTags.Count), (T("Creator"), "users", _fCreators.Count), (T("Added"), "calendar-clock", _fAddedDays != 0 ? 1 : 0), (T("Size"), "hard-drive", _fSizeMb > 0 ? 1 : 0),
         };
-        var nav = new StackPanel { Spacing = 2, Padding = new Thickness(8), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
+        var nav = new StackPanel { Spacing = 2, Padding = new Thickness(8, 8, 8, 8), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
         for (int i = 0; i < groups.Length; i++)
         {
             var (label, icon, used) = groups[i];
             var at = i;
-            var g = new Grid { ColumnSpacing = 9 };
+            var g = new Grid { ColumnSpacing = 12 };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(Lucide.Icon(icon, 15, Res(i == _filterGroup ? "ApexAccentBrush" : "ApexMutedBrush")));
+            var mark = Lucide.Icon(icon, 16, Res(i == _filterGroup ? "ApexAccentBrush" : "ApexMutedBrush"));
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            g.Children.Add(mark);
             var t = new TextBlock { Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             Grid.SetColumn(t, 1);
             g.Children.Add(t);
@@ -1039,15 +1066,15 @@ public sealed partial class MainWindow
                 g.Children.Add(badge);
             }
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 34, Padding = new Thickness(10, 0, 10, 0),
-                BorderThickness = new Thickness(0), Background = i == _filterGroup ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+                BorderThickness = new Thickness(0), Background = i == _filterGroup ? new SolidColorBrush(Pick(0x14FFFFFF, 0x0F000000)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, label);
             b.Click += (_, _) => { _filterGroup = at; FillFilterPanel(); };
             nav.Children.Add(b);
         }
         panel.Children.Add(nav);
 
-        var list = new StackPanel { Spacing = 1, Padding = new Thickness(8, 8, 10, 8) };
-        void Head(string text) => list.Children.Add(new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(8, 10, 0, 2) });
+        var list = new StackPanel { Padding = new Thickness(16, 10, 16, 10) };
+        void Head(string text) => list.Children.Add(new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(0, list.Children.Count == 0 ? 4 : 14, 0, 4) });
         void Opt(string label, string? icon, string? color, int count, bool on, Action<bool> set)
         {
             var g = new Grid { ColumnSpacing = 10 };
@@ -1055,7 +1082,8 @@ public sealed partial class MainWindow
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.Children.Add(color is not null ? new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 9, Height = 9, Fill = TagDot.BrushOf(color), Margin = new Thickness(3, 0, 3, 0), VerticalAlignment = VerticalAlignment.Center }
-                : icon is not null ? Lucide.Icon(icon, 15, Res(on ? "ApexAccentBrush" : "ApexMutedBrush")) : new Border { Width = _filterGroup >= 4 ? 0 : 15 }); // (creators, dates, sizes: no icon column at all)
+                : icon is not null ? Glyph(icon) : new Border { Width = _filterGroup >= 4 ? 0 : 15 }); // (creators, dates, sizes: no icon column at all)
+            FrameworkElement Glyph(string name) { var i = Lucide.Icon(name, 16, Res(on ? "ApexAccentBrush" : "ApexMutedBrush")); i.VerticalAlignment = VerticalAlignment.Center; return i; }
             var t = new TextBlock { Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             Grid.SetColumn(t, 1);
             g.Children.Add(t);
@@ -1064,7 +1092,8 @@ public sealed partial class MainWindow
             g.Children.Add(n);
             g.VerticalAlignment = VerticalAlignment.Center;
             var box = new CheckBox { Content = g, IsChecked = on, MinWidth = 0, MinHeight = 36, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                VerticalContentAlignment = VerticalAlignment.Center, Padding = new Thickness(8, 0, 4, 0) };
+                VerticalContentAlignment = VerticalAlignment.Center, Padding = new Thickness(12, 0, 0, 0) };
+            box.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, label);
             box.Click += (_, _) => { set(box.IsChecked == true); FillMods(); FillFilterPanel(); };
             list.Children.Add(box);
@@ -1077,14 +1106,12 @@ public sealed partial class MainWindow
                     if (inPlace.Count(r => r.File.FileType == f) is var n && (n > 0 || _fFiles.Contains(f))) Opt(FileTypeName(f), FileTypeIcon(f), null, n, _fFiles.Contains(f), on => Flip(_fFiles, f, on));
                 break;
             case 1:
-                // (an icon two kinds share tells them apart from nothing: those rows go without)
                 var kinds = inPlace.SelectMany(r => r.Kinds).Concat(_fKinds).Distinct().ToList();
-                var shared = kinds.GroupBy(KindIcon).Where(x => x.Count() > 1).Select(x => x.Key).ToHashSet();
                 foreach (var grp in kinds.GroupBy(KindGroup).OrderBy(x => KindGroupOrder(x.Key)))
                 {
                     Head(KindGroupName(grp.Key));
                     foreach (var k in grp.Distinct().OrderBy(KindLabel))
-                        Opt(KindLabel(k), shared.Contains(KindIcon(k)) ? null : KindIcon(k), null, inPlace.Count(r => r.Kinds.Contains(k)), _fKinds.Contains(k), on => Flip(_fKinds, k, on));
+                        Opt(KindLabel(k), KindIcon(k), null, inPlace.Count(r => r.Kinds.Contains(k)), _fKinds.Contains(k), on => Flip(_fKinds, k, on));
                 }
                 break;
             case 2:
@@ -1116,7 +1143,7 @@ public sealed partial class MainWindow
         Grid.SetColumn(scroll, 1);
         panel.Children.Add(scroll);
 
-        var foot = new Grid { Padding = new Thickness(14, 10, 12, 10), ColumnSpacing = 12, BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
+        var foot = new Grid { Padding = new Thickness(18, 10, 12, 10), ColumnSpacing = 16, BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
         foot.ColumnDefinitions.Add(new ColumnDefinition());
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1125,7 +1152,7 @@ public sealed partial class MainWindow
         clear.Click += (_, _) => { _fFiles.Clear(); _fKinds.Clear(); _fStates.Clear(); _fTags.Clear(); _fCreators.Clear(); _fAddedDays = _fSizeMb = 0; FillMods(); FillFilterPanel(); };
         Grid.SetColumn(clear, 1);
         foot.Children.Add(clear);
-        var ok = new Button { Content = T("Done"), Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+        var ok = new Button { Content = T("Done"), MinHeight = 36, MinWidth = 88, Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
         ok.Click += (_, _) => ModFilterFlyout.Hide();
         Grid.SetColumn(ok, 2);
         foot.Children.Add(ok);
@@ -1190,10 +1217,21 @@ public sealed partial class MainWindow
     static int KindGroupOrder(int g) => g;
     static string KindGroupName(int g) => g switch
     {
-        0 => T("GAMEPLAY"), 1 => T("CREATE A SIM"), 2 => T("BUY MODE"), 3 => T("BUILD MODE"), 4 => T("LOOK AND SOUND"), 5 => T("PLACES AND PEOPLE"), _ => T("OTHER"),
+        0 => T("Gameplay"), 1 => T("Create a Sim"), 2 => T("Buy mode"), 3 => T("Build mode"), 4 => T("Look and sound"), 5 => T("Places and people"), _ => T("Other"),
     };
 
-    void FillSortText() => ModSortText.Text = SortNames()[Math.Clamp(_modSort, 0, 5)];
+    void FillSortText()
+    {
+        ModSortText.Text = SortNames()[Math.Clamp(_modSort, 0, 5)];
+        foreach (var (text, mark, at) in new[] { (ModHeadNameText, ModHeadNameMark, 0), (ModHeadKindText, ModHeadKindMark, 2), (ModHeadSizeText, ModHeadSizeMark, 1) })
+        {
+            var on = _modSort == at;
+            text.Foreground = Res(on ? "TextFillColorPrimaryBrush" : "ApexMutedBrush");
+            text.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
+            mark.Stroke = Res("TextFillColorPrimaryBrush");
+            mark.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
     static string[] SortNames() => [T("Name"), T("Size"), T("Type"), T("Folder"), T("Newest"), T("Needs a look first")];
 
     void OnModSortClick(object sender, RoutedEventArgs e)
@@ -1220,7 +1258,14 @@ public sealed partial class MainWindow
         var over = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
         ModSelectionBar.MaxWidth = over > 0 ? Math.Max(160, list.ActualWidth - over - 24) : double.PositiveInfinity;
         ModSelectionBar.Translation = new System.Numerics.Vector3((float)(-over / 2), 0, 24);
+        var room = list.ActualWidth - over;
+        var (wide, tight) = (room >= 660, room < 380);
+        if ((_barWide, _barTight) == (wide, tight)) return;
+        (_barWide, _barTight) = (wide, tight);
+        if (ModSelectionBar.Visibility == Visibility.Visible) FillSelectionBar(Picked());
     }
+    void OnModListSized(object sender, SizeChangedEventArgs e) => PlaceSelectionBar();
+    bool _barWide, _barTight;
 
     void FillSelectionBar(List<ModRow> picked)
     {
@@ -1230,26 +1275,42 @@ public sealed partial class MainWindow
         if (picked.Count < 2) return;
         var a = ModSelectionActions;
         a.Children.Clear();
-        a.Children.Add(new TextBlock { Text = T("{0} selected", picked.Count), FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-        Button Act(string icon, string tip, Action? run, bool enabled = true, string? brush = null)
+        // (with its words where there is room; the icon alone, with them in its tip, where there is not)
+        Button Act(string icon, string tip, Action? run, bool enabled = true, string? brush = null, string? label = null)
         {
-            var b = Dims(new Button { Content = Lucide.Icon(icon, 16, brush is null ? null : Res(brush)), Width = 34, Height = 34, Padding = new Thickness(0), IsEnabled = enabled });
+            var mark = Lucide.Icon(icon, 16, brush is null ? null : Res(brush));
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            var b = Dims(new Button { Content = mark, MinWidth = 36, Height = 36, Padding = new Thickness(0), IsEnabled = enabled, BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) });
+            if (label is not null && _barWide)
+            {
+                var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+                s.Children.Add(mark);
+                s.Children.Add(new TextBlock { Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
+                (b.Content, b.Padding) = (s, new Thickness(10, 0, 12, 0));
+            }
             ToolTipService.SetToolTip(b, tip);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
             if (run is not null) b.Click += (_, _) => run();
             a.Children.Add(b);
             return b;
         }
-        var allOn = mine.Count > 0 && mine.All(r => r.File.Enabled);
-        Act(allOn ? "power-off" : "power", allOn ? T("Turn off") : T("Turn on"), () => SetMods(mine, !allOn), mine.Count > 0);
-        var mv = Act("folder-input", T("Move to…"), null, mine.Count > 0);
-        mv.Click += (_, _) => MoveMenu(mine).ShowAt(mv);
-        var tg = Act("tag", T("Tag"), null);
-        tg.Click += (_, _) => TagMenu(picked).ShowAt(tg);
-        Act("merge", T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null)), mine.Count > 1);
-        Act("trash-2", T("Move to the Recycle Bin"), () => RemoveMods(mine), mine.Count > 0, "ApexErrorBrush");
-        a.Children.Add(new Border { Width = 1, Height = 20, Background = Res("ApexCardBorderBrush"), Margin = new Thickness(4, 0, 4, 0) });
+        void Line() => a.Children.Add(new Border { Width = 1, Height = 20, Background = Res("ApexInputBorderBrush"), Margin = new Thickness(4, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center });
         Act("x", T("Clear the selection"), CloseModDetails);
+        var count = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontSize = 13, Margin = new Thickness(2, 0, 8, 0) };
+        count.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = _barTight ? picked.Count.ToString() : T("{0} selected", picked.Count), FontWeight = FontWeights.SemiBold });
+        if (_barWide) count.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = " · " + ModRow.SizeText(picked.Sum(r => r.File.Size)), Foreground = Res("ApexMutedBrush") });
+        a.Children.Add(count);
+        Line();
+        var allOn = mine.Count > 0 && mine.All(r => r.File.Enabled);
+        var turn = allOn ? T("Turn off") : T("Turn on");
+        Act(allOn ? "power-off" : "power", turn, () => SetMods(mine, !allOn), mine.Count > 0, label: turn);
+        var mv = Act("folder-input", T("Move to…"), null, mine.Count > 0, label: T("Move to…"));
+        mv.Click += (_, _) => MoveMenu(mine).ShowAt(mv);
+        var tg = Act("tag", T("Tag"), null, label: T("Tag"));
+        tg.Click += (_, _) => TagMenu(picked).ShowAt(tg);
+        Act("merge", T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null)), mine.Count > 1, label: T("Merge"));
+        Line();
+        Act("trash-2", T("Move to the Recycle Bin"), () => RemoveMods(mine), mine.Count > 0, "ApexErrorBrush");
     }
 
     void OnModRightTapped(object sender, RightTappedRoutedEventArgs e)
@@ -1356,15 +1417,18 @@ public sealed partial class MainWindow
         ModRow.SizeColumn = new GridLength(compact ? 0 : 72);
         ModHeadKind.Width = ModRow.KindColumn;
         ModHeadSize.Width = ModRow.SizeColumn;
-        ModHeadKindText.Visibility = ModHeadSizeText.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        ModHeadKindButton.Visibility = ModHeadSizeButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         if (_modsLoaded)
         {
             // (the rows are made again so their columns take the new widths)
             _fillingMods = true;
-            var keep = _modShown.ToList();
+            var (keep, picked) = (_modShown.ToList(), Picked());
             _modShown.Clear();
             foreach (var r in keep) _modShown.Add(r);
+            var list = _modsGrid ? (ListViewBase)ModGrid : ModList;
+            foreach (var r in picked) list.SelectedItems.Add(r);
             _fillingMods = false;
+            FillFooter();
         }
         FillModDetails();
     }
@@ -1409,7 +1473,7 @@ public sealed partial class MainWindow
         foreach (var group in Enum.GetNames<Kind>().Where(k => k != nameof(Kind.Other)).Concat(["Asi"])
                      .GroupBy(KindGroup).OrderBy(g => KindGroupOrder(g.Key)))
         {
-            list.Children.Add(new TextBlock { Text = KindGroupName(group.Key), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(4, list.Children.Count == 0 ? 0 : 12, 0, 4) });
+            list.Children.Add(new TextBlock { Text = KindGroupName(group.Key), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(4, list.Children.Count == 0 ? 0 : 12, 0, 4) });
             foreach (var k in group.OrderBy(KindLabel, StringComparer.CurrentCultureIgnoreCase))
             {
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -1650,7 +1714,7 @@ public sealed partial class MainWindow
         foreach (var it in all.Take(shown)) panel.Children.Add(ReplacedRow(it, gi, r.File.Path, d.Objects.Contains(it)));
         if (all.Count > shown)
         {
-            var more = new Button { Content = T("See all {0}", all.Count), HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 4, 0, 0) };
+            var more = new Button { Content = T("See all {0}", all.Count), MinHeight = 36, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 8, 0, 0) };
             more.Click += (_, _) => Safe(SeeAllReplacedAsync(r, gi, all));
             panel.Children.Add(more);
         }

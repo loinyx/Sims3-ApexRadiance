@@ -190,7 +190,7 @@ public sealed partial class MainWindow
         {
             ItemTemplate = EmptyCell(), SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = true, Padding = new Thickness(0),
             CanReorderItems = mine, CanDragItems = mine, AllowDrop = mine,
-            Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10),
+            Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
         };
         AutomationProperties.SetName(list, T("Mods in this merge"));
         if (mine) AutomationProperties.SetHelpText(list, T("Alt with the up or down arrow moves a mod."));
@@ -366,7 +366,7 @@ public sealed partial class MainWindow
         if (mine)
         {
             var add = WideButton("plus", T("Add mods"), () => Safe(AddToMergeAsync(r)));
-            (add.Height, add.Margin, add.CornerRadius) = (44, new Thickness(8), new CornerRadius(8));
+            (add.Height, add.Padding, add.CornerRadius, add.HorizontalContentAlignment, add.BorderThickness, add.Background) = (44, new Thickness(8, 0, 12, 0), new CornerRadius(7), HorizontalAlignment.Left, new Thickness(0), new SolidColorBrush(Microsoft.UI.Colors.Transparent));
             list.Footer = add;
         }
         list.ItemsSource = d.Items;
@@ -771,9 +771,8 @@ public sealed partial class MainWindow
 
         var (who, guessed) = o.Note?.Creator is { } set ? (set, false) : (ModCreators.Guess(_mods.Append(row.File)).GetValueOrDefault(row.File.Path), true);
         var written = guessed ? "" : who ?? "";
-        host.Children.Add(Tiles((T("Size"), TileText(row.Size)), (T("Added"), TileText(Added(row.File).ToString("d"))),
-            (T("Creator"), CreatorBox(who, guessed, mine, name => { if (name.Trim() != written) { write(n => n.Creator = name); written = name.Trim(); } })),
-            (T("State"), TileText(r.File.Enabled ? T("On") : T("Off"), r.File.Enabled ? null : "ApexWarningBrush"))));
+        host.Children.Add(Facts((T("Size"), FactText(row.Size)), (T("Added"), FactText(Added(row.File).ToString("d"))),
+            (T("Creator"), CreatorBox(who, guessed, mine, name => { if (name.Trim() != written) { write(n => n.Creator = name); written = name.Trim(); } }))));
         if (row.Defaults.Replaced > 0) host.Children.Add(Note("replace", "ApexAccentBrush", ReplacesSummary(row.Defaults)));
 
         var what = Section(T("What it is"), mine ? T("Change") : null, out var pick);
@@ -792,7 +791,7 @@ public sealed partial class MainWindow
         where.Children.Add(new TextBlock { Text = string.Join(" › ", new[] { ModMerge.FolderName }.Concat(Path.GetRelativePath(Path.GetDirectoryName(merge.Dir)!, row.File.Path).Split(Path.DirectorySeparatorChar))), FontSize = 13, TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush") });
         where.Children.Add(Muted(T("Taken out of the merge, it goes back to {0}.", ModRow.Place(row.File))));
         host.Children.Add(where);
-        host.Children.Add(ActionRow("folder-search", T("Show file"), null, () => ShowFile(row.File.Path)));
+        host.Children.Add(Actions(ActionRow("folder-search", T("Show file"), null, () => ShowFile(row.File.Path))));
     }
 
     UIElement InnerTags(MergeOriginal o, Action<Action<ModNote>> change)

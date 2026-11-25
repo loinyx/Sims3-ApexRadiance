@@ -22,11 +22,11 @@ public sealed partial class MainWindow
         var steps = new[] { (MergeStep.Check, T("Check the files")), (MergeStep.Write, T("Write the merged package")), (MergeStep.Verify, T("Check every resource against the originals")),
             (MergeStep.Move, T("Keep the originals aside")), (MergeStep.Finish, T("Put the merged package in place")) };
         var rows = new Dictionary<MergeStep, (FrameworkElement Icon, TextBlock Text, TextBlock Detail)>();
-        var list = new StackPanel { Spacing = 8 };
+        var list = new StackPanel { Spacing = 12 };
         var icons = new Dictionary<MergeStep, Grid>();
         foreach (var (step, label) in steps)
         {
-            var g = new Grid { ColumnSpacing = 10 };
+            var g = new Grid { ColumnSpacing = 12, MinHeight = 20 };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -43,15 +43,25 @@ public sealed partial class MainWindow
             rows[step] = (iconHost, t, det);
             icons[step] = iconHost;
         }
+        // how far it is and what is left of it, over the bar; the steps under it (the log is a click away once it ends: thousands
+        // of mods write a line each, too many to show as they come)
         var bar = new ProgressBar { Maximum = 1 };
-        var time = new TextBlock { FontSize = 12, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Right, TextWrapping = TextWrapping.Wrap };
-        var log = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, FontFamily = new FontFamily("Consolas"), FontSize = 11, Height = 120 };
-        ScrollViewer.SetVerticalScrollBarVisibility(log, ScrollBarVisibility.Auto);
-        var body = new StackPanel { Spacing = 14, Width = 480 };
-        body.Children.Add(bar);
-        body.Children.Add(list);
-        body.Children.Add(time);
-        body.Children.Add(log);
+        var far = new TextBlock { Text = "0%", FontSize = 20, FontWeight = FontWeights.SemiBold };
+        var time = new TextBlock { FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 3), TextWrapping = TextWrapping.Wrap };
+        var ahead = new Grid { ColumnSpacing = 12 };
+        ahead.ColumnDefinitions.Add(new ColumnDefinition());
+        ahead.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        ahead.Children.Add(far);
+        Grid.SetColumn(time, 1);
+        ahead.Children.Add(time);
+        var top = new StackPanel { Spacing = 8 };
+        top.Children.Add(ahead);
+        top.Children.Add(bar);
+        var result = new TextBlock { FontSize = 13, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var body = new StackPanel { Spacing = 18, Width = 440 };
+        body.Children.Add(top);
+        body.Children.Add(result);
+        body.Children.Add(PaneCard(list, new Thickness(14, 13, 14, 13)));
         var cts = new CancellationTokenSource();
         var running = true; // (a failed run leaves the bar short of the end: Close then closes, it does not stop)
         var d = new ContentDialog { Title = T("Merging into {0}", jobs[0].File), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
@@ -78,21 +88,20 @@ public sealed partial class MainWindow
             if (mine != job) return; // (said late, by the package before)
             if (p.Step != current) { foreach (var (s, _) in steps.TakeWhile(x => x.Item1 != p.Step)) Mark(s, "done"); current = p.Step; Mark(p.Step, "now"); }
             var (_, _, det) = rows[p.Step];
-            det.Text = p.Total <= 0 ? "" : p.Step == MergeStep.Move ? $"{p.Done} / {p.Total}" : $"{ModRow.SizeText(p.Done)} / {ModRow.SizeText(p.Total)}";
-            var share = 1.0 / steps.Length;
-            bar.Value = (job + Array.FindIndex(steps, x => x.Item1 == p.Step) * share + (p.Total > 0 ? share * p.Done / p.Total : 0)) / jobs.Count;
-            time.Text = clock.Elapsed.ToString(@"mm\:ss");
+            det.Text = p.Total <= 0 || p.Step == MergeStep.Finish ? "" : p.Step == MergeStep.Move ? $"{p.Done} / {p.Total}" : $"{ModRow.SizeText(p.Done)} / {ModRow.SizeText(p.Total)}";
+            var (from, share) = p.Step switch { MergeStep.Check => (0.0, 0.02), MergeStep.Write => (0.02, 0.56), MergeStep.Verify => (0.58, 0.28), MergeStep.Move => (0.86, 0.13), _ => (0.99, 0.01) }; // (what each one takes of the time)
+            bar.Value = (job + from + (p.Total > 0 ? share * p.Done / p.Total : 0)) / jobs.Count;
+            far.Text = $"{Math.Floor(bar.Value * 100):0}%";
         });
         var timer = DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromMilliseconds(400);
-        var (before, shownLog) = ("", ""); // (the logs of the packages already done)
-        void ReadLog()
+        timer.Interval = TimeSpan.FromMilliseconds(500);
+        timer.Tick += (_, _) =>
         {
-            if (jobs[job].Log() is { } lp && File.Exists(lp))
-                try { using var fs = new FileStream(lp, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); using var sr = new StreamReader(fs); var all = before + sr.ReadToEnd(); if (all.Length != shownLog.Length) { log.Text = shownLog = all; log.SelectionStart = all.Length; } }
-                catch (IOException) { }
-        }
-        timer.Tick += (_, _) => { time.Text = clock.Elapsed.ToString(@"mm\:ss"); ReadLog(); };
+            // (a guess only once there is something to guess from)
+            var gone = clock.Elapsed.TotalSeconds;
+            var left = gone > 3 && bar.Value > 0.04 ? gone * (1 - bar.Value) / bar.Value : 0;
+            time.Text = cts.IsCancellationRequested || left < 1 ? clock.Elapsed.ToString(@"m\:ss") : left < 90 ? T("About {0} s left", (int)Math.Ceiling(left / 5) * 5) : T("About {0} min left", (int)Math.Ceiling(left / 60));
+        };
         timer.Start();
         var shown = ShowDialog(d);
         var done = new List<MergeResult>();
@@ -108,8 +117,6 @@ public sealed partial class MainWindow
                 Mark(MergeStep.Check, "now");
                 var (now, progress) = (jobs[job], Follow(job));
                 done.Add(await ModWork(() => now.Run(progress, cts.Token)));
-                ReadLog(); // (a merge quicker than the timer still shows its whole log)
-                before = shownLog.Length > 0 ? shownLog + "\r\n" : "";
             }
             job = jobs.Count - 1;
         }
@@ -117,7 +124,6 @@ public sealed partial class MainWindow
         running = false;
         timer.Stop();
         clock.Stop();
-        if (error is not null) ReadLog();
         // (several logs: the folder they are in)
         if ((error is null ? done[^1].LogPath : jobs[job].Log() ?? done.LastOrDefault()?.LogPath) is { } path)
         {
@@ -129,15 +135,21 @@ public sealed partial class MainWindow
         {
             foreach (var (s, _) in steps) Mark(s, "done");
             bar.Value = 1;
+            far.Text = "100%";
+            time.Text = "";
+            result.Visibility = Visibility.Visible;
             d.Title = title?.Invoke(done) ?? T("Merged {0} mods", done.Sum(r => r.Mods));
-            time.Text = T("{0} resources · {1} · verified · {2:0.0} s", done.Sum(r => r.Resources), ModRow.SizeText(done.Sum(r => r.Bytes)), done.Sum(r => r.Elapsed.TotalSeconds));
+            result.Text = T("{0} resources · {1} · verified · {2:0.0} s", done.Sum(r => r.Resources), ModRow.SizeText(done.Sum(r => r.Bytes)), done.Sum(r => r.Elapsed.TotalSeconds));
         }
         else
         {
             Mark(current, "fail");
             d.Title = error is OperationCanceledException ? T("Merge stopped") : T("The merge did not finish");
+            time.Text = "";
+            bar.ShowError = true;
+            result.Visibility = Visibility.Visible;
             // (a SetupException from Run says what is out of place itself, such as originals left in the merge folder)
-            time.Text = (done.Count > 0 ? T("Done before it: {0}.", string.Join(", ", done.Select(r => r.Merged.Name))) + " " : "")
+            result.Text = (done.Count > 0 ? T("Done before it: {0}.", string.Join(", ", done.Select(r => r.Merged.Name))) + " " : "")
                 + (error is OperationCanceledException ? T(done.Count > 0 ? "The rest was not merged." : "Nothing was changed.")
                 : ErrorText(error) + (error is SetupException || done.Count > 0 ? "" : " " + T("Your mods are as they were.")));
         }

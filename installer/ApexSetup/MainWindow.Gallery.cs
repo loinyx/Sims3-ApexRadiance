@@ -293,10 +293,10 @@ public sealed partial class MainWindow
             return b;
         }
         Windows.UI.Color[] dots = [Rgb(0x7D, 0xBE, 0x9A), Rgb(0x57, 0xB6, 0xE8), Rgb(0xE0, 0xA8, 0x4F), Rgb(0xE8, 0x6F, 0xB8), Rgb(0xB4, 0xAE, 0xF2), Rgb(0x8E, 0x8E, 0x8E)];
-        s.Children.Add(SideHeading(T("LIBRARY"), first: true));
+        s.Children.Add(SideHeading(T("Library"), first: true));
         s.Children.Add(Album(Gallery.All, T("All pictures"), _galPics.Count, AccentInk));
         s.Children.Add(Album(Gallery.Favourites, T("Favourites"), found.Count(p => Gallery.InAlbum(p, Gallery.Favourites, _gal!, _galSaves)), Rgb(0xF2, 0xC9, 0x4C)));
-        s.Children.Add(SideHeading(T("HOUSEHOLDS")));
+        s.Children.Add(SideHeading(T("Households")));
         // the player's own albums (a trip, a family's story) under the household they belong to, each with its icon;
         // right-click one to rename or delete it, a household to make an album in it
         var homes = _gal!.Custom.ToDictionary(c => c, c => Gallery.HomeOf(c, _gal, _galPics, _galSaves));
@@ -339,7 +339,7 @@ public sealed partial class MainWindow
         var mine = new Grid { Margin = new Thickness(10, 12, 2, 2), Height = 30 };
         mine.ColumnDefinitions.Add(new ColumnDefinition());
         mine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var mineHead = Eyebrow(T("ALBUMS"));
+        var mineHead = Eyebrow(T("Albums"));
         mineHead.VerticalAlignment = VerticalAlignment.Center;
         mine.Children.Add(mineHead);
         var make = new Button { Content = new FontIcon { Glyph = "\uE710", FontSize = 12 }, Width = 26, Height = 26, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
@@ -3612,7 +3612,7 @@ public sealed partial class MainWindow
             // the albums it is in, each opening its album
             if (inAlbums.Count > 0)
             {
-                var head = Eyebrow(T("IN ALBUMS"));
+                var head = Eyebrow(T("In albums"));
                 head.Margin = new Thickness(0, 4, 0, -10);
                 side.Children.Add(head);
                 var wrap = new StackPanel { Spacing = 6 };

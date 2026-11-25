@@ -47,6 +47,7 @@ public sealed partial class MainWindow
 
         ModDetailsHead.Children.Add(DetailsHead(r, merge, problems.Count > 0, mine));
         if (tabs.Count > 1) DetailsTabs(tabs, m);
+        else ModDetailsHead.Children.Add(new Border { Height = 1, Margin = new Thickness(0, 8, 0, 0), Background = Res("ApexCardBorderBrush") });
 
         var host = ModDetails;
         switch (_detailsTab)
@@ -66,7 +67,7 @@ public sealed partial class MainWindow
     void DetailsTabs(List<(string Key, string Label)> tabs, ModFile? count)
     {
         var bar = new SelectorBar();
-        var side = tabs.Count > 4 ? 4 : 8; // (five tabs, as a default replacement has, still fit the pane)
+        var side = tabs.Count > 4 ? 6 : 8; // (five tabs, as a default replacement has, still fit the pane)
         foreach (var (key, label) in tabs)
         {
             var tab = new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab, FontSize = 13, Padding = new Thickness(side, 10, side, 8) };
@@ -76,7 +77,7 @@ public sealed partial class MainWindow
         bar.SelectionChanged += (s, _) => { if (s.SelectedItem?.Tag is string k && k != _detailsTab) { _detailsTab = k; DispatcherQueue.TryEnqueue(FillModDetails); } }; // (later: the fill removes this bar)
         // (more tabs than fit in a long language: the row scrolls to the open one)
         bar.Loaded += (_, _) => bar.SelectedItem?.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
-        ModDetailsHead.Children.Add(new ScrollViewer { Content = bar, Margin = new Thickness(tabs.Count > 4 ? 8 : 12, 0, tabs.Count > 4 ? 8 : 12, 0), HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        ModDetailsHead.Children.Add(new ScrollViewer { Content = bar, Margin = new Thickness(20 - side, 0, 20 - side, 0), HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled });
         ModDetailsHead.Children.Add(new Border { Height = 1, Background = Res("ApexCardBorderBrush") });
     }
 
@@ -113,7 +114,8 @@ public sealed partial class MainWindow
         }
 
         var name = merge is not null ? _draft?.Name ?? r.Name : r.Name;
-        var nameRow = new Grid { ColumnSpacing = 2 };
+        // (as wide as the name: the pencil stands beside it)
+        var nameRow = new Grid { ColumnSpacing = 4, HorizontalAlignment = HorizontalAlignment.Left };
         nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var nameText = NameText(name, m.Name);
@@ -121,12 +123,14 @@ public sealed partial class MainWindow
         if (mine)
         {
             var rename = IconButton("pencil", T("Rename"));
-            rename.Width = rename.Height = 28;
+            rename.Width = rename.Height = 26;
             rename.VerticalAlignment = VerticalAlignment.Top;
+            ((FrameworkElement)rename.Content).Opacity = 0.7;
             rename.Click += (_, _) =>
             {
                 var box = new TextBox { Text = name, FontSize = 15, MinWidth = 0 };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("New name"));
+                nameRow.HorizontalAlignment = HorizontalAlignment.Stretch;
                 nameRow.Children.Remove(nameText);
                 nameRow.Children.Insert(0, box);
                 rename.Visibility = Visibility.Collapsed;
@@ -150,7 +154,7 @@ public sealed partial class MainWindow
         ToggleSwitch? sw = null;
         if (!m.Locked)
         {
-            sw = new ToggleSwitch { IsOn = m.Enabled, OnContent = "", OffContent = "", MinWidth = 0 };
+            sw = new ToggleSwitch { IsOn = m.Enabled, OnContent = "", OffContent = "", MinWidth = 0, Width = 40 };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(sw, m.Enabled ? T("Turn off") : T("Turn on"));
             var on = sw;
             sw.Toggled += (_, _) => { if (on.IsOn != r.File.Enabled) SetMods([r], on.IsOn); };
@@ -158,7 +162,6 @@ public sealed partial class MainWindow
 
         // badges: what kind of thing this is, at a glance
         var badges = new List<Border>();
-        if (merge is not null) badges.Add(StripBadge(T("Merged · {0} mods", merge.Originals.Count), "merge", "#CECBF6"));
         if (r.Defaults.IsDefault) badges.Add(StripBadge(T("Default replacement"), "replace", "#9CC7EE"));
         if (problem) badges.Add(StripBadge(T("Needs a look"), "triangle-alert", "#E0A84F"));
         if (m.Locked) badges.Add(m.FileType switch
@@ -166,7 +169,7 @@ public sealed partial class MainWindow
             "asi" => StripBadge(T("In the game folder"), "plug", "#CECBF6"),
             _ => StripBadge(T("Installed by Apex Launcher"), "lock", "#CECBF6"),
         });
-        var sub = string.Join(" · ", new[] { r.Kind, r.Size, m.Enabled || m.Locked ? null : T("Off") }.OfType<string>());
+        var sub = string.Join(" · ", new[] { merge is not null ? T("Merged · {0} mods", merge.Originals.Count) : r.Kind, m.Enabled || m.Locked ? null : T("Off") }.OfType<string>());
         return HeadPanel(r, null, tile, nameRow, sub, sw, badges);
     }
 
@@ -194,9 +197,9 @@ public sealed partial class MainWindow
     }
 
     // the head of one mod's details, on a faint wash of its colour: picture, name and what it is, close and the switch; its badges under them
-    UIElement HeadPanel(ModRow r, UIElement? above, FrameworkElement tile, UIElement name, string sub, ToggleSwitch? sw, List<Border> badges)
+    UIElement HeadPanel(ModRow r, UIElement? above, FrameworkElement tile, UIElement name, string sub, ToggleSwitch? sw, List<Border> badges, string? closeTip = null)
     {
-        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(20, 14, 12, 10) };
+        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(20, 16, 20, closeTip is null ? 10 : 18) };
         if (r.TileBrush is SolidColorBrush wash)
             panel.Background = new LinearGradientBrush
             {
@@ -213,8 +216,9 @@ public sealed partial class MainWindow
         Grid.SetColumn(names, 1);
         g.Children.Add(names);
         var right = new StackPanel { Spacing = 2 };
-        var close = IconButton("x", T("Close"));
+        var close = IconButton("x", closeTip ?? T("Close"));
         close.HorizontalAlignment = HorizontalAlignment.Right;
+        close.Margin = new Thickness(0, -8, -9, 0); // (its mark, not its square, stands on the pane's edge, above the switch)
         close.Click += (_, _) => CloseModDetails();
         right.Children.Add(close);
         if (sw is not null) { sw.HorizontalAlignment = HorizontalAlignment.Right; right.Children.Add(sw); }
@@ -240,35 +244,24 @@ public sealed partial class MainWindow
         return new Border { Child = s, Height = 26, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(13), Background = new SolidColorBrush(Pick(0xB30B0C0E, 0xCCFFFFFF)) };
     }
 
-    static Button StripButton(string icon, string tip)
-    {
-        var b = new Button { Content = Lucide.Icon(icon, 15, Res("ApexSoftTextBrush")), Width = 32, Height = 32, Padding = new Thickness(0), CornerRadius = new CornerRadius(8),
-            Background = new SolidColorBrush(Pick(0x990B0C0E, 0xCCFFFFFF)), BorderThickness = new Thickness(0) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
-        ToolTipService.SetToolTip(b, tip);
-        return b;
-    }
-
     // ---------- Overview ----------
 
     void Overview(ModRow r, MergeRecord? merge, bool mine)
     {
         var m = r.File;
         var host = ModDetails;
-        if (merge is not null)
-        {
-            var explain = Note("lightbulb", "ApexAccentBrush", T("The game loads this as one file instead of {0}, so it starts faster. The {0} mods are kept as they were, and you can take any of them out.", merge.Originals.Count));
-            host.Children.Add(new Border { Child = explain, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(10), Background = Res("ApexAccentSoftBrush"), BorderBrush = Res("ApexAccentLineBrush"), BorderThickness = new Thickness(1) });
-        }
         // the creator, written in place; the guess shows as the hint
         var (who, guessed) = ModCreators.Of(m, _modCreatorGuess);
         var creator = CreatorBox(who, guessed, mine, name => ModNotes.SetCreator(r.File.Rel, name));
         if (m.Locked) host.Children.Add(Note("lock", "ApexMutedBrush", ModRow.LockText(m)));
-        host.Children.Add(Tiles((T("Size"), TileText(r.Size)), (T("Added"), TileText(Added(m).ToString("d"))), (T("Creator"), creator),
-            merge is not null ? (T("Made from"), TileText(T("{0} mods", merge.Originals.Count)))
-            : (T("State"), TileText(!m.Locked ? (m.Enabled ? T("On") : T("Off")) : m.FileType switch { "asi" => T("Loaded"), _ => T("Managed") },
-                m.Enabled || m.Locked ? null : "ApexWarningBrush"))));
-        if (merge is not null) host.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked on {0}, when it was made: every resource matched.", merge.Created.ToLocalTime().ToString("d"))));
+        host.Children.Add(Facts((T("Size"), FactText(r.Size)), (T("Added"), FactText(Added(m).ToString("d"))), (T("Creator"), creator)));
+        if (merge is not null)
+        {
+            var notes = new StackPanel { Spacing = 10 };
+            notes.Children.Add(Note("lightbulb", "ApexAccentBrush", T("The game loads this as one file instead of {0}, so it starts faster. The {0} mods are kept as they were, and you can take any of them out.", merge.Originals.Count)));
+            notes.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked on {0}, when it was made: every resource matched.", merge.Created.ToLocalTime().ToString("d"))));
+            host.Children.Add(PaneCard(notes, new Thickness(14, 12, 14, 13)));
+        }
         if (!m.Enabled && !m.Locked && HasItems(r))
             host.Children.Add(Warn(T("Off: saving now removes its items"), T("Lots and Sims that use its objects or outfits lose them the next time you save without it.")));
 
@@ -293,42 +286,36 @@ public sealed partial class MainWindow
         where.Children.Add(new TextBlock { Text = ModRow.Place(m) + " › " + m.Name, FontSize = 13, TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush") });
         host.Children.Add(where);
 
-        var actions = new StackPanel { Spacing = 8 };
-        if (CanOpenInS3pe(r)) actions.Children.Add(ActionRow("package", T("Open in s3pe"), null, () => Safe(OpenInS3peAsync(r))));
-        actions.Children.Add(ActionRow("folder-search", T("Show file"), null, () => ShowFile(r.File.Path)));
-        host.Children.Add(actions);
+        host.Children.Add(Actions(CanOpenInS3pe(r) ? ActionRow("package", T("Open in s3pe"), null, () => Safe(OpenInS3peAsync(r))) : null,
+            ActionRow("folder-search", T("Show file"), null, () => ShowFile(r.File.Path))));
     }
 
-    // facts as tiles, two to a row
-    static Grid Tiles(params (string Label, FrameworkElement Value)[] facts)
+    // what the pane's cards are made of: one surface, one corner
+    static Border PaneCard(UIElement child, Thickness padding = default) => new() { Child = child, Padding = padding, CornerRadius = new CornerRadius(8), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
+
+    // facts, one to a row: what it is on the left, the value on the right edge
+    static Border Facts(params (string Label, FrameworkElement Value)[] facts)
     {
-        var tiles = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
-        tiles.ColumnDefinitions.Add(new ColumnDefinition());
-        tiles.ColumnDefinitions.Add(new ColumnDefinition());
-        for (var i = 0; i < facts.Length; i++)
+        var rows = new StackPanel();
+        foreach (var (label, value) in facts)
         {
-            if (i % 2 == 0) tiles.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var s = new StackPanel { Spacing = 3 };
-            s.Children.Add(new TextBlock { Text = facts[i].Label, FontSize = 11, Foreground = Res("ApexMutedBrush") });
-            s.Children.Add(facts[i].Value);
-            var b = new Border { Child = s, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
-            Grid.SetRow(b, i / 2);
-            Grid.SetColumn(b, i % 2);
-            tiles.Children.Add(b);
+            var g = new Grid { ColumnSpacing = 12, MinHeight = 40, Padding = new Thickness(14, 0, 14, 0), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, rows.Children.Count == 0 ? 0 : 1, 0, 0) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.Children.Add(new TextBlock { Text = label, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+            value.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(value, 1);
+            g.Children.Add(value);
+            rows.Children.Add(g);
         }
-        return tiles;
+        return PaneCard(rows);
     }
 
-    static TextBlock TileText(string t, string? brush = null)
-    {
-        var b = new TextBlock { Text = t, FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
-        if (brush is not null) b.Foreground = Res(brush);
-        return b;
-    }
+    static TextBlock FactText(string t) => new() { Text = t, FontSize = 13, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Right, TextTrimming = TextTrimming.CharacterEllipsis };
 
     TextBox CreatorBox(string? who, bool guessed, bool mine, Action<string> save)
     {
-        var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 14, FontWeight = FontWeights.SemiBold, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0),
+        var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 13, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Right, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0),
             BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), IsReadOnly = !mine };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(creator, T("Creator"));
         ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name. Type the maker's name to change it.") : T("The maker's name."));
@@ -359,7 +346,7 @@ public sealed partial class MainWindow
     {
         var s = new StackPanel { Spacing = 8 };
         var head = new Grid();
-        head.Children.Add(new TextBlock { Text = title, FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+        head.Children.Add(new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
         linkButton = null;
         if (link is not null)
         {
@@ -387,11 +374,11 @@ public sealed partial class MainWindow
 
     TextBox NotesBox(string? text, double height, Action<string> save)
     {
-        var notes = new TextBox
+        var notes = Field(new TextBox
         {
             Text = text ?? "", PlaceholderText = T("Notes: where it came from, what it changes"), AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap, MinHeight = height,
-        };
+        });
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(notes, T("Notes"));
         notes.LostFocus += (_, _) =>
         {
@@ -449,12 +436,6 @@ public sealed partial class MainWindow
             f.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             Grid.SetColumn(b, f.ColumnDefinitions.Count - 1);
             f.Children.Add(b);
-        }
-        if (merge is not null && mine)
-        {
-            var power = IconButton(m.Enabled ? "power-off" : "power", m.Enabled ? T("Turn off") : T("Turn on"));
-            power.Click += (_, _) => SetMods([r], !r.File.Enabled);
-            Icon(power);
         }
         if (mine)
         {

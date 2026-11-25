@@ -72,9 +72,9 @@ public sealed partial class MainWindow
         if (c.Items.Count > 0)
             panel.Children.Add(ContentSwitch((T("Items {0}", c.Items.Count), !keys), (T("Resources {0}", c.Resources.Count), keys), at => { _contentKeys = at == 1; AgainContent(panel, path, c, ct); }));
 
-        var search = new TextBox { Text = _contentSearch, PlaceholderText = keys ? T("Search by name, type or key") : T("Search by name") };
+        var search = Field(new TextBox { Text = _contentSearch, PlaceholderText = keys ? T("Search by name, type or key") : T("Search by name"), MinHeight = 36 });
         AutomationProperties.SetName(search, search.PlaceholderText);
-        var tools = new Grid { ColumnSpacing = 4 };
+        var tools = new Grid();
         foreach (var w in new[] { new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) tools.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         tools.Children.Add(search);
         panel.Children.Add(tools);
@@ -124,7 +124,7 @@ public sealed partial class MainWindow
             copy.Click += (_, _) => Copy();
             var save = IconButton("file-down", T("Save the list as text"));
             save.Click += (_, _) => Safe(SaveKeysAsync(path, Chosen()));
-            foreach (var (b, at) in new[] { (copy, 1), (save, 2) }) { Grid.SetColumn(b, at); tools.Children.Add(b); }
+            foreach (var (b, at) in new[] { (copy, 1), (save, 2) }) { b.Margin = new Thickness(at == 1 ? 6 : 2, 0, 0, 0); b.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(b, at); tools.Children.Add(b); }
             list.KeyDown += (_, e) =>
             {
                 if (e.Key != Windows.System.VirtualKey.C || !Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) return;
@@ -173,7 +173,7 @@ public sealed partial class MainWindow
         {
             g.ColumnDefinitions.Add(new ColumnDefinition());
             var x = new Button { Content = new TextBlock { Text = text, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = Res(on ? "TextFillColorPrimaryBrush" : "ApexMutedBrush") },
-                Height = 34, Padding = new Thickness(8, 0, 8, 0), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch,
+                Height = 30, Padding = new Thickness(8, 0, 8, 0), CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch,
                 Background = new SolidColorBrush(on ? Pick(0x1FFFFFFF, 0x14000000) : Microsoft.UI.Colors.Transparent) };
             AutomationProperties.SetName(x, text);
             AutomationProperties.SetItemStatus(x, on ? T("Selected") : "");
@@ -181,7 +181,7 @@ public sealed partial class MainWindow
             Grid.SetColumn(x, i);
             g.Children.Add(x);
         }
-        return new Border { Child = g, Padding = new Thickness(4), CornerRadius = new CornerRadius(9), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
+        return new Border { Child = g, Padding = new Thickness(2), CornerRadius = new CornerRadius(6), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
     }
 
     static StackPanel WaitLine(string text)
@@ -224,7 +224,7 @@ public sealed partial class MainWindow
 
     GridView ItemGrid(string path, CancellationToken ct)
     {
-        var grid = new GridView { SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = true, ItemTemplate = EmptyCell(), Padding = new Thickness(0),
+        var grid = new GridView { SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = true, ItemTemplate = EmptyCell(), Padding = new Thickness(0), Margin = new Thickness(0, 0, -8, 0), // (the last tile's own gap)
             ItemsPanel = (ItemsPanelTemplate)XamlReader.Load("<ItemsPanelTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"><ItemsWrapGrid Orientation=\"Horizontal\" ItemWidth=\"98\" ItemHeight=\"132\"/></ItemsPanelTemplate>") };
         AutomationProperties.SetName(grid, T("Items"));
         // (a few pictures at a time, the ones in view when their turn comes)
@@ -477,7 +477,7 @@ public sealed partial class MainWindow
             s.Children.Add(head);
             var box = new StackPanel();
             foreach (var r in list) box.Children.Add(new Border { Child = r, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, box.Children.Count == 0 ? 0 : 1, 0, 0) });
-            s.Children.Add(new Border { Child = box, CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) });
+            s.Children.Add(PaneCard(box));
             panel.Children.Add(s);
         }
         UIElement Row(string title, string what, ModConflict? health, params UIElement[] acts)

@@ -124,7 +124,7 @@ public sealed partial class MainWindow
         more.Click += (_, _) => menu.ShowAt(more);
         Grid.SetColumn(more, 3);
         g.Children.Add(more);
-        s.Children.Add(new Border { Child = g, Padding = new Thickness(12, 6, 6, 6), CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) });
+        s.Children.Add(PaneCard(g, new Thickness(12, 6, 6, 6)));
         return s;
     }
 

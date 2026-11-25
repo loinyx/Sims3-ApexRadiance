@@ -994,11 +994,19 @@ public sealed partial class MainWindow : Window
     }
 
     // the status bars in a tint of their colour and the window's caption buttons, for the theme in use
+    SolidColorBrush QuietBox => new(Pick(0xFF4A4A4A, 0xFFB4B4B4));
+
     void ThemeChrome()
     {
         foreach (var (key, dark, light) in new[] { ("Success", 0xFF14231Bu, 0xFFE4F3EAu), ("Warning", 0xFF2A2214u, 0xFFFBF1DFu), ("Error", 0xFF2C1718u, 0xFFFBE6E5u), ("Informational", 0xFF1E1E1Eu, 0xFFEFEFEFu) })
             Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = new SolidColorBrush(Pick(dark, light));
-        Field(ModSideSearch);
+        // (the boxes of the list: drawn to be found, not to be seen first)
+        ModList.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = ModListHead.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
+        // (what opens over a screen: the same quiet surface everywhere, with an edge of its own)
+        foreach (var key in new[] { "FlyoutPresenterBackground", "MenuFlyoutPresenterBackground", "ComboBoxDropDownBackground" })
+            Application.Current.Resources[key] = new SolidColorBrush(Pick(0xFF1C1C1C, 0xFFFCFCFC));
+        foreach (var key in new[] { "FlyoutBorderThemeBrush", "MenuFlyoutPresenterBorderBrush", "ComboBoxDropDownBorderBrush" })
+            Application.Current.Resources[key] = new SolidColorBrush(Pick(0xFF333333, 0xFFDCDCDC));
         // Mods' two views, as the gallery's: the one in use on a quiet pill
         foreach (var view in new[] { ModsViewList, ModsViewGallery })
             foreach (var state in new[] { "", "PointerOver", "Pressed" })

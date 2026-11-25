@@ -58,15 +58,14 @@ public sealed partial class MainWindow
         };
         d.Resources["ContentDialogMaxWidth"] = 680.0;
         var box = new TextBox { Header = T("Name of the merged package"), Text = name };
-        var line = Muted(T("Checking the mods…"));
+        var line = Muted(T("Checking {0} mods…", mods.Count));
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
-        var busy = new ProgressRing { Width = 14, Height = 14, IsActive = true, VerticalAlignment = VerticalAlignment.Center };
-        var status = new Grid { ColumnSpacing = 10 };
-        status.ColumnDefinitions.Add(new ColumnDefinition());
-        status.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        status.Children.Add(line);
-        Grid.SetColumn(busy, 1);
+        // (the line the check runs along keeps its room when it is done: nothing under it moves)
+        var busy = new ProgressBar { IsIndeterminate = true, MinHeight = 3 };
+        AutomationProperties.SetName(busy, T("Checking the mods…"));
+        var status = new StackPanel { Spacing = 10 };
         status.Children.Add(busy);
+        status.Children.Add(line);
         var notices = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
         var putAll = new HyperlinkButton { Content = T("Put all in"), Padding = new Thickness(0) };
         var leaveAll = new HyperlinkButton { Content = T("Leave all conflicts out"), Padding = new Thickness(0) };
@@ -82,14 +81,14 @@ public sealed partial class MainWindow
                 BasedOn = (Style)Application.Current.Resources["DefaultListViewItemStyle"],
                 Setters =
                 {
-                    new Setter(Control.PaddingProperty, new Thickness(12, 6, 8, 6)), new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch),
+                    new Setter(Control.PaddingProperty, new Thickness(12, 4, 8, 4)), new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch),
                     new Setter(FrameworkElement.MinHeightProperty, 52.0),
                 },
             },
         };
         AutomationProperties.SetName(list, T("Order"));
         var order = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
-        order.Children.Add(new TextBlock { Text = T("Order"), FontSize = 13, FontWeight = FontWeights.SemiBold });
+        order.Children.Add(new TextBlock { Text = T("Order"), FontSize = 14, FontWeight = FontWeights.SemiBold });
         order.Children.Add(Muted(T("If two mods change the same thing, the top one counts. Drag to change the order, or use the arrows.")));
         order.Children.Add(quick);
         order.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = new SolidColorBrush(Pick(0x0AFFFFFF, 0x06000000)) });
@@ -119,7 +118,7 @@ public sealed partial class MainWindow
         {
             want++;
             d.IsPrimaryButtonEnabled = false;
-            busy.IsActive = true;
+            (busy.IsIndeterminate, busy.Opacity) = (true, 1);
             Rows();
             timer.Stop();
             timer.Interval = TimeSpan.FromMilliseconds(Math.Max(1, wait));
@@ -173,7 +172,7 @@ public sealed partial class MainWindow
             var resources = plans.Sum(p => p.Resources) + (scripts?.Resources ?? 0);
             var bytes = plans.Sum(p => p.OutputBytes) + (scripts?.OutputBytes ?? 0);
             var made = plans.Count + (scripts is null ? 0 : 1);
-            busy.IsActive = false;
+            (busy.IsIndeterminate, busy.Opacity) = (false, 0);
             d.Title = inside == mods.Count ? T("Merge {0} mods", inside) : T("Merge {0} of the {1} mods chosen", inside, mods.Count);
             line.Text = trouble is not null || inside < 2 ? "" : made == 1 ? // (one mod: no merge yet, and the reason is said below)
                 T("Into {0} · {1} mods · {2} resources · {3}", PlaceTitle(folder).Title, inside, resources, ModRow.SizeText(bytes))
@@ -195,7 +194,7 @@ public sealed partial class MainWindow
 
             leftOut.Children.Clear();
             var gone = choices.Others(plans, scripts);
-            if (gone.Count > 0) leftOut.Children.Add(new TextBlock { Text = T("Left out"), FontSize = 13, FontWeight = FontWeights.SemiBold });
+            if (gone.Count > 0) leftOut.Children.Add(new TextBlock { Text = T("Left out"), FontSize = 14, FontWeight = FontWeights.SemiBold });
             foreach (var s in gone.Take(30))
                 leftOut.Children.Add(new TextBlock { Text = $"{Path.GetFileNameWithoutExtension(s.Mod.Name)}: {T(s.Reason.Key, s.Reason.Args)}", FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
             if (gone.Count > 30) leftOut.Children.Add(Muted(T("and {0} more", gone.Count - 30)));
@@ -230,7 +229,7 @@ public sealed partial class MainWindow
         {
             static string Plain(string file) => Path.GetFileNameWithoutExtension(file);
             if (r.Why is { } why) return (T(why.Key, why.Args), "ApexWarningBrush");
-            if (r.Meets is not { } meets) return (r.Pick == false ? T("Stays out of the merge") : r.Scripts ? T("In the package of script mods") : T("No conflict"), "ApexMutedBrush");
+            if (r.Meets is not { } meets) return (r.Pick == false ? T("Stays out of the merge") : r.Scripts ? T("In the package of script mods") : T("No conflict") + " · " + ModRow.SizeText(r.Mod.Size), "ApexMutedBrush");
             var several = meets.With.Count + meets.Outside.Count > 1;
             var others = meets.With.OrderByDescending(w => w.Value).Select(w => several ? $"{Plain(w.Key)} ({w.Value})" : Plain(w.Key)).Concat(meets.Outside).ToList();
             var who = string.Join(", ", others.Take(3)) + (others.Count > 3 ? " " + T("and {0} more", others.Count - 3) : "");
@@ -374,7 +373,7 @@ public sealed partial class MainWindow
         public MergeRowView(Grid root)
         {
             Root = root;
-            root.ColumnSpacing = 10;
+            root.ColumnSpacing = 8;
             foreach (var w in new[] { GridLength.Auto, new GridLength(26), new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) root.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
             var up = (FrameworkElement)Up.Content;
             up.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);

@@ -954,7 +954,7 @@ public sealed partial class MainWindow
     static TextBlock Strong(string t) => new() { Text = t, FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
     static TextBlock Body(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexBody"], Foreground = Res("ApexSoftTextBrush") };
     static TextBlock Muted(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexMuted"] };
-    static TextBlock Eyebrow(string t) => new() { Text = t, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush") };
+    static TextBlock Eyebrow(string t) => new() { Text = t, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush") };
 
     // every page opens the same: its title, one line under it, and what acts on the whole page on the right
     static Grid PageHead(string title, string? sub = null, FrameworkElement? act = null)

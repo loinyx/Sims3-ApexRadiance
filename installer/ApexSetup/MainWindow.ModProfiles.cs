@@ -28,6 +28,7 @@ public sealed partial class MainWindow
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var icon = Lucide.Icon("layers", 18, Res("ApexAccentBrush"), 1.8);
         icon.VerticalAlignment = VerticalAlignment.Center;
+        icon.Margin = new Thickness(-1, 0, -1, 0); // (its words start where the places' words do)
         g.Children.Add(icon);
         var text = new StackPanel();
         text.Children.Add(new TextBlock { Text = label, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
