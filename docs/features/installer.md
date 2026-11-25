@@ -12,7 +12,7 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Released in 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Released in 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Released in 4.0.3 (Setup 1.2.0). Sims 3 Modernization's experimental channel: Unreleased. The restart host on by default in a new install, no longer experimental: Released in 4.1.0. Apex Launcher 2.0 (the launcher below): Released in 4.1.0. Apex Launcher 2.3 (Game settings, adding files, profiles, merges edited in one go, Saves cleaning, Health by check): Released in 4.1.1 |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Released in 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Released in 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Released in 4.0.3 (Setup 1.2.0). Sims 3 Modernization's experimental channel: Unreleased. The restart host on by default in a new install, no longer experimental: Released in 4.1.0. Apex Launcher 2.0 (the launcher below): Released in 4.1.0. Apex Launcher 2.3 (Game settings, adding files, profiles, merges edited in one go, Saves cleaning and backups, Health by check): Released in 4.1.1 |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
 | Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup; also Sims 3 Modernization's channel, `ModernizationChannel`); restore points in `Game\Bin\Apex Radiance backup\restore`; the launcher's own files in `%LOCALAPPDATA%\Apex Launcher` (`settings.json`, `gallery.json`, `language.txt`, mod notes, picture thumbnails, `ApexLauncher.log`); the program in `%LOCALAPPDATA%\Programs\Apex Launcher` |
@@ -249,7 +249,7 @@ as the signed-in user, not as administrator: a change to the game folder or to a
     (which becomes one more backup, with Undo) or opened as another save, named, pinned, checked against its checksums,
     exported and moved to the Recycle Bin. A name and a pin are kept in the zip's own comment; the list of mods that were
     on is a file inside (`apex-mods.txt`), used to tell which are missing on a restore and never written into the save.
-  - **Automatic backups** are made when the game closes, before Play or once a day, only of saves that changed and never
+  - **Automatic backups** (off until chosen) are made when the game closes, before Play or once a day, only of saves that changed and never
     while the game runs. Older automatic ones leave past the number to keep and past the space limit; ones the player
     made, named or pinned, and a save's newest one, never do. Each save can have its own choice. *All backups* lists them
     with filters and actions for a selection.
@@ -277,7 +277,7 @@ as the signed-in user, not as administrator: a change to the game folder or to a
 | Hide while playing | None (`settings.json` `HideWhilePlaying`) | switch | On | | The launcher goes to the notification area while the game runs |
 | Fix safe things without asking | None (`settings.json` `FixSafeAutomatically`) | switch | On | | Health applies the fixes that keep a copy of each file |
 | Install updates when I press Play | None (`settings.json` `InstallUpdatesOnPlay`) | switch | On | | The ready updates go in before the game starts; off, Play starts the game as it is |
-| When the game closes (Saves, Automatic backups) | None (`backups.json` `OnClose`) | switch | On | | A backup of each save played lately that changed since its newest one |
+| When the game closes (Saves, Automatic backups) | None (`backups.json` `OnClose`) | switch | Off | | A backup of each save played lately that changed since its newest one |
 | Before playing | None (`backups.json` `BeforePlay`) | switch | Off | | The same before the game starts; *Play without waiting* skips it |
 | Once a day | None (`backups.json` `Daily`) | switch | Off | | The same once a day, while the launcher is open and the game is closed |
 | Backups of each save | None (`backups.json` `Keep`) | choice | 5 | 1, 3, 5, 10, 20 | How many automatic backups of a save stay |

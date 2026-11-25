@@ -580,13 +580,14 @@ static class SavesTests
         var beside = Path.GetDirectoryName(docs)!;
 
         // only the saves chosen for the moment, and only when they changed
-        var none = SaveBackups.Run(docs, BackupMoment.Play).Made.Count + SaveBackups.Run(docs, BackupMoment.Day).Made.Count;
+        var none = SaveBackups.Run(docs, BackupMoment.Close).Made.Count + SaveBackups.Due(docs, BackupMoment.Close).Count + SaveBackups.Run(docs, BackupMoment.Play).Made.Count + SaveBackups.Run(docs, BackupMoment.Day).Made.Count;
+        BackupChoices.Change(c => c.OnClose = true);
         var old = SaveBackups.Run(docs, BackupMoment.Close).Made.Count;
         foreach (var s in new[] { a, b }) File.SetLastWriteTime(Path.Combine(s.Dir, "TravelDB.package"), DateTime.Now.AddMinutes(-1));
         var first = SaveBackups.Run(docs, BackupMoment.Close);
         var again = SaveBackups.Run(docs, BackupMoment.Close);
         check(none + old == 0 && first is { Made.Count: 2, Error: null } && again.Made.Count == 0 && Zips("A") is [{ Note: SaveBackups.AutoClose, Pinned: false, Label: null, Stored: > 0 }]
-              && Zips("A")[0].Bytes == SaveInfo.Of(a).Bytes, "backups: when the game closes each save played lately gets one (an old one with none does not), the list of mods not counted as the save; with nothing new there is none");
+              && Zips("A")[0].Bytes == SaveInfo.Of(a).Bytes, "backups: none is made until chosen; then when the game closes each save played lately gets one (an old one with none does not), the list of mods not counted as the save; with nothing new there is none");
         foreach (var s in new[] { a, b }) File.SetLastWriteTime(Path.Combine(s.Dir, "TravelDB.package"), DateTime.Now.AddMinutes(1));
         BackupChoices.Change(c => c.Saves["A"] = new() { Off = true });
         Games.IsRunning = () => true;

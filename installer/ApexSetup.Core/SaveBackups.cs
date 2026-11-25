@@ -17,7 +17,7 @@ public sealed class BackupTimes
 
 public sealed class BackupChoices
 {
-    public bool OnClose { get; set; } = true;
+    public bool OnClose { get; set; }
     public bool BeforePlay { get; set; }
     public bool Daily { get; set; }
     public int Keep { get; set; } = 5;      // of each save

@@ -24,7 +24,7 @@ constexpr const char* k411Added[] = {
     "Apex Launcher: Add puts mods, Sims, lots, worlds and archives in their places",
     "Apex Launcher: profiles keep which mods are on",
     "Apex Launcher: Saves cleans a save, with a backup first and Undo",
-    "Apex Launcher: backups of your saves, made by themselves when the game closes",
+    "Apex Launcher: backups of your saves, on their own when the game closes if you turn it on",
     nullptr};
 
 constexpr const char* k411Improved[] = {
