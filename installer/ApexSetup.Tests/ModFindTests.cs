@@ -200,6 +200,17 @@ static class ModFindTests
         r = ModFind.Search(list, Mine(), docs, gi);
         check(ModFind.PackReads == reads + 1 && State(Gone) == FindState.Found, "find: a package that changed is read again, alone");
 
+        // installed with the game's launcher; a resource of which the game ships only the picture or the footprint
+        const ulong store = 0x9C22000000000077, half = 0x9C22000000000088, foot = 0x9C22000000000099;
+        var some = ModFind.Read(Write(Path.Combine(root, "store.txt"), string.Join("\n", $"0x034AEECB-0x00000000-0x{store:X16}", $"515CA4CD:00000000:{half:X16}", $"0x0333406C-0x00000000-0x{foot:X16}", $"0x034AEECB-0x00000000-0x{Rug:X16}")));
+        Pkg(Path.Combine(docs, "DCCache", "dcdb0.dbc"), (ModKinds.Casp, 0, store, [1]));
+        Pkg(Path.Combine(docs, "DCCache", "dcdb1.dbc.tmp"), (ModKinds.Casp, 0, Rug, [1]));
+        Pkg(Path.Combine(docs, "DCBackup", "0x1.package"), (ModKinds.Casp, 0, store + 1, [1]));
+        Pkg(Path.Combine(game, "GameData", "Shared", "Packages", "FullBuild1.package"), (ModKinds.Img, 0, half, [1]), (0xD382BF57, 0, foot, [1]));
+        var got = ModFind.Search(some, Mine(), docs, DefaultReplacements.Index(g));
+        check(got.Matches.Select(m => ModFind.StateOf(m, On)).SequenceEqual([FindState.Installed, FindState.Game, FindState.Game, FindState.Missing]),
+            $"find: what the game's launcher installed and what the game ships only in part are not missing ({string.Join(" ", got.Matches.Select(m => ModFind.StateOf(m, On)))})");
+
         // turned on: the state follows the mods, the search does not run again
         Mods.SetEnabled(mods.Single(m => m.Name == "Rugs.package"), true, docs);
         mods = Mine();

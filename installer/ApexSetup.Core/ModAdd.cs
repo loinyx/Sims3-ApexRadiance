@@ -245,7 +245,8 @@ public sealed class ModAdd : IDisposable
 
     void Compare(IReadOnlyList<ModFile> installed)
     {
-        var mods = installed.Where(m => m.FileType == "package").ToList();
+        // (the ones that are on first: of two copies, the one the game loads is compared and replaced)
+        var mods = installed.Where(m => m.FileType == "package").OrderByDescending(m => m.Enabled).ToList();
         var merges = mods.Select(m => ModMerge.Info(_docs, m)).OfType<MergeRecord>().ToList();
         var inMerges = merges.SelectMany(r => r.Originals.Select(o => (Merge: r.Name, Original: o))).ToList();
         var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -272,7 +273,7 @@ public sealed class ModAdd : IDisposable
         foreach (var i in Items.Where(i => i.Ok))
         {
             _ct.ThrowIfCancellationRequested();
-            if (there[i.Place].FirstOrDefault(f => f.Size == i.Size && Same(HashOf(f.Path), i.Sha)).Path is { } same) i.SameAs = Path.GetFileName(same);
+            if (there[i.Place].FirstOrDefault(f => f.Size == i.Size && Same(HashOf(f.Path), i.Sha)).Path is { } same) (i.SameAs, i.OtherMod) = (Path.GetFileName(same), mods.FirstOrDefault(m => Same(m.Path, same)));
             else if (i.Place == AddPlace.Mods && inMerges.FirstOrDefault(x => x.Original.Size == i.Size && Same(x.Original.Sha256, i.Sha)).Merge is { } merge) (i.SameAs, i.SameInMerge) = (merge, true);
             else if (!seen.TryAdd((i.Place, i.Sha), i.Name)) (i.SameAs, i.SameInList) = (seen[(i.Place, i.Sha)], true);
             if (i.SameAs is not null) i.Add = false;
@@ -323,6 +324,7 @@ public sealed class ModAdd : IDisposable
         var replace = i.Replace && i.CanReplace && File.Exists(i.Other);
         var dir = replace ? Path.GetDirectoryName(i.Other!)! : Dir(i.Place);
         Directory.CreateDirectory(dir);
+        if (i.Place == AddPlace.Mods) Engine.EnsureResourceCfg(_docs); // (without it the game loads no mod at all)
         var part = Copy(i.File, dir, i.Sha);
         try
         {

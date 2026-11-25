@@ -302,7 +302,7 @@ public static class Compat
     }
 
     // Mods\Resource.cfg reads that package (path relative to Mods) through one of its PackedFile patterns
-    static bool CfgReads(string cfg, string rel) =>
+    public static bool CfgReads(string cfg, string rel) =>
         Regex.Matches(cfg, @"(?mi)^\s*PackedFile\s+(\S+)").Any(m => Regex.IsMatch(rel.Replace('\\', '/'),
             "^" + Regex.Escape(m.Groups[1].Value.Replace('\\', '/')).Replace(@"\*", "[^/]*").Replace(@"\?", "[^/]") + "$", RegexOptions.IgnoreCase));
 

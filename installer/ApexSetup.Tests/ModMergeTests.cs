@@ -422,12 +422,25 @@ static class ModMergeTests
             "updates: with the game's index, a file that holds nearly all of a mod's own resources, changed and newer, is its newer version under any name; another replacement of the same game items is not");
         check(ModMerge.NameKeyOf("My_Mod v1.2b.package") == ModMerge.NameKeyOf("my mod (2).package") && ModMerge.NameKeyOf("Mod-1.69.package") == "mod" && ModMerge.NameKeyOf("Hair 1.package") != ModMerge.NameKeyOf("Hair 2.package") && ModMerge.NameKeyOf("Luv2.package") == "luv2",
             "updates: a name is compared without its version, case, spaces and underscores; a bare number is part of the name");
+        // an update as the mods are now: the newer mod off or gone, the merge off, the merge renamed, then the update made
+        var upHair = byName.Single(u => !u.Same);
+        var asOff = upd with { Path = Path.Combine(Mods.Disabled(docs), P("Upd")), Enabled = false };
+        check(ModMerge.Now(docs, upHair, loose) is { } still && still.Merged == upd && still.Newer == upHair.Newer
+            && ModMerge.Now(docs, upHair, loose.Select(m => m.Rel == upHair.Newer.Rel ? m with { Enabled = false } : m).ToList()) is null
+            && ModMerge.Now(docs, upHair, loose.Where(m => m.Rel != upHair.Newer.Rel).ToList()) is null
+            && ModMerge.Now(docs, upHair, loose.Select(m => m == upd ? asOff : m).ToList())!.Merged == asOff,
+            "updates: one found earlier takes the files as they are now, and is gone when the newer mod is off or no longer there");
+        var renamed = upd with { Path = Path.Combine(mods, P("Upd new")), Rel = Rel("Upd new") };
+        ModMerge.Moved(docs, upd.Rel, renamed.Rel);
+        check(ModMerge.Now(docs, upHair, loose.Select(m => m == upd ? renamed : m).ToList())?.Merged == renamed, "updates: one found earlier follows its merge to a new name");
+        ModMerge.Moved(docs, renamed.Rel, upd.Rel);
         var hV4 = Sha(Path.Combine(mods, P("Hair v4")));
         var hHair = Sha(Path.Combine(updStore, P("Hair v2")));
         var updated = ModMerge.Update(docs, withGame.Where(u => !u.Same).ToList()).Remerged!.Merged;
         check(Names(ModMerge.Info(updated)!).SequenceEqual(["Couch remake", "SkinA", "Chair 1", "Hair v4"]) && Text(updated.Path, 50) == "h-4" && !File.Exists(Path.Combine(mods, P("Hair v4"))) && Sha(Path.Combine(updStore, P("Hair v4"))) == hV4
             && Binned().Contains(hHair) && Directory.GetFiles(recycled).Length == 3 && File.Exists(Path.Combine(mods, P("hair_V3"))),
             "updates: the newer files take their older versions' places in the merge in one change, the old ones to the Recycle Bin " + string.Join(", ", Names(ModMerge.Info(updated)!)));
+        check(ModMerge.Now(docs, upHair, loose.Append(updated).ToList()) is null, "updates: one already made no longer holds");
         var v5 = Path.Combine(downloads, "Hair v5.package");
         Pkg(v5, Raw(50, 50, "h-5"), Raw(51, 51, "h2"));
         check(ModMerge.Updates(docs, [ModMerge.Outside(v5)]) is [{ Same: false, Newer.Path: var np }] && np == v5 && ModMerge.Updates(docs, [ModMerge.Outside(Path.Combine(updStore, P("Hair v4")))]).Count == 0,

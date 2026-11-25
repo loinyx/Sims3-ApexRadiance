@@ -2233,5 +2233,7 @@ public static partial class Strings
         ["No portraits in this save. The game makes them as you play."] = "Este save não tem retratos. O jogo faz enquanto você joga.",
         ["Some of the Sims this save knows. The game makes these portraits again by itself."] = "Alguns dos Sims que este save conhece. O jogo refaz estes retratos sozinho.",
         ["Portrait of a Sim"] = "Retrato de Sim",
+        ["The game isn't set up to load mods yet. The launcher adds the Resource.cfg file it needs."] = "O jogo ainda não está pronto para carregar mods. O launcher adiciona o arquivo Resource.cfg de que ele precisa.",
+        ["Installed with the game's launcher"] = "Instalado pelo launcher do jogo",
     };
 }
