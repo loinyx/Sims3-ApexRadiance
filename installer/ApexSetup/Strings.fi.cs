@@ -754,7 +754,6 @@ public static partial class Strings
         ["Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it."] = "Mukautetut maailmat ovat kansiossa Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; maailman poistaminen ei koskaan koske siinä tehtyihin tallennuksiin.",
         ["Downloads"] = "Lataukset",
         ["Ended"] = "Päättyi",
-        ["Everything"] = "Kaikki",
         ["Everything it installed was removed. The files it replaced are back."] = "Kaikki sen asentama poistettiin. Sen korvaamat tiedostot on palautettu.",
         ["Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it."] = "Kokeelliset versiot ovat testaajille ja voivat rikkoutua. Kanavan vaihtaminen korvaa ts3native.ini-tiedoston; kopio säilytetään sen vieressä.",
         ["Fix"] = "Korjaa",

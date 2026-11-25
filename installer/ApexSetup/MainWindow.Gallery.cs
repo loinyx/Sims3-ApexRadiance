@@ -244,13 +244,12 @@ public sealed partial class MainWindow
         var s = new StackPanel { Spacing = 0 };
         var folded = false;
         var found = Found.ToList();
-        Button Album(string key, string name, int count, string icon, string? glyph = null)
+        Button Album(string key, string name, int count, string icon)
         {
             var on = key == _galAlbum;
             // (searching: what holds nothing found stays out of the list)
             var none = _galQuery.Length > 0 && count == 0 && !on;
             var g = SideLine(icon, name, count > 0 ? count.ToString() : "");
-            if (glyph is not null) { g.Children.RemoveAt(0); g.Children.Insert(0, new FontIcon { Glyph = glyph, FontSize = 16, Width = 16, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }); }
             // (the mark of the place shown, as a list draws it)
             if (on) g.Children.Add(new Border { Width = 3, Height = 16, CornerRadius = new CornerRadius(1.5), Background = Res("ApexAccentBrush"), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(-16, 0, 0, 0) });
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 38, Padding = new Thickness(16, 0, 16, 0), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(0),
@@ -286,7 +285,7 @@ public sealed partial class MainWindow
         foreach (var save in _galSaves)
         {
             var hb = Album(save.Name, HouseTitle(save.Name, brief: true), found.Count(p => Gallery.InAlbum(p, save.Name, _gal!, _galSaves)), "users");
-            var here = new MenuFlyoutItem { Text = T("New album in {0}", save.Name), Icon = new FontIcon { Glyph = "\uE710" } };
+            var here = new MenuFlyoutItem { Text = T("New album in {0}", save.Name), Icon = Lucide.Element("plus") };
             var home = save.Name;
             here.Click += async (_, _) => { if (await AlbumDialog(null, home) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
             hb.ContextFlyout = new MenuFlyout { Items = { here } };
@@ -297,13 +296,13 @@ public sealed partial class MainWindow
         var loose = _gal.Custom.Where(c => !_galSaves.Any(v => string.Equals(homes[c], v.Name, StringComparison.OrdinalIgnoreCase))).ToList();
         Button Mine(CustomAlbum c, bool inside)
         {
-            var b = Album(c.Key, c.Name, found.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), "layers", c.Icon);
+            var b = Album(c.Key, c.Name, found.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), AlbumIcon(c.Icon));
             if (inside) b.Margin = new Thickness(14, 0, 0, 0); // (one level in, as a folder inside a folder in Mods)
             var menu = new MenuFlyout();
-            var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = new FontIcon { Glyph = "\uE70F" } };
+            var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = Lucide.Element("pencil") };
             var one = c;
             rename.Click += async (_, _) => { if (await AlbumDialog(one) is not null) BuildGallery(); };
-            var drop = new MenuFlyoutItem { Text = T("Delete the album"), Icon = new FontIcon { Glyph = "\uE74D" } };
+            var drop = new MenuFlyoutItem { Text = T("Delete the album"), Icon = Lucide.Element("trash-2") };
             drop.Click += async (_, _) =>
             {
                 if (!await Confirm(T("Delete {0}?", one.Name), T("Only the album is deleted. Its pictures stay in your Screenshots folder and other albums."), T("Delete"))) return;
@@ -343,7 +342,7 @@ public sealed partial class MainWindow
         var look = Gallery.Look(_gal!, _galAlbum);
         var titles = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        if (Gallery.CustomOf(_gal!, _galAlbum) is { } own) name.Children.Add(new FontIcon { Glyph = own.Icon, FontSize = _galBook ? 28 : 22, Foreground = new SolidColorBrush(AccentInk), VerticalAlignment = VerticalAlignment.Center });
+        if (Gallery.CustomOf(_gal!, _galAlbum) is { } own) name.Children.Add(new LucideIcon { Kind = AlbumIcon(own.Icon), Size = _galBook ? 28 : 22, Stroke = new SolidColorBrush(AccentInk), VerticalAlignment = VerticalAlignment.Center, StrokeWidth = 1.75 });
         _boardTitle = _galBook
             ? new TextBlock { Text = AlbumName(_galAlbum), FontFamily = new FontFamily(look.Font), FontSize = 40, FontWeight = FontWeights.SemiBold, Foreground = Ink(look) }
             : new TextBlock { Text = AlbumName(_galAlbum), FontSize = 28, FontWeight = FontWeights.SemiBold };
@@ -362,7 +361,7 @@ public sealed partial class MainWindow
             _boardTools.Clear();
             T Round<T>(T b, string glyph, string name) where T : Button
             {
-                b.Content = new FontIcon { Glyph = glyph, FontSize = 16 };
+                b.Content = new LucideIcon { Kind = glyph, Size = 16, Follow = true, StrokeWidth = 1.75 };
                 b.Width = 44; b.Height = 44; b.Padding = new Thickness(0); b.CornerRadius = new CornerRadius(22); b.BorderThickness = new Thickness(1);
                 _boardTools.Add(b);
                 InkTool(b, look);
@@ -370,20 +369,20 @@ public sealed partial class MainWindow
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
                 return b;
             }
-            var custom = Round(new Button(), "\uE790", T("Customise"));
+            var custom = Round(new Button(), "palette", T("Customise"));
             custom.Click += (_, _) => ToggleCustomize();
-            var add = Round(new Button(), "\uE70B", T("Add a note"));
+            var add = Round(new Button(), "sticky-note", T("Add a note"));
             var menu = new MenuFlyout();
             foreach (var (key, color) in NoteColors)
             {
-                var item = new MenuFlyoutItem { Text = T(char.ToUpperInvariant(key[0]) + key[1..]), Icon = new FontIcon { Glyph = "", Foreground = new SolidColorBrush(color) } };
+                var item = new MenuFlyoutItem { Text = T(char.ToUpperInvariant(key[0]) + key[1..]), Icon = Lucide.Element("circle", new SolidColorBrush(color)) };
                 item.Click += (_, _) => AddNote(key);
                 menu.Items.Add(item);
             }
             add.Flyout = menu;
             tools.Children.Add(custom);
             tools.Children.Add(add);
-            var shuffle = Round(new Button(), "\uE8B1", T("Rearrange"));
+            var shuffle = Round(new Button(), "shuffle", T("Rearrange"));
             shuffle.Click += (_, _) => ShuffleBoard();
             tools.Children.Add(shuffle);
         }
@@ -433,7 +432,7 @@ public sealed partial class MainWindow
         Button Side(string glyph, string text, bool book)
         {
             var c = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
-            c.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
+            c.Children.Add(new LucideIcon { Kind = glyph, Size = 14, Follow = true, StrokeWidth = 1.75 });
             c.Children.Add(new TextBlock { Text = text, FontSize = 13 });
             var b = new Button { Content = c, Height = 30, HorizontalAlignment = HorizontalAlignment.Stretch, BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 Foreground = _galBook == book ? Res("TextFillColorPrimaryBrush") : Res("ApexSoftTextBrush") };
@@ -443,8 +442,8 @@ public sealed partial class MainWindow
             b.Click += (_, _) => { if (_galBook == book) return; _galBook = book; if (_gal is not null) { _gal.Book = book; KeepQuiet(); } pill.Translation = new Vector3(book ? 118 : 0, 0, 0); DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, BuildGallery); };
             return b;
         }
-        var albums = Side("", T("Albums"), false);
-        var book = Side("", T("Scrapbook"), true);
+        var albums = Side("layout-grid", T("Albums"), false);
+        var book = Side("book-open", T("Scrapbook"), true);
         Grid.SetColumn(book, 1);
         track.Children.Add(albums);
         track.Children.Add(book);
@@ -580,7 +579,7 @@ public sealed partial class MainWindow
         Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0C, 0x0C, 0x0C)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x55, 255, 255, 255)), BorderThickness = new Thickness(1.5),
         IsHitTestVisible = false,
-        Child = new FontIcon { Glyph = "\uF5B0", FontSize = size * 0.38, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), Margin = new Thickness(size * 0.06, 0, 0, 0) },
+        Child = new LucideIcon { Solid = true, Kind = "play", Size = size * 0.38, Stroke = new SolidColorBrush(Microsoft.UI.Colors.White), Margin = new Thickness(size * 0.06, 0, 0, 0), StrokeWidth = 1.75 },
     };
 
     static async Task<bool> Blank(string file)
@@ -652,7 +651,7 @@ public sealed partial class MainWindow
         g.Children.Add(when);
         if (Gallery.Peek(_gal!, p.Path).Favourite)
             g.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Margin = new Thickness(8), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0C, 0x0C, 0x0C)), Child = new FontIcon { Glyph = "", FontSize = 13, Foreground = new SolidColorBrush(Rgb(0xF2, 0xC9, 0x4C)) } });
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0C, 0x0C, 0x0C)), Child = new LucideIcon { Solid = true, Kind = "star", Size = 13, Stroke = new SolidColorBrush(Rgb(0xF2, 0xC9, 0x4C)), StrokeWidth = 1.75 } });
         var b = new Button { Content = g, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Shadow = new ThemeShadow(), Translation = new Vector3(0, 0, 8) };
         b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -711,7 +710,7 @@ public sealed partial class MainWindow
     // drifts down turning gently, zoom grows from the middle, slide comes in along the timeline, playful drops with a
     // small bounce, none is simply there.
     static readonly (string Key, string Name, string Glyph)[] Entrances =
-        [("soft", "Soft", "\uE7B3"), ("float", "Float", "\uE753"), ("zoom", "Zoom", "\uE8A3"), ("slide", "Slide", "\uE76C"), ("playful", "Playful", "\uE76E"), ("none", "None", "\uE711")];
+        [("soft", "Soft", "feather"), ("float", "Float", "cloud"), ("zoom", "Zoom", "zoom-in"), ("slide", "Slide", "chevron-right"), ("playful", "Playful", "smile"), ("none", "None", "x")];
 
     // a little picture that comes in the way it names: once when shown, again under the pointer
     static FrameworkElement EntranceArt(string mode, bool chosen)
@@ -905,13 +904,13 @@ public sealed partial class MainWindow
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-        title.Children.Add(new FontIcon { Glyph = album.Icon, FontSize = 26, Foreground = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4)), VerticalAlignment = VerticalAlignment.Center });
+        title.Children.Add(new LucideIcon { Kind = AlbumIcon(album.Icon), Size = 26, Stroke = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4)), VerticalAlignment = VerticalAlignment.Center, StrokeWidth = 1.75 });
         title.Children.Add(new TextBlock { Text = album.Name, FontFamily = new FontFamily(look.Font), FontSize = 44, Foreground = new SolidColorBrush(Rgb(0xF4, 0xF0, 0xE6)) });
         title.Children.Add(new TextBlock { Text = members.Count == 1 ? T("1 picture") : T("{0} pictures", members.Count), FontSize = 14, Opacity = 0.65, Foreground = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 10, 0, 0) });
         head.Children.Add(title);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
         var whole = new Button { Content = T("Open the album"), CornerRadius = new CornerRadius(18), Padding = new Thickness(16, 6, 16, 7) };
-        var shut = new Button { Content = new FontIcon { Glyph = "\uE711", FontSize = 12 }, Width = 38, Height = 38, Padding = new Thickness(0), CornerRadius = new CornerRadius(19) };
+        var shut = new Button { Content = new LucideIcon { Kind = "x", Size = 12, Follow = true, StrokeWidth = 1.75 }, Width = 38, Height = 38, Padding = new Thickness(0), CornerRadius = new CornerRadius(19) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(shut, T("Close"));
         actions.Children.Add(whole);
         actions.Children.Add(shut);
@@ -1034,11 +1033,11 @@ public sealed partial class MainWindow
     MenuFlyout PileMenu(CustomAlbum c)
     {
         var menu = new MenuFlyout();
-        var open = new MenuFlyoutItem { Text = T("Open the album"), Icon = new FontIcon { Glyph = "" } };
+        var open = new MenuFlyoutItem { Text = T("Open the album"), Icon = Lucide.Element("external-link") };
         open.Click += (_, _) => { _galAlbum = c.Key; BuildGallery(); };
-        var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = new FontIcon { Glyph = "" } };
+        var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = Lucide.Element("pencil") };
         rename.Click += async (_, _) => { if (await AlbumDialog(c) is not null) BuildGallery(); };
-        var undo = new MenuFlyoutItem { Text = T("Undo the album"), Icon = new FontIcon { Glyph = "" } };
+        var undo = new MenuFlyoutItem { Text = T("Undo the album"), Icon = Lucide.Element("undo-2") };
         undo.Click += (_, _) =>
         {
             if (_gal is null) return;
@@ -1280,7 +1279,7 @@ public sealed partial class MainWindow
         titles.Children.Add(new TextBlock { Text = T("Customise"), FontSize = 20, FontWeight = FontWeights.SemiBold });
         titles.Children.Add(new TextBlock { Text = AlbumName(_galAlbum), FontSize = 12, Opacity = 0.6, TextTrimming = TextTrimming.CharacterEllipsis });
         head.Children.Add(titles);
-        var x = new Button { Content = new FontIcon { Glyph = "", FontSize = 12 }, Width = 34, Height = 34, Padding = new Thickness(0), CornerRadius = new CornerRadius(17), BorderThickness = new Thickness(0),
+        var x = new Button { Content = new LucideIcon { Kind = "x", Size = 12, Follow = true, StrokeWidth = 1.75 }, Width = 34, Height = 34, Padding = new Thickness(0), CornerRadius = new CornerRadius(17), BorderThickness = new Thickness(0),
             Background = new SolidColorBrush(Pick(0x14FFFFFF, 0x10000000)), VerticalAlignment = VerticalAlignment.Top };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(x, T("Close"));
         x.Click += (_, _) => ToggleCustomize(false);
@@ -1355,10 +1354,10 @@ public sealed partial class MainWindow
             shadeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             shadeRow.ColumnDefinitions.Add(new ColumnDefinition());
             shadeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            shadeRow.Children.Add(new FontIcon { Glyph = "\uE708", FontSize = 13, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
+            shadeRow.Children.Add(new LucideIcon { Kind = "moon", Size = 13, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Follow = true, StrokeWidth = 1.75 });
             Grid.SetColumn(brightness, 1);
             shadeRow.Children.Add(brightness);
-            var sun = new FontIcon { Glyph = "\uE706", FontSize = 16, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center };
+            var sun = new LucideIcon { Kind = "sun", Size = 16, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Follow = true, StrokeWidth = 1.75 };
             Grid.SetColumn(sun, 2);
             shadeRow.Children.Add(sun);
             body.Children.Add(shadeRow);
@@ -1472,7 +1471,7 @@ public sealed partial class MainWindow
                     art.Children.Add(new Border { Width = 46, Height = 14, Background = TapeBrush(probe, 1), Rotation = -6, CenterPoint = new Vector3(23, 7, 0), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 0, 0) });
                     art.Children.Add(new Border { Width = 40, Height = 12, Background = TapeBrush(probe, 3), Rotation = 5, CenterPoint = new Vector3(20, 6, 0), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 6) });
                 }
-                else art.Children.Add(new FontIcon { Glyph = "", FontSize = 20, Opacity = 0.5 });
+                else art.Children.Add(new LucideIcon { Kind = "x", Size = 20, Opacity = 0.5, Follow = true, StrokeWidth = 1.75 });
                 PutAt(tapes, Choice(art, kinds[i].Name, look.Tape == key, () => { look.Tape = key; Changed(); FillCustomize(); }, 80), i, 3);
             }
             body.Children.Add(tapes);
@@ -1544,7 +1543,7 @@ public sealed partial class MainWindow
                     lines.Children.Add(new TextBlock { Text = AlbumName(_galAlbum), FontFamily = new FontFamily(f), FontSize = 24, TextTrimming = TextTrimming.CharacterEllipsis });
                     lines.Children.Add(new TextBlock { Text = f, FontSize = 11, Opacity = 0.55 });
                     g.Children.Add(lines);
-                    if (on) { var tick = new FontIcon { Glyph = "\uE73E", FontSize = 14, Foreground = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(tick, 1); g.Children.Add(tick); }
+                    if (on) { var tick = new LucideIcon { Kind = "check", Size = 14, Stroke = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center, StrokeWidth = 1.75 }; Grid.SetColumn(tick, 1); g.Children.Add(tick); }
                     var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(14, 8, 14, 10), CornerRadius = new CornerRadius(12),
                         BorderThickness = new Thickness(on ? 2 : 1), BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Pick(0x1AFFFFFF, 0x1F000000)),
                         Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0CFFFFFF, 0x0A000000)) };
@@ -1907,11 +1906,11 @@ public sealed partial class MainWindow
         Draggable(outer, () => { s.X = Canvas.GetLeft(outer); s.Y = Canvas.GetTop(outer); Keep(); });
         var menu = new MenuFlyout();
         void Resize(double by) { s.Size = Math.Clamp(s.Size * by, 0.5, 3); text.FontSize = 64 * s.Size * _boardScale; Keep(); }
-        var bigger = new MenuFlyoutItem { Text = T("Bigger"), Icon = new FontIcon { Glyph = "\uE8A3" } };
+        var bigger = new MenuFlyoutItem { Text = T("Bigger"), Icon = Lucide.Element("zoom-in") };
         bigger.Click += (_, _) => Resize(1.25);
-        var smaller = new MenuFlyoutItem { Text = T("Smaller"), Icon = new FontIcon { Glyph = "\uE71F" } };
+        var smaller = new MenuFlyoutItem { Text = T("Smaller"), Icon = Lucide.Element("zoom-out") };
         smaller.Click += (_, _) => Resize(0.8);
-        var off = new MenuFlyoutItem { Text = T("Take it off"), Icon = new FontIcon { Glyph = "\uE74D" } };
+        var off = new MenuFlyoutItem { Text = T("Take it off"), Icon = Lucide.Element("trash-2") };
         off.Click += (_, _) => { look.Stickers.Remove(s); Keep(); _boardCanvas?.Children.Remove(outer); };
         menu.Items.Add(bigger);
         menu.Items.Add(smaller);
@@ -2252,7 +2251,7 @@ public sealed partial class MainWindow
             var at = pics.IndexOf(members[0]);
             var cardH = ((at % 4 == 0 ? 194 : 154) * s * look.Size) + 70;
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            row.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 14, Foreground = ink, VerticalAlignment = VerticalAlignment.Center });
+            row.Children.Add(new LucideIcon { Kind = AlbumIcon(c.Icon), Size = 14, Stroke = ink, VerticalAlignment = VerticalAlignment.Center, StrokeWidth = 1.75 });
             var tagName = new TextBlock { Text = c.Name, FontFamily = new FontFamily(look.Font), FontSize = 20, Foreground = ink, VerticalAlignment = VerticalAlignment.Center };
             row.Children.Add(tagName);
             row.Children.Add(new TextBlock { Text = members.Count.ToString(), FontSize = 12, Foreground = ink, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 0) });
@@ -2274,7 +2273,7 @@ public sealed partial class MainWindow
             var key = c.Key;
             var albumCards = members.Select(m => _boardCards.First(cc => cc.Pic.Path == m.Path).Card).ToList();
             toggle.Click += (_, _) => Spotlight(c, members, albumCards);
-            var open = TagButton(new FontIcon { Glyph = "\uE8A7", FontSize = 12, Foreground = ink }, new Thickness(0));
+            var open = TagButton(new LucideIcon { Kind = "external-link", Size = 12, Stroke = ink, StrokeWidth = 1.75 }, new Thickness(0));
             open.Width = 30;
             ToolTipService.SetToolTip(open, T("Open the album {0}", c.Name));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(open, T("Open the album {0}", c.Name));
@@ -2726,7 +2725,7 @@ public sealed partial class MainWindow
         box.Resources["TextControlForegroundFocused"] = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
         box.Resources["TextControlBorderBrushFocused"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         box.LostFocus += (_, _) => { note.Text = box.Text; Keep(); };
-        var close = new Button { Content = new FontIcon { Glyph = "", FontSize = 11 }, Width = 24, Height = 24, Padding = new Thickness(0), BorderThickness = new Thickness(0), Opacity = 0,
+        var close = new Button { Content = new LucideIcon { Kind = "x", Size = 11, Follow = true, StrokeWidth = 1.75 }, Width = 24, Height = 24, Padding = new Thickness(0), BorderThickness = new Thickness(0), Opacity = 0,
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 0, 0, 0)), Foreground = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26)),
             OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(150) } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(close, T("Remove the note"));
@@ -2977,25 +2976,36 @@ public sealed partial class MainWindow
 
     static readonly (string Glyph, string Name)[] AlbumIcons =
     [
-        ("\uE709", "Trip"), ("\uEB51", "Love"), ("\uE80F", "Home"), ("\uE722", "Pictures"), ("\uE734", "Favourite"), ("\uE8F1", "Gift"),
-        ("\uE7C1", "Family"), ("\uE909", "World"), ("\uE706", "Summer"), ("\uE708", "Night"), ("\uE8D6", "Music"), ("\uE7FC", "Games"),
-        ("\uE913", "Places"), ("\uE7EE", "Celebration"), ("\uEA86", "Pets"), ("\uE825", "Build"),
+        ("star", "Favourite"), ("heart", "Love"), ("users", "Family"), ("baby", "Baby"), ("house", "Home"), ("camera", "Pictures"), ("plane", "Trip"), ("map-pin", "Places"),
+        ("globe", "World"), ("sun", "Summer"), ("moon", "Night"), ("leaf", "Autumn"), ("snowflake", "Winter"), ("flower-2", "Garden"), ("tree-palm", "Beach"), ("mountain", "Mountain"),
+        ("tent", "Camping"), ("umbrella", "Rain"), ("cake", "Birthday"), ("party-popper", "Celebration"), ("gift", "Gift"), ("gem", "Wedding"), ("crown", "Royalty"), ("trophy", "Trophy"),
+        ("graduation-cap", "Graduation"), ("school", "School"), ("briefcase", "Work"), ("building-2", "City"), ("church", "Church"), ("hammer", "Build"), ("sofa", "Furniture"), ("bed", "Bedroom"),
+        ("utensils", "Food"), ("coffee", "Coffee"), ("wine", "Drinks"), ("music", "Music"), ("guitar", "Band"), ("gamepad-2", "Games"), ("palette", "Art"), ("book-open", "Story"),
+        ("shirt", "Outfits"), ("dumbbell", "Sport"), ("bike", "Bike"), ("car", "Car"), ("rocket", "Future"), ("ghost", "Ghosts"), ("sparkles", "Magic"), ("flame", "Fire"),
+        ("paw-print", "Pets"), ("dog", "Dog"), ("cat", "Cat"), ("bird", "Bird"), ("fish", "Fish"), ("key", "Secret"),
     ];
+
+    // an album's icon: albums made before 2.3 keep a sign of Windows' icon font
+    static string AlbumIcon(string icon) => icon switch
+    {
+        "\uE709" => "plane", "\uEB51" => "heart", "\uE80F" => "house", "\uE722" => "camera", "\uE8F1" => "gift", "\uE7C1" => "users", "\uE909" => "globe", "\uE706" => "sun", "\uE708" => "moon",
+        "\uE8D6" => "music", "\uE7FC" => "gamepad-2", "\uE913" => "map-pin", "\uE7EE" => "party-popper", "\uEA86" => "paw-print", "\uE825" => "hammer", _ => Lucide.Names.Contains(icon) ? icon : "star",
+    };
 
     // a new album (album null) or a change to one: its name and its icon; the album, or null when cancelled
     async Task<CustomAlbum?> AlbumDialog(CustomAlbum? album, string? home = null)
     {
         var name = new TextBox { Header = T("Name"), Text = album?.Name ?? "", PlaceholderText = T("Trip to Egypt") };
-        var grid = new GridView { SelectionMode = ListViewSelectionMode.Single, Margin = new Thickness(0, 14, 0, 0), MaxHeight = 220 };
+        var grid = new GridView { SelectionMode = ListViewSelectionMode.Single, Margin = new Thickness(0, 14, -4, 0), MaxHeight = 232 }; // (eight across, the last on the fields' edge)
         foreach (var (glyph, label) in AlbumIcons)
         {
-            var cell = new Border { Width = 52, Height = 52, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush"), Child = new FontIcon { Glyph = glyph, FontSize = 22 } };
+            var cell = new Border { Width = 48, Height = 48, CornerRadius = new CornerRadius(10), Background = Res("ApexTileBrush"), Child = new LucideIcon { Kind = glyph, Size = 22, Follow = true, StrokeWidth = 1.75 } };
             ToolTipService.SetToolTip(cell, T(label));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cell, T(label));
             grid.Items.Add(cell);
         }
-        grid.SelectedIndex = Math.Max(0, Array.FindIndex(AlbumIcons, i => i.Glyph == album?.Icon));
-        var body = new StackPanel { Width = 400 };
+        grid.SelectedIndex = Math.Max(0, Array.FindIndex(AlbumIcons, i => i.Glyph == AlbumIcon(album?.Icon ?? "")));
+        var body = new StackPanel { Width = 412 };
         body.Children.Add(name);
         var house = new ComboBox { Header = T("Household"), HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 14, 0, 0) };
         foreach (var v in _galSaves) house.Items.Add(v.Name);
@@ -3111,14 +3121,14 @@ public sealed partial class MainWindow
         stage.Children.Add(zoomer);
         Button Round(string glyph, string name, double size = 46)
         {
-            var b = new Button { Content = new FontIcon { Glyph = glyph, FontSize = 16 }, Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Padding = new Thickness(0),
+            var b = new Button { Content = new LucideIcon { Kind = glyph, Size = 16, Follow = true, StrokeWidth = 1.75 }, Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Padding = new Thickness(0),
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1F, 255, 255, 255)), BorderThickness = new Thickness(0) };
             ToolTipService.SetToolTip(b, name);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
             return b;
         }
-        var prev = Round("", T("Previous picture"));
-        var next = Round("", T("Next picture"));
+        var prev = Round("chevron-left", T("Previous picture"));
+        var next = Round("chevron-right", T("Next picture"));
         prev.HorizontalAlignment = HorizontalAlignment.Left; prev.VerticalAlignment = VerticalAlignment.Center; prev.Margin = new Thickness(-36, 0, 0, 0);
         next.HorizontalAlignment = HorizontalAlignment.Right; next.VerticalAlignment = VerticalAlignment.Center; next.Margin = new Thickness(0, 0, -36, 0);
         stage.Children.Add(prev);
@@ -3133,29 +3143,29 @@ public sealed partial class MainWindow
         island.Margin = new Thickness(0);
         Button Tool(string glyph, string name)
         {
-            var b = new Button { Content = new FontIcon { Glyph = glyph, FontSize = 16 }, Width = 40, Height = 40, Padding = new Thickness(0), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(0),
+            var b = new Button { Content = new LucideIcon { Kind = glyph, Size = 16, Follow = true, StrokeWidth = 1.75 }, Width = 40, Height = 40, Padding = new Thickness(0), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(0),
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
             ToolTipService.SetToolTip(b, name);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
             island.Children.Add(b);
             return b;
         }
-        var zoomOut = Tool("\uE71F", T("Zoom out"));
+        var zoomOut = Tool("zoom-out", T("Zoom out"));
         var zoomLabel = new Button { Content = "100%", MinWidth = 64, Height = 40, CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(0), FontSize = 13, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
         ToolTipService.SetToolTip(zoomLabel, T("Fit to the window"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(zoomLabel, T("Fit to the window"));
         island.Children.Add(zoomLabel);
-        var zoomIn = Tool("\uE8A3", T("Zoom in"));
+        var zoomIn = Tool("zoom-in", T("Zoom in"));
         island.Children.Add(new Border { Width = 1, Height = 22, Margin = new Thickness(6, 0, 6, 0), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x30, 255, 255, 255)), VerticalAlignment = VerticalAlignment.Center });
-        var play = Tool("\uE768", T("Slideshow"));
-        var full = Tool("\uE740", T("Full screen"));
-        var photos = Tool("\uE8A7", T("Open in Photos"));
+        var play = Tool("play", T("Slideshow"));
+        var full = Tool("maximize", T("Full screen"));
+        var photos = Tool("external-link", T("Open in Photos"));
         zoomOut.Click += (_, _) => ZoomTo(zoomer.ZoomFactor / 1.4f);
         zoomIn.Click += (_, _) => ZoomTo(zoomer.ZoomFactor * 1.4f);
         zoomLabel.Click += (_, _) => ZoomTo(1);
         zoomer.ViewChanged += (_, _) => zoomLabel.Content = $"{Math.Round(zoomer.ZoomFactor * 100)}%";
         stage.Children.Add(islandFrame);
-        var close = Round("", T("Close"), 40);
+        var close = Round("x", T("Close"), 40);
         // (the controls over the dark room keep the dark look in a light theme)
         foreach (var c in new FrameworkElement[] { prev, next, close, islandFrame }) c.RequestedTheme = ElementTheme.Dark;
         close.HorizontalAlignment = HorizontalAlignment.Right; close.VerticalAlignment = VerticalAlignment.Top; close.Margin = new Thickness(0, -32, -40, 0);
@@ -3478,8 +3488,8 @@ public sealed partial class MainWindow
         Button Action(string glyph, string name, bool on = false)
         {
             var g = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            var icon = new FontIcon { Glyph = glyph, FontSize = 20 };
-            if (on) icon.Foreground = Res("ApexAccentBrush");
+            var icon = new LucideIcon { Kind = glyph, Size = 20, Follow = true, StrokeWidth = 1.75 };
+            if (on) icon.Stroke = Res("ApexAccentBrush");
             g.Children.Add(icon);
             g.Children.Add(new TextBlock { Text = name, FontSize = 12, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, Height = 78, CornerRadius = new CornerRadius(12), Padding = new Thickness(6),
@@ -3544,31 +3554,31 @@ public sealed partial class MainWindow
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             grid.RowDefinitions.Add(new RowDefinition());
             grid.RowDefinitions.Add(new RowDefinition());
-            var fav = Action(info.Favourite ? "" : "", info.Favourite ? T("In Favourites") : T("Favourite"), info.Favourite);
+            var fav = Action("star", info.Favourite ? T("In Favourites") : T("Favourite"), info.Favourite);
             fav.Click += (_, _) => { var i = Gallery.Info(_gal!, p.Path); i.Favourite = !i.Favourite; Keep(); Fill(); };
             var inAlbums = _gal!.Custom.Where(c => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)).ToList();
-            var album = Action("", T("Add to an album"), inAlbums.Count > 0);
+            var album = Action("images", T("Add to an album"), inAlbums.Count > 0);
             var albums = new MenuFlyout();
             albums.Opening += (_, _) =>
             {
                 albums.Items.Clear();
                 foreach (var c in _gal.Custom)
                 {
-                    var t = new ToggleMenuFlyoutItem { Text = c.Name, IsChecked = c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase), Icon = new FontIcon { Glyph = c.Icon } };
+                    var t = new ToggleMenuFlyoutItem { Text = c.Name, IsChecked = c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase), Icon = Lucide.Element(AlbumIcon(c.Icon)) };
                     var one = c;
                     t.Click += (_, _) => { Gallery.Toggle(_gal, one, p.Path); Fill(); };
                     albums.Items.Add(t);
                 }
                 if (_gal.Custom.Count > 0) albums.Items.Add(new MenuFlyoutSeparator());
-                var make = new MenuFlyoutItem { Text = T("New album…"), Icon = new FontIcon { Glyph = "" } };
+                var make = new MenuFlyoutItem { Text = T("New album…"), Icon = Lucide.Element("plus") };
                 make.Click += async (_, _) => { popup.IsOpen = false; if (await AlbumDialog(null, Gallery.HouseholdOf(p, _gal, _galSaves)) is { } made) Gallery.Toggle(_gal, made, p.Path); popup.IsOpen = true; Fill(); };
                 albums.Items.Add(make);
             };
             album.Flyout = albums;
             var cover = _gal.HomePicture == p.Path;
-            var home = Action("", cover ? T("Home picture") : T("Use on Home"), cover);
+            var home = Action("house", cover ? T("Home picture") : T("Use on Home"), cover);
             home.Click += (_, _) => { _gal.HomePicture = p.Path; Keep(); Fill(); };
-            var folder = Action("", T("Show in folder"));
+            var folder = Action("folder-open", T("Show in folder"));
             folder.Click += (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{p.Path}\"") { UseShellExecute = true });
             Grid.SetColumn(album, 1);
             Grid.SetRow(home, 1);
@@ -3586,7 +3596,7 @@ public sealed partial class MainWindow
                 foreach (var c in inAlbums)
                 {
                     var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-                    row.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 14, Foreground = new SolidColorBrush(AccentInk) });
+                    row.Children.Add(new LucideIcon { Kind = AlbumIcon(c.Icon), Size = 14, Stroke = new SolidColorBrush(AccentInk), StrokeWidth = 1.75 });
                     row.Children.Add(new TextBlock { Text = c.Name, FontSize = 13 });
                     var go = new HyperlinkButton { Content = row, Padding = new Thickness(4, 2, 4, 2) };
                     var key = c.Key;
@@ -3604,7 +3614,7 @@ public sealed partial class MainWindow
             var file = new TextBlock { Text = Path.GetFileName(p.Path), FontSize = 11, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
             ToolTipService.SetToolTip(file, p.Path);
             foot.Children.Add(file);
-            var bin = new Button { Content = new FontIcon { Glyph = "", FontSize = 14, Foreground = Res("ApexErrorBrush") }, Width = 36, Height = 36, Padding = new Thickness(0), CornerRadius = new CornerRadius(18),
+            var bin = new Button { Content = new LucideIcon { Kind = "trash-2", Size = 14, Stroke = Res("ApexErrorBrush"), StrokeWidth = 1.75 }, Width = 36, Height = 36, Padding = new Thickness(0), CornerRadius = new CornerRadius(18),
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
             ToolTipService.SetToolTip(bin, T("Move to the Recycle Bin"));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(bin, T("Move to the Recycle Bin"));
@@ -3622,7 +3632,7 @@ public sealed partial class MainWindow
         {
             show?.Stop();
             show = null;
-            ((FontIcon)play.Content).Glyph = on ? "\uE769" : "\uE768";
+            ((LucideIcon)play.Content).Kind = on ? "pause" : "play";
             ToolTipService.SetToolTip(play, on ? T("Stop the slideshow") : T("Slideshow"));
             if (!on) return;
             show = DispatcherQueue.CreateTimer();
@@ -3644,7 +3654,7 @@ public sealed partial class MainWindow
             next.Margin = on ? new Thickness(0, 0, 16, 0) : new Thickness(0, 0, -36, 0);
             islandFrame.Margin = on ? new Thickness(0, 0, 0, 24) : new Thickness(0, 0, 0, -30);
             Refit();
-            ((FontIcon)full.Content).Glyph = on ? "\uE73F" : "\uE740";
+            ((LucideIcon)full.Content).Kind = on ? "minimize" : "maximize";
             ToolTipService.SetToolTip(full, on ? T("Leave full screen") : T("Full screen"));
         }
         full.Click += (_, _) => Wide(!wide);

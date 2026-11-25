@@ -216,18 +216,18 @@ public sealed partial class MainWindow
         var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft };
         if (update && !blocked)
         {
-            var asIs = new MenuFlyoutItem { Text = T("Play without updating"), Icon = new FontIcon { Glyph = "" }, IsEnabled = !_busy && !Maintenance };
+            var asIs = new MenuFlyoutItem { Text = T("Play without updating"), Icon = Lucide.Element("play"), IsEnabled = !_busy && !Maintenance };
             asIs.Click += async (_, _) => await PlayAsync(null);
             menu.Items.Add(asIs);
             menu.Items.Add(new MenuFlyoutSeparator());
         }
-        var all = new MenuFlyoutItem { Text = T("All saves"), Icon = new FontIcon { Glyph = "" } };
+        var all = new MenuFlyoutItem { Text = T("All saves"), Icon = Lucide.Element("save") };
         all.Click += (_, _) => Show(SavesScreen);
         menu.Items.Add(all);
         var more = new Button
         {
             Width = 56, Height = 56, Padding = new Thickness(0), CornerRadius = new CornerRadius(8), Background = glass, BorderThickness = new Thickness(0), Flyout = menu,
-            Content = new FontIcon { Glyph = "", FontSize = 16, Foreground = ink },
+            Content = new LucideIcon { Kind = "ellipsis", Size = 16, Stroke = ink, StrokeWidth = 1.75 },
         };
         ToolTipService.SetToolTip(more, T("More"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, T("More"));
@@ -244,7 +244,7 @@ public sealed partial class MainWindow
         var play = new Button { Height = 56, Padding = new Thickness(22, 0, 28, 0), CornerRadius = new CornerRadius(8), IsEnabled = !_busy && !Maintenance };
         if (!blocked) play.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         var pc = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-        pc.Children.Add(new FontIcon { Glyph = "", FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
+        pc.Children.Add(new LucideIcon { Solid = true, Kind = "play", Size = 14, VerticalAlignment = VerticalAlignment.Center, Follow = true, StrokeWidth = 1.75 });
         var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         var title = blocked ? T("Play anyway") : T("Play");
         label.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold });

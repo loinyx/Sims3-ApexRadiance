@@ -53,13 +53,19 @@ that fold (`SideGroup`) over places 38 high, or 64 with a picture. The place sho
 there is no pane and the screen offers a list in its place. Code: `MainWindow.SidePane.cs` (Mods' own is in XAML, on the same
 parts).
 
+## A mod's details
+
+A pane 368 wide. A banner 136 high with the picture, close in its top corner and change picture in its bottom one, both 8 from
+the edges; the name at 20, badges 32 high; facts 48 high in one card; sections 24 apart; the main action and delete in the
+footer, 40 high. A value that can be typed over looks like the other values until the pointer or the keyboard is on it.
+
 ## Text
 
 Segoe UI Variable. Title 28 semibold, section 16 semibold, row 14 semibold, detail 13, page line 14, small label 12.
 
 ## Icons
 
-Lucide, stroke 1.75, one family everywhere (the side pane too). Neutral; a tile takes a hue only for a warning or an error.
+Lucide, stroke 1.75, one family everywhere (the side pane, menus and album icons too), filled only for Play. Neutral; a tile takes a hue only for a warning or an error.
 
 ## Background light
 

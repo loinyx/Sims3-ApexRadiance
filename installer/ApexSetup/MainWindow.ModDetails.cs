@@ -70,7 +70,7 @@ public sealed partial class MainWindow
         var side = tabs.Count > 4 ? 6 : 8; // (five tabs, as a default replacement has, still fit the pane)
         foreach (var (key, label) in tabs)
         {
-            var tab = new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab, FontSize = 13, Padding = new Thickness(side, 10, side, 8) };
+            var tab = new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab, FontSize = 14, Padding = new Thickness(side, 10, side, 10) };
             bar.Items.Add(tab);
             if (key == "conflicts" && count is not null) _ = CountConflictsAsync(count, bar, tab);
         }
@@ -87,30 +87,22 @@ public sealed partial class MainWindow
     {
         var m = r.File;
         var own = ModNotes.PicturePath(m.Rel) is not null;
-        // the picture, which is also its button
+        // the picture, and the button that changes it
         FrameworkElement tile = PictureTile(r, merge is not null ? "merge" : r.KindIcon, own);
+        Button? change = null;
         if (mine)
         {
             var label = own ? T("Change picture") : T("Add picture");
-            var mark = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(11), Background = Res("ApexRaisedBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1),
-                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 2, 2), Child = Lucide.Icon("image-plus", 12, Res("ApexSoftTextBrush")) };
-            var both = new Grid();
-            both.Children.Add(tile);
-            both.Children.Add(mark);
-            var pic = new Button { Content = both, Padding = new Thickness(0), Width = 60, Height = 60, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), VerticalAlignment = VerticalAlignment.Top };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(pic, label);
-            // (the player's own picture shows whole under the pointer: the tile is small)
-            ToolTipService.SetToolTip(pic, own && r.Image is { } whole ? new ToolTip { Content = new Image { Source = whole, MaxWidth = 300, MaxHeight = 300 } } : label);
+            change = IconButton("image-plus", label);
             var menu = new MenuFlyout();
             menu.Items.Add(MenuItem(label, async () =>
             {
                 var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
                 foreach (var x in new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif" }) picker.FileTypeFilter.Add(x);
                 if (await picker.PickSingleFileAsync() is { } file) SetPicture(r, file.Path);
-            }));
-            if (own) menu.Items.Add(MenuItem(T("Remove picture"), () => SetPicture(r, null)));
-            pic.Click += (_, _) => menu.ShowAt(pic);
-            tile = pic;
+            }, "image-plus"));
+            if (own) menu.Items.Add(MenuItem(T("Remove picture"), () => SetPicture(r, null), "trash-2"));
+            change.Click += (_, _) => menu.ShowAt(change);
         }
 
         var name = merge is not null ? _draft?.Name ?? r.Name : r.Name;
@@ -123,14 +115,13 @@ public sealed partial class MainWindow
         if (mine)
         {
             var rename = IconButton("pencil", T("Rename"));
-            rename.Width = rename.Height = 26;
+            rename.Width = rename.Height = 28;
             rename.VerticalAlignment = VerticalAlignment.Top;
-            ((FrameworkElement)rename.Content).Opacity = 0.7;
             rename.Click += (_, _) =>
             {
-                var box = new TextBox { Text = name, FontSize = 16, MinWidth = 0 };
+                var box = new TextBox { Text = name, FontSize = 14, MinWidth = 0, Height = 36, Padding = new Thickness(12, 8, 12, 8) };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("New name"));
-                nameRow.HorizontalAlignment = HorizontalAlignment.Stretch;
+                (nameRow.HorizontalAlignment, nameRow.ColumnSpacing) = (HorizontalAlignment.Stretch, 0);
                 nameRow.Children.Remove(nameText);
                 nameRow.Children.Insert(0, box);
                 rename.Visibility = Visibility.Collapsed;
@@ -151,15 +142,6 @@ public sealed partial class MainWindow
             nameRow.Children.Add(rename);
         }
 
-        ToggleSwitch? sw = null;
-        if (!m.Locked)
-        {
-            sw = new ToggleSwitch { IsOn = m.Enabled, OnContent = "", OffContent = "", MinWidth = 0, Width = 40 };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(sw, m.Enabled ? T("Turn off") : T("Turn on"));
-            var on = sw;
-            sw.Toggled += (_, _) => { if (on.IsOn != r.File.Enabled) SetMods([r], on.IsOn); };
-        }
-
         // badges: what kind of thing this is, at a glance
         var badges = new List<Border>();
         if (r.Defaults.IsDefault) badges.Add(StripBadge(T("Default replacement"), "replace", "#9CC7EE"));
@@ -170,72 +152,69 @@ public sealed partial class MainWindow
             _ => StripBadge(T("Installed by Apex Launcher"), "lock", "#CECBF6"),
         });
         var sub = string.Join(" · ", new[] { merge is not null ? T("Merged · {0} mods", merge.Originals.Count) : r.Kind, m.Enabled || m.Locked ? null : T("Off") }.OfType<string>());
-        return HeadPanel(r, null, tile, nameRow, sub, sw, badges);
+        return HeadPanel(null, tile, change, nameRow, sub, badges);
     }
 
     static TextBlock NameText(string name, string tip)
     {
-        var t = new TextBlock { Text = name, FontSize = 16, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        var t = new TextBlock { Text = name, FontSize = 20, LineHeight = 28, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(t, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
         ToolTipService.SetToolTip(t, tip);
         return t;
     }
 
-    // (the player's own picture fills it, a package's small thumbnail shows whole)
-    static Border PictureTile(ModRow r, string icon, bool own)
+    // (the player's own picture fills the banner, a package's small thumbnail stands whole in its middle)
+    static FrameworkElement PictureTile(ModRow r, string icon, bool own)
     {
-        UIElement inside;
-        if (r.Image is { } img) inside = new Image { Source = img, Stretch = own ? Stretch.UniformToFill : Stretch.Uniform };
-        else
-        {
-            var glyph = Lucide.Icon(icon, 28, r.GlyphBrush, 1.7);
-            glyph.HorizontalAlignment = HorizontalAlignment.Center;
-            glyph.VerticalAlignment = VerticalAlignment.Center;
-            inside = glyph;
-        }
-        return new Border { Width = 60, Height = 60, CornerRadius = new CornerRadius(12), Background = r.TileBrush, VerticalAlignment = VerticalAlignment.Top, Child = inside };
+        if (r.Image is { } img) return new Image { Source = img, Stretch = own ? Stretch.UniformToFill : Stretch.Uniform, MaxHeight = own ? double.PositiveInfinity : 104, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var glyph = Lucide.Icon(icon, 40, Res("ApexMutedBrush"), 1.5);
+        (glyph.HorizontalAlignment, glyph.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center);
+        return glyph;
     }
 
-    // the head of one mod's details: picture, name and what it is, close and the switch; its badges under them
-    UIElement HeadPanel(ModRow r, UIElement? above, FrameworkElement tile, UIElement name, string sub, ToggleSwitch? sw, List<Border> badges, string? closeTip = null)
+    // the head of a mod's details: its picture as a banner with what closes the pane and what changes the picture in its corners,
+    // then the name, what it is, and its badges
+    UIElement HeadPanel(UIElement? above, FrameworkElement tile, Button? change, UIElement name, string sub, List<Border> badges, string? closeTip = null)
     {
-        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(20, 20, 20, closeTip is null ? 12 : 20) };
+        var panel = new StackPanel { Spacing = Design.Space.X4, Padding = new Thickness(20, 20, 20, closeTip is null ? 12 : 20) };
         if (above is not null) panel.Children.Add(above);
-        var g = new Grid { ColumnSpacing = 14 };
-        foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        g.Children.Add(tile);
-        var names = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-        names.Children.Add(name);
-        names.Children.Add(new TextBlock { Text = sub, FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap });
-        Grid.SetColumn(names, 1);
-        g.Children.Add(names);
-        var right = new StackPanel { Spacing = 2 };
+        var banner = new Grid { Height = 136, CornerRadius = new CornerRadius(Design.Radius.Card), Background = Res("ApexTileBrush") };
+        tile.HorizontalAlignment = HorizontalAlignment.Center;
+        tile.VerticalAlignment = VerticalAlignment.Center;
+        banner.Children.Add(tile);
         var close = IconButton("x", closeTip ?? T("Close"));
-        close.HorizontalAlignment = HorizontalAlignment.Right;
-        close.Margin = new Thickness(0, -8, -9, 0); // (its mark, not its square, stands on the pane's edge, above the switch)
         close.Click += (_, _) => CloseModDetails();
-        right.Children.Add(close);
-        if (sw is not null) { sw.HorizontalAlignment = HorizontalAlignment.Right; right.Children.Add(sw); }
-        Grid.SetColumn(right, 2);
-        g.Children.Add(right);
-        panel.Children.Add(g);
+        Corner(close, VerticalAlignment.Top);
+        if (change is not null) Corner(change, VerticalAlignment.Bottom);
+        panel.Children.Add(banner);
+        var names = new StackPanel { Spacing = Design.Space.TitleToSub };
+        names.Children.Add(name);
+        names.Children.Add(new TextBlock { Text = sub, FontSize = 14, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(names);
         if (badges.Count > 0)
         {
-            var wrap = new WrapPanel { Spacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
+            var wrap = new WrapPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
             foreach (var b in badges) wrap.Children.Add(b);
             panel.Children.Add(wrap);
         }
         return panel;
+
+        // (as far from the top, or the bottom, as from the side)
+        void Corner(Button b, VerticalAlignment at)
+        {
+            (b.Width, b.Height, b.CornerRadius, b.Background, b.HorizontalAlignment, b.VerticalAlignment, b.Margin) = (32, 32, new CornerRadius(16), Res("ApexVeilBrush"), HorizontalAlignment.Right, at, new Thickness(8));
+            banner.Children.Add(b);
+        }
     }
 
     static Border StripBadge(string text, string icon, string color)
     {
-        // (the pale ink of the dark theme, and its darker one on the light theme's pale chip)
-        var brush = TagDot.BrushOf(!_light ? color : color switch { "#9CC7EE" => "#2F6FA8", "#E0A84F" => "#8A5A00", _ => "#5A52B5" });
-        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        s.Children.Add(Lucide.Icon(icon, 12, brush, 2.2));
-        s.Children.Add(new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = brush, VerticalAlignment = VerticalAlignment.Center });
-        return new Border { Child = s, Height = 26, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(13), Background = new SolidColorBrush(Pick(0xB30B0C0E, 0xCCFFFFFF)) };
+        // (the colour only where something has to be seen)
+        var warn = color == "#E0A84F";
+        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        s.Children.Add(Lucide.Icon(icon, 14, Res(warn ? "ApexWarningBrush" : "ApexMutedBrush"), 1.75));
+        s.Children.Add(new TextBlock { Text = text, FontSize = 13, Foreground = Res(warn ? "ApexWarningTextBrush" : "ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center });
+        return new Border { Child = s, Height = 32, Padding = new Thickness(12, 0, 12, 0), CornerRadius = new CornerRadius(8), Background = Res(warn ? "ApexWarningSoftBrush" : "ApexTileBrush") };
     }
 
     // ---------- Overview ----------
@@ -248,7 +227,22 @@ public sealed partial class MainWindow
         var (who, guessed) = ModCreators.Of(m, _modCreatorGuess);
         var creator = CreatorBox(who, guessed, mine, name => ModNotes.SetCreator(r.File.Rel, name));
         if (m.Locked) host.Children.Add(Note("lock", "ApexMutedBrush", ModRow.LockText(m)));
-        host.Children.Add(Facts((T("Size"), FactText(r.Size)), (T("Added"), FactText(Day(Added(m)))), (T("Creator"), creator)));
+        var place = new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Right };
+        place.ColumnDefinitions.Add(new ColumnDefinition());
+        place.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var where = FactText(ModRow.Place(m));
+        ToolTipService.SetToolTip(where, ModRow.Place(m));
+        var file = FactText(m.Name);
+        ToolTipService.SetToolTip(file, m.Name);
+        place.Children.Add(where);
+        if (mine)
+        {
+            var move = new HyperlinkButton { Content = T("Move…"), FontSize = 13, Padding = new Thickness(0) };
+            move.Click += (_, _) => MoveMenu([r]).ShowAt(move);
+            Grid.SetColumn(move, 1);
+            place.Children.Add(move);
+        }
+        host.Children.Add(Facts((T("Size"), FactText(r.Size)), (T("Added"), FactText(Day(Added(m)))), (T("Folder"), place), (T("File"), file), (T("Creator"), creator)));
         if (merge is not null)
         {
             var notes = new StackPanel { Spacing = 10 };
@@ -274,12 +268,6 @@ public sealed partial class MainWindow
             host.Children.Add(tags);
         }
 
-        // where it is, in full
-        var where = Section(T("Where"), mine ? T("Move…") : null, out var move);
-        if (move is not null) move.Click += (_, _) => MoveMenu([r]).ShowAt(move);
-        where.Children.Add(new TextBlock { Text = ModRow.Place(m) + " › " + m.Name, FontSize = 13, TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush") });
-        host.Children.Add(where);
-
         host.Children.Add(Actions(CanOpenInS3pe(r) ? ActionRow("package", T("Open in s3pe"), null, () => Safe(OpenInS3peAsync(r))) : null,
             ActionRow("folder-search", T("Show file"), null, () => ShowFile(r.File.Path))));
     }
@@ -293,7 +281,7 @@ public sealed partial class MainWindow
         var rows = new StackPanel();
         foreach (var (label, value) in facts)
         {
-            var g = new Grid { ColumnSpacing = 12, MinHeight = 44, Padding = new Thickness(16, 0, 16, 0), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, rows.Children.Count == 0 ? 0 : 1, 0, 0) };
+            var g = new Grid { ColumnSpacing = 12, MinHeight = 48, Padding = new Thickness(16, 0, 16, 0), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, rows.Children.Count == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.Children.Add(new TextBlock { Text = label, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
@@ -305,12 +293,19 @@ public sealed partial class MainWindow
         return PaneCard(rows);
     }
 
-    static TextBlock FactText(string t) => new() { Text = t, FontSize = 13, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Right, TextTrimming = TextTrimming.CharacterEllipsis };
+    static TextBlock FactText(string t) => new() { Text = t, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right, TextTrimming = TextTrimming.CharacterEllipsis };
 
     TextBox CreatorBox(string? who, bool guessed, bool mine, Action<string> save)
     {
-        var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 13, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Right, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0),
-            BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), IsReadOnly = !mine };
+        var none = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 13, TextAlignment = TextAlignment.Right, MinWidth = 0, MinHeight = 0, Height = 32, Padding = new Thickness(7, 6, 7, 6),
+            Margin = new Thickness(0, 0, -8, 0), BorderThickness = new Thickness(1), BorderBrush = none, Background = none, IsReadOnly = !mine }; // (its text stands on the other values' edge)
+        // (a value until the pointer or the keyboard is on it, then a field like any other)
+        foreach (var k in new[] { "TextControlBackgroundPointerOver", "TextControlBackgroundFocused" }) creator.Resources[k] = mine ? Res("ApexTileBrush") : none;
+        creator.Resources["TextControlBorderBrushPointerOver"] = none;
+        creator.Resources["TextControlBorderBrushFocused"] = mine ? Res("ApexAccentBrush") : none;
+        creator.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(1);
+        creator.Resources["TextControlPlaceholderForeground"] = creator.Resources["TextControlPlaceholderForegroundPointerOver"] = creator.Resources["TextControlPlaceholderForegroundFocused"] = Res("ApexMutedBrush");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(creator, T("Creator"));
         ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name. Type the maker's name to change it.") : T("The maker's name."));
         creator.LostFocus += (_, _) =>
@@ -323,13 +318,13 @@ public sealed partial class MainWindow
 
     static WrapPanel KindChips(ModRow r, bool chosen)
     {
-        var kinds = new WrapPanel { Spacing = 6 };
+        var kinds = new WrapPanel { Spacing = 8 };
         foreach (var k in r.Kinds.Take(8))
         {
-            var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-            chip.Children.Add(Lucide.Icon(KindIcon(k), 12, Res("ApexMutedBrush")));
-            chip.Children.Add(new TextBlock { Text = KindLabel(k), FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
-            kinds.Children.Add(new Border { Child = chip, Height = 26, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(13), Background = Res("ApexPillBrush") });
+            var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            chip.Children.Add(Lucide.Icon(KindIcon(k), 14, Res("ApexMutedBrush"), 1.75));
+            chip.Children.Add(new TextBlock { Text = KindLabel(k), FontSize = 13, Foreground = Res("ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center });
+            kinds.Children.Add(new Border { Child = chip, Height = 32, Padding = new Thickness(12, 0, 12, 0), CornerRadius = new CornerRadius(8), Background = Res("ApexTileBrush") });
         }
         if (chosen) kinds.Children.Add(new TextBlock { Text = T("Chosen by you"), FontSize = 11, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
         return kinds;
@@ -338,13 +333,13 @@ public sealed partial class MainWindow
     // a small heading with an optional link on its right
     StackPanel Section(string title, string? link, out HyperlinkButton? linkButton)
     {
-        var s = new StackPanel { Spacing = 8 };
+        var s = new StackPanel { Spacing = 12 };
         var head = new Grid();
-        head.Children.Add(new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+        head.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         linkButton = null;
         if (link is not null)
         {
-            linkButton = new HyperlinkButton { Content = link, Padding = new Thickness(0), FontSize = 12, HorizontalAlignment = HorizontalAlignment.Right };
+            linkButton = new HyperlinkButton { Content = link, Padding = new Thickness(0), FontSize = 13, HorizontalAlignment = HorizontalAlignment.Right };
             head.Children.Add(linkButton);
         }
         s.Children.Add(head);
@@ -416,15 +411,15 @@ public sealed partial class MainWindow
         else if (merge is not null && mine)
         {
             main = WideButton("scissors", T("Split into mods"), () => Safe(SplitAsync(r)));
-            main.Height = 36;
+            main.Height = Design.Size.ControlLarge;
             ToolTipService.SetToolTip(main, T("Split it into its {0} original mods", merge.Originals.Count));
         }
         else main = MainButton(m.Enabled ? T("Turn off") : T("Turn on"), () => SetMods([r], !r.File.Enabled), accent: !m.Enabled);
         f.Children.Add(main);
         void Icon(Button b)
         {
-            b.Width = 36;
-            b.Height = 36;
+            b.Width = Design.Size.ControlLarge;
+            b.Height = Design.Size.ControlLarge;
             b.BorderThickness = new Thickness(1);
             b.BorderBrush = Res("ApexCardBorderBrush");
             f.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -442,7 +437,7 @@ public sealed partial class MainWindow
     // (accent: the screen's main action; turning mods off is not one)
     static Button MainButton(string text, Action click, bool accent = true)
     {
-        var b = new Button { Content = text, HorizontalAlignment = HorizontalAlignment.Stretch, Height = 36 };
+        var b = new Button { Content = text, HorizontalAlignment = HorizontalAlignment.Stretch, Height = Design.Size.ControlLarge };
         if (accent) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         b.Click += (_, _) => click();
         return Dims(b);

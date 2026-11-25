@@ -754,7 +754,6 @@ public static partial class Strings
         ["Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it."] = "사용자 지정 월드는 Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds에 들어가요. 월드를 제거해도 그 월드에서 만든 저장 파일은 건드리지 않아요.",
         ["Downloads"] = "다운로드",
         ["Ended"] = "종료",
-        ["Everything"] = "모두",
         ["Everything it installed was removed. The files it replaced are back."] = "설치했던 모든 것이 제거됐어요. 교체했던 파일은 되돌아왔어요.",
         ["Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it."] = "실험적 빌드는 테스트용이며 문제가 생길 수 있어요. 채널을 바꾸면 ts3native.ini가 교체되고, 그 옆에 사본이 보관돼요.",
         ["Fix"] = "수정",

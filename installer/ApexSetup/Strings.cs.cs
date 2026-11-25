@@ -758,7 +758,6 @@ public static partial class Strings
         ["Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it."] = "Vlastní světy patří do Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; odebrání světa se nikdy nedotkne her v něm uložených.",
         ["Downloads"] = "Stažené",
         ["Ended"] = "Ukončeno",
-        ["Everything"] = "Vše",
         ["Everything it installed was removed. The files it replaced are back."] = "Vše, co nainstaloval, bylo odebráno. Soubory, které nahradil, jsou zpět.",
         ["Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it."] = "Experimentální sestavení jsou pro testery a mohou nefungovat. Přepnutí kanálu nahradí ts3native.ini; kopie se uloží vedle něj.",
         ["Fix"] = "Opravit",

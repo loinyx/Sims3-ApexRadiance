@@ -157,7 +157,7 @@
             <Button x:Name="LangButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Padding="10,4" Click="OnLanguage"
                     AutomationProperties.Name="Language">
                 <StackPanel Orientation="Horizontal" Spacing="6">
-                    <FontIcon Glyph="&#xE774;" FontSize="13" />
+                    <local:LucideIcon Kind="globe" Size="15" StrokeWidth="1.75" Follow="True" VerticalAlignment="Center" />
                     <TextBlock x:Name="LangText" Tag="dyn" FontSize="12" />
                 </StackPanel>
             </Button>
@@ -241,15 +241,15 @@
                                 <StackPanel Spacing="12">
                                     <TextBlock Text="What the launcher does" Style="{StaticResource ApexStrong}" FontSize="13" />
                                     <StackPanel Orientation="Horizontal" Spacing="12">
-                                        <FontIcon Glyph="&#xE721;" FontSize="16" Foreground="{ThemeResource ApexAccentBrush}" />
+                                        <local:LucideIcon Kind="search" Size="16" StrokeWidth="1.75" Stroke="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" />
                                         <TextBlock Text="Finds your The Sims 3 (Steam or EA app)." Style="{StaticResource ApexBody}" Foreground="{ThemeResource ApexSoftTextBrush}" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="12">
-                                        <FontIcon Glyph="&#xE896;" FontSize="16" Foreground="{ThemeResource ApexAccentBrush}" />
+                                        <local:LucideIcon Kind="download" Size="16" StrokeWidth="1.75" Stroke="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" />
                                         <TextBlock Text="Installs Apex Radiance and the fixes you choose." Style="{StaticResource ApexBody}" Foreground="{ThemeResource ApexSoftTextBrush}" MaxWidth="560" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="12">
-                                        <FontIcon Glyph="&#xE83D;" FontSize="16" Foreground="{ThemeResource ApexAccentBrush}" />
+                                        <local:LucideIcon Kind="shield-check" Size="16" StrokeWidth="1.75" Stroke="{ThemeResource ApexAccentBrush}" VerticalAlignment="Center" />
                                         <TextBlock Text="Keeps a copy of every file it changes, so you can undo everything." Style="{StaticResource ApexBody}" Foreground="{ThemeResource ApexSoftTextBrush}" MaxWidth="560" />
                                     </StackPanel>
                                 </StackPanel>
@@ -310,7 +310,7 @@
                             <TextBlock x:Name="NoGames" Text="The launcher didn't find the game. Choose the game folder." Style="{StaticResource ApexBody}" Visibility="Collapsed" />
                             <Button x:Name="GameBrowse" Click="OnBrowse">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE838;" FontSize="14" />
+                                    <local:LucideIcon Kind="folder-open" Size="16" StrokeWidth="1.75" Follow="True" VerticalAlignment="Center" />
                                     <TextBlock Text="Choose another folder" />
                                 </StackPanel>
                             </Button>
@@ -501,7 +501,7 @@
                                             <StackPanel x:Name="S3ppGet" Orientation="Horizontal" Spacing="8">
                                                 <Button Click="OnS3ppDownload">
                                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                                        <FontIcon Glyph="&#xE896;" FontSize="14" />
+                                                        <local:LucideIcon Kind="download" Size="16" StrokeWidth="1.75" Follow="True" VerticalAlignment="Center" />
                                                         <TextBlock Text="Download on Nexus Mods" />
                                                     </StackPanel>
                                                 </Button>
@@ -571,7 +571,7 @@
                         <!-- 4 Done -->
                         <StackPanel x:Name="ScreenDone" Spacing="14" Visibility="Collapsed" HorizontalAlignment="Center" Padding="0,24,0,0">
                             <Border x:Name="DoneCheck" Width="72" Height="72" CornerRadius="36" Background="{ThemeResource ApexSuccessSoftBrush}" HorizontalAlignment="Center">
-                                <FontIcon Glyph="&#xE73E;" FontSize="32" Foreground="{ThemeResource ApexSuccessBrush}" />
+                                <local:LucideIcon Kind="check" Size="32" StrokeWidth="1.75" Stroke="{ThemeResource ApexSuccessBrush}" VerticalAlignment="Center" />
                             </Border>
                             <!-- the install's end, in the welcome's own card (RefreshDone) -->
                             <Grid x:Name="DoneSplit" Tag="dyn" Visibility="Collapsed" />
@@ -892,12 +892,12 @@
                         </Grid>
                     </Grid>
                     <!-- the chosen mod (or several) -->
-                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="352" Margin="0,16,16,16" HorizontalAlignment="Right" Visibility="Collapsed" CornerRadius="16" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1" Background="{ThemeResource ApexCardBrush}">
+                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="368" Margin="0,16,16,16" HorizontalAlignment="Right" Visibility="Collapsed" CornerRadius="16" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1" Background="{ThemeResource ApexCardBrush}">
                         <Grid>
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                             <StackPanel x:Name="ModDetailsHead" />
                             <ScrollViewer Grid.Row="1">
-                                <StackPanel x:Name="ModDetails" Tag="dyn" Padding="20,20,20,24" Spacing="20" />
+                                <StackPanel x:Name="ModDetails" Tag="dyn" Padding="20,20,20,24" Spacing="24" />
                             </ScrollViewer>
                             <Grid x:Name="ModDetailsFoot" Grid.Row="2" Padding="20" ColumnSpacing="8" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="0,1,0,0" Visibility="Collapsed" />
                         </Grid>

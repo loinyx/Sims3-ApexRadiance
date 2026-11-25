@@ -766,7 +766,6 @@ public static partial class Strings
         ["Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it."] = "Οι προσαρμοσμένοι κόσμοι μπαίνουν στο Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds· η αφαίρεση ενός κόσμου δεν αγγίζει ποτέ τις αποθηκεύσεις που έγιναν σε αυτόν.",
         ["Downloads"] = "Λήψεις",
         ["Ended"] = "Τέλος",
-        ["Everything"] = "Όλα",
         ["Everything it installed was removed. The files it replaced are back."] = "Ό,τι εγκατέστησε αφαιρέθηκε. Τα αρχεία που αντικατέστησε επανήλθαν.",
         ["Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it."] = "Οι πειραματικές εκδόσεις είναι για δοκιμαστές και μπορεί να έχουν προβλήματα. Η αλλαγή καναλιού αντικαθιστά το ts3native.ini· ένα αντίγραφο κρατιέται δίπλα του.",
         ["Fix"] = "Διόρθωση",

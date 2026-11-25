@@ -535,25 +535,12 @@ public sealed partial class MainWindow
 
     static bool AnimationsOn => new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
 
-    // menus take an icon element: Windows' own Segoe Fluent glyphs that match the Lucide icons used elsewhere
-    static IconElement MenuIcon(string name, Brush? brush = null)
-    {
-        var glyph = name switch
-        {
-            "power" or "power-off" => "", "pencil" => "", "folder" => "", "folder-plus" => "", "folder-input" => "",
-            "folder-search" => "", "merge" => "", "trash-2" => "", "copy" => "", "tag" => "", "plus" => "",
-            "layers" => "", "sparkles" => "", "triangle-alert" => "", "plug" => "", "package" => "", "library" => "",
-            _ => "",
-        };
-        var i = new FontIcon { Glyph = glyph };
-        if (brush is not null) i.Foreground = brush;
-        return i;
-    }
+    static IconElement MenuIcon(string name, Brush? brush = null) => Lucide.Element(name, brush);
 
     static MenuFlyoutItem MenuItem(string text, Action click, string? icon = null, Windows.System.VirtualKey? key = null, bool danger = false)
     {
         var i = new MenuFlyoutItem { Text = text };
-        if (icon is not null) i.Icon = MenuIcon(icon);
+        if (icon is not null) i.Icon = MenuIcon(icon, danger ? Res("ApexErrorBrush") : null);
         if (key is { } k) i.KeyboardAcceleratorTextOverride = k == Windows.System.VirtualKey.Space ? T("Space") : k.ToString();
         if (danger) i.Foreground = Res("ApexErrorBrush");
         i.Click += (_, _) => click();
@@ -1889,7 +1876,7 @@ public sealed partial class MainWindow
 
     UIElement TagsRow(List<ModRow> rows)
     {
-        var wrap = new WrapPanel { Spacing = 6 };
+        var wrap = new WrapPanel { Spacing = 8 };
         var all = ModNotes.Tags.Where(t => rows.All(r => ModNotes.TagsOf(r.File.Rel).Contains(t.Name, StringComparer.OrdinalIgnoreCase))).ToList();
         foreach (var t in all)
         {
@@ -1901,12 +1888,12 @@ public sealed partial class MainWindow
             var name = t.Name;
             x.Click += (_, _) => TagMods(rows, name, false);
             chip.Children.Add(x);
-            wrap.Children.Add(new Border { Child = chip, Height = 28, Padding = new Thickness(10, 0, 4, 0), CornerRadius = new CornerRadius(12), Background = TagDot.BrushOf(t.Color, 0x26) });
+            wrap.Children.Add(new Border { Child = chip, Height = 32, Padding = new Thickness(12, 0, 6, 0), CornerRadius = new CornerRadius(8), Background = TagDot.BrushOf(t.Color, 0x26) });
         }
         var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        content.Children.Add(Lucide.Icon("tag", 12));
-        content.Children.Add(new TextBlock { Text = T("Add tag"), FontSize = 12 });
-        var add = new Button { Content = content, Height = 28, Padding = new Thickness(10, 0, 12, 0), CornerRadius = new CornerRadius(12), VerticalAlignment = VerticalAlignment.Center };
+        content.Children.Add(Lucide.Icon("plus", 14));
+        content.Children.Add(new TextBlock { Text = T("Add tag"), FontSize = 13 });
+        var add = new Button { Content = content, Height = 32, Padding = new Thickness(12, 0, 14, 0), CornerRadius = new CornerRadius(8), VerticalAlignment = VerticalAlignment.Center };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(add, T("Add tag"));
         add.Click += (_, _) => TagMenu(rows).ShowAt(add);
         wrap.Children.Add(add);

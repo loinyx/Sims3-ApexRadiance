@@ -15,20 +15,20 @@ public sealed partial class MainWindow
         var mine = picked.Where(Mine).ToList();
         var list = _modsGrid ? (ListViewBase)ModGrid : ModList;
         // (their pictures, one behind the other, in the place of the one mod's)
-        var stack = new Grid { Width = 60, Height = 60, VerticalAlignment = VerticalAlignment.Top };
+        var stack = new Grid { Width = 92, Height = 92, VerticalAlignment = VerticalAlignment.Top };
         var shown = picked.Take(3).ToList();
         for (var i = shown.Count - 1; i >= 0; i--)
         {
-            FrameworkElement glyph = shown[i].Image is { } own ? new Image { Source = own, Stretch = Stretch.Uniform, Margin = new Thickness(3) } : Lucide.Icon(shown[i].KindIcon, 20, shown[i].GlyphBrush, 1.7);
+            FrameworkElement glyph = shown[i].Image is { } own ? new Image { Source = own, Stretch = Stretch.Uniform, Margin = new Thickness(3) } : Lucide.Icon(shown[i].KindIcon, 26, shown[i].GlyphBrush, 1.6);
             glyph.HorizontalAlignment = HorizontalAlignment.Center;
             glyph.VerticalAlignment = VerticalAlignment.Center;
-            var step = 18 / Math.Max(1, shown.Count - 1);
+            var step = 28 / Math.Max(1, shown.Count - 1);
             // (the tile's own wash on an opaque base, so the tiles behind don't show through)
             stack.Children.Add(new Border
             {
-                Width = 42, Height = 42, CornerRadius = new CornerRadius(10), Background = Res("ApexRaisedBrush"), BorderBrush = Res("ApexPaneBrush"), BorderThickness = new Thickness(2),
-                HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(i * step, 18 - i * step, 0, 0),
-                Child = new Border { Background = shown[i].TileBrush, CornerRadius = new CornerRadius(8), Child = glyph },
+                Width = 64, Height = 64, CornerRadius = new CornerRadius(12), Background = Res("ApexRaisedBrush"), BorderBrush = Res("ApexPaneBrush"), BorderThickness = new Thickness(2),
+                HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(i * step, 28 - i * step, 0, 0),
+                Child = new Border { Background = shown[i].TileBrush, CornerRadius = new CornerRadius(10), Child = glyph },
             });
         }
         var kinds = picked.Select(r => r.Kind).Distinct().ToList();
@@ -40,7 +40,7 @@ public sealed partial class MainWindow
             mine.Count == 0 ? null : on == mine.Count ? T("all on") : on == 0 ? T("all off") : T("{0} on", on),
         }.OfType<string>());
         var title = T("{0} mods selected", picked.Count);
-        ModDetailsHead.Children.Add(HeadPanel(picked[0], null, stack, NameText(title, title), sub, null, [], T("Clear the selection")));
+        ModDetailsHead.Children.Add(HeadPanel(null, stack, null, NameText(title, title), sub, [], T("Clear the selection")));
         ModDetailsHead.Children.Add(new Border { Height = 1, Background = Res("ApexCardBorderBrush") });
 
         var host = ModDetails;
@@ -102,7 +102,7 @@ public sealed partial class MainWindow
         var allOn = on == mine.Count;
         foot.Children.Add(MainButton(allOn ? T("Turn all {0} off", mine.Count) : T("Turn all {0} on", mine.Count), () => SetMods(mine, !allOn), accent: !allOn));
         var remove = IconButton("trash-2", T("Move all {0} to the Recycle Bin", mine.Count), "ApexErrorBrush");
-        remove.Width = remove.Height = 36;
+        remove.Width = remove.Height = Design.Size.ControlLarge;
         remove.BorderThickness = new Thickness(1);
         remove.BorderBrush = Res("ApexCardBorderBrush");
         remove.Click += (_, _) => RemoveMods(mine);
@@ -145,7 +145,7 @@ public sealed partial class MainWindow
             Grid.SetColumn(both, 1);
             g.Children.Add(both);
         }
-        var b = new Button { Content = g, MinHeight = 44, Padding = new Thickness(14, 6, 14, 7), CornerRadius = new CornerRadius(7), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0),
+        var b = new Button { Content = g, MinHeight = 48, Padding = new Thickness(16, 6, 16, 7), CornerRadius = new CornerRadius(11), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
         b.Click += (_, _) => click();

@@ -870,7 +870,7 @@ public sealed partial class MainWindow : Window
         var muted = App.Brush("ApexMutedBrush");
         if (_updated is { } done)
         {
-            CardHeader(UpdateList, "\uE73E", "ApexSuccessBrush", T("Everything is up to date"), T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."));
+            CardHeader(UpdateList, "check", "ApexSuccessBrush", T("Everything is up to date"), T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."));
             foreach (var (name, from, to) in done.Rows) CardRow(UpdateList, new TextBlock { Text = name, FontSize = 14 }, from.Length > 0 ? $"{from} \u2192 {to}" : to, "ApexSuccessBrush");
             if (done.Point is { } p)
             {
@@ -880,7 +880,7 @@ public sealed partial class MainWindow : Window
             }
             return;
         }
-        CardHeader(UpdateList, "\uE896", "ApexAccentBrush", ups.Count == 1 ? T("1 update for The Sims 3 \u00b7 {0}", g.Label) : T("{0} updates for The Sims 3 \u00b7 {1}", ups.Count, g.Label),
+        CardHeader(UpdateList, "download", "ApexAccentBrush", ups.Count == 1 ? T("1 update for The Sims 3 \u00b7 {0}", g.Label) : T("{0} updates for The Sims 3 \u00b7 {1}", ups.Count, g.Label),
             T("The launcher makes a restore point before it changes any file, so you can undo this."));
         foreach (var c in ups)
         {
@@ -1031,7 +1031,7 @@ public sealed partial class MainWindow : Window
         var head = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 12 };
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
-        head.Children.Add(new FontIcon { Glyph = glyph, FontSize = 20, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 0, 0) });
+        head.Children.Add(new LucideIcon { Kind = glyph, Size = 20, Stroke = Res(brush), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 0, 0), StrokeWidth = 1.75 });
         var text = new StackPanel { Spacing = 2 };
         text.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
         foreach (var line in sub.Split('\n'))
@@ -1130,7 +1130,7 @@ public sealed partial class MainWindow : Window
         // (the header already says the game is current: "in place" only after a check the player asked for)
         var check = clean ? (_checkedAt is null ? "" : T("Everything is in place (checked at {0}).", _checkedAt))
             : _checkedAt is not null ? T("Checked at {0}.", _checkedAt) : "";
-        CardHeader(StatusList, clean ? "\uE73E" : "\uE7BA", clean ? "ApexSuccessBrush" : "ApexWarningBrush", T("The Sims 3 \u00b7 {0}", g.Label),
+        CardHeader(StatusList, clean ? "check" : "triangle-alert", clean ? "ApexSuccessBrush" : "ApexWarningBrush", T("The Sims 3 \u00b7 {0}", g.Label),
             string.Join("\n", new[] { g.Root, !_loading && !_offline && Updates().Count == 0 ? T("Everything in this game is up to date.") : "", check }.Where(x => x.Length > 0)));
         void Row(string name, string value, bool good) =>
             CardRow(StatusList, new TextBlock { Text = name, FontSize = 14 }, value, good ? "ApexMutedBrush" : "ApexAccentBrush");
@@ -2246,7 +2246,7 @@ public sealed partial class MainWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
         row.ColumnDefinitions.Add(new ColumnDefinition());
         var ring = new ProgressRing { Width = 16, Height = 16, IsActive = false };
-        var icon = new FontIcon { FontSize = 16 };
+        var icon = new LucideIcon { Size = 16, Follow = true, StrokeWidth = 1.75 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var label = new TextBlock { Text = text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
         var tail = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = App.Brush("ApexMutedBrush") };
@@ -2259,10 +2259,10 @@ public sealed partial class MainWindow : Window
             ring.IsActive = state == 1;
             ring.Visibility = state == 1 ? Visibility.Visible : Visibility.Collapsed;
             icon.Visibility = state == 1 ? Visibility.Collapsed : Visibility.Visible;
-            icon.Glyph = state == 3 ? "" : state == 2 ?"" : "";
-            icon.Foreground = App.Brush(state == 3 ? "ApexErrorBrush" : state == 2 ? "ApexSuccessBrush" : "ApexMutedBrush");
+            icon.Kind = state == 3 ? "circle-x" : state == 2 ?"check" : "circle";
+            icon.Stroke = App.Brush(state == 3 ? "ApexErrorBrush" : state == 2 ? "ApexSuccessBrush" : "ApexMutedBrush");
             label.Foreground = App.Brush(state is 0 or 4 ? "ApexMutedBrush" : "ApexSoftTextBrush");
-            if (state == 4) icon.Glyph = "\uE7A7"; // (undone: the undo arrow)
+            if (state == 4) icon.Kind = "undo-2"; // (undone: the undo arrow)
             tail.Text = state == 4 ? T("undone") : state == 3 ? T("stopped here") : "";
         };
     }

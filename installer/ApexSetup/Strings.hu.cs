@@ -767,7 +767,6 @@ public static partial class Strings
         ["Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it."] = "Az egyéni világok a Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds mappába kerülnek; egy világ eltávolítása sosem érinti a benne készült mentéseket.",
         ["Downloads"] = "Letöltések",
         ["Ended"] = "Véget ért",
-        ["Everything"] = "Minden",
         ["Everything it installed was removed. The files it replaced are back."] = "Minden általa telepített elem eltávolítva. Az általa lecserélt fájlok visszakerültek.",
         ["Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it."] = "A kísérleti verziók tesztelőknek szólnak, és hibásak lehetnek. A csatornaváltás lecseréli a ts3native.ini fájlt; mellette másolat marad.",
         ["Fix"] = "Javítás",

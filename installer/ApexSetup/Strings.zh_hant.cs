@@ -727,7 +727,6 @@ public static partial class Strings
         ["Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it."] = "自訂世界位於 Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds；移除世界絕不會影響在其中建立的存檔。",
         ["Downloads"] = "下載",
         ["Ended"] = "已結束",
-        ["Everything"] = "全部",
         ["Everything it installed was removed. The files it replaced are back."] = "它安裝的所有內容皆已移除。被它取代的檔案已還原。",
         ["Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it."] = "實驗性版本供測試者使用，可能會出問題。切換通道會取代 ts3native.ini；旁邊會保留一份副本。",
         ["Fix"] = "修正",

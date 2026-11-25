@@ -191,7 +191,7 @@ public sealed partial class MainWindow
         {
             ItemTemplate = EmptyCell(), SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = true, Padding = new Thickness(0),
             CanReorderItems = mine, CanDragItems = mine, AllowDrop = mine,
-            Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
+            Background = Res("ApexRaisedBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12),
         };
         AutomationProperties.SetName(list, T("Mods in this merge"));
         if (mine) AutomationProperties.SetHelpText(list, T("Alt with the up or down arrow moves a mod."));
@@ -735,7 +735,7 @@ public sealed partial class MainWindow
 
         var badges = new List<Border>();
         if (row.Defaults.IsDefault) badges.Add(StripBadge(T("Default replacement"), "replace", "#9CC7EE"));
-        ModDetailsHead.Children.Add(HeadPanel(row, back, PictureTile(row, KindIcon(row.Kinds[0]), o.Note?.Picture is not null), NameText(row.Name, row.File.Name), T("Inside the merge {0}", r.Name), null, badges));
+        ModDetailsHead.Children.Add(HeadPanel(back, PictureTile(row, KindIcon(row.Kinds[0]), o.Note?.Picture is not null), null, NameText(row.Name, row.File.Name), T("Inside the merge {0}", r.Name), badges));
         DetailsTabs(tabs, null);
 
         // the player's own words about it, kept with the merge
@@ -797,7 +797,7 @@ public sealed partial class MainWindow
 
     UIElement InnerTags(MergeOriginal o, Action<Action<ModNote>> change)
     {
-        var wrap = new WrapPanel { Spacing = 6 };
+        var wrap = new WrapPanel { Spacing = 8 };
         var have = o.Note?.Tags ?? [];
         void Tag(string name, bool on) => change(n =>
         {
@@ -813,12 +813,12 @@ public sealed partial class MainWindow
             AutomationProperties.SetName(x, T("Remove tag {0}", name));
             x.Click += (_, _) => Tag(name, false);
             chip.Children.Add(x);
-            wrap.Children.Add(new Border { Child = chip, Height = 28, Padding = new Thickness(10, 0, 4, 0), CornerRadius = new CornerRadius(12), Background = TagDot.BrushOf(color, 0x26) });
+            wrap.Children.Add(new Border { Child = chip, Height = 32, Padding = new Thickness(12, 0, 6, 0), CornerRadius = new CornerRadius(8), Background = TagDot.BrushOf(color, 0x26) });
         }
         var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         label.Children.Add(Lucide.Icon("tag", 12));
         label.Children.Add(new TextBlock { Text = T("Add tag"), FontSize = 12 });
-        var add = new Button { Content = label, Height = 28, Padding = new Thickness(10, 0, 12, 0), CornerRadius = new CornerRadius(12) };
+        var add = new Button { Content = label, Height = 32, Padding = new Thickness(12, 0, 14, 0), CornerRadius = new CornerRadius(8) };
         AutomationProperties.SetName(add, T("Add tag"));
         add.Click += (_, _) =>
         {

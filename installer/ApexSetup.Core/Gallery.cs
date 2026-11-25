@@ -80,7 +80,7 @@ public sealed class CustomAlbum
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
     public string Name { get; set; } = "";
-    public string Icon { get; set; } = "";        // a Segoe Fluent Icons glyph
+    public string Icon { get; set; } = "star";        // a Lucide icon's name (before 2.3: a sign of Windows' icon font)
     public List<string> Pictures { get; set; } = [];
     public string? Household { get; set; }     // the household it belongs to; null: the one most of its pictures belong to
     public string Key => Gallery.Mine + Id;

@@ -764,7 +764,6 @@ public static partial class Strings
         ["Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it."] = "Eigene Welten liegen in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; das Entfernen einer Welt berührt nie die darin erstellten Spielstände.",
         ["Downloads"] = "Downloads",
         ["Ended"] = "Beendet",
-        ["Everything"] = "Alles",
         ["Everything it installed was removed. The files it replaced are back."] = "Alles, was er installiert hat, wurde entfernt. Die ersetzten Dateien sind zurück.",
         ["Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it."] = "Experimentelle Builds sind für Tester und können Fehler haben. Ein Kanalwechsel ersetzt ts3native.ini; eine Kopie bleibt daneben.",
         ["Fix"] = "Beheben",

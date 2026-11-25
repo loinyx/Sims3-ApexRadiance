@@ -424,7 +424,7 @@ public sealed partial class MainWindow
                     if (await SaveCard.ImageOf(t.Result) is { } img) { pic.Children.Add(new Image { Source = img, Stretch = Stretch.UniformToFill }); if (smallBadge is not null) smallBadge.Visibility = Visibility.Visible; }
                     // a world without its own picture: its pack's icon, large, never a lot's picture
                     else if (packOf is not null) { var big = PackBadge(packOf, installed.FirstOrDefault(x => x.Pack == packOf).Dir, 72); big.HorizontalAlignment = HorizontalAlignment.Center; big.VerticalAlignment = VerticalAlignment.Center; pic.Children.Add(big); }
-                    else pic.Children.Add(new FontIcon { Glyph = "\uE909", FontSize = 28, Foreground = Res("ApexIconMutedBrush") });
+                    else pic.Children.Add(new LucideIcon { Kind = "globe", Size = 28, Stroke = Res("ApexIconMutedBrush"), StrokeWidth = 1.75 });
                 }, TaskScheduler.FromCurrentSynchronizationContext());
                 col.Children.Add(pic);
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(14, 10, 14, 12) };
@@ -1086,7 +1086,7 @@ public sealed partial class MainWindow
     static StackPanel Icon(string glyph, string text)
     {
         var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        s.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
+        s.Children.Add(new LucideIcon { Kind = glyph, Size = 14, Follow = true, StrokeWidth = 1.75 });
         s.Children.Add(new TextBlock { Text = text });
         return s;
     }

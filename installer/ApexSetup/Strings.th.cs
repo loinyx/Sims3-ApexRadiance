@@ -727,7 +727,6 @@ public static partial class Strings
         ["Custom worlds go in Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds; removing one never touches saves made in it."] = "โลกที่สร้างเองอยู่ใน Documents\\Electronic Arts\\The Sims 3\\InstalledWorlds การลบโลกจะไม่แตะต้องเซฟที่เล่นในโลกนั้น",
         ["Downloads"] = "ดาวน์โหลด",
         ["Ended"] = "สิ้นสุด",
-        ["Everything"] = "ทุกอย่าง",
         ["Everything it installed was removed. The files it replaced are back."] = "ทุกอย่างที่ติดตั้งไว้ถูกลบแล้ว ไฟล์ที่ถูกแทนที่กลับมาแล้ว",
         ["Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it."] = "เวอร์ชันทดลองมีไว้สำหรับผู้ทดสอบและอาจเสียหายได้ การเปลี่ยนช่องทางจะแทนที่ ts3native.ini โดยเก็บสำเนาไว้ข้าง ๆ",
         ["Fix"] = "แก้ไข",

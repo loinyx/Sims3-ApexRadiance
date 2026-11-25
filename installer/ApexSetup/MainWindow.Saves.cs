@@ -367,7 +367,7 @@ public sealed partial class MainWindow
         if (e.Kind == SaveKindOf.Here)
         {
             var play = MainButton("", () => Safe(PlayAsync(e.Look!.Save.Name, update: _settings.InstallUpdatesOnPlay)));
-            play.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { Lucide.Icon("play", 16, Res("ApexInkBrush")), new TextBlock { Text = T("Play"), FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center } } };
+            play.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { new LucideIcon { Solid = true, Kind = "play", Size = 14, Follow = true, StrokeWidth = 1.75, VerticalAlignment = VerticalAlignment.Center }, new TextBlock { Text = T("Play"), FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center } } };
             (play.MinWidth, play.Height, play.IsEnabled) = (136, 44, !_busy && !Maintenance && !_running);
             AutomationProperties.SetName(play, T("Play {0}", e.Name));
             AutomationProperties.SetAutomationId(play, "SavePlay");
