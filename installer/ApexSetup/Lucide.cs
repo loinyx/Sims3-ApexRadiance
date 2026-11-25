@@ -117,7 +117,51 @@ public static class Lucide
         ["upload"] = "M 12 3 v 12 M 17 8 l -5 -5 l -5 5 M 21 15 v 4 a 2 2 0 0 1 -2 2 H 5 a 2 2 0 0 1 -2 -2 v -4",
         ["play"] = "M 6 3 L 20 12 L 6 21 Z",
         ["external-link"] = "M 15 3 h 6 v 6 M 10 14 L 21 3 M 18 13 v 6 a 2 2 0 0 1 -2 2 H 5 a 2 2 0 0 1 -2 -2 V 8 a 2 2 0 0 1 2 -2 h 6",
+        ["settings"] = "M 12.22 2 h -.44 a 2 2 0 0 0 -2 2 v .18 a 2 2 0 0 1 -1 1.73 l -.43 .25 a 2 2 0 0 1 -2 0 l -.15 -.08 a 2 2 0 0 0 -2.73 .73 l -.22 .38 a 2 2 0 0 0 .73 2.73 l .15 .1 a 2 2 0 0 1 1 1.72 v .51 a 2 2 0 0 1 -1 1.74 l -.15 .09 a 2 2 0 0 0 -.73 2.73 l .22 .38 a 2 2 0 0 0 2.73 .73 l .15 -.08 a 2 2 0 0 1 2 0 l .43 .25 a 2 2 0 0 1 1 1.73 V 20 a 2 2 0 0 0 2 2 h .44 a 2 2 0 0 0 2 -2 v -.18 a 2 2 0 0 1 1 -1.73 l .43 -.25 a 2 2 0 0 1 2 0 l .15 .08 a 2 2 0 0 0 2.73 -.73 l .22 -.39 a 2 2 0 0 0 -.73 -2.73 l -.15 -.08 a 2 2 0 0 1 -1 -1.74 v -.5 a 2 2 0 0 1 1 -1.74 l .15 -.09 a 2 2 0 0 0 .73 -2.73 l -.22 -.38 a 2 2 0 0 0 -2.73 -.73 l -.15 .08 a 2 2 0 0 1 -2 0 l -.43 -.25 a 2 2 0 0 1 -1 -1.73 V 4 a 2 2 0 0 0 -2 -2 z M 9 12 A 3 3 0 1 0 15 12 A 3 3 0 1 0 9 12 Z",
+        ["save"] = "M 15.2 3 a 2 2 0 0 1 1.4 .6 l 3.8 3.8 a 2 2 0 0 1 .6 1.4 V 19 a 2 2 0 0 1 -2 2 H 5 a 2 2 0 0 1 -2 -2 V 5 a 2 2 0 0 1 2 -2 z M 17 21 v -7 a 1 1 0 0 0 -1 -1 H 8 a 1 1 0 0 0 -1 1 v 7 M 7 3 v 4 a 1 1 0 0 0 1 1 h 7",
+        ["newspaper"] = "M 4 22 h 16 a 2 2 0 0 0 2 -2 V 4 a 2 2 0 0 0 -2 -2 H 8 a 2 2 0 0 0 -2 2 v 16 a 2 2 0 0 1 -2 2 Z m 0 0 a 2 2 0 0 1 -2 -2 v -9 c 0 -1.1 .9 -2 2 -2 h 2 M 18 14 h -8 M 15 18 h -5 M 10 6 h 8 v 4 h -8 V 6 Z",
+        ["refresh-cw"] = "M 3 12 a 9 9 0 0 1 9 -9 9.75 9.75 0 0 1 6.74 2.74 L 21 8 M 21 3 v 5 h -5 M 21 12 a 9 9 0 0 1 -9 9 9.75 9.75 0 0 1 -6.74 -2.74 L 3 16 M 8 16 H 3 v 5",
+        ["sun"] = "M 8 12 A 4 4 0 1 0 16 12 A 4 4 0 1 0 8 12 Z M 12 2 v 2 M 12 20 v 2 m 4.93 4.93 1.41 1.41 m 17.66 17.66 1.41 1.41 M 2 12 h 2 M 20 12 h 2 m 6.34 17.66 -1.41 1.41 m 19.07 4.93 -1.41 1.41",
+        ["contrast"] = "M 2 12 A 10 10 0 1 0 22 12 A 10 10 0 1 0 2 12 Z M 12 18 a 6 6 0 0 0 0 -12 v 12 z",
+        ["shopping-bag"] = "M 6 2 3 6 v 14 a 2 2 0 0 0 2 2 h 14 a 2 2 0 0 0 2 -2 V 6 l -3 -4 Z M 3 6 h 18 M 16 10 a 4 4 0 0 1 -8 0",
+        ["images"] = "M 18 22 H 4 a 2 2 0 0 1 -2 -2 V 6 m 22 13 -1.296 -1.296 a 2.41 2.41 0 0 0 -3.408 0 L 11 18 M 10 8 A 2 2 0 1 0 14 8 A 2 2 0 1 0 10 8 Z M 8 2 H 20 A 2 2 0 0 1 22 4 V 16 A 2 2 0 0 1 20 18 H 8 A 2 2 0 0 1 6 16 V 4 A 2 2 0 0 1 8 2 Z",
+        ["activity"] = "M 22 12 h -2.48 a 2 2 0 0 0 -1.93 1.46 l -2.35 8.36 a .25 .25 0 0 1 -.48 0 L 9.24 2.18 a .25 .25 0 0 0 -.48 0 l -2.35 8.36 A 2 2 0 0 1 4.49 12 H 2",
+        ["memory-stick"] = "M 6 19 v -3 M 10 19 v -3 M 14 19 v -3 M 18 19 v -3 M 8 11 V 9 M 16 11 V 9 M 12 11 V 9 M 2 15 h 20 M 2 7 a 2 2 0 0 1 2 -2 h 16 a 2 2 0 0 1 2 2 v 1.1 a 2 2 0 0 0 0 3.837 V 17 a 2 2 0 0 1 -2 2 H 4 a 2 2 0 0 1 -2 -2 v -5.1 a 2 2 0 0 0 0 -3.837 Z",
+        ["wifi"] = "M 12 20 h .01 M 2 8.82 a 15 15 0 0 1 20 0 M 5 12.859 a 10 10 0 0 1 14 0 M 8.5 16.429 a 5 5 0 0 1 7 0",
+        ["footprints"] = "M 4 16 v -2.38 C 4 11.5 2.97 10.5 3 8 c .03 -2.72 1.49 -6 4.5 -6 C 9.37 2 10 3.8 10 5.5 c 0 3.11 -2 5.66 -2 8.68 V 16 a 2 2 0 1 1 -4 0 Z M 20 20 v -2.38 c 0 -2.12 1.03 -3.12 1 -5.62 -.03 -2.72 -1.49 -6 -4.5 -6 C 14.63 6 14 7.8 14 9.5 c 0 3.11 2 5.66 2 8.68 V 20 a 2 2 0 1 0 4 0 Z M 16 17 h 4 M 4 13 h 4",
+        ["book-open"] = "M 12 7 v 14 M 3 18 a 1 1 0 0 1 -1 -1 V 4 a 1 1 0 0 1 1 -1 h 5 a 4 4 0 0 1 4 4 4 4 0 0 1 4 -4 h 5 a 1 1 0 0 1 1 1 v 13 a 1 1 0 0 1 -1 1 h -6 a 3 3 0 0 0 -3 3 3 3 0 0 0 -3 -3 z",
+        ["hard-drive-download"] = "M 12 2 v 8 m 16 6 -4 4 -4 -4 M 4 14 H 20 A 2 2 0 0 1 22 16 V 20 A 2 2 0 0 1 20 22 H 4 A 2 2 0 0 1 2 20 V 16 A 2 2 0 0 1 4 14 Z M 6 18 h .01 M 10 18 h .01",
+        ["box"] = "M 21 8 a 2 2 0 0 0 -1 -1.73 l -7 -4 a 2 2 0 0 0 -2 0 l -7 4 A 2 2 0 0 0 3 8 v 8 a 2 2 0 0 0 1 1.73 l 7 4 a 2 2 0 0 0 2 0 l 7 -4 A 2 2 0 0 0 21 16 Z m 3.3 7 8.7 5 8.7 -5 M 12 22 V 12",
+        ["boxes"] = "M 2.97 12.92 A 2 2 0 0 0 2 14.63 v 3.24 a 2 2 0 0 0 .97 1.71 l 3 1.8 a 2 2 0 0 0 2.06 0 L 12 19 v -5.5 l -5 -3 -4.03 2.42 Z m 7 16.5 -4.74 -2.85 m 7 16.5 5 -3 M 7 16.5 v 5.17 M 12 13.5 V 19 l 3.97 2.38 a 2 2 0 0 0 2.06 0 l 3 -1.8 a 2 2 0 0 0 .97 -1.71 v -3.24 a 2 2 0 0 0 -.97 -1.71 L 17 10.5 l -5 3 Z m 17 16.5 -5 -3 m 17 16.5 4.74 -2.85 M 17 16.5 v 5.17 M 7.97 4.42 A 2 2 0 0 0 7 6.13 v 4.37 l 5 3 5 -3 V 6.13 a 2 2 0 0 0 -.97 -1.71 l -3 -1.8 a 2 2 0 0 0 -2.06 0 l -3 1.8 Z M 12 8 7.26 5.15 m 12 8 4.74 -2.85 M 12 13.5 V 8",
+        ["gift"] = "M 4 8 H 20 A 1 1 0 0 1 21 9 V 11 A 1 1 0 0 1 20 12 H 4 A 1 1 0 0 1 3 11 V 9 A 1 1 0 0 1 4 8 Z M 12 8 v 13 M 19 12 v 7 a 2 2 0 0 1 -2 2 H 7 a 2 2 0 0 1 -2 -2 v -7 M 7.5 8 a 2.5 2.5 0 0 1 0 -5 A 4.8 8 0 0 1 12 8 a 4.8 8 0 0 1 4.5 -5 2.5 2.5 0 0 1 0 5",
+        ["audio-waveform"] = "M 2 13 a 2 2 0 0 0 2 -2 V 7 a 2 2 0 0 1 4 0 v 13 a 2 2 0 0 0 4 0 V 4 a 2 2 0 0 1 4 0 v 13 a 2 2 0 0 0 4 0 v -4 a 2 2 0 0 1 2 -2",
+        ["cloud"] = "M 17.5 19 H 9 a 7 7 0 1 1 6.71 -9 h 1.79 a 4.5 4.5 0 1 1 0 9 Z",
+        ["link"] = "M 10 13 a 5 5 0 0 0 7.54 .54 l 3 -3 a 5 5 0 0 0 -7.07 -7.07 l -1.72 1.71 M 14 11 a 5 5 0 0 0 -7.54 -.54 l -3 3 a 5 5 0 0 0 7.07 7.07 l 1.71 -1.71",
+        ["user"] = "M 19 21 v -2 a 4 4 0 0 0 -4 -4 H 9 a 4 4 0 0 0 -4 4 v 2 M 8 7 A 4 4 0 1 0 16 7 A 4 4 0 1 0 8 7 Z",
+        ["archive"] = "M 3 3 H 21 A 1 1 0 0 1 22 4 V 7 A 1 1 0 0 1 21 8 H 3 A 1 1 0 0 1 2 7 V 4 A 1 1 0 0 1 3 3 Z M 4 8 v 11 a 2 2 0 0 0 2 2 h 12 a 2 2 0 0 0 2 -2 V 8 M 10 12 h 4",
+        ["history"] = "M 3 12 a 9 9 0 1 0 9 -9 9.75 9.75 0 0 0 -6.74 2.74 L 3 8 M 3 3 v 5 h 5 M 12 7 v 5 l 4 2",
+        ["clock"] = "M 2 12 A 10 10 0 1 0 22 12 A 10 10 0 1 0 2 12 Z M 12 6 12 12 16 14",
+        ["circle-alert"] = "M 2 12 A 10 10 0 1 0 22 12 A 10 10 0 1 0 2 12 Z M 12 8 L 12 12 M 12 16 L 12.01 16",
+        ["aperture"] = "M 2 12 A 10 10 0 1 0 22 12 A 10 10 0 1 0 2 12 Z m 14.31 8 5.74 9.94 M 9.69 8 h 11.48 m 7.38 12 5.74 -9.94 M 9.69 16 3.95 6.06 M 14.31 16 H 2.83 m 16.62 12 -5.74 9.94",
+        ["move-vertical"] = "M 12 2 v 20 m 8 18 4 4 4 -4 m 8 6 4 -4 4 4",
+        ["scan-line"] = "M 3 7 V 5 a 2 2 0 0 1 2 -2 h 2 M 17 3 h 2 a 2 2 0 0 1 2 2 v 2 M 21 17 v 2 a 2 2 0 0 1 -2 2 h -2 M 7 21 H 5 a 2 2 0 0 1 -2 -2 v -2 M 7 12 h 10",
     };
+
+    // the icon as a picture in one colour, for the controls that take no shape of ours (the side pane)
+    public static Microsoft.UI.Xaml.Media.Imaging.SvgImageSource Picture(string name, Windows.UI.Color ink, double stroke = 1.75)
+    {
+        var source = new Microsoft.UI.Xaml.Media.Imaging.SvgImageSource { RasterizePixelWidth = 60, RasterizePixelHeight = 60 };
+        var svg = FormattableString.Invariant($"<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='{Paths[name]}' fill='none' stroke='#{ink.R:X2}{ink.G:X2}{ink.B:X2}' stroke-width='{stroke}' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+        _ = Fill();
+        return source;
+        async Task Fill()
+        {
+            await stream.WriteAsync(System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.AsBuffer(System.Text.Encoding.UTF8.GetBytes(svg)));
+            stream.Seek(0);
+            await source.SetSourceAsync(stream);
+        }
+    }
 
     public static IReadOnlyCollection<string> Names => Paths.Keys;
 

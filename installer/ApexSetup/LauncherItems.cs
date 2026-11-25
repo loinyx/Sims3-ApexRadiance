@@ -79,24 +79,21 @@ public sealed class ModRow : INotifyPropertyChanged
         File = f;
         Findings = findings;
         Kinds = [f.Kind.ToString()];
-        // one soft hue per kind: the glyph in it, the tile a faint wash of it (calmer than solid blocks of colour)
-        var hue = f.Kind switch
-        {
-            ModKind.Script => Rgb(0x8E, 0x9C, 0xFF), ModKind.Cas => Rgb(0xF0, 0x8F, 0xC4), ModKind.Objects => Rgb(0xE8, 0xC4, 0x66),
-            ModKind.Lighting => Rgb(0xF2, 0xB2, 0x5C), ModKind.Sound => Rgb(0x62, 0xCB, 0xDD), ModKind.Textures => Rgb(0x93, 0xD2, 0x7C),
-            ModKind.Tuning => Rgb(0x6E, 0xD3, 0xA8), ModKind.Interface => Rgb(0xB5, 0x98, 0xF6),
-            ModKind.Asi => Rgb(0xA6, 0xAC, 0xCC),
-            _ => Rgb(0xA2, 0xA5, 0xB2),
-        };
-        GlyphBrush = new SolidColorBrush(hue);
-        TileBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x24, hue.R, hue.G, hue.B));
+        // (neutral, as every icon: a mod's picture is its colour)
+        GlyphBrush = App.Brush("ApexSoftTextBrush");
+        TileBrush = App.Brush("ApexTileBrush");
     }
 
     public Brush GlyphBrush { get; }
 
     // the row's checkbox mirrors the list's selection; a click on it adds or takes the row out (the screen's handler)
     bool _picked;
-    public bool Picked { get => _picked; set { if (_picked != value) { _picked = value; Changed(nameof(Picked)); } } }
+    public bool Picked { get => _picked; set { if (_picked != value) { _picked = value; Changed(nameof(Picked), nameof(CheckOpacity)); } } }
+    // the box on its picture: under the pointer, with the keyboard on it, or chosen
+    bool _over;
+    public double CheckOpacity => _over || _picked ? 1 : 0;
+    public void OnOver() { _over = true; Changed(nameof(CheckOpacity)); }
+    public void OnOut() { _over = false; Changed(nameof(CheckOpacity)); }
     public static Action<ModRow>? Check;
     public void OnCheck() => Check?.Invoke(this);
 

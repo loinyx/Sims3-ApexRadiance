@@ -128,7 +128,7 @@ public sealed partial class MainWindow
             ((FrameworkElement)rename.Content).Opacity = 0.7;
             rename.Click += (_, _) =>
             {
-                var box = new TextBox { Text = name, FontSize = 15, MinWidth = 0 };
+                var box = new TextBox { Text = name, FontSize = 16, MinWidth = 0 };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("New name"));
                 nameRow.HorizontalAlignment = HorizontalAlignment.Stretch;
                 nameRow.Children.Remove(nameText);
@@ -175,7 +175,7 @@ public sealed partial class MainWindow
 
     static TextBlock NameText(string name, string tip)
     {
-        var t = new TextBlock { Text = name, FontSize = 17, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        var t = new TextBlock { Text = name, FontSize = 16, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(t, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
         ToolTipService.SetToolTip(t, tip);
         return t;
@@ -196,16 +196,10 @@ public sealed partial class MainWindow
         return new Border { Width = 60, Height = 60, CornerRadius = new CornerRadius(12), Background = r.TileBrush, VerticalAlignment = VerticalAlignment.Top, Child = inside };
     }
 
-    // the head of one mod's details, on a faint wash of its colour: picture, name and what it is, close and the switch; its badges under them
+    // the head of one mod's details: picture, name and what it is, close and the switch; its badges under them
     UIElement HeadPanel(ModRow r, UIElement? above, FrameworkElement tile, UIElement name, string sub, ToggleSwitch? sw, List<Border> badges, string? closeTip = null)
     {
-        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(20, 16, 20, closeTip is null ? 10 : 18) };
-        if (r.TileBrush is SolidColorBrush wash)
-            panel.Background = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(0, 1),
-                GradientStops = { new GradientStop { Color = wash.Color, Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0, wash.Color.R, wash.Color.G, wash.Color.B), Offset = 1 } },
-            };
+        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(20, 20, 20, closeTip is null ? 12 : 20) };
         if (above is not null) panel.Children.Add(above);
         var g = new Grid { ColumnSpacing = 14 };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
@@ -291,7 +285,7 @@ public sealed partial class MainWindow
     }
 
     // what the pane's cards are made of: one surface, one corner
-    static Border PaneCard(UIElement child, Thickness padding = default) => new() { Child = child, Padding = padding, CornerRadius = new CornerRadius(8), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
+    static Border PaneCard(UIElement child, Thickness padding = default) => new() { Child = child, Padding = padding, CornerRadius = new CornerRadius(12), Background = Res("ApexRaisedBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
 
     // facts, one to a row: what it is on the left, the value on the right edge
     static Border Facts(params (string Label, FrameworkElement Value)[] facts)
@@ -299,7 +293,7 @@ public sealed partial class MainWindow
         var rows = new StackPanel();
         foreach (var (label, value) in facts)
         {
-            var g = new Grid { ColumnSpacing = 12, MinHeight = 40, Padding = new Thickness(14, 0, 14, 0), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, rows.Children.Count == 0 ? 0 : 1, 0, 0) };
+            var g = new Grid { ColumnSpacing = 12, MinHeight = 44, Padding = new Thickness(16, 0, 16, 0), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, rows.Children.Count == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.Children.Add(new TextBlock { Text = label, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });

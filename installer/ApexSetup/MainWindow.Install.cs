@@ -56,29 +56,27 @@ public sealed partial class MainWindow
         var list = new StackPanel();
         foreach (var (value, icon, title, text) in new[]
         {
-            (true, "hard-drive", T("Keep Apex Launcher on this PC"), T("In the Start menu and on the desktop")),
+            (true, "hard-drive", T("Keep Apex Launcher on this PC"), T("Recommended. In the Start menu and on the desktop")),
             (false, "folder", T("Keep it as a single file"), T("One file you can move anywhere")),
         })
         {
             var on = value == _doneInstall;
-            var g = new Grid { ColumnSpacing = 14 };
+            var g = new Grid { ColumnSpacing = Design.Space.IconToText };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var mark = Lucide.Icon(icon, 18, Res("ApexSoftTextBrush"));
-            mark.VerticalAlignment = VerticalAlignment.Center;
-            g.Children.Add(mark);
+            g.Children.Add(Design.IconTile.Of(icon));
             var s = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             s.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
             s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
             Grid.SetColumn(s, 1);
             g.Children.Add(s);
-            var check = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(1.5), VerticalAlignment = VerticalAlignment.Center,
-                BorderBrush = Res(on ? "ApexAccentBrush" : "ApexMutedBrush"),
-                Child = on ? new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Res("ApexAccentBrush") } : null };
+            var check = OptionDot();
+            check.VerticalAlignment = VerticalAlignment.Center;
+            OptionOn(check, on);
             Grid.SetColumn(check, 2);
             g.Children.Add(check);
-            var row = new Border { Child = g, Padding = new Thickness(16, 13, 16, 13), Background = on ? Res("ApexAccentSoftBrush") : null,
+            var row = new Border { Child = g, Padding = new Thickness(Design.Space.CardPad), Background = on ? Res("ApexAccentSoftBrush") : null,
                 BorderThickness = new Thickness(0, list.Children.Count > 0 ? 1 : 0, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
             var b = new Button { Content = row, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
@@ -86,7 +84,7 @@ public sealed partial class MainWindow
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title);
             list.Children.Add(b);
         }
-        DoneChoice.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"),
+        DoneChoice.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"),
             Background = Res("ApexHairlineBrush"), Margin = new Thickness(0, 10, 0, 0) });
     }
 

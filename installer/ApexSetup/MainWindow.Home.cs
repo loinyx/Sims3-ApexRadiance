@@ -137,7 +137,7 @@ public sealed partial class MainWindow
             Text = "The Sims 3", FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 48, FontWeight = FontWeights.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis, Foreground = text,
         });
-        words.Children.Add(new TextBlock { Text = _game is { } game ? (game.Label + " " + game.Version).Trim() : "", FontSize = 14, Foreground = soft });
+        words.Children.Add(new TextBlock { Text = _game is { } game ? string.Join(" \u00b7 ", new[] { (game.Label + " " + game.Version).Trim(), _state?.ApexVersion is { Length: > 0 } av ? "Apex Radiance " + av : "" }.Where(p => p.Length > 0)) : "", FontSize = 14, Foreground = soft });
         var acts = HomeActions();
         acts.Margin = new Thickness(0, 16, 0, 0);
         words.Children.Add(acts);
@@ -334,7 +334,7 @@ public sealed partial class MainWindow
             var photo = new Grid();
             tile.Children.Add(photo);
             var foot = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16, 0, 72, 14), Spacing = 1 };
-            var title = new TextBlock { Text = _homeNames.GetValueOrDefault(save.Dir) ?? name, FontSize = 15, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+            var title = new TextBlock { Text = _homeNames.GetValueOrDefault(save.Dir) ?? name, FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
             foot.Children.Add(title);
             var meta = Muted(Day(save.LastPlayed));
             meta.TextWrapping = TextWrapping.NoWrap;
@@ -426,9 +426,9 @@ public sealed partial class MainWindow
         }
         var liquid = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = wave, Height = wave, RadiusX = wave * 0.42, RadiusY = wave * 0.42, Fill = accent };
         Canvas.SetLeft(liquid, -28);
-        var (light, dark) = (Tri(accent), Tri(Res("TextOnAccentFillColorPrimaryBrush")));
+        var (light, dark) = (Tri(accent), Tri(Res("ApexOnAccentBrush")));
         var inside = new Grid { Width = size, Height = size, IsHitTestVisible = false, Opacity = play.IsEnabled ? 1 : 0.45,
-            Background = new SolidColorBrush(Pick(0xFF12402A, 0xFFBFEBD3)) };
+            Background = Res("ApexAccentSoftBrush") };
         foreach (var e in new UIElement[] { new Canvas { Children = { liquid } }, light, dark }) inside.Children.Add(e);
         (play.Width, play.Content) = (size, inside);
         (play.HorizontalAlignment, play.VerticalAlignment, play.Margin) = (HorizontalAlignment.Right, VerticalAlignment.Bottom, new Thickness(0, 0, 14, 14));
@@ -606,7 +606,7 @@ public sealed partial class MainWindow
             "solid" => null,
             _ => new MicaBackdrop(),
         };
-        if (_settings.Backdrop == "solid") Root.SetValue(Panel.BackgroundProperty, Res("ApexPaneBrush"));
-        else Root.ClearValue(Panel.BackgroundProperty);
+        // (the theme's pane over what Windows lets through: a tint of the wallpaper, never lighter than the page)
+        Root.Background = _settings.Backdrop == "solid" ? Res("ApexPaneBrush") : new SolidColorBrush(Tone("Pane", 0xE6));
     }
 }

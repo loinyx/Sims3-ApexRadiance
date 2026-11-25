@@ -100,6 +100,7 @@ function Open([string]$screen) {
     if (-not $id) { Nav $screen; return }
     Nav 'Settings'
     $b = ById $id
+    for ($i = 0; $i -lt 10 -and -not $b; $i++) { Start-Sleep -Milliseconds 300; $b = ById $id }
     if (-not $b) { throw "settings row $id not found" }
     Invoke $b
     Start-Sleep -Milliseconds 600

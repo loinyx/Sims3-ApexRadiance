@@ -46,12 +46,16 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         // (a test run can pick the theme; otherwise it is Windows')
         if (Environment.GetEnvironmentVariable("APEX_LAUNCHER_THEME") is { } pick) Root.RequestedTheme = pick == "light" ? ElementTheme.Light : ElementTheme.Dark;
+        else ApplyMode();
         _light = Root.ActualTheme == ElementTheme.Light;
+        Design.DesignSystem.Restate();
+        Design.DesignSystem.Into(Root.Resources);
         HandCursor.Watch(Root);
         ApplyBackdrop();
         ThemeChrome();
+        NavIcons();
         Root.ActualThemeChanged += (_, _) => ThemeChanged();
-        _ui.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(ThemeChanged);
+        _ui.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(() => { if (_settings.Theme == Design.Theme.Windows) Design.DesignSystem.Apply(_settings.Theme); ThemeChanged(); });
         // status bars in a dark tint of their colour (the window's own resources: read before any bar draws), not the default
         // olive and brown
         // the log's context line: the game, its edition and version, the renderer and the loaders Setup found
@@ -482,14 +486,16 @@ public sealed partial class MainWindow : Window
         {
             ComponentsStep or WizardSettings when _running && Wizard => T("Waiting for the game to close\u2026"),
             GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."),
-            GameSettingsScreen when _running => T("Close The Sims 3 to continue"),
+            GameStep when Wizard && _gameAllSet => T("All set to install."),
+            GameSettingsScreen => _running ? T("Close The Sims 3 to continue") : GameSettingsCount() > 0 ? T("Each file is copied before it changes.") : "",
+            WizardSettings => T("Each file is copied before it changes."),
             InstallStep when Wizard && _busy => T("Don't close the window."),
             ComponentsStep when _loading => T("Checking the latest versions\u2026"),
             ComponentsStep when _offline && wa.Count > 0 && _releaseError is { } le => T(le.Key, le.Args),
             ComponentsStep when _offline && wa.Count > 0 => T("The launcher needs an internet connection to download files."),
             ComponentsStep when work.Count == 0 && !fixes => "",
             ComponentsStep when _state?.ApexVersion is null && Engine.DownloadEstimate(wa, c => Repo.GetValueOrDefault(c) is { } r ? _latest.GetValueOrDefault(r) : null) is var bytes
-                => T("About {0} MB to download", Math.Max(1, bytes >> 20)),
+                => T("About {0} MB to download \u00b7 nothing changes until you install", Math.Max(1, bytes >> 20)),
             // what Apply will change in the drivers and Apex's settings (the components show theirs on their rows)
             ComponentsStep when work.Count > 0 => T("To apply: {0}", string.Join(", ", wa.Select(Name).Concat(wd.Select(c => T("remove {0}", Name(c)))).Concat(settings))),
             _ => "",
@@ -510,6 +516,12 @@ public sealed partial class MainWindow : Window
         FirstGame.Text = _game is not null ? "The Sims 3" : T("The launcher didn't find the game. Choose the game folder.");
         FirstGameStore.Text = _game is { } g ? (g.Label + " " + g.Version).Trim() : "";
         FirstGameIcon.Visibility = FirstGameStore.Visibility = _game is null ? Visibility.Collapsed : Visibility.Visible;
+        FirstGameIcon.Child = Design.IconTile.Of("gamepad-2");
+        FirstSide.Children.Clear();
+        FirstSide.Children.Add(SplitSide());
+        FirstPoints.Children.Clear();
+        FirstPoints.Children.Add(SplitPoint("gauge", T("Ready in about 2 minutes"), T("With the recommended mods already chosen")));
+        FirstPoints.Children.Add(SplitPoint("shield-check", T("You can undo everything later"), T("Each file comes from its author's GitHub")));
         Steps(StepsGame, 1);
         Steps(StepsComponents, 2);
         Steps(StepsRenderer, 2);
@@ -533,17 +545,19 @@ public sealed partial class MainWindow : Window
         var on = Wizard;
         if (!on && _step is not (GameStep or ComponentsStep or RendererStep or WizardSettings or InstallStep or DoneStep)) _wizardFlow = false;
         Nav.IsPaneVisible = !on;
-        ContentFrame.MaxWidth = on ? 760 : double.PositiveInfinity;
+        ContentFrame.MaxWidth = on ? 840 : double.PositiveInfinity;
         ContentFrame.HorizontalAlignment = HorizontalAlignment.Stretch; // (with MaxWidth: the card keeps its width, centred, whatever the step holds)
         ContentFrame.VerticalAlignment = on ? VerticalAlignment.Center : VerticalAlignment.Stretch;
         ContentFrame.Margin = new Thickness(on ? 24 : 0);
-        ContentFrame.CornerRadius = new CornerRadius(on ? 24 : 0);
+        ContentFrame.CornerRadius = new CornerRadius(on ? 16 : 0);
         ContentFrame.BorderThickness = new Thickness(on ? 1 : 0);
         ContentFrame.BorderBrush = on ? Res("ApexCardBorderBrush") : null;
         ContentFrame.Background = on ? Res("ApexCardBrush") : null;
         ContentFrame.MaxHeight = on && Nav.ActualHeight > 0 ? Math.Max(320, Nav.ActualHeight - 48) : double.PositiveInfinity;
         BackButton.MinHeight = NextButton.MinHeight = on ? 40 : 36; // (one height through the install, the welcome and the move)
-        if (on) Scroller.Padding = new Thickness(32, 24, 32, 0);
+        var split = on && _step == DoneStep && _doneClean; // (its card reaches the edges)
+        if (on) Scroller.Padding = split ? new Thickness(0) : new Thickness(32, 28, 32, 0);
+        if (on) Screens.Margin = new Thickness(0, 0, 0, split ? 0 : 32);
         // the card's own header: Apex Radiance and the steps (each screen's own steps row then stays hidden)
         WizardBrand.Visibility = on && !(_step == DoneStep && _doneClean) ? Visibility.Visible : Visibility.Collapsed; // (the install's end has its own logo)
         foreach (var host in new[] { StepsGame, StepsComponents, StepsRenderer, StepsInstall }) host.Visibility = on || host.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -582,8 +596,7 @@ public sealed partial class MainWindow : Window
         GameRunningNotice.Visibility = GameRunningNotice.IsOpen ? Visibility.Visible : Visibility.Collapsed;
         WizardComponents.Opacity = on && (_running || _offline) ? 0.55 : 1;
         if (!list) return;
-        FrameworkElement IconBox(string icon) => new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Pick(0xFF232323, 0xFFF0F0F0)),
-            VerticalAlignment = VerticalAlignment.Center, Child = Lucide.Icon(icon, 18, Res("ApexSoftTextBrush")) };
+        FrameworkElement IconBox(string icon) => RowIcon(icon);
         // (a control of the hidden cards moved into a row: it keeps its handlers and state; where it sits is kept here, since
         // a control of a card never shown tells no parent)
         FrameworkElement Adopt(FrameworkElement e, Border card)
@@ -598,7 +611,7 @@ public sealed partial class MainWindow : Window
         // (one rule for every state: quiet grey, a warning in its colour)
         TextBlock? StateText(string text, Brush? brush) => wizard || text.Length == 0 ? null : new TextBlock
         {
-            Text = text, FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis,
+            Text = text, FontSize = 13, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis,
             Foreground = ReferenceEquals(brush, Res("ApexWarningBrush")) || ReferenceEquals(brush, Res("ApexErrorBrush")) ? brush : Res("ApexMutedBrush"),
         };
         TextBlock? State(TextBlock pill) => StateText(pill.Text, pill.Foreground) is { } t ? Tip(t) : null;
@@ -630,7 +643,7 @@ public sealed partial class MainWindow : Window
         void Label(string text)
         {
             WizardRows.Children.Add(wizard
-                ? new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(0, 14, 0, 2) }
+                ? new TextBlock { Text = text, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexSoftTextBrush"), Margin = new Thickness(0, 20, 0, 8) }
                 : Section(text));
             group = null;
         }
@@ -640,7 +653,7 @@ public sealed partial class MainWindow : Window
             if (group is null)
             {
                 group = new StackPanel();
-                WizardRows.Children.Add(new Border { Child = group, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexHairlineBrush") });
+                WizardRows.Children.Add(new Border { Child = group, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexRaisedBrush") });
             }
             if (group.Children.Count > 0) { row.BorderThickness = new Thickness(0, 1, 0, 0); row.BorderBrush = Res("ApexHairlineBrush"); }
             group.Children.Add(row);
@@ -648,6 +661,9 @@ public sealed partial class MainWindow : Window
         foreach (var other in OtherModsSection.Children.OfType<Border>())
         {
             Soft(other);
+            Join(other);
+            // (their icons in the rows' own tile)
+            if (other.Child is Grid { Children: [Border old, ..] } cells && old.Child is LucideIcon kind) { var tile = RowIcon(kind.Kind); cells.Children.RemoveAt(0); cells.Children.Insert(0, tile); }
             if (other.Child is Grid row && _tight.TryAdd(row, row)) Tight(row);
         }
         // a narrow window: the words of a row get the room its state and control can spare
@@ -659,10 +675,10 @@ public sealed partial class MainWindow : Window
         };
         Border Card(UIElement child, double pad)
         {
-            if (wizard) return new Border { Child = child, Padding = new Thickness(16, 12, 16, 12), MinHeight = 62 };
-            var b = new Border { Child = child, CornerRadius = new CornerRadius(8), Padding = new Thickness(20, pad, 20, pad), MinHeight = 68 };
+            if (wizard) return new Border { Child = child, Padding = new Thickness(Design.Space.RowPad, 12, Design.Space.RowPad, 12), MinHeight = Design.Size.Row };
+            var b = new Border { Child = child, CornerRadius = new CornerRadius(12), Padding = new Thickness(20, pad, 20, pad), MinHeight = 68 };
             Soft(b);
-            return b;
+            return pad == 8 ? Join(b) : b;
         }
         // one row: icon, name and one line, its state in a column of its own, the controls on the right; every row the same height
         void Row(FrameworkElement icon, string name, string text, string? pill, FrameworkElement? state, bool changes, params FrameworkElement?[] ends)
@@ -671,7 +687,7 @@ public sealed partial class MainWindow : Window
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(wizard ? 0 : 152) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = wizard ? GridLength.Auto : new GridLength(200) });
             icon.VerticalAlignment = VerticalAlignment.Center;
             g.Children.Add(icon);
             var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
@@ -684,7 +700,7 @@ public sealed partial class MainWindow : Window
                     Child = new TextBlock { Text = pill, FontSize = 11, FontWeight = wizard ? FontWeights.SemiBold : FontWeights.Normal, Foreground = Res(wizard ? "ApexAccentTextBrush" : "ApexMutedBrush") },
                 });
             words.Children.Add(title);
-            var line = new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2 };
+            var line = new TextBlock { Text = text, FontSize = 13, LineHeight = 18, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2 };
             ToolTipService.SetToolTip(line, text);
             words.Children.Add(line);
             Grid.SetColumn(words, 1);
@@ -726,8 +742,14 @@ public sealed partial class MainWindow : Window
             }
             return t;
         }
-        // Apex Radiance on top, set apart with its version and whether it is up to date
-        if (!wizard)
+        // Apex Radiance on top: the first row of the install's list; in Components a card of its own with its version and state
+        if (wizard)
+        {
+            var mark = new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = Design.Size.Tile, Height = Design.Size.Tile };
+            Row(mark, "Apex Radiance" + (Latest(Components.Apex) is { } v ? " " + v : ""), T("Lighting, picture and performance"), null, null, false,
+                new TextBlock { Text = T("Always included"), FontSize = 13, Foreground = Res("ApexMutedBrush") });
+        }
+        else
         {
             var have = _state?.ApexVersion;
             var latest = Latest(Components.Apex);
@@ -736,31 +758,22 @@ public sealed partial class MainWindow : Window
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 52, Height = 52, VerticalAlignment = VerticalAlignment.Center });
-            var words = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
-            words.Children.Add(new TextBlock { Text = "Apex Radiance", FontSize = 18, FontWeight = FontWeights.SemiBold });
-            words.Children.Add(new TextBlock { Text = T("Lighting, picture and performance for The Sims 3."), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
+            g.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 48, Height = 48, VerticalAlignment = VerticalAlignment.Center });
+            var words = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+            words.Children.Add(new TextBlock { Text = "Apex Radiance", FontSize = 20, FontWeight = FontWeights.SemiBold });
+            words.Children.Add(new TextBlock { Text = T("Lighting, picture and performance for The Sims 3."), FontSize = 13, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
             Grid.SetColumn(words, 1); g.Children.Add(words);
             var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
             var version = apexUpdate && have is not null && latest is not null ? have + " \u2192 " + latest : have;
-            if (version is { Length: > 0 }) right.Children.Add(new TextBlock { Text = version, FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+            if (version is { Length: > 0 }) right.Children.Add(new TextBlock { Text = version, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
             var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             if (!apexUpdate) chip.Children.Add(Lucide.Icon("check", 13, Res("ApexSoftTextBrush")));
             chip.Children.Add(new TextBlock { Text = apexUpdate ? T("Update ready") : T("Up to date"), FontSize = 12, Foreground = Res("ApexSoftTextBrush") });
             right.Children.Add(new Border { Child = chip, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 4, 10, 5), VerticalAlignment = VerticalAlignment.Center });
             Grid.SetColumn(right, 2); g.Children.Add(right);
-            var hero = Card(g, 18);
+            var hero = Card(g, 20);
             hero.MinHeight = 88;
             hero.CornerRadius = new CornerRadius(12);
-            // (the glow sits behind the card's own fill: a gradient from the logo's purple at the left into the card colour)
-            var fill = ((SolidColorBrush)Res("ApexCardBrush")).Color;
-            var glow = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 0.6) };
-            glow.GradientStops.Add(new GradientStop { Color = Blend(fill, Windows.UI.Color.FromArgb(255, 0x9B, 0x7B, 0xF0), _light ? 0.10 : 0.16), Offset = 0 });
-            glow.GradientStops.Add(new GradientStop { Color = Blend(fill, Windows.UI.Color.FromArgb(255, 0x3F, 0xD1, 0x8C), _light ? 0.04 : 0.05), Offset = 0.45 });
-            glow.GradientStops.Add(new GradientStop { Color = fill, Offset = 1 });
-            hero.Background = glow;
-            hero.PointerEntered += (_, _) => hero.Background = glow;
-            hero.PointerExited += (_, _) => hero.Background = glow;
             WizardRows.Children.Add(hero);
         }
         S3ssDot.Visibility = Changes(Components.S3ss) ? Visibility.Visible : Visibility.Collapsed;
@@ -903,23 +916,69 @@ public sealed partial class MainWindow : Window
     static void Soft(Border b)
     {
         b.Background = Res("ApexCardBrush");
-        b.BorderBrush = new SolidColorBrush(Pick(0xFF212121, 0xFFE4E4E4));
+        b.BorderBrush = Res("ApexCardBorderBrush");
         b.BorderThickness = new Thickness(1);
         if (!_softened.TryAdd(b, _softened)) return;
-        b.PointerEntered += (_, _) => b.Background = new SolidColorBrush(Pick(0xFF1C1C1C, 0xFFFAFAFA));
+        b.PointerEntered += (_, _) => b.Background = Res("ApexHoverBrush");
         b.PointerExited += (_, _) => b.Background = Res("ApexCardBrush");
+    }
+    // rows one under another are one card: a line between them, the corners only on the first and the last
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Border, object> _joined = new();
+    static Border Join(Border b)
+    {
+        if (!_joined.TryAdd(b, _joined)) return b;
+        b.Loaded += (_, _) => Rejoin(b.Parent as Panel);
+        b.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => Rejoin(b.Parent as Panel));
+        return b;
+    }
+    static void Rejoin(Panel? p)
+    {
+        if (p is null) return;
+        var gap = p is StackPanel s ? s.Spacing : 0;
+        var rows = p.Children.Where(c => c.Visibility == Visibility.Visible).ToList();
+        bool Row(int i) => i >= 0 && i < rows.Count && rows[i] is Border r && _joined.TryGetValue(r, out _);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (!Row(i)) continue;
+            var b = (Border)rows[i];
+            bool above = Row(i - 1), below = Row(i + 1);
+            const double r = Design.Radius.Card;
+            b.CornerRadius = new CornerRadius(above ? 0 : r, above ? 0 : r, below ? 0 : r, below ? 0 : r);
+            b.BorderThickness = new Thickness(1, 1, 1, below ? 0 : 1);
+            b.Margin = new Thickness(0, above ? -gap : 0, 0, 0);
+        }
     }
     static Windows.UI.Color Pick(uint dark, uint light) { var c = _light ? light : dark; return Windows.UI.Color.FromArgb((byte)(c >> 24), (byte)(c >> 16), (byte)(c >> 8), (byte)c); }
     // the accent as text and icons: light on dark, deep on light
-    static Windows.UI.Color AccentInk => Accent(_light ? Windows.UI.ViewManagement.UIColorType.AccentDark2 : Windows.UI.ViewManagement.UIColorType.AccentLight2);
+    static Windows.UI.Color AccentInk => Tone("Accent");
     static Windows.UI.Color Mix(Windows.UI.Color a, Windows.UI.Color b, double k) =>
         Windows.UI.Color.FromArgb(255, (byte)(a.R + (b.R - a.R) * k), (byte)(a.G + (b.G - a.G) * k), (byte)(a.B + (b.B - a.B) * k));
+
+    // the window in Windows' dark or light, or always in one of them
+    void ApplyMode() => Root.RequestedTheme = _settings.Mode switch { "dark" => ElementTheme.Dark, "light" => ElementTheme.Light, _ => ElementTheme.Default };
+
+    // a colour of the theme in use, by its name in Design/Themes.cs
+    static Windows.UI.Color Tone(string name, byte? alpha = null) => Design.DesignSystem.Now[name] is var c && alpha is { } a ? Windows.UI.Color.FromArgb(a, c.R, c.G, c.B) : Design.DesignSystem.Now[name];
+
+    // the side pane's icons, of the same family as every other, in the text's colour
+    static readonly Dictionary<string, string> NavIcon = new()
+    {
+        ["8"] = "house", ["2"] = "blocks", ["16"] = "sliders-horizontal", ["9"] = "puzzle", ["10"] = "globe", ["11"] = "save", ["15"] = "image", ["12"] = "heart-pulse", ["13"] = "newspaper", ["14"] = "settings",
+    };
+    void NavIcons()
+    {
+        foreach (var i in Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>())
+            if (i.Tag is string tag && NavIcon.TryGetValue(tag, out var name)) i.Icon = new ImageIcon { Source = Lucide.Picture(name, Tone("SoftText")) };
+    }
 
     void ThemeChanged()
     {
         var light = Root.ActualTheme == ElementTheme.Light;
         _light = light;
+        Design.DesignSystem.Restate();
+        ApplyBackdrop();
         ThemeChrome();
+        NavIcons();
         // (the folder pane and the rows hold brushes of the old theme; RefreshAll builds the screen in use, the Gallery too)
         _folderSig = "";
         foreach (var r in _modRows) r.Refresh();
@@ -928,15 +987,16 @@ public sealed partial class MainWindow : Window
 
     // the status bars in a tint of their colour and the window's caption buttons, for the theme in use
     // (one brush each, its colour changed with the theme: what is on screen follows at once)
-    readonly SolidColorBrush QuietBox = new(), _over = new(), _overEdge = new();
+    readonly SolidColorBrush QuietBox = new(), _over = new(), _overEdge = new(), _content = new(), _contentEdge = new(), _calm = new(), _calmInk = new();
 
     void ThemeChrome()
     {
         foreach (var (key, dark, light) in new[] { ("Success", 0xFF14231Bu, 0xFFE4F3EAu), ("Warning", 0xFF2A2214u, 0xFFFBF1DFu), ("Error", 0xFF2C1718u, 0xFFFBE6E5u), ("Informational", 0xFF1E1E1Eu, 0xFFEFEFEFu) })
             Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = new SolidColorBrush(Pick(dark, light));
         // (the boxes of the list: drawn to be found, not to be seen first)
-        (QuietBox.Color, _over.Color, _overEdge.Color) = (Pick(0xFF4A4A4A, 0xFFB4B4B4), Pick(0xFF1C1C1C, 0xFFFCFCFC), Pick(0xFF333333, 0xFFDCDCDC));
-        ModList.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = ModListHead.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
+        (QuietBox.Color, _over.Color, _overEdge.Color) = (Tone("InputBorderHover"), Tone("Raised"), Tone("InputBorder"));
+        ModListHead.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
+        ModList.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = ModList.Resources["CheckBoxCheckBackgroundStrokeUncheckedPointerOver"] = Res("ApexSoftTextBrush");
         // (what opens over a screen: one quiet surface with an edge of its own. Here and not in App.xaml: a theme dictionary there
         // does not reach these. A contrast theme keeps its own)
         if (!new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast)
@@ -944,17 +1004,27 @@ public sealed partial class MainWindow : Window
             foreach (var key in new[] { "FlyoutPresenterBackground", "MenuFlyoutPresenterBackground", "ComboBoxDropDownBackground" }) Application.Current.Resources[key] = _over;
             foreach (var key in new[] { "FlyoutBorderThemeBrush", "MenuFlyoutPresenterBorderBrush", "ComboBoxDropDownBorderBrush" }) Application.Current.Resources[key] = _overEdge;
         }
+        (_content.Color, _contentEdge.Color) = (Tone("Content"), Tone("CardBorder"));
+        Nav.Resources["NavigationViewContentBackground"] = _content;
+        Nav.Resources["NavigationViewContentGridBorderBrush"] = _contentEdge;
+        // (a list of switches that are nearly all on: quiet ones, so the few that are off and the chosen mods are what stands out)
+        (_calm.Color, _calmInk.Color) = (Tone(_light ? "SoftText" : "InputBorderHover"), Windows.UI.Color.FromArgb(255, 255, 255, 255));
+        foreach (var state in new[] { "", "PointerOver", "Pressed" })
+        {
+            ModList.Resources["ToggleSwitchFillOn" + state] = ModList.Resources["ToggleSwitchStrokeOn" + state] = _calm;
+            ModList.Resources["ToggleSwitchKnobFillOn" + state] = _calmInk;
+        }
         // Mods' two views, as the gallery's: the one in use on a quiet pill
         foreach (var view in new[] { ModsViewList, ModsViewGallery })
             foreach (var state in new[] { "", "PointerOver", "Pressed" })
-                view.Resources["ToggleButtonBackgroundChecked" + state] = new SolidColorBrush(Pick(0xFF2C2C2C, 0xFFE5E5E5));
+                view.Resources["ToggleButtonBackgroundChecked" + state] = Res("ApexSelectedBrush");
         if (AppWindow?.TitleBar is { } bar)
         {
             var fg = _light ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
             bar.ButtonForegroundColor = fg;
             bar.ButtonHoverForegroundColor = fg;
             bar.ButtonPressedForegroundColor = fg;
-            bar.ButtonInactiveForegroundColor = Pick(0xFF8E8E8E, 0xFF8C8C8C);
+            bar.ButtonInactiveForegroundColor = Tone("Muted");
             bar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
             bar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
             bar.ButtonHoverBackgroundColor = Pick(0x1AFFFFFF, 0x12000000);
@@ -967,9 +1037,9 @@ public sealed partial class MainWindow : Window
         var head = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 12 };
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
-        head.Children.Add(new FontIcon { Glyph = glyph, FontSize = 18, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 0, 0) });
+        head.Children.Add(new FontIcon { Glyph = glyph, FontSize = 20, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 0, 0) });
         var text = new StackPanel { Spacing = 2 };
-        text.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        text.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
         foreach (var line in sub.Split('\n'))
             text.Children.Add(new TextBlock { Text = line, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
         Grid.SetColumn(text, 1);
@@ -1625,7 +1695,7 @@ public sealed partial class MainWindow : Window
                     HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(radio, RendererShort(r));
                 radio.Checked += (_, _) => { if (_fillingRenderer) return; _renderer = r; RefreshComponents(); };
-                var card = new Border { Child = radio, CornerRadius = new CornerRadius(16), BorderThickness = new Thickness(1) };
+                var card = new Border { Child = radio, CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1) };
                 RendererCards.ColumnDefinitions.Add(new ColumnDefinition());
                 Grid.SetColumn(card, RendererCards.Children.Count);
                 RendererCards.Children.Add(card);
@@ -1636,15 +1706,8 @@ public sealed partial class MainWindow : Window
         {
             var on = r == _renderer;
             radio.IsChecked = on;
-            card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
-            card.Background = on ? Res("ApexAccentSoftBrush") : Res("ApexHairlineBrush");
-            // (the card's own radio dot and icon follow the choice)
-            if (radio.Content is Grid item && item.Tag is (Border dot, Border icon))
-            {
-                dot.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexMutedBrush");
-                dot.Child = on ? new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Res("ApexAccentBrush") } : null;
-                icon.Background = on ? Res("ApexAccentSoftBrush") : Res("ApexPillBrush");
-            }
+            OptionLit(card, on);
+            if (radio.Content is Grid { Tag: Border dot }) OptionOn(dot, on);
         }
         _fillingRenderer = false;
     }
@@ -1654,48 +1717,66 @@ public sealed partial class MainWindow : Window
     Grid RendererItem(string r, bool installed)
     {
         var nvidia = _vulkan?.Card?.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) == true;
-        var (icon, title, lines) = r switch
+        var (icon, title, kind, lines) = r switch
         {
-            RBridge => ("sparkle", "RTX Remix bridge", new List<(bool, string)> { (true, T("About 600 MB more memory")), (true, T("Good for big neighborhoods")) }
+            RBridge => ("sparkles", "RTX Remix bridge", T("Recommended"), new List<(bool, string)> { (true, T("About 600 MB more memory")), (true, T("Good for big neighborhoods")) }
                 .Concat(nvidia ? [(true, T("Unlocks NVIDIA Smooth Motion"))] : new List<(bool, string)>()).ToList()),
-            RDxvk => ("monitor", "DXVK", new List<(bool, string)> { (true, T("Vulkan, fewer stutters")), (true, T("Use it if the bridge gives you trouble")), (false, T("No extra memory")) }),
-            RNative => ("gamepad-2", "Direct3D 9", new List<(bool, string)> { (true, T("Changes nothing in the game")), (false, T("Apex runs worse")), (false, T("More crashes from low memory")) }),
-            _ => ("monitor", T("Keep my d3d9.dll"), new List<(bool, string)> { (true, T("Your d3d9.dll stays as it is.")) }),
+            RDxvk => ("boxes", "DXVK", T("Alternative"), new List<(bool, string)> { (true, T("Vulkan, fewer stutters")), (true, T("Use it if the bridge gives you trouble")), (false, T("No extra memory")) }),
+            RNative => ("gamepad-2", "Direct3D 9", T("The game's own"), new List<(bool, string)> { (true, T("Changes nothing in the game")), (false, T("Apex runs worse")), (false, T("More crashes from low memory")) }),
+            _ => ("monitor", T("Keep my d3d9.dll"), "", new List<(bool, string)> { (true, T("Your d3d9.dll stays as it is.")) }),
         };
-        var g = new Grid { Padding = new Thickness(18), RowSpacing = 10 };
-        for (var i = 0; i < 4; i++) g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var top = new Grid();
-        var box = new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(10), HorizontalAlignment = HorizontalAlignment.Left, Child = Lucide.Icon(icon, 18, Res(r == RBridge ? "ApexAccentBrush" : "ApexSoftTextBrush")) };
-        var dot = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(1.5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-        top.Children.Add(box); top.Children.Add(dot);
-        g.Children.Add(top);
-        var name = new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
-        Grid.SetRow(name, 1); g.Children.Add(name);
-        var list = new StackPanel { Spacing = 6 };
+        if (installed) kind = kind.Length > 0 ? kind + " \u00b7 " + T("installed") : T("Installed");
+        var top = new Grid { Height = Design.Size.Tile };
+        var tile = Design.IconTile.Of(icon);
+        tile.HorizontalAlignment = HorizontalAlignment.Left;
+        var dot = OptionDot();
+        (dot.HorizontalAlignment, dot.VerticalAlignment) = (HorizontalAlignment.Right, VerticalAlignment.Top);
+        top.Children.Add(tile); top.Children.Add(dot);
+        var name = new StackPanel { Spacing = Design.Space.TitleToSub, Margin = new Thickness(0, Design.Space.X4, 0, Design.Space.X4) };
+        name.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        name.Children.Add(new TextBlock { Text = kind, FontSize = 13, Foreground = Res(r == RBridge ? "ApexAccentTextBrush" : "ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        var list = new StackPanel { Spacing = Design.Space.X2 };
         foreach (var (good, text) in lines)
         {
-            var line = new Grid { ColumnSpacing = 8 };
+            var line = new Grid { ColumnSpacing = Design.Space.X2 };
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             line.ColumnDefinitions.Add(new ColumnDefinition());
-            var mark = Lucide.Icon(good ? "check" : "x", 13, Res(good ? "ApexSuccessBrush" : "ApexMutedBrush"), 2.5);
-            mark.VerticalAlignment = VerticalAlignment.Top;
-            mark.Margin = new Thickness(0, 2, 0, 0);
+            var mark = Lucide.Icon(good ? "check" : "x", 14, Res(good ? "ApexSuccessBrush" : "ApexMutedBrush"), 2.25);
+            (mark.VerticalAlignment, mark.Margin) = (VerticalAlignment.Top, new Thickness(0, 2, 0, 0));
             line.Children.Add(mark);
-            var words = new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap };
+            var words = new TextBlock { Text = text, FontSize = 13, LineHeight = 18, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap };
             Grid.SetColumn(words, 1);
             line.Children.Add(words);
             list.Children.Add(line);
         }
-        Grid.SetRow(list, 3); g.Children.Add(list);
-        g.Tag = (dot, box);
+        var g = new Grid { Padding = new Thickness(Design.Space.CardPad) };
+        for (var i = 0; i < 3; i++) g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        foreach (var (e, i) in new (FrameworkElement, int)[] { (top, 0), (name, 1), (list, 2) }) { Grid.SetRow(e, i); g.Children.Add(e); }
+        g.Tag = dot;
         return g;
+    }
+
+    // the round mark of a choice: a ring, filled with the accent and a dot when chosen (OptionOn)
+    static Border OptionDot() => new() { Width = 20, Height = 20, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1.5), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+        Child = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4) } };
+    static void OptionOn(Border dot, bool on)
+    {
+        dot.Background = on ? Design.DesignSystem.MainBrush : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        dot.BorderBrush = on ? new SolidColorBrush(Microsoft.UI.Colors.Transparent) : Res("ApexMutedBrush");
+        ((Border)dot.Child).Background = on ? Res("ApexInkBrush") : null;
+    }
+    // a choice's whole card: lit when chosen
+    static void OptionLit(Border card, bool on)
+    {
+        card.BorderBrush = Res(on ? "ApexAccentLineBrush" : "ApexCardBorderBrush");
+        card.Background = Res(on ? "ApexAccentSoftBrush" : "ApexRaisedBrush");
     }
 
     void RefreshComponents()
     {
         var wizard = Wizard && _step == ComponentsStep;
         CompTitle.Text = wizard ? T("Along with Apex Radiance") : T("Components");
-        CompSub.Text = wizard ? T("The recommended set is already on.") : T("What runs with your game.");
+        CompSub.Text = wizard ? T("The recommended set is already on. You can change it later, in Components.") : T("What runs with your game. Nothing changes until you apply.");
         if (_state is not { } s || _game is not { } g) return;
         SetDefaults();
         var latest = Latest(Components.Apex) ?? "";
@@ -1717,12 +1798,15 @@ public sealed partial class MainWindow : Window
             : _renderer == RBridge ? StateLine(Components.Bridge, true, true, false)
             : _renderer == RNative ? (T("Works, but the RTX Remix bridge or DXVK run Apex Radiance better."), "ApexMutedBrush")
             : (T("Your d3d9.dll stays as it is."), "ApexMutedBrush"));
+        GpuLine.Text = _vulkan is { Card: { } cardName } ? T("Your graphics card: {0}", $"{cardName} \u00b7 Vulkan {_vulkan?.Version}") : "";
+        GpuLine.Visibility = GpuLine.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         BridgeDetail.Text = "";
         if (OldCard)
             BridgeDetail.Text = T("DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0}).", CardFound);
         else if (OldDriver)
             BridgeDetail.Text = T("Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open the launcher again.", MissingList);
 
+        BridgeDetail.Visibility = BridgeDetail.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         // (the game may reset its graphics options once after a renderer change: not worth a warning in the install)
         GraphicsInfo.IsOpen = false;
         ShowCoreNotes();
@@ -1744,6 +1828,7 @@ public sealed partial class MainWindow : Window
         if (!S3ppPresent) S3ppToggle.Visibility = Visibility.Collapsed; // (missing: its download buttons below)
         S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWait.Visibility = _s3ppWatch is not null ? Visibility.Visible : Visibility.Collapsed;
+        S3ppMore.Visibility = S3ppGet.Visibility == Visibility.Visible || S3ppWait.Visibility == Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());
         RefreshSmooth(s, g);
         RefreshAfmf();
@@ -1928,7 +2013,7 @@ public sealed partial class MainWindow : Window
             _updated = null;
             UpdateList.Children.Clear();
             var head = new StackPanel { Spacing = 10, Padding = new Thickness(18, 14, 18, 14) };
-            head.Children.Add(new TextBlock { Text = T("Applying changes"), FontSize = 15, FontWeight = FontWeights.SemiBold });
+            head.Children.Add(new TextBlock { Text = T("Applying changes"), FontSize = 16, FontWeight = FontWeights.SemiBold });
             installBar = new ProgressBar { Maximum = 1 };
             head.Children.Add(installBar);
             UpdateList.Children.Add(head);
@@ -2167,7 +2252,7 @@ public sealed partial class MainWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
         row.ColumnDefinitions.Add(new ColumnDefinition());
         var ring = new ProgressRing { Width = 16, Height = 16, IsActive = false };
-        var icon = new FontIcon { FontSize = 15 };
+        var icon = new FontIcon { FontSize = 16 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var label = new TextBlock { Text = text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
         var tail = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = App.Brush("ApexMutedBrush") };
@@ -2223,23 +2308,41 @@ public sealed partial class MainWindow : Window
         DoneSummaryCard.Visibility = DoneSummary.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         // a first install that went in whole: the install's own end (the logo with a check)
         var clean = _doneClean = _wizardFlow && apex && !_lastWasUpdate && _lastRemove.Count == 0 && _lastChanges.All(p => p.Error is null);
-        DoneLogo.Visibility = clean ? Visibility.Visible : Visibility.Collapsed;
-        DoneCheck.Visibility = clean ? Visibility.Collapsed : Visibility.Visible;
+        foreach (var e in new FrameworkElement[] { DoneCheck, DoneTitle, DoneText }) e.Visibility = clean ? Visibility.Collapsed : Visibility.Visible;
+        if (!clean && DoneText.Text.Length == 0) DoneText.Visibility = Visibility.Collapsed;
+        if (clean) DoneSummaryCard.Visibility = Visibility.Collapsed;
+        ScreenDone.Padding = new Thickness(0, clean ? 0 : 24, 0, 0);
+        ScreenDone.HorizontalAlignment = clean ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
+        DoneSplit.Children.Clear();
+        DoneSplit.Visibility = clean ? Visibility.Visible : Visibility.Collapsed;
+        (_doneChoiceIn ?? ScreenDone).Children.Remove(DoneChoice); // (kept here: a control never shown tells no parent)
         if (clean)
         {
-            DoneTitle.FontSize = 34;
-            DoneTitle.Text = T("All installed");
-            DoneText.Text = T("Your game is ready to play.");
-            DoneText.MaxWidth = 500;
+            var (card, words) = SplitCard(done: true);
+            words.Children.Add(SplitTitle(T("All installed")));
+            words.Children.Add(SplitText(T("Apex Radiance {0} is in your The Sims 3. Your saves and mods weren't touched.", _state?.ApexVersion ?? "")));
+            var went = new StackPanel { Spacing = Design.Space.X3, Margin = new Thickness(0, 24, 0, 0) };
+            foreach (var c in _lastInstall.Where(c => c is not (Components.Loader or Components.Apex)))
+            {
+                var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X3 };
+                line.Children.Add(Lucide.Icon("circle-check", 18, Res("ApexSuccessBrush"), 1.75));
+                line.Children.Add(new TextBlock { Text = Name(c), FontSize = 14 });
+                went.Children.Add(line);
+            }
+            if (went.Children.Count > 0) words.Children.Add(went);
+            words.Children.Add(DoneChoice);
+            _doneChoiceIn = words;
+            ((Grid)card.Children[0]).CornerRadius = new CornerRadius(Design.Radius.Panel - 1, 0, 0, 0); // (the footer follows under it)
+            DoneSplit.Children.Add(card);
         }
-        else DoneTitle.FontSize = 28;
-        DoneSummaryCard.Visibility = clean ? Visibility.Collapsed : DoneSummaryCard.Visibility;
+        else { ScreenDone.Children.Add(DoneChoice); _doneChoiceIn = ScreenDone; }
         FillDoneChoice();
     }
 
     // the footer's link: Go to Home at the end of the install
     void OnFooterLink(object sender, RoutedEventArgs e) => Show(Home);
     bool _doneClean;
+    Panel? _doneChoiceIn;
 
     // ---------- repair or remove ----------
 
@@ -2568,6 +2671,7 @@ public sealed partial class MainWindow : Window
         _dialog = d;
         d.Language = Root.Language; // (a dialog is a popup: it does not inherit the window's language)
         DarkDialog(d);
+        Design.DesignSystem.Into(d.Resources);
         HandCursor.Watch(d);
         _dialogShown = d.ShowAsync().AsTask();
         try { return await _dialogShown; }

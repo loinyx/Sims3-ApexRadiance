@@ -154,7 +154,7 @@ public sealed partial class MainWindow
             Grid.SetRow(detail, narrow ? 1 : 0);
             Grid.SetColumn(detail, narrow ? 0 : 1);
             Grid.SetColumnSpan(detail, narrow ? 2 : 1);
-            (detail.BorderThickness, detail.Padding) = narrow ? (new Thickness(0), new Thickness(0)) : (new Thickness(1, 0, 0, 0), new Thickness(28, 0, 0, 0));
+            (detail.BorderThickness, detail.Padding) = (new Thickness(0), new Thickness(narrow ? 0 : 8, 0, 0, 0));
             several.Visibility = w < 640 ? Visibility.Collapsed : Visibility.Visible;
         }
         Fit(Scroller.ActualWidth - 64);
@@ -223,7 +223,7 @@ public sealed partial class MainWindow
 
     Grid SavePhoto(SaveLook? l, double side)
     {
-        var photo = new Grid { Width = side, Height = side, CornerRadius = new CornerRadius(side >= 64 ? 12 : 8), Background = new SolidColorBrush(Pick(0xFF232323, 0xFFF0F0F0)), VerticalAlignment = VerticalAlignment.Center };
+        var photo = new Grid { Width = side, Height = side, CornerRadius = new CornerRadius(12), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center };
         _ = Photo();
         return photo;
 
@@ -271,19 +271,19 @@ public sealed partial class MainWindow
             {
                 var head = Eyebrow(EntryGroup(kind = e.Kind));
                 AutomationProperties.SetHeadingLevel(head, AutomationHeadingLevel.Level2);
-                list.Items.Add(new ListViewItem { Content = head, IsEnabled = false, IsTabStop = false, MinHeight = 0, Padding = new Thickness(14, 18, 0, 6) });
+                list.Items.Add(new ListViewItem { Content = head, IsEnabled = false, IsTabStop = false, MinHeight = 0, Padding = new Thickness(12, 20, 0, 8) });
             }
             var sub = EntrySub(now, e);
             var line = new Grid { ColumnSpacing = 14 };
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             line.ColumnDefinitions.Add(new ColumnDefinition());
-            line.Children.Add(SavePhoto(e.Look, 44));
-            var words = (StackPanel)Col(SaveText(e.Name, 14, strong: true), SaveText(sub, 12, "ApexMutedBrush"));
+            line.Children.Add(SavePhoto(e.Look, 48));
+            var words = (StackPanel)Col(SaveText(e.Name, 14, strong: true), SaveText(sub, 13, "ApexMutedBrush"));
             (words.Spacing, words.VerticalAlignment) = (2, VerticalAlignment.Center);
             Grid.SetColumn(words, 1);
             line.Children.Add(words);
             if (e.Kind != SaveKindOf.Here) line.Opacity = 0.75;
-            var item = new ListViewItem { Content = line, Tag = e.Key, MinHeight = 64, Padding = new Thickness(14, 0, 12, 0), HorizontalContentAlignment = HorizontalAlignment.Stretch, CornerRadius = new CornerRadius(8) };
+            var item = new ListViewItem { Content = line, Tag = e.Key, MinHeight = 72, Padding = new Thickness(12, 0, 12, 0), Margin = new Thickness(0, 2, 0, 2), HorizontalContentAlignment = HorizontalAlignment.Stretch, CornerRadius = new CornerRadius(Design.Radius.Card) };
             ToolTipService.SetToolTip(item, e.Look is null ? e.Name : e.Name + "\n" + SavePlace(e.Look.Save, e.Look.Info));
             AutomationProperties.SetName(item, $"{e.Name}, {sub}");
             if (e.Kind == SaveKindOf.Here) item.ContextFlyout = SaveMenu(e.Look!);
@@ -321,54 +321,102 @@ public sealed partial class MainWindow
     StackPanel SaveDetail(SavesNow now, SaveEntry e)
     {
         var s = new StackPanel();
-        var head = new Grid { ColumnSpacing = 16 };
-        foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) head.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        head.Children.Add(SavePhoto(e.Look, 72));
-        var name = new TextBlock { Text = e.Name, FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 24, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+        s.Children.Add(SaveHero(e));
+        if (e.Kind == SaveKindOf.Stored && e.Points.Count == 0) return s;
+        BackupsPart(s, now, e);
+        if (e.Kind == SaveKindOf.Here) CleanPart(s, now, e.Look!);
+        return s;
+    }
+
+    // the chosen save: its name and place, Play, its household standing on the right, and what there is to know under them
+    Border SaveHero(SaveEntry e)
+    {
+        var name = new TextBlock { Text = e.Name, FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 32, LineHeight = 40, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+        ToolTipService.SetToolTip(name, e.Name);
         AutomationProperties.SetHeadingLevel(name, AutomationHeadingLevel.Level2);
         var sub = PageSub(e.Kind switch
         {
-            SaveKindOf.Here => string.Join(" · ", SavePlace(e.Look!.Save, e.Look.Info), SaveDay(e.Look.Info.LastPlayed, hour: true), SaveSize(e.Look.Info.Bytes)),
+            SaveKindOf.Here => SavePlace(e.Look!.Save, e.Look.Info),
             SaveKindOf.Stored => T("The game doesn't see this save until you put it back."),
             _ => T("This save left the game, but its backups are still here."),
         });
         sub.TextWrapping = TextWrapping.Wrap;
-        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { name, sub } };
-        Grid.SetColumn(words, 1);
-        head.Children.Add(words);
-        var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X2, Margin = new Thickness(0, Design.Space.X6, 0, 0) };
         if (e.Kind == SaveKindOf.Here)
         {
-            var more = MoreButton(T("More options") + ", " + e.Name, SaveMenu(e.Look!));
-            acts.Children.Add(more);
             var play = MainButton("", () => Safe(PlayAsync(e.Look!.Save.Name, update: _settings.InstallUpdatesOnPlay)));
-            play.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Lucide.Icon("play", 15, Res("TextOnAccentFillColorPrimaryBrush")), new TextBlock { Text = T("Play"), VerticalAlignment = VerticalAlignment.Center } } };
-            (play.MinWidth, play.IsEnabled) = (112, !_busy && !Maintenance && !_running);
+            play.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { Lucide.Icon("play", 16, Res("ApexInkBrush")), new TextBlock { Text = T("Play"), FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center } } };
+            (play.MinWidth, play.Height, play.IsEnabled) = (136, 44, !_busy && !Maintenance && !_running);
             AutomationProperties.SetName(play, T("Play {0}", e.Name));
             AutomationProperties.SetAutomationId(play, "SavePlay");
             acts.Children.Add(play);
+            var more = MoreButton(T("More options") + ", " + e.Name, SaveMenu(e.Look!));
+            (more.Width, more.Height) = (44, 44);
+            more.Background = Res("ApexTileBrush");
+            acts.Children.Add(more);
         }
         else if (e.Kind == SaveKindOf.Stored)
         {
             var back = MainButton(T("Put back in the game"), () => Safe(PutBack(e.Look!.Save)));
-            (back.Padding, back.IsEnabled) = (new Thickness(16, 0, 16, 0), SavesBlocked() is null);
+            (back.Padding, back.Height, back.IsEnabled) = (new Thickness(16, 0, 16, 0), 44, SavesBlocked() is null);
             acts.Children.Add(back);
         }
         if (e.Kind != SaveKindOf.Here)
         {
             var delete = Id(Dims(Button("", () => DeleteGone(e))), "SaveDelete");
-            delete.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Lucide.Icon("trash-2", 15, Res("ApexErrorBrush")), new TextBlock { Text = T("Delete"), VerticalAlignment = VerticalAlignment.Center } } };
-            (delete.IsEnabled, delete.VerticalAlignment) = (SavesBlocked() is null, VerticalAlignment.Center);
+            delete.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Lucide.Icon("trash-2", 16, Res("ApexErrorBrush")), new TextBlock { Text = T("Delete"), VerticalAlignment = VerticalAlignment.Center, Foreground = Res("ApexErrorBrush") } } };
+            (delete.IsEnabled, delete.Height) = (SavesBlocked() is null, 44);
             AutomationProperties.SetName(delete, T("Delete") + ", " + e.Name);
-            acts.Children.Insert(0, delete);
+            acts.Children.Add(delete);
         }
-        Grid.SetColumn(acts, 2);
-        head.Children.Add(acts);
-        s.Children.Add(head);
-        if (e.Kind == SaveKindOf.Stored && e.Points.Count == 0) return s;
-        BackupsPart(s, now, e);
-        if (e.Kind == SaveKindOf.Here) CleanPart(s, now, e.Look!);
-        return s;
+        var words = new StackPanel { Padding = new Thickness(28), Spacing = Design.Space.TitleToSub, VerticalAlignment = VerticalAlignment.Center, Children = { name, sub, acts } };
+        var photo = SaveFamily(e.Look, 188);
+        var top = new Grid { MinHeight = 204 };
+        top.ColumnDefinitions.Add(new ColumnDefinition());
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        top.Children.Add(words);
+        Grid.SetColumn(photo, 1);
+        top.Children.Add(photo);
+        top.SizeChanged += (_, a) => photo.Visibility = a.NewSize.Width < 520 ? Visibility.Collapsed : Visibility.Visible;
+
+        var facts = new Grid { BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
+        void Fact(string what, string value)
+        {
+            var cell = new Border { Padding = new Thickness(facts.Children.Count == 0 ? 28 : 20, 16, 20, 16), BorderThickness = new Thickness(facts.Children.Count == 0 ? 0 : 1, 0, 0, 0), BorderBrush = Res("ApexHairlineBrush"),
+                Child = new StackPanel { Spacing = 2, Children = { SaveText(what, 12, "ApexMutedBrush"), SaveText(value, 14, strong: true) } } };
+            ToolTipService.SetToolTip(cell, what + ": " + value);
+            facts.ColumnDefinitions.Add(new ColumnDefinition());
+            Grid.SetColumn(cell, facts.Children.Count);
+            facts.Children.Add(cell);
+        }
+        if (e.Look is { } look)
+        {
+            Fact(T("Last played"), SaveDay(look.Info.LastPlayed, hour: true));
+            Fact(T("Size"), SaveSize(look.Info.Bytes));
+        }
+        Fact(T("Backups"), e.Points.Count == 0 ? T("None") : e.Points.Count + " \u00b7 " + SaveSize(e.Points.Sum(p => p.Stored)));
+        Fact(T("Last backup"), e.Points.Count == 0 ? T("None") : SaveDay(e.Points.Max(p => p.When)));
+        return new Border { Child = new StackPanel { Children = { top, facts } }, CornerRadius = new CornerRadius(Design.Radius.Panel), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexCardBrush") };
+    }
+
+    // the household standing on the card's line, in a light of no colour
+    Grid SaveFamily(SaveLook? l, double height)
+    {
+        var g = new Grid { Width = 260, VerticalAlignment = VerticalAlignment.Stretch };
+        g.Children.Add(new SoftGlow(Tone("Muted"), App.Light ? 0.08 : 0.22, 0.6) { Width = 320, Height = 260, Margin = new Thickness(-30, 0, -30, 0), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom });
+        if (l is not null) _ = Photo();
+        else g.Children.Add(new Grid { Children = { Lucide.Icon("users", 56, Res("ApexIconMutedBrush"), 1.4) }, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+        return g;
+
+        async Task Photo()
+        {
+            try
+            {
+                if (await OfSave(l, "family-large", async () => await SaveCard.SimsOf(await OffThread(() => Saves.Photo(l.Save)))) is { } img)
+                    g.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, MaxHeight = height, MaxWidth = 220, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom });
+            }
+            catch (Exception x) { App.Log(x); }
+        }
     }
 
     MenuFlyout SaveMenu(SaveLook l)
@@ -413,6 +461,25 @@ public sealed partial class MainWindow
         var rows = new StackPanel { Spacing = 4 };
         AutomationProperties.SetName(rows, T("Clean"));
         var says = new List<Action<SaveRead?, bool>>();
+        var bar = new Grid { Height = 8, CornerRadius = new CornerRadius(4), Background = Res("ApexTileBrush") };
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0, GridUnitType.Star) });
+        bar.ColumnDefinitions.Add(new ColumnDefinition());
+        var part = new Border { Background = Design.DesignSystem.MainBrush, CornerRadius = new CornerRadius(4) };
+        bar.Children.Add(part);
+        var barLeft = SaveText("", 13, "ApexSoftTextBrush");
+        var barRight = SaveText(SaveSize(l.Info.Bytes), 13, "ApexMutedBrush");
+        barRight.HorizontalAlignment = HorizontalAlignment.Right;
+        var meter = new Border { Padding = new Thickness(Design.Space.CardPad), Child = new StackPanel { Spacing = Design.Space.X3, Children = { new Grid { Children = { barLeft, barRight } }, bar } } };
+        Soft(meter);
+        rows.Children.Add(Join(meter));
+        says.Add((read, done) =>
+        {
+            var gain = read is null ? 0 : Gain(read, _saveParts);
+            barLeft.Text = !done ? T("Reading the save\u2026") : gain > 0 ? T("{0} can go", SaveSize(gain)) : T("Nothing to free with these choices");
+            bar.ColumnDefinitions[0].Width = new GridLength(gain, GridUnitType.Star);
+            bar.ColumnDefinitions[1].Width = new GridLength(Math.Max(1, l.Info.Bytes - gain), GridUnitType.Star);
+            part.MinWidth = gain > 0 ? 8 : 0;
+        });
         foreach (var (parts, title, info, icon) in CleanOptions)
         {
             var size = SaveText("", 13, "ApexMutedBrush");

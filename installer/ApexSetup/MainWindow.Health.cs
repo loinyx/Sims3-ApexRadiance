@@ -74,31 +74,26 @@ public sealed partial class MainWindow
     // ---------- the look of its parts ----------
 
     // a surface the light behind it reaches through a little
-    static Border Glass(UIElement child, double radius = 8)
+    static Border Glass(UIElement child, double radius = Design.Radius.Card)
     {
-        return new Border { Child = child, CornerRadius = new CornerRadius(radius), BorderThickness = new Thickness(1), Background = new SolidColorBrush(Pick(0xE0171717, 0xEBFFFFFF)),
-            BorderBrush = new SolidColorBrush(Pick(0x12FFFFFF, 0x14000000)) };
+        return new Border { Child = child, CornerRadius = new CornerRadius(radius), BorderThickness = new Thickness(1), Background = new SolidColorBrush(Tone("Card", 0xE6)), BorderBrush = Res("ApexCardBorderBrush") };
     }
 
-    static TextBlock SectionTitle(string text) => new() { Text = text, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) };
+    static TextBlock SectionTitle(string text) => new() { Text = text, FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) };
 
-    static FrameworkElement IconTile(string icon, Windows.UI.Color tint) => new Border
-    {
-        Width = 36, Height = 36, CornerRadius = new CornerRadius(8), VerticalAlignment = VerticalAlignment.Center,
-        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x24, tint.R, tint.G, tint.B)), Child = Lucide.Icon(icon, 18, new SolidColorBrush(tint)),
-    };
+    static FrameworkElement IconTile(string icon, Windows.UI.Color tint) => Design.IconTile.Of(icon, Design.Oklch.From(tint).H, Design.Size.Tile);
 
     // an icon, a title with a line under it, and an action on the right
     static Grid Line(FrameworkElement? icon, string title, string detail, FrameworkElement? action, double pad = 10)
     {
-        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(20, pad, 20, pad), MinHeight = 66 };
+        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(20, pad, 20, pad), MinHeight = 72 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         if (icon is not null) g.Children.Add(icon);
         var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        if (detail.Length > 0) text.Children.Add(new TextBlock { Text = detail, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        if (detail.Length > 0) text.Children.Add(new TextBlock { Text = detail, FontSize = 13, LineHeight = 18, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
         Grid.SetColumn(text, 1);
         g.Children.Add(text);
         if (action is not null) { Grid.SetColumn(action, 2); action.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(action); }
@@ -177,7 +172,7 @@ public sealed partial class MainWindow
 
         var checks = new StackPanel { Spacing = 4 };
         checks.Children.Add(SectionTitle(T("Checks")));
-        var grid = new CardGrid { MinItemWidth = 310, Spacing = 4 };
+        var grid = new CardGrid { MinItemWidth = 310, Spacing = Design.Space.Grid };
         foreach (var a in HealthAreas) grid.Children.Add(AreaTile(a));
         checks.Children.Add(grid);
         body.Children.Add(checks);
@@ -205,7 +200,7 @@ public sealed partial class MainWindow
         var unread = bad == 0 && area == HealthArea.Mods && ModsUnread;
         if (unread) brush = "ApexMutedBrush";
         var state = unread ? T("Not checked") : bad == 0 ? gone == 0 ? T("All good") : gone == 1 ? T("1 ignored") : T("{0} ignored", gone) : bad == 1 ? T("1 to look at") : T("{0} to look at", bad);
-        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(20, 0, 16, 0), Height = 66 };
+        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(20, 0, 20, 0), Height = 72 };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         var icon = RowIcon(AreaIcon(area));
         var name = new TextBlock { Text = AreaName(area), FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -214,10 +209,10 @@ public sealed partial class MainWindow
         if (bad > 0 || unread || gone > 0) how.Children.Add(new TextBlock { Text = state, FontSize = 13, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Center });
         var go = Lucide.Icon("chevron-right", 14, Res("ApexMutedBrush"));
         foreach (var (e, i) in new (FrameworkElement, int)[] { (icon, 0), (name, 1), (how, 2), (go, 3) }) { Grid.SetColumn(e, i); e.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(e); }
-        var b = new Button { Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = new SolidColorBrush(Pick(0xE0171717, 0xEBFFFFFF)), BorderBrush = new SolidColorBrush(Pick(0x12FFFFFF, 0x14000000)) };
-        b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Pick(0xF0202020, 0xFFF6F6F6));
-        b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Pick(0xF01B1B1B, 0xFFF0F0F0));
+        var b = new Button { Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = new SolidColorBrush(Tone("Card", 0xE6)), BorderBrush = new SolidColorBrush(Pick(0x12FFFFFF, 0x14000000)) };
+        b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Tone("Hover"));
+        b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Tone("Strip"));
         b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Pick(0x24FFFFFF, 0x24000000));
         b.Click += (_, _) => HealthGo(area.ToString());
         AutomationProperties.SetName(b, AreaName(area) + ", " + state);
@@ -276,7 +271,7 @@ public sealed partial class MainWindow
     {
         var s = new StackPanel { Spacing = 4 };
         foreach (var r in rows)
-            s.Children.Add(Glass(r));
+            s.Children.Add(Join(Glass(r)));
         return s;
     }
 
@@ -430,7 +425,7 @@ public sealed partial class MainWindow
             foot.Children.Add(tech);
             inner.Children.Add(foot);
             if (_conflictTech)
-                inner.Children.Add(new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(14, 12, 14, 12), Background = new SolidColorBrush(Pick(0xFF101010, 0xFFF3F3F3)),
+                inner.Children.Add(new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(14, 12, 14, 12), Background = Res("ApexStripBrush"),
                     Child = new TextBlock { Text = c.Raw, FontFamily = new FontFamily("Consolas"), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } });
             all.Children.Add(inner);
         }

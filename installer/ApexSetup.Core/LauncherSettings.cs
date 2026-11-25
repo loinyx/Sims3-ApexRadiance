@@ -15,6 +15,8 @@ public sealed class LauncherSettings
     public int HomePictureHeight { get; set; } = 330;     // its height on Home, in pixels
     public int HomePictureStrength { get; set; } = 100;   // how strongly it shows, 30 to 100 (%)
     public string Backdrop { get; set; } = "mica";        // the window's background: "mica", "micaalt", "acrylic" or "solid"
+    public string Theme { get; set; } = "amethyst";       // the colours (Design/Themes.cs), or "windows" for Windows' accent
+    public string Mode { get; set; } = "system";          // "system" (as Windows), "dark" or "light"
     public bool NavCompact { get; set; }                  // the side pane kept to its icons (the toggle at its top)
 
     // the game options chosen before the game ever wrote Options.ini, by its Documents folder: set once the game has made it

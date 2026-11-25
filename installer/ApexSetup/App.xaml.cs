@@ -160,6 +160,7 @@ public partial class App : Application
             new Thread(() => { while (replace.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => (_window as MainWindow)?.QuitForNewerCopy()); }) { IsBackground = true }.Start();
             new Thread(() => { while (show.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => { _window.AppWindow.Show(); _window.Activate(); (_window as MainWindow)?.TakeHandedFiles(); }); }) { IsBackground = true }.Start();
         }
+        Design.DesignSystem.Install(LauncherSettings.Load().Theme);
         var w = new MainWindow();
         _window = w;
         w.OpenWhenReady(MainWindow.ModFilesIn(argv));

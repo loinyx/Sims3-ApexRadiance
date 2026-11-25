@@ -37,12 +37,6 @@ public sealed partial class MainWindow
     {
         var points = e.Points;
         var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-        if (points.Count > 0)
-        {
-            var sum = PageSub(BackupCount(points.Count) + ", " + SaveSize(points.Sum(p => p.Stored)));
-            sum.VerticalAlignment = VerticalAlignment.Center;
-            head.Children.Add(sum);
-        }
         if (e.Kind == SaveKindOf.Here)
         {
             var make = Id(Button("", () => CopySaves([e.Look!.Save])), "SaveBackup");
@@ -66,10 +60,13 @@ public sealed partial class MainWindow
             mark.HorizontalAlignment = HorizontalAlignment.Right;
             line.Children.Add(mark);
             var all = new Button { Content = line, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, MinHeight = 44, Padding = new Thickness(20, 0, 22, 0), CornerRadius = new CornerRadius(8),
-                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Pick(0xFF212121, 0xFFE4E4E4)) };
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderBrush = Res("ApexCardBorderBrush") };
             all.Click += (_, _) => { _saveAllBackups = !_saveAllBackups; SavesAgain(); };
             AutomationProperties.SetName(all, text.Text);
-            list.Children.Add(all);
+            all.BorderThickness = new Thickness(0);
+            var more = new Border { Child = all };
+            Soft(more);
+            list.Children.Add(Join(more));
         }
         if (e.Kind == SaveKindOf.Here) list.Children.Add(AutoRow(e));
         host.Children.Add(list);
@@ -82,9 +79,9 @@ public sealed partial class MainWindow
         var (title, sub) = (BackupTitle(p), BackupSub(p));
         // why it was made, at a glance; a pinned one says that instead
         var mark = RowIcon(p.Pinned ? "pin" : WhyId(p) switch { "auto" => "calendar-clock", "clean" => "sparkles", "restore" => "undo-2", "game" => "gamepad-2", _ => "copy" });
-        if (p.Pinned) { mark.Child = Lucide.Icon("pin", 18, Res("ApexAccentBrush")); ToolTipService.SetToolTip(mark, T("Pinned: never deleted by itself")); }
+        if (p.Pinned) { ToolTipService.SetToolTip(mark, T("Pinned: never deleted by itself")); }
         g.Children.Add(mark);
-        var words = (StackPanel)Col(SaveText(title, 14, strong: true), SaveText(sub, 12, "ApexMutedBrush"));
+        var words = (StackPanel)Col(SaveText(title, 14, strong: true), SaveText(sub, 13, "ApexMutedBrush"));
         (words.Spacing, words.VerticalAlignment) = (2, VerticalAlignment.Center);
         ToolTipService.SetToolTip(words, title + "\n" + sub);
         var size = SaveText(SaveSize(p.Stored), 13, "ApexSoftTextBrush");
@@ -98,9 +95,9 @@ public sealed partial class MainWindow
         var more = MoreButton(T("More options") + ", " + title, BackupMenu(e, p));
         Grid.SetColumn(more, 4);
         g.Children.Add(more);
-        var card = new Border { Child = g, CornerRadius = new CornerRadius(8), Padding = new Thickness(20, 8, 12, 8), MinHeight = 68, ContextFlyout = BackupMenu(e, p) };
+        var card = new Border { Child = g, Padding = new Thickness(20, 12, 20, 12), MinHeight = 68, ContextFlyout = BackupMenu(e, p) };
         Soft(card);
-        return card;
+        return Join(card);
     }
 
     static Button MoreButton(string name, MenuFlyout menu)

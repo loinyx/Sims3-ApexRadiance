@@ -103,7 +103,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 
 | Feature | Status |
 |---|---|
-| [Apex Launcher](features/installer.md) (Apex Radiance Setup up to 1.2.x): an optional Windows program that installs, updates, checks, repairs and removes Apex Radiance and the mods it works with, and starts the game with its mods, saves and pictures | Released in 3.1.1; Released in 3.1.2: a welcome for first installs, updates in their own card, renderer cards, the RTX Remix bridge labelled experimental and offered only with Vulkan 1.3; Released in 3.2.1: DXVK and the bridge offered only when the graphics driver has what DXVK needs |; Released in 4.1.0: Apex Launcher 2.0, with Home and Play, Health, Mods, Saves, a Gallery and What's new; Released in 4.1.1: Apex Launcher 2.3, with Game settings, adding files, profiles, merges that stay responsive and Saves cleaning |
+| [Apex Launcher](features/installer.md) ([design system](launcher-design.md)) (Apex Radiance Setup up to 1.2.x): an optional Windows program that installs, updates, checks, repairs and removes Apex Radiance and the mods it works with, and starts the game with its mods, saves and pictures | Released in 3.1.1; Released in 3.1.2: a welcome for first installs, updates in their own card, renderer cards, the RTX Remix bridge labelled experimental and offered only with Vulkan 1.3; Released in 3.2.1: DXVK and the bridge offered only when the graphics driver has what DXVK needs |; Released in 4.1.0: Apex Launcher 2.0, with Home and Play, Health, Mods, Saves, a Gallery and What's new; Released in 4.1.1: Apex Launcher 2.3, with Game settings, adding files, profiles, merges that stay responsive and Saves cleaning |
 
 ### Removed
 

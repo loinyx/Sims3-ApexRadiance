@@ -63,10 +63,10 @@ public sealed partial class MainWindow
     // the header: the launcher and a dot for each step
     FrameworkElement UpgradeHeader(string[] steps, int current)
     {
-        var g = new Grid { Padding = new Thickness(32, 18, 32, 18), ColumnSpacing = 12 };
+        var g = new Grid { Padding = new Thickness(32, 17, 32, 17), ColumnSpacing = 12, BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Res("ApexHairlineBrush") };
         for (int i = 0; i < 3; i++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = i == 2 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
         g.Children.Add(new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 30, Height = 30, VerticalAlignment = VerticalAlignment.Center });
-        var title = new TextBlock { Text = "Apex Launcher", FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+        var title = new TextBlock { Text = "Apex Launcher", FontSize = 16, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(title, 1);
         g.Children.Add(title);
         var dots = StepDots(steps, current);
@@ -76,56 +76,92 @@ public sealed partial class MainWindow
         return g;
     }
 
-    // a dot for each step, the current one long; the names are read by screen readers and shown on hover
+    // the step's name and a piece of a bar for each step, filled up to it
     static StackPanel StepDots(string[] steps, int current)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-        for (int i = 0; i < steps.Length; i++)
-            row.Children.Add(new Border { Width = i == current ? 20 : 6, Height = 6, CornerRadius = new CornerRadius(3), Background = Res(i == current ? "ApexAccentBrush" : i < current ? "ApexAccentTextBrush" : "ApexCardBorderBrush"), Opacity = i < current ? 0.6 : 1 });
         var name = current >= 0 && current < steps.Length ? steps[current] : "";
-        ToolTipService.SetToolTip(row, name);
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X1, VerticalAlignment = VerticalAlignment.Center };
+        for (int i = 0; i < steps.Length; i++)
+            bar.Children.Add(new Border { Width = 24, Height = 4, CornerRadius = new CornerRadius(2), Background = i == current ? Design.DesignSystem.MainBrush : Res(i < current ? "ApexAccentLineBrush" : "ApexInputBorderBrush") });
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X3, VerticalAlignment = VerticalAlignment.Center };
+        row.Children.Add(new TextBlock { Text = name, FontSize = 13, Foreground = Res("ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(bar);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, $"{name}, {current + 1}/{steps.Length}");
         return row;
     }
 
-    // the footer: the buttons on the right, one alone in the middle
+    // the footer: the buttons on the right
     static FrameworkElement UpgradeFooter(params Button[] buttons)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = buttons.Length == 1 ? HorizontalAlignment.Center : HorizontalAlignment.Right };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right };
         foreach (var b in buttons) { b.Height = 40; b.FontWeight = b.Style == (Style)Application.Current.Resources["AccentButtonStyle"] ? FontWeights.SemiBold : FontWeights.Normal; b.MinWidth = b.Style == (Style)Application.Current.Resources["AccentButtonStyle"] ? 140 : 96; row.Children.Add(b); }
-        return new Border { Padding = new Thickness(32, 0, 32, 24), Child = row };
+        return new Border { Height = 72, Padding = new Thickness(32, 0, 32, 0), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexFooterBrush"), Child = row };
     }
 
-    static FrameworkElement CheckLine(string text)
-    {
-        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        var i = Lucide.Icon("check", 15, Res("ApexAccentBrush"), 2.6);
-        i.VerticalAlignment = VerticalAlignment.Center;
-        s.Children.Add(i);
-        s.Children.Add(new TextBlock { Text = text, FontSize = 14, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
-        return s;
-    }
-
-    static Image Logo(double size) => new() { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Center };
+    static Image Logo(double size) => new() { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
 
     // ---------- 1 What's new (an old Setup that updated itself) ----------
 
+    // a card that opens or ends something: the logo in a soft light of the theme on the left, the words and the button on the right
+    (Grid Card, StackPanel Words) SplitCard(bool done = false)
+    {
+        var g = new Grid { MinHeight = 440 };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star), MaxWidth = 300 });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5, GridUnitType.Star) });
+        var side = SplitSide();
+        if (done)
+            side.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(20), Background = Res("ApexCardBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(80, 80, 0, 0), Child = Lucide.Icon("check", 20, Res("ApexSuccessBrush"), 2.5) });
+        g.Children.Add(side);
+        var words = new StackPanel { Padding = new Thickness(40), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(words, 1);
+        g.Children.Add(words);
+        return (g, words);
+    }
+    static Grid SplitSide()
+    {
+        var light = new SoftGlow(Tone("Accent"), App.Light ? 0.16 : 0.20, 0.5) { Width = 420, Height = 420, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        return new Grid { CornerRadius = new CornerRadius(Design.Radius.Panel - 1, 0, 0, Design.Radius.Panel - 1), Background = Res("ApexFooterBrush"), BorderThickness = new Thickness(0, 0, 1, 0), BorderBrush = Res("ApexCardBorderBrush"),
+            Children = { light, Logo(120) } };
+    }
+    static TextBlock SplitTitle(string t) => new() { Text = t.Replace("Apex Launcher", "Apex\u00A0Launcher"), FontSize = 28, LineHeight = 36, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+    static TextBlock SplitText(string t) => new() { Text = t, FontSize = 14, LineHeight = 22, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
+    static Grid SplitPoint(string icon, string title, string text)
+    {
+        var g = new Grid { ColumnSpacing = Design.Space.IconToText };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.Children.Add(Design.IconTile.Of(icon));
+        var w = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        w.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        w.Children.Add(new TextBlock { Text = text, FontSize = 13, LineHeight = 18, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        Grid.SetColumn(w, 1);
+        g.Children.Add(w);
+        return g;
+    }
+    static Button SplitButton(Button b)
+    {
+        (b.MinHeight, b.MinWidth, b.HorizontalAlignment, b.FontWeight, b.Margin) = (Design.Size.ControlLarge, 160, HorizontalAlignment.Left, FontWeights.SemiBold, new Thickness(0, 32, 0, 0));
+        return b;
+    }
+
     void FillUpgradeNews(StackPanel card)
     {
-        var top = new StackPanel { Padding = new Thickness(32, 34, 32, 6), Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center };
-        top.Children.Add(Logo(96));
-        top.Children.Add(new TextBlock { Text = T("Apex Radiance Setup is now Apex Launcher"), FontSize = 30, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center });
-        top.Children.Add(new TextBlock { Text = T("It now also starts the game and keeps your mods, saves and pictures in one place. Everything came with it."),
-            FontSize = 14, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, MaxWidth = 560, HorizontalAlignment = HorizontalAlignment.Center });
-        card.Children.Add(top);
-        // what came with it
-        var lines = new StackPanel { Spacing = 10, Margin = new Thickness(0, 14, 0, 28), HorizontalAlignment = HorizontalAlignment.Center };
-        lines.Children.Add(CheckLine(T("Your games and language")));
-        lines.Children.Add(CheckLine(T("Apex Radiance and its components")));
-        lines.Children.Add(CheckLine(T("Restore points and backups")));
-        card.Children.Add(lines);
-        var next = Button(T("Continue"), () => UpgradeShow(1), accent: true);
-        card.Children.Add(UpgradeFooter(next));
+        var (split, words) = SplitCard();
+        words.Children.Add(SplitTitle(T("Apex Radiance Setup is now Apex Launcher")));
+        words.Children.Add(SplitText(T("It still installs and updates Apex Radiance, and now it does more.")));
+        words.Children.Add(new StackPanel
+        {
+            Spacing = Design.Space.X5, Margin = new Thickness(0, 28, 0, 0),
+            Children =
+            {
+                SplitPoint("play", T("Starts your game"), T("Straight into the save you choose")),
+                SplitPoint("puzzle", T("Keeps your things in one place"), T("Mods, saves and pictures")),
+                SplitPoint("archive", T("Everything came with it"), T("Your games, components, backups and language")),
+            },
+        });
+        words.Children.Add(SplitButton(Button(T("Continue"), () => UpgradeShow(1), accent: true)));
+        card.Children.Add(split);
     }
 
     // ---------- 2 Where it lives ----------
@@ -134,20 +170,17 @@ public sealed partial class MainWindow
     {
         var self = Environment.ProcessPath ?? "";
         card.Children.Add(UpgradeHeader(steps, Array.IndexOf(steps, T("Where it lives"))));
-        var body = new StackPanel { Padding = new Thickness(32, 20, 32, 32), Spacing = 12 };
-        body.Children.Add(new TextBlock { Text = T("Where should it live?"), FontSize = 28, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 12) });
+        var body = new StackPanel { Padding = new Thickness(32, 28, 32, 32), Spacing = 12 };
+        body.Children.Add(new TextBlock { Text = T("Where should it live?"), FontSize = 28, FontWeight = FontWeights.SemiBold, OpticalMarginAlignment = OpticalMarginAlignment.None });
+        body.Children.Add(new TextBlock { Text = T("Pick once; Settings can change it later."), FontSize = 14, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, -8, 0, 12) });
         var cards = new List<(Border Card, Border Check, bool Value)>();
         void Pick(bool v)
         {
             _upgradeInstall = v;
             foreach (var c in cards)
             {
-                var on = c.Value == v;
-                c.Card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
-                c.Card.Background = on ? Res("ApexAccentSoftBrush") : Res("ApexHairlineBrush");
-                c.Check.Background = on ? Res("ApexAccentBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-                c.Check.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexMutedBrush");
-                c.Check.Child.Opacity = on ? 1 : 0;
+                OptionLit(c.Card, c.Value == v);
+                OptionOn(c.Check, c.Value == v);
             }
         }
         Button Option(bool value, string icon, string title, string text)
@@ -156,20 +189,18 @@ public sealed partial class MainWindow
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var mark = Lucide.Icon(icon, 20, Res("ApexSoftTextBrush"));
-            mark.VerticalAlignment = VerticalAlignment.Center;
-            g.Children.Add(mark);
+            g.Children.Add(Design.IconTile.Of(icon));
             var s = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            s.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold });
+            s.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
             s.Children.Add(new TextBlock { Text = text, FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
             Grid.SetColumn(s, 1);
             g.Children.Add(s);
-            var check = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(11), BorderThickness = new Thickness(1.5), VerticalAlignment = VerticalAlignment.Center,
-                Child = Lucide.Icon("check", 12, new SolidColorBrush(Microsoft.UI.Colors.Black), 3.2) };
+            var check = OptionDot();
+            check.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(check, 2);
             g.Children.Add(check);
-            var c = new Border { Child = g, Padding = new Thickness(18, 16, 18, 16), CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1) };
-            var b = new Button { Content = c, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(14), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            var c = new Border { Child = g, Padding = new Thickness(Design.Space.CardPad), CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1) };
+            var b = new Button { Content = c, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(12), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -178,7 +209,7 @@ public sealed partial class MainWindow
             cards.Add((c, check, value));
             return b;
         }
-        body.Children.Add(Option(true, "hard-drive", T("Install it"), T("In the Start menu and on the desktop")));
+        body.Children.Add(Option(true, "hard-drive", T("Install it"), T("Recommended. In the Start menu and on the desktop")));
         body.Children.Add(Option(false, "package", T("Keep it portable"), T("One file you can move anywhere")));
         Pick(_upgradeInstall);
         card.Children.Add(body);
@@ -218,41 +249,27 @@ public sealed partial class MainWindow
 
     void FillUpgradeReady(StackPanel card, string[] steps)
     {
-        card.Children.Add(UpgradeHeader(steps, steps.Length - 1));
-        var top = new StackPanel { Padding = new Thickness(32, 30, 32, 6), Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center };
-        // the logo with a tick on its corner
-        var badge = new Grid { Width = 96, Height = 96, HorizontalAlignment = HorizontalAlignment.Center };
-        badge.Children.Add(Logo(96));
-        badge.Children.Add(new Border { Width = 34, Height = 34, CornerRadius = new CornerRadius(17), Background = Res("ApexAccentBrush"), BorderBrush = Res("ApexCardBrush"), BorderThickness = new Thickness(4),
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -4, -4),
-            Child = Lucide.Icon("check", 15, Res("TextOnAccentFillColorPrimaryBrush"), 3.2) });
-        top.Children.Add(badge);
-        top.Children.Add(new TextBlock { Text = T("Apex Launcher is installed"), FontSize = 30, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0) });
-        top.Children.Add(new TextBlock { Text = T("Your game is ready to play."), FontSize = 14, Foreground = Res("ApexSoftTextBrush"),
-            TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center });
-        card.Children.Add(top);
+        var (split, words) = SplitCard(done: true);
+        words.Children.Add(SplitTitle(T("Apex Launcher is installed")));
+        words.Children.Add(SplitText(T("Open it from the Start menu or the desktop. Your game is ready to play.")));
         // the copy it came from (Downloads, usually): deleted on Open, ticked by default
         // (only a launcher exe is offered for deleting, whatever the command line names)
         var old = _upgradeFrom is { } f && File.Exists(f) && !LauncherInstall.IsInstalledCopy(f) && f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
             && SelfUpdate.Products.Contains(System.Diagnostics.FileVersionInfo.GetVersionInfo(f).ProductName) ? f : null;
         if (old is not null)
         {
-            var box = new CheckBox { IsChecked = _upgradeDelete, MinWidth = 0 };
-            box.HorizontalAlignment = HorizontalAlignment.Center;
-            box.Content = T("Delete the old copy in {0}", Path.GetFileName(Path.GetDirectoryName(old) ?? ""));
+            var box = new CheckBox { IsChecked = _upgradeDelete, MinWidth = 0, Margin = new Thickness(0, 24, 0, 0), Content = T("Delete the old copy in {0}", Path.GetFileName(Path.GetDirectoryName(old) ?? "")) };
             ToolTipService.SetToolTip(box, old);
             box.Checked += (_, _) => _upgradeDelete = true;
             box.Unchecked += (_, _) => _upgradeDelete = false;
-            box.Margin = new Thickness(32, 12, 32, 22);
-            card.Children.Add(box);
+            words.Children.Add(box);
         }
-        else top.Margin = new Thickness(0, 0, 0, 22);
-        var open = Button(T("Open Apex Launcher"), async () =>
+        words.Children.Add(SplitButton(Button(T("Open Apex Launcher"), async () =>
         {
             if (old is not null && _upgradeDelete && !DryRun) await DeleteOldCopy(old);
             UpgradeClose();
-        }, accent: true);
-        card.Children.Add(UpgradeFooter(open));
+        }, accent: true)));
+        card.Children.Add(split);
     }
 
     // (the old copy closes right after it starts this one: a few tries while Windows lets go of it)

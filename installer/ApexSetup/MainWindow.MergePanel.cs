@@ -813,12 +813,12 @@ public sealed partial class MainWindow
             AutomationProperties.SetName(x, T("Remove tag {0}", name));
             x.Click += (_, _) => Tag(name, false);
             chip.Children.Add(x);
-            wrap.Children.Add(new Border { Child = chip, Height = 28, Padding = new Thickness(10, 0, 4, 0), CornerRadius = new CornerRadius(14), Background = TagDot.BrushOf(color, 0x26) });
+            wrap.Children.Add(new Border { Child = chip, Height = 28, Padding = new Thickness(10, 0, 4, 0), CornerRadius = new CornerRadius(12), Background = TagDot.BrushOf(color, 0x26) });
         }
         var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         label.Children.Add(Lucide.Icon("tag", 12));
         label.Children.Add(new TextBlock { Text = T("Add tag"), FontSize = 12 });
-        var add = new Button { Content = label, Height = 28, Padding = new Thickness(10, 0, 12, 0), CornerRadius = new CornerRadius(14) };
+        var add = new Button { Content = label, Height = 28, Padding = new Thickness(10, 0, 12, 0), CornerRadius = new CornerRadius(12) };
         AutomationProperties.SetName(add, T("Add tag"));
         add.Click += (_, _) =>
         {

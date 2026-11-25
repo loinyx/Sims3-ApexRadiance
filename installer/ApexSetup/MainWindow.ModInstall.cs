@@ -196,7 +196,7 @@ public sealed partial class MainWindow
         g.Children.Add(check);
 
         var icon = i.Place switch { AddPlace.SavedSims => "person-standing", AddPlace.Library => i.Household ? "users" : "house", AddPlace.Worlds => "globe", _ => ModRow.IconOf(i.Kind) };
-        var tile = new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Pick(0xFF232323, 0xFFF0F0F0)),
+        var tile = new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(8), Background = Res("ApexPillBrush"),
             VerticalAlignment = VerticalAlignment.Center, Child = Lucide.Icon(icon, 18, Res("ApexSoftTextBrush")) };
         Grid.SetColumn(tile, 1);
         g.Children.Add(tile);

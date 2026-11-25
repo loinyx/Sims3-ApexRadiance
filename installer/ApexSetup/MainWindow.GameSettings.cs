@@ -52,7 +52,7 @@ public sealed partial class MainWindow
         var host = ScreenGameSettings;
         host.Children.Clear();
         var resetAll = Id(Button(T("Reset all to default"), GameSettingsToDefault), "GameSettingsReset");
-        host.Children.Add(PageHead(T("Game settings"), T("Options the game keeps in its own files."), _game is null ? null : resetAll));
+        host.Children.Add(PageHead(T("Game settings"), T("Graphics and speed options the game keeps in its files. Close the game before you apply."), _game is null ? null : resetAll));
         if (_game is not { } g) { host.Children.Add(Muted(T("Choose the game first."))); return; }
         if (_gsFor != g.Bin) LoadGameSettings();
         resetAll.IsEnabled = !_busy;
@@ -63,7 +63,7 @@ public sealed partial class MainWindow
         GraphicsRows(list);
         Label(T("In-game options"), Link(T("Turn all off"), () => { foreach (var i in InGame) _gsWant[i.Id] = "1"; SyncGameSettings(); }));
         InGameRows(list);
-        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("Set after you open the game once.")));
+        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set after its first session.")));
         Label(T("Loading and walking"));
         LoadingRows(list);
         WalkingValues(host);
@@ -125,7 +125,7 @@ public sealed partial class MainWindow
         g.Children.Add(icon is null ? new Border { Width = 36 } : RowIcon(icon));
         var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         words.Children.Add(new TextBlock { Text = name, FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-        var line = new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2 };
+        var line = new TextBlock { Text = text, FontSize = 13, LineHeight = 18, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2 };
         ToolTipService.SetToolTip(line, text);
         words.Children.Add(line);
         Grid.SetColumn(words, 1);
@@ -154,29 +154,29 @@ public sealed partial class MainWindow
         }
         if (!list.Wizard)
         {
-            var card = new Border { Child = g, CornerRadius = new CornerRadius(8), Padding = new Thickness(20, 8, 20, 8), MinHeight = 68 };
+            var card = new Border { Child = g, Padding = new Thickness(20, 12, 20, 12), MinHeight = 68 };
             Soft(card);
-            list.Host.Children.Add(card);
+            list.Host.Children.Add(Join(card));
             return;
         }
         if (list.Group is null)
-            list.Host.Children.Add(new Border { Child = list.Group = new StackPanel(), CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexHairlineBrush") });
-        list.Group.Children.Add(new Border { Child = g, Padding = new Thickness(16, 12, 16, 12), MinHeight = 62, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, list.Group.Children.Count > 0 ? 1 : 0, 0, 0) });
+            list.Host.Children.Add(new Border { Child = list.Group = new StackPanel(), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexRaisedBrush") });
+        list.Group.Children.Add(new Border { Child = g, Padding = new Thickness(Design.Space.RowPad, 12, Design.Space.RowPad, 12), MinHeight = Design.Size.Row, BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, list.Group.Children.Count > 0 ? 1 : 0, 0, 0) });
     }
 
     // ---------- the options ----------
 
     static readonly (string Id, string Icon, string Title, string Detail)[] InGame =
     [
-        (GameSettings.Store, "package", "Turn off Shop mode", "The in-game store."),
+        (GameSettings.Store, "shopping-bag", "Turn off Shop mode", "The in-game store."),
         (GameSettings.Interactive, "gamepad-2", "Turn off interactive loading screens", "The game you play while a save loads."),
-        (GameSettings.Memories, "library", "Turn off memories", "Sims stop recording memories."),
-        (GameSettings.Online, "globe", "Turn off online and social features", "Connect notifications and the sign-in prompt."),
+        (GameSettings.Memories, "book-open", "Turn off memories", "Sims stop recording memories."),
+        (GameSettings.Online, "wifi", "Turn off online and social features", "Connect notifications and the sign-in prompt."),
     ];
 
     void GraphicsRows(SettingList l)
     {
-        Choice(l, "lamp", GameSettings.Shadow, T("Shadow resolution"), T("Sharper edges. Needs the highest lighting quality."), GameSettings.ShadowSizes, v => v);
+        Choice(l, "sun", GameSettings.Shadow, T("Shadow resolution"), T("Sharper edges. Needs the highest lighting quality."), GameSettings.ShadowSizes, v => v);
         Choice(l, "person-standing", GameSettings.Sims, T("Sim texture size"), T("More detail up close. Needs the highest Sim detail."), GameSettings.SimSizes, v => v);
         Switch(l, "sparkles", GameSettings.Bloom, T("Turn off bloom"), T("Can also remove other screen effects."));
     }
@@ -185,8 +185,8 @@ public sealed partial class MainWindow
 
     void LoadingRows(SettingList l)
     {
-        Choice(l, "hard-drive", GameSettings.Reads, T("Files read at once"), T("40 MB may load lots sooner. Not measured."), GameSettings.ReadSizes, v => v[..^6] + " MB");
-        Choice(l, "users", "walk", T("Space between walking Sims"), T("Meant to let Sims pass closer. Players report mixed results."), Presets,
+        Choice(l, "hard-drive-download", GameSettings.Reads, T("Files read at once"), T("40 MB may load lots sooner. Not measured."), GameSettings.ReadSizes, v => v[..^6] + " MB");
+        Choice(l, "footprints", "walk", T("Space between walking Sims"), T("Meant to let Sims pass closer. Players report mixed results."), Presets,
             v => v switch { "half" => T("Half"), "small" => T("Smallest"), _ => T("Default") });
     }
 
@@ -474,7 +474,7 @@ public sealed partial class MainWindow
         var head = new Grid { ColumnSpacing = 16 };
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        head.Children.Add(Col(Heading(T("Game settings")), Muted(T("Optional. You can change these later."))));
+        head.Children.Add(Col(Heading(T("Game settings")), Muted(T("Optional. You can change these later in the launcher."))));
         var reset = Button(T("Reset to default"), GameSettingsToDefault);
         reset.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(reset, 1);
@@ -482,12 +482,12 @@ public sealed partial class MainWindow
         host.Children.Add(head);
         SettingList Label(string text)
         {
-            host.Children.Add(new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(0, 14, 0, 2) });
+            host.Children.Add(new TextBlock { Text = text, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexSoftTextBrush"), Margin = new Thickness(0, 20, 0, 8) });
             return new SettingList(host, true);
         }
         GraphicsRows(Label(T("Graphics")));
         InGameRows(Label(T("In-game options")));
-        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("Set after you open the game once.")));
+        if (!File.Exists(Engine.OptionsIni(Docs))) host.Children.Add(Muted(T("You haven't opened the game yet, so these four are set after its first session.")));
         LoadingRows(Label(T("Loading and walking")));
         // (only with the mod chosen in Components, and something to change)
         if (S3ssToggle.IsOn && SetterSettings.Differences(SetterSettings.Read(Docs)) is var d && d.TurnOn.Count + d.TurnOff.Count > 0)

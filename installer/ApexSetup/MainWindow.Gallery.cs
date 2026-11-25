@@ -280,14 +280,14 @@ public sealed partial class MainWindow
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             // (a dot or an icon in a 16 px column, as the Mods pane's icons)
             g.Children.Add(glyph is null ? new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 8, Height = 8, Margin = new Thickness(4, 0, 4, 0), Fill = new SolidColorBrush(dot), VerticalAlignment = VerticalAlignment.Center }
-                : new FontIcon { Glyph = glyph, FontSize = 15, Width = 16, Foreground = new SolidColorBrush(dot), VerticalAlignment = VerticalAlignment.Center });
+                : new FontIcon { Glyph = glyph, FontSize = 16, Width = 16, Foreground = new SolidColorBrush(dot), VerticalAlignment = VerticalAlignment.Center });
             var t = new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(t, 1);
             g.Children.Add(t);
             if (count > 0) { var n = new TextBlock { Text = count.ToString(), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(n, 2); g.Children.Add(n); }
             var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 32, Padding = new Thickness(10, 0, 10, 0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(4),
-                Background = on ? new SolidColorBrush(Pick(0xFF232323, 0xFFE8E8E8)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-            b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Pick(0xFF1E1E1E, 0xFFF1F1F1));
+                Background = on ? Res("ApexSelectedBrush") : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            b.Resources["ButtonBackgroundPointerOver"] = Res("ApexHoverBrush");
             b.Click += (_, _) => { _galAlbum = key; _galLimit = 60; BuildGallery(); };
             if (none) b.Visibility = Visibility.Collapsed;
             if (key != Gallery.All)
@@ -462,7 +462,7 @@ public sealed partial class MainWindow
         var track = new Grid { Height = 36, Padding = new Thickness(2), CornerRadius = new CornerRadius(6), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center };
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
-        var pill = new Border { CornerRadius = new CornerRadius(4), Background = new SolidColorBrush(Pick(0xFF2C2C2C, 0xFFE5E5E5)), Width = 118, HorizontalAlignment = HorizontalAlignment.Left,
+        var pill = new Border { CornerRadius = new CornerRadius(4), Background = Res("ApexSelectedBrush"), Width = 118, HorizontalAlignment = HorizontalAlignment.Left,
             TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, Translation = new Vector3(_galBook ? 0 : 118, 0, 0) };
         Grid.SetColumnSpan(pill, 2);
         track.Children.Add(pill);
@@ -505,7 +505,7 @@ public sealed partial class MainWindow
         {
             var block = new StackPanel { Spacing = 10 };
             var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            head.Children.Add(new TextBlock { Text = key, FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            head.Children.Add(new TextBlock { Text = key, FontSize = 16, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
             head.Children.Add(new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 1, 8, 2), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock { Text = list.Count.ToString(), FontSize = 12, Foreground = Res("ApexSoftTextBrush") } });
             if (!_galByHome && string.Join(" · ", list.Select(p => Gallery.HouseholdOf(p, _gal!, _galSaves)).OfType<string>().Distinct().Select(HouseTitle)) is { Length: > 0 } homes)
@@ -1227,7 +1227,7 @@ public sealed partial class MainWindow
         var d = new Border
         {
             Width = 372, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 14, 14), CornerRadius = new CornerRadius(18),
-            Background = new AcrylicBrush { TintColor = Pick(0xFF181818, 0xFFF7F7F7), TintOpacity = 0.82, TintLuminosityOpacity = 0.9, FallbackColor = Pick(0xFF1E1E1E, 0xFFF7F7F7) },
+            Background = new AcrylicBrush { TintColor = Tone("Card"), TintOpacity = 0.82, TintLuminosityOpacity = 0.9, FallbackColor = Tone("Raised") },
             BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)), BorderThickness = new Thickness(1),
             Shadow = new ThemeShadow(), Translation = new Vector3(420, 0, 40), Opacity = 0, IsHitTestVisible = false,
             TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) },
@@ -1395,7 +1395,7 @@ public sealed partial class MainWindow
             shadeRow.Children.Add(new FontIcon { Glyph = "\uE708", FontSize = 13, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
             Grid.SetColumn(brightness, 1);
             shadeRow.Children.Add(brightness);
-            var sun = new FontIcon { Glyph = "\uE706", FontSize = 15, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center };
+            var sun = new FontIcon { Glyph = "\uE706", FontSize = 16, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(sun, 2);
             shadeRow.Children.Add(sun);
             body.Children.Add(shadeRow);
@@ -1509,7 +1509,7 @@ public sealed partial class MainWindow
                     art.Children.Add(new Border { Width = 46, Height = 14, Background = TapeBrush(probe, 1), Rotation = -6, CenterPoint = new Vector3(23, 7, 0), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 0, 0) });
                     art.Children.Add(new Border { Width = 40, Height = 12, Background = TapeBrush(probe, 3), Rotation = 5, CenterPoint = new Vector3(20, 6, 0), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 6) });
                 }
-                else art.Children.Add(new FontIcon { Glyph = "", FontSize = 18, Opacity = 0.5 });
+                else art.Children.Add(new FontIcon { Glyph = "", FontSize = 20, Opacity = 0.5 });
                 PutAt(tapes, Choice(art, kinds[i].Name, look.Tape == key, () => { look.Tape = key; Changed(); FillCustomize(); }, 80), i, 3);
             }
             body.Children.Add(tapes);
@@ -2518,7 +2518,7 @@ public sealed partial class MainWindow
             case "rounded":
                 stack.Children.Add(new Border { Width = w, Height = h, CornerRadius = new CornerRadius(20), Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill } });
                 caption.Foreground = dark;
-                stack.Children.Add(capBox = new Border { Child = caption, Margin = new Thickness(10, -18, 0, 0), Padding = new Thickness(12, 2, 12, 2), CornerRadius = new CornerRadius(14), HorizontalAlignment = HorizontalAlignment.Left,
+                stack.Children.Add(capBox = new Border { Child = caption, Margin = new Thickness(10, -18, 0, 0), Padding = new Thickness(12, 2, 12, 2), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Left,
                     Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xEB, 0xF6, 0xF2, 0xEA)) });
                 body = stack;
                 break;
@@ -2534,7 +2534,7 @@ public sealed partial class MainWindow
                 // (a postmark over the corner, with the day)
                 var mark = new Grid { Width = 74, Height = 74, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -22, -26, 0), Rotation = -14, CenterPoint = new Vector3(37, 37, 0) };
                 mark.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB0, 0x6A, 0x4E, 0x8C)), StrokeThickness = 2 });
-                mark.Children.Add(new TextBlock { Text = p.Taken.ToString("dd MMM\nyyyy", LangCulture()).ToUpperInvariant(), FontSize = 10, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xC0, 0x6A, 0x4E, 0x8C)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+                mark.Children.Add(new TextBlock { Text = p.Taken.ToString("dd MMM\nyyyy", LangCulture()).ToUpperInvariant(), FontSize = 11, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xC0, 0x6A, 0x4E, 0x8C)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
                 stamp.Children.Add(mark);
                 body = stamp;
                 break;
@@ -2763,7 +2763,7 @@ public sealed partial class MainWindow
         box.Resources["TextControlForegroundFocused"] = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
         box.Resources["TextControlBorderBrushFocused"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         box.LostFocus += (_, _) => { note.Text = box.Text; Keep(); };
-        var close = new Button { Content = new FontIcon { Glyph = "", FontSize = 10 }, Width = 24, Height = 24, Padding = new Thickness(0), BorderThickness = new Thickness(0), Opacity = 0,
+        var close = new Button { Content = new FontIcon { Glyph = "", FontSize = 11 }, Width = 24, Height = 24, Padding = new Thickness(0), BorderThickness = new Thickness(0), Opacity = 0,
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 0, 0, 0)), Foreground = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26)),
             OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(150) } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(close, T("Remove the note"));
@@ -3148,7 +3148,7 @@ public sealed partial class MainWindow
         stage.Children.Add(zoomer);
         Button Round(string glyph, string name, double size = 46)
         {
-            var b = new Button { Content = new FontIcon { Glyph = glyph, FontSize = 15 }, Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Padding = new Thickness(0),
+            var b = new Button { Content = new FontIcon { Glyph = glyph, FontSize = 16 }, Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Padding = new Thickness(0),
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1F, 255, 255, 255)), BorderThickness = new Thickness(0) };
             ToolTipService.SetToolTip(b, name);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
@@ -3170,7 +3170,7 @@ public sealed partial class MainWindow
         island.Margin = new Thickness(0);
         Button Tool(string glyph, string name)
         {
-            var b = new Button { Content = new FontIcon { Glyph = glyph, FontSize = 15 }, Width = 40, Height = 40, Padding = new Thickness(0), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(0),
+            var b = new Button { Content = new FontIcon { Glyph = glyph, FontSize = 16 }, Width = 40, Height = 40, Padding = new Thickness(0), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(0),
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
             ToolTipService.SetToolTip(b, name);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);

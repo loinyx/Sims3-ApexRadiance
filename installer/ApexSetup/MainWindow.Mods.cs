@@ -228,6 +228,7 @@ public sealed partial class MainWindow
             }.Where(x => x is not null));
             ModsAdd.IsEnabled = true; // (from a place that is no folder, files go into Mods › Packages; the preview says where)
             FillChips();
+            FillTypes(inPlace);
             FillSortText();
             FillFooter();
         }
@@ -415,7 +416,7 @@ public sealed partial class MainWindow
     FrameworkElement GroupHeader(string key, string label, string? add)
     {
         // the whole row is the heading's button (hover and click across it); the + sits on its right end
-        var g = new Grid { Tag = "-", Margin = new Thickness(4, 14, 4, 2), Height = 30 };
+        var g = new Grid { Tag = "-", Margin = new Thickness(4, 16, 4, 4), Height = 32 };
         var head = new Button
         {
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(12, 0, 8, 0),
@@ -983,6 +984,32 @@ public sealed partial class MainWindow
 
     // ---------- the filters ----------
 
+    // the types the mods here are, the most common first: a click shows only that one, All shows every one again
+    readonly List<string> _typesShown = [];
+    void FillTypes(List<ModRow> inPlace)
+    {
+        ModTypes.Children.Clear();
+        var all = inPlace.Where(r => r.Kinds.Count > 0).GroupBy(r => r.Kinds[0]).OrderByDescending(x => x.Count()).ThenBy(x => KindLabel(x.Key)).Take(7).ToList();
+        ModTypesScroll.Visibility = all.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        _typesShown.Clear();
+        if (all.Count < 2) return;
+        _typesShown.AddRange(all.Select(x => x.Key));
+        Add(T("All"), inPlace.Count, _fKinds.Count == 0, () => _fKinds.Clear());
+        foreach (var k in all) Add(KindLabel(k.Key), inPlace.Count(r => r.Kinds.Contains(k.Key)), _fKinds.Count == 1 && _fKinds.Contains(k.Key), () => { _fKinds.Clear(); _fKinds.Add(k.Key); });
+
+        void Add(string text, int count, bool on, Action pick)
+        {
+            var words = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            words.Children.Add(new TextBlock { Text = text, FontSize = 13, Foreground = Res(on ? "ApexInkBrush" : "ApexSoftTextBrush") });
+            words.Children.Add(new TextBlock { Text = count.ToString(), FontSize = 12, Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center, Foreground = Res(on ? "ApexInkBrush" : "ApexMutedBrush") });
+            var b = new Button { Content = words, Height = 32, Padding = new Thickness(14, 0, 14, 0), CornerRadius = new CornerRadius(16) };
+            if (on) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("{0}, {1}", text, count));
+            b.Click += (_, _) => { pick(); FillMods(); };
+            ModTypes.Children.Add(b);
+        }
+    }
+
     // the chips in the search box: every filter in use, each with a button that takes it away
     void FillChips()
     {
@@ -1005,7 +1032,7 @@ public sealed partial class MainWindow
         }
         if (_fOnly is { } only) Chip(only.Count == 1 ? Path.GetFileNameWithoutExtension(only.First()) : T("{0} mods", only.Count), "layers", null, () => _fOnly = null);
         foreach (var f in _fFiles.ToList()) Chip(FileTypeName(f), FileTypeIcon(f), null, () => _fFiles.Remove(f));
-        foreach (var k in _fKinds.ToList()) Chip(KindLabel(k), KindIcon(k), null, () => _fKinds.Remove(k));
+        if (_fKinds.Count > 1 || _fKinds.Count == 1 && !_typesShown.Contains(_fKinds.First())) foreach (var k in _fKinds.ToList()) Chip(KindLabel(k), KindIcon(k), null, () => _fKinds.Remove(k));
         foreach (var s in _fStates.ToList()) Chip(StateName(s), StateIcon(s), null, () => _fStates.Remove(s));
         foreach (var t in _fTags.ToList()) Chip(t == "" ? T("Untagged") : t, "tag", t == "" ? null : ModNotes.ColorOf(t), () => _fTags.Remove(t));
         foreach (var c in _fCreators.ToList()) Chip(c == "" ? T("Unknown creator") : c, "users", null, () => _fCreators.Remove(c));
@@ -1087,7 +1114,7 @@ public sealed partial class MainWindow
             if (used > 0)
             {
                 var badge = new Border { MinWidth = 16, Height = 16, CornerRadius = new CornerRadius(8), Background = Res("ApexAccentBrush"),
-                    Child = new TextBlock { Text = used.ToString(), FontSize = 10, FontWeight = FontWeights.Bold, Foreground = Res("TextOnAccentFillColorPrimaryBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } };
+                    Child = new TextBlock { Text = used.ToString(), FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Res("ApexInkBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } };
                 Grid.SetColumn(badge, 2);
                 g.Children.Add(badge);
             }
@@ -1576,12 +1603,12 @@ public sealed partial class MainWindow
         // (nothing chosen: no pane, the list has the whole width)
         var opens = ModDetailsPane.Visibility == Visibility.Collapsed;
         ModDetailsPane.Visibility = _findPage is not null || picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        ModColDetails.Width = new GridLength(_modsNarrow || ModDetailsPane.Visibility == Visibility.Collapsed ? 0 : ModDetailsPane.Width);
+        ModColDetails.Width = new GridLength(_modsNarrow || ModDetailsPane.Visibility == Visibility.Collapsed ? 0 : ModDetailsPane.Width + 16);
         // (the list gets narrower as the pane opens: the mod chosen stays in sight)
         if (opens && ModDetailsPane.Visibility == Visibility.Visible && picked.Count == 1 && picked[0] is var seen)
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => (_modsGrid ? (ListViewBase)ModGrid : ModList).ScrollIntoView(seen));
         // (over the grid the pane would hide whole columns of tiles: the grid makes room for it instead)
-        var room = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width : 0;
+        var room = _modsNarrow && ModDetailsPane.Visibility == Visibility.Visible ? ModDetailsPane.Width + 16 : 0;
         if (ModGrid.Padding.Right != 24 + room) { ModGrid.Padding = new Thickness(0, 0, 24 + room, 72); FitModGrid(); }
         PlaceSelectionBar();
         if (picked.Count == 0) return;
@@ -1804,7 +1831,7 @@ public sealed partial class MainWindow
                 else
                 {
                     // (no picture of its own: the game keeps showing its own for it)
-                    mod.Child = new TextBlock { Text = T("same"), FontSize = 10, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                    mod.Child = new TextBlock { Text = T("same"), FontSize = 11, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
                     ToolTipService.SetToolTip(mod, T("This mod has no picture for it, so the game shows its own."));
                 }
             }
@@ -1902,12 +1929,12 @@ public sealed partial class MainWindow
             var name = t.Name;
             x.Click += (_, _) => TagMods(rows, name, false);
             chip.Children.Add(x);
-            wrap.Children.Add(new Border { Child = chip, Height = 28, Padding = new Thickness(10, 0, 4, 0), CornerRadius = new CornerRadius(14), Background = TagDot.BrushOf(t.Color, 0x26) });
+            wrap.Children.Add(new Border { Child = chip, Height = 28, Padding = new Thickness(10, 0, 4, 0), CornerRadius = new CornerRadius(12), Background = TagDot.BrushOf(t.Color, 0x26) });
         }
         var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         content.Children.Add(Lucide.Icon("tag", 12));
         content.Children.Add(new TextBlock { Text = T("Add tag"), FontSize = 12 });
-        var add = new Button { Content = content, Height = 28, Padding = new Thickness(10, 0, 12, 0), CornerRadius = new CornerRadius(14), VerticalAlignment = VerticalAlignment.Center };
+        var add = new Button { Content = content, Height = 28, Padding = new Thickness(10, 0, 12, 0), CornerRadius = new CornerRadius(12), VerticalAlignment = VerticalAlignment.Center };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(add, T("Add tag"));
         add.Click += (_, _) => TagMenu(rows).ShowAt(add);
         wrap.Children.Add(add);
