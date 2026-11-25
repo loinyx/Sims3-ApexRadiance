@@ -1156,6 +1156,17 @@ bool ReadBakeFields(BYTE* light, BakeFields& f) {
 } // namespace
 
 namespace NightTerrainBake {
+namespace {
+// A lamp still in the stamps' list after it was deleted (LotLightBridge::CurrentBakeLamps is read every 20 frames) is freed and
+// its memory reused: BakeTest's vfunc+0x20 call then ran that memory as code. False for such a light, the first 8 logged
+std::atomic<long> g_stampDeadSkips{0};
+bool StampLightLive(uintptr_t light) {
+    if (LevelLightShare::LightLive(light)) return true;
+    if (const long n = g_stampDeadSkips.fetch_add(1, std::memory_order_relaxed) + 1; n <= 8)
+        LOG_INFO(std::format("[NightTerrainBake] Lamp {:08X} is destroyed: left out of the terrain stamps ({} so far)", light, n));
+    return false;
+}
+} // namespace
 void SetExcluded(const std::vector<uintptr_t>& lights) {
     int n = 0;
     for (uintptr_t L : lights)
@@ -1177,7 +1188,7 @@ bool EverBaked(uintptr_t light) {
 // the cone spill; .w = range x intensity x 0.2 as at 0xC29523 .. 0xC29586; the position with the low-lamp lift)
 bool StampOf(uintptr_t light, float col[4], float pos[3], float rect[4], float& ground, float cone[3][4]) {
     BakeFields f{};
-    if (!g_bakeGainInstalled || !light || !ReadBakeFields(reinterpret_cast<BYTE*>(light), f) || !f.taken || !f.lot) return false; // (lot lamps only)
+    if (!g_bakeGainInstalled || !light || !StampLightLive(light) || !ReadBakeFields(reinterpret_cast<BYTE*>(light), f) || !f.taken || !f.lot) return false; // (lot lamps only)
     for (int k = 0; k < 3; k++) col[k] = f.colour[k] * g_bakeLotMul[k];
     if (f.type == 9 || f.type == 10) {
         const float share = std::clamp(f.axisY * g_areaHalf + g_areaHalf, g_areaZero, g_areaOne);

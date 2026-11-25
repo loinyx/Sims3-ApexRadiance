@@ -18263,6 +18263,7 @@ bool StackedWithEdit(const void* room) {
 }
 
 uintptr_t BasisSamplesVec() { return BasisSamplesVecImpl(); }
+bool LightLive(uintptr_t light) { return light && BasisLightLive(light); }
 bool BasisStep(const float* pos, uintptr_t light, float* acc16) { return pos && acc16 && BasisStepImpl(pos, light, acc16); }
 bool BasisPartNow(void* room, const float* pos, uintptr_t light, float* acc16) {
     if (!room || !pos || !acc16 || !light || !g_basisGuardReady.load(std::memory_order_relaxed) || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return false;
