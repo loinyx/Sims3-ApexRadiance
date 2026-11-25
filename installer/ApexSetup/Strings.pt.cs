@@ -2251,5 +2251,11 @@ public static partial class Strings
         ["{0} in automatic ones. Past it, the oldest go first."] = "{0} em automáticos. Ao passar, os mais velhos saem primeiro.",
         ["Another game already keeps its backups in this folder."] = "Outro jogo já guarda os backups dele nesta pasta.",
         ["Close The Sims 3 to clean, back up or restore your saves."] = "Feche o The Sims 3 para limpar, fazer backup ou restaurar seus saves.",
+        ["{0} deleted"] = "{0} excluído",
+        ["Its last backup goes to the Recycle Bin."] = "O último backup vai para a Lixeira.",
+        ["Its {0} backups go to the Recycle Bin."] = "Os {0} backups vão para a Lixeira.",
+        ["The save goes to the Recycle Bin, and its backups stay where they are."] = "O save vai para a Lixeira, e os backups ficam onde estão.",
+        ["Empty the Recycle Bin to delete it for good."] = "Esvazie a Lixeira para excluir de vez.",
+        ["This drive has no Recycle Bin, so you can't bring it back."] = "Este disco não tem Lixeira, então não dá para trazer de volta.",
     };
 }

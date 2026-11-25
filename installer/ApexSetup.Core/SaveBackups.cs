@@ -268,7 +268,7 @@ public static class SaveBackups
     }
 
     // (a USB drive has no Recycle Bin)
-    static void Remove(SavePoint p) { if (HasBin(p.Path)) SaveCopies.Recycle(p.Path); else File.Delete(p.Path); }
+    static void Remove(SavePoint p) { if (HasBin(p.Path)) SaveCopies.Recycle(p.Path); else if (Directory.Exists(p.Path)) Directory.Delete(p.Path, true); else File.Delete(p.Path); }
     internal static void RemoveOwn(SavePoint p) { if (HasBin(p.Path)) SaveCopies.RecycleOwn(p.Path); else File.Delete(p.Path); }
     public static bool HasBin(string path)
     {
@@ -279,8 +279,10 @@ public static class SaveBackups
     public static void Delete(IEnumerable<SavePoint> points)
     {
         Engine.CheckDry();
-        lock (SaveCopies.Gate) foreach (var p in points.Where(p => p.Kind == CopyKind.Launcher)) Remove(p);
+        lock (SaveCopies.Gate) foreach (var p in points.Where(CanDelete).ToList()) { if (p.Kind == CopyKind.Game) Engine.CheckWritable(); Remove(p); }
     }
+    // a zip, and the game's previous version of a save that is gone (one of a save that is there is the game's to keep)
+    public static bool CanDelete(SavePoint p) => p.Kind == CopyKind.Launcher || p.Kind == CopyKind.Game && p.Path.EndsWith(".sims3.backup", StringComparison.OrdinalIgnoreCase) && !Directory.Exists(p.Path[..^7]);
 
     // ---------- the folder ----------
 

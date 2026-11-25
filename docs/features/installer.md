@@ -247,7 +247,8 @@ as the signed-in user, not as administrator: a change to the game folder or to a
   the pictures that stay are a dialog; rename, duplicate, keep out of the game and delete are in the save's menu.
   - **Backups** (`SaveCopies.cs`, `SaveBackups.cs`) are zips of the save's folder. Each can be restored over the save
     (which becomes one more backup, with Undo) or opened as another save, named, pinned, checked against its checksums,
-    exported and moved to the Recycle Bin. A name and a pin are kept in the zip's own comment; the list of mods that were
+    exported and moved to the Recycle Bin. A save that is gone, or kept out of the game, can be deleted with what is left
+    of it. A name and a pin are kept in the zip's own comment; the list of mods that were
     on is a file inside (`apex-mods.txt`), used to tell which are missing on a restore and never written into the save.
   - **Automatic backups** (off until chosen) are made when the game closes, before Play or once a day, only of saves that changed and never
     while the game runs. Older automatic ones leave past the number to keep and past the space limit; ones the player

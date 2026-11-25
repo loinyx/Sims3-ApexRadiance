@@ -133,9 +133,9 @@ public sealed partial class MainWindow
             Item(T("Check the file"), () => CheckBackup(p), "check");
         }
         Item(T("Export"), () => ExportBackups([(e, p)]), "upload", mine || SavesBlocked() is null);
-        if (!mine) return menu;
+        if (!SaveBackups.CanDelete(p)) return menu;
         menu.Items.Add(new MenuFlyoutSeparator());
-        Item(BackupGone(p.Path), () => DeleteBackups([p]), "trash-2", danger: true);
+        Item(BackupGone(p.Path), () => DeleteBackups([p]), "trash-2", mine || SavesBlocked() is null, danger: true);
         return menu;
     }
     static string BackupGone(string path) => SaveBackups.HasBin(path) ? T("Move to the Recycle Bin") : T("Delete");
@@ -245,6 +245,30 @@ public sealed partial class MainWindow
         if (await SaveWork(T("Removing backups"), (say, _) => { say(BackupCount(points.Count), -1, false); SaveBackups.Delete(points); return points; }) is not null)
             SavesSay(InfoBarSeverity.Success, bin ? points.Count == 1 ? T("Backup moved to the Recycle Bin") : T("{0} backups moved to the Recycle Bin", points.Count) : points.Count == 1 ? T("Backup deleted") : T("{0} backups deleted", points.Count));
         FillSaves();
+    }
+
+    // a save that is gone, with everything that is left of it; or one kept out of the game
+    async Task DeleteGone(SaveEntry e)
+    {
+        var bin = e.Kind == SaveKindOf.Stored || e.Points.All(p => SaveBackups.HasBin(p.Path));
+        var text = e.Kind == SaveKindOf.Stored ? T("The save goes to the Recycle Bin, and its backups stay where they are.")
+            : e.Points.Count == 1 ? T("Its last backup goes to the Recycle Bin.") : T("Its {0} backups go to the Recycle Bin.", e.Points.Count);
+        text = bin ? text + " " + T("Empty the Recycle Bin to delete it for good.") : T("This drive has no Recycle Bin, so you can't bring it back.");
+        // (the next of the same kind is chosen after it, to delete several in a row)
+        var same = _savesNow?.Entries.Where(x => x.Kind == e.Kind).ToList() ?? [];
+        var at = same.FindIndex(x => x.Key == e.Key);
+        var next = same.ElementAtOrDefault(at + 1) ?? same.ElementAtOrDefault(at - 1);
+        if (!await Confirm(T("Delete {0}?", e.Name), text, T("Delete"), danger: true)) return;
+        if (await SaveWork(T("Delete"), (say, _) =>
+        {
+            say(T("Moving the save"), -1, false);
+            if (e.Kind == SaveKindOf.Stored) SaveCopies.Delete(e.Look!.Save); else SaveBackups.Delete(e.Points);
+            return e;
+        }) is null) { FillSaves(); return; }
+        // (before the list is read again: what it shows still has the one that went)
+        if (next is not null) SavePicked(next.Key);
+        FillSaves();
+        SavesSay(InfoBarSeverity.Success, T("{0} deleted", e.Name));
     }
 
     async Task ExportBackups(List<(SaveEntry Of, SavePoint Point)> what)
@@ -501,6 +525,7 @@ public sealed partial class MainWindow
         void Pick(ComboBox box, string id, string text, string at) { var i = new ComboBoxItem { Content = text, Tag = id }; box.Items.Add(i); if (id == at) box.SelectedItem = i; }
         Pick(bySave, "", T("All saves"), _allSave);
         foreach (var e in now.Entries.Where(e => e.Points.Count > 0)) Pick(bySave, e.Key, EntryName(now, e), _allSave);
+        if (now.Entries.Any(e => e.Kind == SaveKindOf.Gone)) Pick(bySave, "-gone", T("Gone from the game"), _allSave);
         if (bySave.SelectedIndex < 0) (_allSave, bySave.SelectedIndex) = ("", 0);
         var byWhy = new ComboBox { MinWidth = 150 };
         AutomationProperties.SetName(byWhy, T("Why it was made"));
@@ -511,12 +536,12 @@ public sealed partial class MainWindow
         var used = SaveSize(every.Where(x => x.Point.Kind == CopyKind.Launcher).Sum(x => x.Point.Stored));
         var page = new StackPanel { Spacing = 14, Margin = new Thickness(0, 0, 0, 72) };
         page.Children.Add(SavesSubHead(T("All backups"), BackupCount(every.Count) + ", " + used, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { bySave, byWhy } }));
-        var shown = every.Where(x => (_allSave == "" || x.Of.Key == _allSave) && (_allWhy == "" || WhyId(x.Point) == _allWhy)).ToList();
+        var shown = every.Where(x => (_allSave == "" || x.Of.Key == _allSave || _allSave == "-gone" && x.Of.Kind == SaveKindOf.Gone) && (_allWhy == "" || WhyId(x.Point) == _allWhy)).ToList();
         SavesHost.Children.Add(page);
         if (shown.Count == 0) { page.Children.Add(EmptyPlace("copy", T("No backups here yet."))); return; }
 
         var sync = new List<Action>();
-        var mine = shown.Where(x => x.Point.Kind == CopyKind.Launcher).ToList();
+        var mine = shown.Where(x => SaveBackups.CanDelete(x.Point)).ToList();
         var all = new CheckBox { MinWidth = 0, MinHeight = 32, IsThreeState = false };
         AutomationProperties.SetName(all, T("Choose all"));
         all.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
@@ -526,7 +551,7 @@ public sealed partial class MainWindow
         rows.Children.Add(new Border { Child = head, MinHeight = 40, Padding = new Thickness(12, 0, 4, 0), BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Res("ApexHairlineBrush") });
         foreach (var (of, p) in shown)
         {
-            var box = new CheckBox { MinWidth = 0, MinHeight = 32, IsEnabled = p.Kind == CopyKind.Launcher };
+            var box = new CheckBox { MinWidth = 0, MinHeight = 32, IsEnabled = SaveBackups.CanDelete(p) };
             box.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
             AutomationProperties.SetName(box, $"{of.Name}, {BackupTitle(p)}, {WhyText(p)}, {SaveSize(p.Stored)}");
             if (!box.IsEnabled) ToolTipService.SetToolTip(box, T("The game keeps this one"));
@@ -584,7 +609,8 @@ public sealed partial class MainWindow
         s.Children.Add(new TextBlock { Text = SaveSize(picked.Sum(x => x.Point.Stored)), FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
         s.Children.Add(new Border { Width = 1, Height = 20, Background = Res("ApexCardBorderBrush"), Margin = new Thickness(12, 0, 8, 0) });
         var points = picked.Select(x => x.Point).ToList();
-        var unpin = points.All(p => p.Pinned);
+        var pins = points.Where(p => p.Kind == CopyKind.Launcher).ToList();
+        var unpin = pins.All(p => p.Pinned);
         void Act(string icon, string text, Func<Task> run, string? brush = null)
         {
             var b = new Button { Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Lucide.Icon(icon, 16, Res(brush ?? "ApexSoftTextBrush")), new TextBlock { Text = text, FontSize = 13 } } }, Height = 36, Padding = new Thickness(12, 0, 12, 0), BorderThickness = new Thickness(0), IsEnabled = !DryRun,
@@ -593,7 +619,7 @@ public sealed partial class MainWindow
             b.Click += (_, _) => Safe(run());
             s.Children.Add(Dims(b));
         }
-        Act(unpin ? "pin-off" : "pin", unpin ? T("Unpin") : T("Pin"), () => MarkBackups(points, p => (p.Label, !unpin)));
+        if (pins.Count > 0) Act(unpin ? "pin-off" : "pin", unpin ? T("Unpin") : T("Pin"), () => MarkBackups(pins, p => (p.Label, !unpin)));
         Act("upload", T("Export"), () => ExportBackups(picked));
         Act("trash-2", SaveBackups.HasBin(points[0].Path) ? T("Recycle Bin") : T("Delete"), () => DeleteBackups(points), "ApexErrorBrush");
         SavesBar.Child = s;

@@ -298,6 +298,13 @@ public sealed partial class MainWindow
             ToolTipService.SetToolTip(item, e.Look is null ? e.Name : e.Name + "\n" + SavePlace(e.Look.Save, e.Look.Info));
             AutomationProperties.SetName(item, $"{e.Name}, {sub}");
             if (e.Kind == SaveKindOf.Here) item.ContextFlyout = SaveMenu(e.Look!);
+            else
+            {
+                var menu = new MenuFlyout();
+                menu.Items.Add(MenuItem(T("Delete"), () => Safe(DeleteGone(e)), "trash-2", danger: true));
+                menu.Opening += (_, _) => menu.Items[0].IsEnabled = SavesBlocked() is null;
+                item.ContextFlyout = menu;
+            }
             list.Items.Add(item);
             if (e.Key.Equals(_savePick, StringComparison.OrdinalIgnoreCase)) list.SelectedItem = item;
         }
@@ -357,6 +364,14 @@ public sealed partial class MainWindow
             var back = MainButton(T("Put back in the game"), () => Safe(PutBack(e.Look!.Save)));
             (back.Padding, back.IsEnabled) = (new Thickness(16, 0, 16, 0), SavesBlocked() is null);
             acts.Children.Add(back);
+        }
+        if (e.Kind != SaveKindOf.Here)
+        {
+            var delete = Id(Dims(Button("", () => DeleteGone(e))), "SaveDelete");
+            delete.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Lucide.Icon("trash-2", 15, Res("ApexErrorBrush")), new TextBlock { Text = T("Delete"), VerticalAlignment = VerticalAlignment.Center } } };
+            (delete.IsEnabled, delete.VerticalAlignment) = (SavesBlocked() is null, VerticalAlignment.Center);
+            AutomationProperties.SetName(delete, T("Delete") + ", " + e.Name);
+            acts.Children.Insert(0, delete);
         }
         Grid.SetColumn(acts, 2);
         head.Children.Add(acts);

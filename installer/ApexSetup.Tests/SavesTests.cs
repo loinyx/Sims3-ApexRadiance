@@ -715,6 +715,16 @@ static class SavesTests
         SaveCopies.Rename(docs, Saves.List(docs).First(x => x.Name == "A"), "Z");
         check(BackupChoices.Load().Saves.TryGetValue("Z", out var mine) && mine.Keep == 2 && !BackupChoices.Load().Saves.ContainsKey("A"), "backups: a renamed save keeps its own choices");
         SaveBackups.Delete(Zips("Z"));
+        // the game's previous version: of a save that is there it stays, of one that is gone it goes
+        var zz = Saves.List(docs).First(x => x.Name == "Z");
+        Directory.CreateDirectory(zz.Dir + ".backup");
+        File.Copy(Path.Combine(zz.Dir, "Meta.data"), Path.Combine(zz.Dir + ".backup", "Meta.data"));
+        var game = new SavePoint(CopyKind.Game, zz.Dir + ".backup", DateTime.Now, 1, null);
+        SaveBackups.Delete([game]);
+        var stays = Directory.Exists(game.Path);
+        Directory.Delete(zz.Dir, true);
+        SaveBackups.Delete([game]);
+        check(stays && !Directory.Exists(game.Path), "backups: the game's previous version goes only when its save is gone");
         check(Zips("Z").Length == 0, "backups: the ones chosen go");
         File.Delete(choices);
     }
