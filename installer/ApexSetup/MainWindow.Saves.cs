@@ -133,7 +133,7 @@ public sealed partial class MainWindow
         if (now.Entries.Count == 0) return;
 
         var at = now.Entries.First(e => e.Key.Equals(_savePick, StringComparison.OrdinalIgnoreCase));
-        var page = new Grid { ColumnSpacing = 28, RowSpacing = 18 };
+        var page = new Grid { RowSpacing = 18 };
         page.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         page.ColumnDefinitions.Add(new ColumnDefinition());
         page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -149,7 +149,7 @@ public sealed partial class MainWindow
         {
             var narrow = w < 800;
             (list.Visibility, pick.Visibility) = narrow ? (Visibility.Collapsed, Visibility.Visible) : (Visibility.Visible, Visibility.Collapsed);
-            list.Width = w < 1000 ? 244 : 288;
+            list.Width = (w < 1000 ? 244 : 288) + 24; // (the 24 is the room of the scroll bar, which stands on the line beside it)
             Grid.SetColumnSpan(pick, 2);
             Grid.SetRow(detail, narrow ? 1 : 0);
             Grid.SetColumn(detail, narrow ? 0 : 1);
@@ -271,7 +271,7 @@ public sealed partial class MainWindow
 
     ListView SaveList(SavesNow now)
     {
-        var list = new ListView { SelectionMode = ListViewSelectionMode.Single, VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(0), MaxHeight = Math.Max(320, Scroller.ActualHeight - 150) };
+        var list = new ListView { SelectionMode = ListViewSelectionMode.Single, VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(0, 0, 24, 0), MaxHeight = Math.Max(320, Scroller.ActualHeight - 150) };
         AutomationProperties.SetName(list, T("Your saves"));
         AutomationProperties.SetAutomationId(list, "SaveList");
         list.ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection();
