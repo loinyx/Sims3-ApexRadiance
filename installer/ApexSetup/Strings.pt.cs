@@ -2132,7 +2132,7 @@ public static partial class Strings
         ["Backing up\u2026"] = "Copiando\u2026",
         ["Backing up {0} of {1}\u2026"] = "Copiando {0} de {1}\u2026",
         ["This save was played since it came back, so it stays."] = "Este save foi jogado depois de voltar, então ele fica.",
-        ["{0} family"] = "Família {0}",
+        ["No copy of this save yet. Make a copy and it shows here as a point."] = "Ainda não há cópia deste save. Faça uma cópia e ela aparece aqui como um ponto.",
         ["Close The Sims 3 to change this save. You can still look around and make copies."] = "Feche o The Sims 3 para mudar este save. Você ainda pode olhar tudo e fazer cópias.",
         ["This save can't be read"] = "Não foi possível ler este save",
         ["Parts of the save"] = "Partes do save",
@@ -2233,5 +2233,8 @@ public static partial class Strings
         ["No portraits in this save. The game makes them as you play."] = "Este save não tem retratos. O jogo faz enquanto você joga.",
         ["Some of the Sims this save knows. The game makes these portraits again by itself."] = "Alguns dos Sims que este save conhece. O jogo refaz estes retratos sozinho.",
         ["Portrait of a Sim"] = "Retrato de Sim",
+        ["The game takes these pictures by itself, and the save grows with them."] = "O jogo tira estas fotos sozinho, e o save cresce com elas.",
+        ["Turn that off in Game settings"] = "Desligar em Configurações do jogo",
+        ["Open Game settings"] = "Abrir Configurações do jogo",
     };
 }

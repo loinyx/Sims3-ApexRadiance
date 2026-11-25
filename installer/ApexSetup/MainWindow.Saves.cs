@@ -112,7 +112,8 @@ public sealed partial class MainWindow
     }
 
     // two saves of one household in one world differ only by the save's name
-    static string SavePlace(SaveLook l) => PlaceName(l) is var p && (p.Length == 0 || p.Equals(l.Save.Name, StringComparison.OrdinalIgnoreCase)) ? l.Save.Name : l.Save.Name + " · " + p;
+    static string SavePlace(SaveLook l) => PlaceName(l) is var p && p.Length == 0 ? l.Save.Name
+        : l.Info.Worlds.Append(l.Info.World).Select(Worlds.Pretty).Any(w => w.StartsWith(l.Save.Name, StringComparison.OrdinalIgnoreCase)) ? p : l.Save.Name + " · " + p;
 
     string PlayedWhen(DateTime t)
     {
@@ -293,7 +294,6 @@ public sealed partial class MainWindow
         if (l.Info.Description.Trim() is { Length: > 0 } about)
         {
             var text = White(about, 14, 0xCC, 4);
-            (text.MaxWidth, text.HorizontalAlignment) = (420, HorizontalAlignment.Left);
             ToolTipService.SetToolTip(text, about);
             words.Children.Add(text);
         }
@@ -317,14 +317,16 @@ public sealed partial class MainWindow
         g.Children.Add(words);
 
         var card = new Border { Child = g, CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), RequestedTheme = ElementTheme.Dark, ContextFlyout = SaveMenu(l) };
-        // (the Sims stand clear of the words; in a narrow window they are smaller and the words keep half of it)
+        // (the Sims stand clear of the words, and the buttons may reach a little further to stay in one row; in a narrow
+        // window the Sims are smaller and the words keep half of it)
         void Fit(double w)
         {
             var wide = w >= 700;
             family.Height = wide ? 350 : 250;
-            family.MaxWidth = Math.Max(120, w * 0.46);
-            family.Margin = new Thickness(0, 0, w * 0.05, 22);
-            words.MaxWidth = wide ? Math.Min(500, w * 0.62) : w;
+            family.MaxWidth = Math.Max(120, w * 0.42);
+            family.Margin = new Thickness(0, 0, w * 0.04, 22);
+            words.MaxWidth = wide ? Math.Min(560, w * 0.62) : w;
+            foreach (var e in words.Children.OfType<FrameworkElement>().Where(e => e != acts)) (e.MaxWidth, e.HorizontalAlignment) = (wide ? Math.Min(500, w * 0.5 - 16) : Math.Min(420, w * 0.56), HorizontalAlignment.Left);
         }
         Fit(640);
         card.SizeChanged += (_, e) => { if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 0.5) Fit(e.NewSize.Width); };
@@ -343,7 +345,8 @@ public sealed partial class MainWindow
             var print = new Border
             {
                 Width = side, Height = side, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(4), BorderBrush = Argb(0xFFF1EFEA), Background = Res("ApexPillBrush"), Opacity = 0,
-                RenderTransform = new RotateTransform { Angle = turn }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5), Shadow = new ThemeShadow(), Translation = new System.Numerics.Vector3(0, 0, 16),
+                // (turned on its visual: a print with a RenderTransform refuses the fade)
+                Rotation = turn, CenterPoint = new System.Numerics.Vector3((float)side / 2, (float)side / 2, 0), Shadow = new ThemeShadow(), Translation = new System.Numerics.Vector3(0, 0, 16),
             };
             Canvas.SetTop(print, y);
             fan.Children.Add(print);
@@ -508,10 +511,11 @@ public sealed partial class MainWindow
     // a household before one of its lots; Play in the corner under the pointer, the rest on its page and in its menu
     FrameworkElement SaveTile(SaveLook l)
     {
-        var (name, place, size) = (FamilyName(l), SavePlace(l), ModRow.SizeText(l.Info.Bytes));
+        var (name, place, size) = (FamilyName(l), SavePlace(l), SpSize(l.Info.Bytes));
         var g = new Grid { Height = 244 };
         var lot = SaveImage(LotPicture(l), 0.62);
-        (lot.Width, lot.Height, lot.Margin, lot.HorizontalAlignment, lot.VerticalAlignment) = (290, 250, new Thickness(0, -14, 0, 0), HorizontalAlignment.Center, VerticalAlignment.Top);
+        // (it fills the card however wide: a lot's picture has an edge of its own)
+        (lot.Stretch, lot.Height, lot.Margin, lot.HorizontalAlignment, lot.VerticalAlignment) = (Stretch.UniformToFill, 250, new Thickness(0, -14, 0, 0), HorizontalAlignment.Center, VerticalAlignment.Top);
         g.Children.Add(lot);
         g.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(((SolidColorBrush)Res("ApexCardBrush")).Color, [(0, 0xF8), (0.14, 0xF5), (0.52, 0x59), (0.8, 0)]) });
         var stand = new Grid { Height = 150, MaxWidth = 190, Margin = new Thickness(22, 0, 0, 74), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom };
@@ -538,14 +542,14 @@ public sealed partial class MainWindow
         var cell = new Grid();
         cell.Children.Add(b);
         var (corner, over) = PlayCorner(play);
-        (corner.VerticalAlignment, corner.Margin, corner.Opacity) = (VerticalAlignment.Top, new Thickness(0, 14, 14, 0), 0);
-        corner.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
+        (corner.VerticalAlignment, corner.Margin) = (VerticalAlignment.Top, new Thickness(0, 14, 14, 0));
+        // (the button's own visual is animated by PlayCorner, so what fades is a layer around it)
+        var layer = new Grid { Children = { corner }, Opacity = 0, IsHitTestVisible = false, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) } };
         var (hover, focus) = (false, false);
-        void Show() { corner.Opacity = hover || focus ? 1 : 0; corner.IsHitTestVisible = hover; over(hover); } // (a touch on the card never starts the game)
-        corner.IsHitTestVisible = false;
+        void Show() { layer.Opacity = hover || focus ? 1 : 0; layer.IsHitTestVisible = hover; over(hover); } // (a touch on the card never starts the game)
         play.GotFocus += (_, _) => { focus = true; Show(); };
         play.LostFocus += (_, _) => { focus = false; Show(); };
-        cell.Children.Add(corner);
+        cell.Children.Add(layer);
         Lift(cell, () => { hover = true; Show(); }, () => { hover = false; Show(); });
         return cell;
     }
@@ -643,9 +647,12 @@ public sealed partial class MainWindow
         g.Children.Add(family);
 
         var words = new StackPanel { Spacing = 12, Margin = new Thickness(22, 0, 22, 22) };
-        words.Children.Add(Col(SaveText(FamilyName(l), 22, strong: true), SaveText(SavePlace(l) + ", " + ModRow.SizeText(l.Info.Bytes), 14, "ApexSoftTextBrush", lines: 2)));
+        var place = SaveText(SavePlace(l) + ", " + SpSize(l.Info.Bytes), 14, "ApexSoftTextBrush");
+        ToolTipService.SetToolTip(place, place.Text);
+        words.Children.Add(Col(SaveText(FamilyName(l), 22, strong: true), place));
         var about = l.Info.Description.Trim() is { Length: > 0 } d ? d : PlayedWhen(l.Save.LastPlayed);
-        var text = SaveText(about, 13, "ApexSoftTextBrush", lines: 4);
+        var text = SaveText(about, 13, "ApexSoftTextBrush", lines: 3);
+        (text.LineHeight, text.Height) = (18, 54); // (the names and the buttons of a row of cards stand in line)
         ToolTipService.SetToolTip(text, about);
         words.Children.Add(text);
         var act = new Border { MinHeight = 48 };

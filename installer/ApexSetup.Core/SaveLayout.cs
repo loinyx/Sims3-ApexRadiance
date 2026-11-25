@@ -3,7 +3,8 @@ namespace ApexSetup;
 // Where things go on a save's page: the memories' mosaic, the tiles of what weighs, the points of the timeline.
 public static class SaveLayout
 {
-    // Square cells in columns; every each-th item takes two by two, and later items fill the holes that leaves.
+    // Square cells in columns; every each-th item takes two by two, and later items fill the holes that leaves (near the
+    // end none is large: nothing would fill beside it).
     public static List<(int Col, int Row, int Span)> Mosaic(int count, int cols, int each = 11)
     {
         var cells = new List<(int, int, int)>(count);
@@ -12,7 +13,7 @@ public static class SaveLayout
         var first = 0; // (the rows above are full)
         for (var i = 0; i < count; i++)
         {
-            var span = cols > 1 && i % each == 0 ? 2 : 1;
+            var span = cols > 1 && i % each == 0 && (i == 0 || count - i > cols * 2) ? 2 : 1;
             while (first < rows.Count && rows[first].All(x => x)) first++;
             var (col, row) = (0, first);
             while (col + span > cols || Taken(col, row) || (span == 2 && (Taken(col + 1, row) || Taken(col, row + 1) || Taken(col + 1, row + 1))))
