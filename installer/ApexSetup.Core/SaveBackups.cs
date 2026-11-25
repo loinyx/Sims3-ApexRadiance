@@ -299,6 +299,9 @@ public static class SaveBackups
             foreach (var game in new[] { Path.Combine(docs, "Saves"), Path.Combine(docs, "Mods") })
                 if ((to + Path.DirectorySeparatorChar).StartsWith(Path.GetFullPath(game) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new SetupException("Choose a folder the game does not use.");
             if (BackupChoices.Sure().Others(docs).Any(f => f.Equals(to, StringComparison.OrdinalIgnoreCase))) throw new SetupException("Another game already keeps its backups in this folder.");
+            // (nor another game's own folder, which has no choice of its own to be found by)
+            if (Path.GetFileName(to).Equals(Path.GetFileName(Saves.OwnBackupDir(docs)), StringComparison.OrdinalIgnoreCase) && !to.Equals(Path.GetFullPath(Saves.OwnBackupDir(docs)), StringComparison.OrdinalIgnoreCase)
+                && Directory.Exists(Path.Combine(Path.GetDirectoryName(to)!, "Saves"))) throw new SetupException("Another game already keeps its backups in this folder.");
             var reach = Directory.Exists(from);
             if (!reach && !leave && BackupChoices.Load().FolderOf(docs) is not null) throw new SetupException("The backup folder isn't available: {0}", from);
             var zips = SaveCopies.ZipFiles(docs).Select(z => z.Path).ToList();
@@ -317,9 +320,16 @@ public static class SaveBackups
                     say?.Invoke(i, zips.Count);
                     var there = Path.Combine(to, Path.GetFileName(zips[i]));
                     if (File.Exists(there) && SaveCopies.Sha(there) == SaveCopies.Sha(zips[i])) continue;
-                    File.Copy(zips[i], there);
+                    // (under another name until it is whole: one cut short would stand in the way of the next try)
+                    var part = there + ".part";
+                    try
+                    {
+                        File.Copy(zips[i], part, true);
+                        if (SaveCopies.Sha(part) != SaveCopies.Sha(zips[i])) throw new IOException("a copied backup did not read back as written");
+                        File.Move(part, there);
+                    }
+                    catch { try { File.Delete(part); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); } throw; }
                     done.Add(there);
-                    if (SaveCopies.Sha(there) != SaveCopies.Sha(zips[i])) throw new IOException("a copied backup did not read back as written");
                 }
                 ct.ThrowIfCancellationRequested();
                 BackupChoices.Change(c => c.SetFolder(docs, folder is null ? null : to));

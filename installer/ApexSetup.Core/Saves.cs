@@ -49,6 +49,9 @@ public static class Saves
         lock (SaveCopies.Gate) return BackupNow(s, docs, note, ct);
     }
 
+    // the day and time in a backup's name, the same in every region (Thai, Arabic and Persian Windows count other years)
+    public static string Stamp(DateTime when) => when.ToString("yyyy-MM-dd HH.mm.ss", System.Globalization.CultureInfo.InvariantCulture);
+
     static string BackupNow(Save s, string docs, string? note, CancellationToken ct)
     {
         var (choices, dir) = (BackupChoices.Load(), BackupDir(docs));
@@ -57,7 +60,7 @@ public static class Saves
         var when = DateTime.Now;
         string zip;
         // (never over an older copy: one made in the same second takes the next)
-        while (File.Exists(zip = Path.Combine(dir, $"{s.Name} {when:yyyy-MM-dd HH.mm.ss}.zip"))) when = when.AddSeconds(1);
+        while (File.Exists(zip = Path.Combine(dir, $"{s.Name} {Stamp(when)}.zip"))) when = when.AddSeconds(1);
         // (a copy that lets a change go ahead is always compared with the save)
         SaveCopies.Zip(s.Dir, zip, note, choices.Check || note is SaveCopies.BeforeClean or SaveCopies.BeforeRestore || Games.IsRunning(), choices.RememberMods ? SaveBackups.ModsNow(docs) : null, ct);
         return zip;

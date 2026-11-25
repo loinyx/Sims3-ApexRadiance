@@ -87,7 +87,7 @@ int Pass(std::vector<uint8_t>& buf, std::string* why) {
     return done;
 }
 
-DWORD WINAPI Thread(LPVOID) {
+void Search() {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     const ULONGLONG start = GetTickCount64();
     std::vector<uint8_t> buf(kChunk);
@@ -106,6 +106,11 @@ DWORD WINAPI Thread(LPVOID) {
     }
     if (total) LOG_INFO(std::format("[SaveNameFix] Ended after {} ms, {} passes", GetTickCount64() - start, passes));
     else LOG_WARNING("[SaveNameFix] Off: " + why);
+}
+
+DWORD WINAPI Thread(LPVOID) {
+    // Out of memory (a 32-bit game) ends the search, not the game.
+    try { Search(); } catch (...) { LOG_WARNING("[SaveNameFix] Off: the search could not go on"); }
     return 0;
 }
 

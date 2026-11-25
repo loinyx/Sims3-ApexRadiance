@@ -89,10 +89,10 @@ public static class RestorePoints
         var now = DateTime.Now;
         var p = new RestorePoint
         {
-            Created = now.ToUniversalTime(), CreatedLocal = now.ToString("yyyy-MM-dd HH:mm:ss zzz"), Label = label, Args = args, Bin = bin,
+            Created = now.ToUniversalTime(), CreatedLocal = now.ToString("yyyy-MM-dd HH:mm:ss zzz", System.Globalization.CultureInfo.InvariantCulture), Label = label, Args = args, Bin = bin,
             SetupVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "",
         };
-        var name = now.ToString("yyyyMMdd-HHmmss");
+        var name = now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
         p.Dir = Path.Combine(RootOf(bin), name);
         for (int n = 2; Directory.Exists(p.Dir); n++) p.Dir = Path.Combine(RootOf(bin), $"{name}-{n}"); // (two actions in one second)
         return _open = new Scope(p, true);

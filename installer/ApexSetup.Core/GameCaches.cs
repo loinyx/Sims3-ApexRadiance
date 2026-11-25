@@ -75,7 +75,7 @@ public static class GameCaches
             }
         }
         var older = Backups();
-        var to = Path.Combine(BackupRoot, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff"));
+        var to = Path.Combine(BackupRoot, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", System.Globalization.CultureInfo.InvariantCulture));
         Directory.CreateDirectory(to);
         File.WriteAllText(Path.Combine(to, "docs.txt"), docs); // (first: a clean cut off half way can still be restored)
         var moved = new List<(string From, string To)>();

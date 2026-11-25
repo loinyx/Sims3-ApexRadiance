@@ -167,9 +167,17 @@ public static class SaveCopies
         var list = new List<(string, string, DateTime)>();
         if (!Directory.Exists(Saves.BackupDir(docs))) return list;
         foreach (var zip in Directory.EnumerateFiles(Saves.BackupDir(docs), "*.zip"))
-            if (Path.GetFileNameWithoutExtension(zip) is var n && n.Length >= 21 && n[^20] == ' '
-                && DateTime.TryParseExact(n[^19..], "yyyy-MM-dd HH.mm.ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)) list.Add((n[..^20], zip, when));
+            if (Path.GetFileNameWithoutExtension(zip) is var n && n.Length >= 21 && n[^20] == ' ' && When(zip, n[^19..]) is { } when) list.Add((n[..^20], zip, when));
         return list;
+    }
+
+    // the day in a zip's name. Older launchers wrote it in the region's own calendar: a year that cannot be, or a day this
+    // calendar has not, takes the file's own time.
+    static DateTime? When(string zip, string stamp)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(stamp, @"^\d{4}-\d\d-\d\d \d\d\.\d\d\.\d\d$")) return null;
+        return DateTime.TryParseExact(stamp, "yyyy-MM-dd HH.mm.ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var when) && when.Year >= 2009 && when.Year <= DateTime.Now.Year + 1
+            ? when : File.GetLastWriteTime(zip);
     }
 
     // the zips of saves that are gone (neither in the game nor kept out of it), newest first; Restore brings one back
@@ -428,6 +436,17 @@ public static class SaveCopies
 
     // a name a save can take, trimmed, or why not (SetupException)
     public static string CleanName(string docs, string name) => CleanIn(SavesDir(docs), name);
+
+    // a name whose backups would mix with another save's: one kept on the other side (in the game, or out of it), or one that
+    // is gone and left its backups
+    static HashSet<string> Kept(string docs, string root) =>
+        ZipFiles(docs).Select(z => z.Name).Concat(Saves.In(Path.GetFullPath(root).Equals(Path.GetFullPath(SavesDir(docs)), StringComparison.OrdinalIgnoreCase) ? StoredDir(docs) : SavesDir(docs)).Select(x => x.Name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    static string NewName(string docs, string root, string name)
+    {
+        name = CleanIn(root, name);
+        return Kept(docs, root).Contains(name) ? throw new SetupException("Backups of a save named {0} are kept. Choose another name.", name) : name;
+    }
     static string CleanIn(string root, string name)
     {
         name = ModLibrary.CleanName(name);
@@ -444,7 +463,7 @@ public static class SaveCopies
         lock (Gate)
         {
             var root = SavesDir(docs);
-            name = name is null ? FreeName(root, s.Name) : CleanIn(root, name);
+            name = name is null ? FreeName(root, s.Name, Kept(docs, root)) : NewName(docs, root, name);
             var copy = CopyAs(s.Dir, Path.Combine(root, name + ".sims3"), ct);
             try { SaveStars.Renamed(s.Name, name, keep: true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); }
             return copy;
@@ -459,8 +478,10 @@ public static class SaveCopies
         lock (Gate)
         {
             var root = Path.GetDirectoryName(s.Dir)!;
-            name = name.Trim().Equals(s.Name, StringComparison.OrdinalIgnoreCase) ? ModLibrary.CleanName(name) : CleanIn(root, name);
+            name = name.Trim().Equals(s.Name, StringComparison.OrdinalIgnoreCase) ? ModLibrary.CleanName(name) : NewName(docs, root, name);
             if (name == s.Name) return s;
+            // (its backups could not follow it, and would be left as those of a save that is gone)
+            if (BackupChoices.Load().FolderOf(docs) is { } far && !Directory.Exists(far)) throw new SetupException("The backup folder isn't available: {0}", far);
             return Move(docs, s, root, name);
         }
     }

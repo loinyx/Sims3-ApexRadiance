@@ -88,20 +88,21 @@ bool IsFile(const std::wstring& p) {
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-// A folder's files into another: what is not there yet, nothing replaced.
-void MoveMissing(const std::wstring& from, const std::wstring& to) {
-    if (MoveFileW(from.c_str(), to.c_str())) return;
+// A folder's files into another: what is not there yet, nothing replaced. keep: they stay where they were too.
+void MoveMissing(const std::wstring& from, const std::wstring& to, bool keep) {
+    if (!keep && MoveFileW(from.c_str(), to.c_str())) return;
     const DWORD a = GetFileAttributesW(from.c_str());
+    if (keep && a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) CopyFileW(from.c_str(), to.c_str(), TRUE);
     if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY) || (a & FILE_ATTRIBUTE_REPARSE_POINT)) return;
     CreateDirectoryW(to.c_str(), nullptr);
     WIN32_FIND_DATAW found;
     const HANDLE find = FindFirstFileW((from + L"\\*").c_str(), &found);
     if (find == INVALID_HANDLE_VALUE) return;
     do {
-        if (wcscmp(found.cFileName, L".") != 0 && wcscmp(found.cFileName, L"..") != 0) MoveMissing(from + L"\\" + found.cFileName, to + L"\\" + found.cFileName);
+        if (wcscmp(found.cFileName, L".") != 0 && wcscmp(found.cFileName, L"..") != 0) MoveMissing(from + L"\\" + found.cFileName, to + L"\\" + found.cFileName, keep);
     } while (FindNextFileW(find, &found));
     FindClose(find);
-    RemoveDirectoryW(from.c_str()); // only when nothing stayed
+    if (!keep) RemoveDirectoryW(from.c_str()); // only when nothing stayed
 }
 
 std::once_flag g_once;
@@ -132,7 +133,8 @@ void Resolve() {
             const std::wstring old = windows + L"Apex Radiance";
             if (!IsFile(g_apex + L"ApexRadiance.toml") && IsDirectory(old)) {
                 SHCreateDirectoryExW(nullptr, game.c_str(), nullptr);
-                MoveMissing(old, game + L"Apex Radiance");
+                // (another edition plays in that one, and keeps its settings)
+                MoveMissing(old, game + L"Apex Radiance", IsFile(windows + L"Options.ini"));
                 // Settings that could not come (in use): read there until the next start moves them.
                 if (!IsFile(g_apex + L"ApexRadiance.toml") && IsFile(old + L"\\ApexRadiance.toml")) g_apex = old + L"\\";
             }

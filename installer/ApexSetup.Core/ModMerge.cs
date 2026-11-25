@@ -790,7 +790,7 @@ public static partial class ModMerge
     {
         var dir = Path.Combine(Paths.Data, "logs");
         Directory.CreateDirectory(dir);
-        path = Path.Combine(dir, $"{kind}-{DateTime.Now:yyyyMMdd-HHmmss-fff}.log");
+        path = Path.Combine(dir, FormattableString.Invariant($"{kind}-{DateTime.Now:yyyyMMdd-HHmmss-fff}.log"));
         return new StreamWriter(path, append: true); // (flushed at each step: a write for each of thousands of lines would cost more than the moves)
     }
 
@@ -901,6 +901,8 @@ public static partial class ModMerge
                 log.WriteLine("restored " + t.O.Rel);
                 FailPoint("split");
             }
+            // (moved meanwhile: it would stay loaded beside its originals)
+            if (!File.Exists(merged.Path)) throw new IOException("the merged file is no longer where it was");
             Recycle(merged.Path);
             log.WriteLine("merged file to the Recycle Bin");
         }

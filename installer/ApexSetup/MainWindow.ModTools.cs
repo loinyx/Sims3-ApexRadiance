@@ -204,6 +204,7 @@ public sealed partial class MainWindow
 
     async Task HuntAsync()
     {
+        if (ModsBusy()) return;
         if (ModHunt.Current() is not null) return;
         var suspects = _mods.Count(m => m.FileType == "package" && !m.Locked && m.Enabled);
         var rounds = (int)Math.Ceiling(Math.Log2(Math.Max(2, suspects)));
@@ -220,6 +221,7 @@ public sealed partial class MainWindow
 
     async Task HuntAnswer(bool still)
     {
+        if (ModsBusy()) return;
         try { ModHunt.Answer(still, Mods.List(_game!, Docs, kinds: false), Docs); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
         _modsLoaded = false;
@@ -229,6 +231,7 @@ public sealed partial class MainWindow
 
     async Task HuntStop()
     {
+        if (ModsBusy()) return;
         try { ModHunt.Stop(Mods.List(_game!, Docs, kinds: false), Docs); }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not put back"), ErrorText(e)); }
         _modsLoaded = false;

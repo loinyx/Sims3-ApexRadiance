@@ -76,7 +76,14 @@ public static partial class ModMerge
     {
         if (merged.Locked) throw new SetupException("The launcher does not move, rename or remove this file.");
         var rec = Info(docs, merged) ?? throw new SetupException("This file is not a merge made by the launcher.");
-        if (rec.Pending is not null) lock (Gate) Undo(docs, rec, null); // (an earlier change that did not finish)
+        // (an earlier change that did not finish; read again under the lock, for one under way may have ended just now)
+        if (rec.Pending is not null)
+            lock (Gate)
+            {
+                Forget(docs);
+                rec = Info(docs, merged) ?? throw new SetupException("This file is not a merge made by the launcher.");
+                if (rec.Pending is not null) Undo(docs, rec, null);
+            }
         var p = new MergeEditPlan { Docs = docs, Merged = merged, Record = rec, Ordered = edit.Order is not null };
         var modsDir = Path.GetFullPath(Path.Combine(docs, "Mods")) + Path.DirectorySeparatorChar;
         var held = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

@@ -28,7 +28,7 @@ public static class Paths
     {
         if (dir is null || string.Equals(dir, DefaultInstallDir, StringComparison.OrdinalIgnoreCase)) { if (File.Exists(InstallDirFile)) File.Delete(InstallDirFile); return; }
         Directory.CreateDirectory(Data);
-        File.WriteAllText(InstallDirFile, dir);
+        Fs.WriteAtomic(InstallDirFile, dir);
     }
     public static string InstalledExe => Path.Combine(InstallDir, "ApexLauncher.exe");
 

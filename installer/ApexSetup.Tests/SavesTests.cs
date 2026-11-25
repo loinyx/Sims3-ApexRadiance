@@ -2,6 +2,7 @@
 // temporary Documents folder. APEX_SAVES_REAL=<a COPY of a Saves folder> adds a run on real saves: each is copied to the
 // temporary folder first and the given folder is only read.
 using System.Buffers.Binary;
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -496,6 +497,29 @@ static class SavesTests
         check(twin.Name == "Town (2)" && named.Name == "Twin" && Same(files, Snap(twin.Dir)) && Same(files, Snap(s.Dir)) && !Directory.Exists(twin.Dir + ".backup")
               && SaveStars.Of("Town (2)").Contains("k1") && SaveStars.Of("Town").Contains("k1") && Throws<SetupException>(() => SaveCopies.Duplicate(docs, s, "Gone")),
             "duplicate: a second save with the same files and stars under a free name; a taken name is refused");
+
+        // a save's backups never mix with another's: a name that only backups keep, or a save kept out of the game, is not free
+        {
+            var left = Path.Combine(Saves.BackupDir(docs), "Ghost 2026-01-02 03.04.05.zip");
+            File.WriteAllText(left, "");
+            var ghost = Throws<SetupException>(() => SaveCopies.Rename(docs, named, "ghost")) && Throws<SetupException>(() => SaveCopies.Duplicate(docs, s, "Ghost"));
+            File.Move(left, Path.Combine(Saves.BackupDir(docs), "Town (3) 2026-01-02 03.04.05.zip"));
+            var next = SaveCopies.Duplicate(docs, s);
+            check(ghost && next.Name == "Town (4)", "names: one whose backups are kept is not taken by another save, nor by a copy");
+            Directory.Delete(next.Dir, true);
+            File.Delete(Path.Combine(Saves.BackupDir(docs), "Town (3) 2026-01-02 03.04.05.zip"));
+            // the day in a name is the same in every region, and one an older launcher wrote in another calendar takes the file's own
+            var was = CultureInfo.CurrentCulture;
+            try { CultureInfo.CurrentCulture = new CultureInfo("th-TH"); check(Saves.Stamp(new DateTime(2026, 11, 25, 1, 2, 3)) == "2026-11-25 01.02.03", "names: a Thai, Arabic or Persian Windows writes the same day"); }
+            finally { CultureInfo.CurrentCulture = was; }
+            foreach (var day in new[] { "2569-11-25 01.02.03", "1405-02-31 01.02.03" })
+            {
+                var old = Path.Combine(Saves.BackupDir(docs), "Old " + day + ".zip");
+                File.WriteAllText(old, "");
+                check(SaveCopies.ZipFiles(docs).Single(z => z.Path == old).When == File.GetLastWriteTime(old), "names: a day of another calendar (" + day[..4] + ") takes the file's time");
+                File.Delete(old);
+            }
+        }
 
         // rename: the folder, the game's copy, the launcher's zips and what it keeps by name
         SaveHealth.Check(docs);

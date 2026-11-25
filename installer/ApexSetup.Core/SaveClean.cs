@@ -15,7 +15,8 @@ public enum CleanStep { Copy, Write, Verify, Swap }
 // Done / Total: files, the save's (Copy) or the ones rewritten
 public readonly record struct CleanProgress(CleanStep Step, int Done, int Total);
 // Copy: the zip made before anything changed, which Undo puts back
-public sealed record CleanResult(Save Save, long Before, long After, int Removed, string Copy);
+// Played: the save's time once cleaned (a later one: it was played since)
+public sealed record CleanResult(Save Save, long Before, long After, int Removed, string Copy, DateTime Played = default);
 
 public sealed class CleanPlan
 {
@@ -197,11 +198,12 @@ public static class SaveClean
         foreach (var p in swapped)
             try { Fs.Retry(() => File.Delete(p.Path + OldSuffix)); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         SaveCopies.Thin(plan.Docs, plan.Save);
-        return new(plan.Save, plan.Before, plan.After, plan.Removed, copy);
+        return new(plan.Save, plan.Before, plan.After, plan.Removed, copy, SaveInfo.Read(plan.Save.Dir)?.LastPlayed ?? default);
     }
 
     // the save as it was before a clean: the zip the clean made goes back in (the save of now is zipped first, like any restore)
     public static Save Undo(string docs, CleanResult r, CancellationToken ct = default) =>
+        r.Played != default && SaveInfo.Read(r.Save.Dir)?.LastPlayed > r.Played ? throw new SetupException("This save was played since it was cleaned, so it stays.") :
         SaveCopies.Restore(docs, r.Save, SaveCopies.Timeline(docs, r.Save).FirstOrDefault(p => p.Kind == CopyKind.Launcher && string.Equals(p.Path, r.Copy, StringComparison.OrdinalIgnoreCase))
             ?? throw new SetupException("The copy made before the clean is gone, so it can't be undone."), ct);
 

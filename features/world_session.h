@@ -47,8 +47,9 @@ inline bool IsActive() {
     if (!global) return false;
     __try {
         const uintptr_t world = *reinterpret_cast<const uintptr_t*>(global);
-        return world && LoaderDismissed() && Active(*reinterpret_cast<const unsigned char*>(world + 0x41),
-                              *reinterpret_cast<const int*>(world + 0x1B4));
+        // The world's own state first: the loading window is asked of the game's UI, which is still being built at start-up.
+        return world && Active(*reinterpret_cast<const unsigned char*>(world + 0x41),
+                               *reinterpret_cast<const int*>(world + 0x1B4)) && LoaderDismissed();
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 

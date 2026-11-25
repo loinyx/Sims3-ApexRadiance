@@ -174,6 +174,21 @@ static class InstallTests
                 using (var run = Registry.CurrentUser.OpenSubKey(LauncherInstall.RegistryBase + @"\Run"))
                     check(run?.GetValue("Apex Launcher") is string cmd && cmd.Contains(chosen), "install folder: Start with Windows follows");
                 check(LauncherInstall.FirstStep(oldSetup, false) == StartStep.HandToInstalled, "install folder: a downloaded copy hands over to it");
+                // a start that Windows refuses: everything points at the copy that works again
+                var other = LauncherInstall.FolderFor(Path.Combine(root, "E"));
+                var refused = false;
+                try { LauncherInstall.Install(Paths.InstalledExe, null, (_, _) => throw new System.ComponentModel.Win32Exception(5), other); } catch (System.ComponentModel.Win32Exception) { refused = true; }
+                using (var run = Registry.CurrentUser.OpenSubKey(LauncherInstall.RegistryBase + @"\Run"))
+                using (var apps = Registry.CurrentUser.OpenSubKey(LauncherInstall.RegistryBase + @"\Uninstall\ApexLauncher"))
+                    check(refused && Paths.InstallDir == chosen && File.Exists(Paths.InstalledExe) && Gone(Path.Combine(other, "ApexLauncher.exe")) && run?.GetValue("Apex Launcher") is string r && r.Contains(chosen)
+                        && apps?.GetValue("InstallLocation") is string at && at == chosen, "install folder: a move that fails leaves the copy there was, and all that points at it");
+                // a copy cut short in the folder is made again
+                Directory.CreateDirectory(other);
+                File.WriteAllText(Path.Combine(other, "ApexLauncher.exe"), "cut");
+                LauncherInstall.Install(Paths.InstalledExe, null, Start, other);
+                check(new FileInfo(Path.Combine(other, "ApexLauncher.exe")).Length > 3 && Gone(Path.Combine(chosen, "ApexLauncher.exe")), "install folder: a copy cut short there is made again");
+                LauncherInstall.Install(Paths.InstalledExe, null, Start, chosen);
+                check(LauncherInstall.LastingArgs(["--tray", @"--moved-from=C:\x.exe", "--was-setup", "--replace", "--handover", @"C:\Games\The Sims 3"]).SequenceEqual([@"C:\Games\The Sims 3"]), "install folder: the next copy gets only what lasts of the command line");
                 File.WriteAllText(Path.Combine(chosen, "mine.txt"), "");
                 LauncherInstall.Install(Paths.InstalledExe, null, Start, Paths.DefaultInstallDir);
                 check(Paths.InstallDir == Paths.DefaultInstallDir && File.Exists(Paths.InstalledExe) && File.Exists(Path.Combine(chosen, "mine.txt")) && !File.Exists(Path.Combine(chosen, "ApexLauncher.exe")),
