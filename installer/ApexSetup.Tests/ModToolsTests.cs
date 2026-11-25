@@ -184,7 +184,7 @@ static class ModToolsTests
             var all = new[] { "new.package", "house.sims3pack", "readme.txt", "text.package", "sims4.package", "protected.package", "cut.package", "empty.package" }
                 .Select(n => Path.Combine(drop, n)).Append(zip).ToList();
             var res = AddTo("Packages", all);
-            string Why(string n) => res.FirstOrDefault(x => x.Name == n) is { } x ? x.Problem ?? "ok" : "gone";
+            string Why(string n) => res.FirstOrDefault(x => x.Name == n) is { } x ? x.Problem ?? (x.Doubt ? x.Warning! : "ok") : "gone";
             check(Why("new.package") == "ok" && Why("house.sims3pack").StartsWith("Install it with") && Why("inner.package") == "ok" && Why("evil.package") == "ok"
                 && Why("sims4.package").Contains("Sims 4") && Why("protected.package").Contains("protected") && Why("cut.package").Contains("damaged")
                 && Why("empty.package").Contains("empty") && Why("text.package").StartsWith("Not a package") && Why("broken.package").StartsWith("Not a package")

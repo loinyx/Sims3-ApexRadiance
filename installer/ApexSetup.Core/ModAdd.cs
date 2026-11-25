@@ -18,6 +18,7 @@ public sealed class AddItem
     public string Sha { get; set; } = "";
     public string? Problem { get; set; }            // why it is not added
     public string? Warning { get; set; }
+    public bool Doubt { get; set; }                 // Warning says it looks damaged: added only when the player ticks it
     public string? SameAs { get; set; }             // the same bytes are already there: that file's name, or the merge's (SameInMerge)
     public bool SameInMerge { get; set; }
     public bool SameInList { get; set; }            // ... or another file of this list
@@ -122,10 +123,11 @@ public sealed class ModAdd : IDisposable
             if (i.Size == 0) { i.Problem = "The file is empty."; return i; }
             var warnings = new List<string>();
             i.Problem = ModInstall.PackageProblems(path, warnings).FirstOrDefault();
+            if (i.Problem is { } bad && ext != ".world" && ModInstall.Doubtful(bad)) (i.Problem, i.Warning, i.Doubt) = (null, bad, true);
             if (!i.Ok) return i;
             if (ext == ".package")
             {
-                i.Warning = warnings.FirstOrDefault();
+                i.Warning ??= warnings.FirstOrDefault();
                 var index = Dbpf.Index(path);
                 i.Kind = Mods.KindOf(index.GroupBy(e => e.Type).ToDictionary(x => x.Key, x => x.Count()));
                 if (IsLibrary(index))
@@ -135,7 +137,7 @@ public sealed class ModAdd : IDisposable
                 }
             }
             i.Sha = Hash(path);
-            i.Add = true;
+            i.Add = !i.Doubt;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { i.Problem = "The file could not be read."; }
         return i;

@@ -179,6 +179,20 @@ static class ModAddTests
             using (var add = Open(Put("x.rar", [.. "Rar!"u8, 0x1A, 7, 0, 1, 2, 3])))
                 check(add.Items.Single().Problem!.Contains("7-Zip"), "add: a rar with no extractor says what to install");
             ModConflicts.Extractors = oldExtractors;
+            // one that looks damaged waits for the player's tick, and is added then; a size without its top bit is read as the game reads it
+            var torn = Pkg((Xml, 301, "one"), (Xml, 302, "two"));
+            var index = BitConverter.ToInt32(torn, 0x40) + 4;
+            BitConverter.GetBytes(0x7FFFFFF0).CopyTo(torn, index + 16);
+            var plain = Pkg((Xml, 303, "three"), (Xml, 304, "four"));
+            foreach (var at in new[] { index + 20, index + 32 + 20 }) plain[at + 3] = 0;
+            using (var add = Open(Put("torn.package", torn), Put("plainsize.package", plain)))
+            {
+                check(add.Items[0] is { Ok: true, Doubt: true, Add: false, Warning: not null } && add.Items[1] is { Ok: true, Doubt: false, Add: true } && Dbpf.Index(Put("plainsize.package", plain)).Count == 2,
+                    "add: a package that looks damaged can be added by the player's choice; one with plain sizes is whole | " + string.Join(" | ", add.Items.Select(i => i.Name + "=" + i.Problem + i.Warning)));
+                add.Add(add.Items[0]);
+                check(File.ReadAllBytes(add.Items[0].Added!).SequenceEqual(torn), "add: ... and goes in as it is");
+                File.Delete(add.Items[0].Added!);
+            }
             // a real .7z, through Windows' tar.exe
             var tar = Path.Combine(Environment.SystemDirectory, "tar.exe");
             var seven = Path.Combine(drop, "real.7z");

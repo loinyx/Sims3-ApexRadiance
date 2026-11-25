@@ -5,6 +5,9 @@ namespace ApexSetup;
 // resources that do too. Nothing here writes.
 public static class ModInstall
 {
+    // what can be a package the launcher reads wrong as well as a broken one: the player may add it all the same (ModAdd)
+    public static bool Doubtful(string problem) => problem.StartsWith("The package is damaged:", StringComparison.Ordinal);
+
     // DBPF header and index, by the format the game reads (and Dbpf.Index): what makes the game skip or choke on a package
     public static List<string> PackageProblems(string path, List<string>? warnings = null)
     {
@@ -28,7 +31,7 @@ public static class ModInstall
         f.Position = 0;
         var entries = Dbpf.Index(f);
         if (entries.Count != count) { p.Add("The package is damaged: its index can't be read."); return p; }
-        if (entries.Any(e => e.Offset + (long)e.Size > f.Length)) p.Add("The package is damaged: part of it is missing. The download may have been cut short.");
+        if (entries.Any(e => e.Size > 0 && e.Offset + (long)e.Size > f.Length)) p.Add("The package is damaged: part of it is missing. The download may have been cut short.");
         if (warnings is not null && entries.Any(e => e.Type == 0x073FAA07)) warnings.Add("A script mod: it runs code in the game. Install it only from a creator you trust.");
         return p;
     }

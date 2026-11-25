@@ -30,12 +30,17 @@ public static class Dbpf
         if (r.ReadUInt32() != 0x46504244 /* "DBPF" */ || r.ReadUInt32() != 2) return list;
         f.Position = 0x24;
         var count = r.ReadUInt32();
+        f.Position = 0x2C;
+        var indexSize = r.ReadUInt32();
         f.Position = 0x40;
         var at = r.ReadUInt32();
         if (count == 0 || count > MaxEntries || at >= f.Length) return list;
         f.Position = at;
         var flags = r.ReadUInt32();
         uint cType = (flags & 1) != 0 ? r.ReadUInt32() : 0, cGroup = (flags & 2) != 0 ? r.ReadUInt32() : 0, cHigh = (flags & 4) != 0 ? r.ReadUInt32() : 0;
+        // (some tools leave the size's top bit out and still write the two last fields: the index's own size says they are there)
+        var shared = (flags & 1) + (flags >> 1 & 1) + (flags >> 2 & 1);
+        var whole = indexSize == 4 + 4 * shared + (long)count * 4 * (8 - shared);
         for (uint i = 0; i < count; i++)
         {
             var type = (flags & 1) != 0 ? cType : r.ReadUInt32();
@@ -46,7 +51,7 @@ public static class Dbpf
             var size = r.ReadUInt32();
             var mem = r.ReadUInt32();
             var compressed = false;
-            if ((size & 0x80000000) != 0)
+            if (whole || (size & 0x80000000) != 0)
             {
                 compressed = r.ReadUInt16() == 0xFFFF;
                 r.ReadUInt16(); // (committed)
