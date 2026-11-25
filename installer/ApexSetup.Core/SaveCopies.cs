@@ -211,6 +211,7 @@ public static class SaveCopies
     {
         if (from.Kind == CopyKind.Now) return s;
         Engine.CheckWritable();
+        Recover(docs); // (a save a cut-short change left aside goes home first: its name must not look free)
         lock (Gate)
         {
             string tmp = Work(s.Dir, "new"), old = Work(s.Dir, "old");

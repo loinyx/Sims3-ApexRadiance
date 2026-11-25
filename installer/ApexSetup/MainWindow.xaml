@@ -207,7 +207,7 @@
                     <Grid x:Name="Screens" Margin="0,0,0,32">
 
                         <!-- 0 Welcome -->
-                        <StackPanel x:Name="ScreenWelcome" Spacing="20">
+                        <StackPanel x:Name="ScreenWelcome" MaxWidth="920" Spacing="20">
                             <StackPanel Orientation="Horizontal" Spacing="20">
                                 <Image Source="ms-appx:///Assets/apex_logo.png" Width="88" Height="88" />
                                 <StackPanel VerticalAlignment="Center" Spacing="4">
@@ -532,7 +532,7 @@
 
                         <!-- 3 Install -->
                         <!-- in the install: the logo in a ring of progress on the left, the steps on the right -->
-                        <Grid x:Name="ScreenInstall" ColumnSpacing="36" Visibility="Collapsed">
+                        <Grid x:Name="ScreenInstall" MaxWidth="920" ColumnSpacing="36" Visibility="Collapsed">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -639,7 +639,7 @@
                         <StackPanel x:Name="ScreenGallery" Spacing="16" Visibility="Collapsed" />
                         <!-- 16 Game settings, 17 the install's step with the same options (MainWindow.GameSettings.cs) -->
                         <StackPanel x:Name="ScreenGameSettings" Spacing="4" Visibility="Collapsed" MaxWidth="920" />
-                        <StackPanel x:Name="ScreenWizardSettings" Spacing="4" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenWizardSettings" MaxWidth="920" Spacing="4" Visibility="Collapsed" />
 
                         <!-- 6 About -->
                         <StackPanel x:Name="ScreenAbout" Spacing="14" Visibility="Collapsed" MaxWidth="920">
@@ -657,7 +657,7 @@
                     </Grid>
                 </ScrollViewer>
                 <!-- 11 what Saves did, at the foot of the window (MainWindow.Saves.cs) -->
-                <InfoBar x:Name="SavesNote" Grid.Row="1" Tag="dyn" IsOpen="False" MaxWidth="720" Margin="24,0,24,16" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
+                <InfoBar x:Name="SavesNote" Grid.Row="1" Tag="dyn" IsOpen="False" MinWidth="420" MaxWidth="720" Margin="24,0,24,16" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
                 <!-- 9 Mods: its own full-height page (the side pane, the list, the chosen mods), each part scrolling on its own -->
                 <Grid x:Name="ScreenMods" Grid.Row="1" Visibility="Collapsed" SizeChanged="OnModsSized">
                     <Grid.KeyboardAccelerators>

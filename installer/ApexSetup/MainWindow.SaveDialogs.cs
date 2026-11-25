@@ -154,10 +154,10 @@ public sealed partial class MainWindow
         var body = new StackPanel { Spacing = 12, Width = 660 };
         body.Children.Add(Body(T("The ones you choose never leave in a clean.")));
         var pick = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-        AutomationProperties.SetName(pick, T("Save"));
+        AutomationProperties.SetName(pick, T("Which save"));
         foreach (var l in saves) pick.Items.Add(FamilyName(l.Save, l.Info) + " · " + SavePlace(l.Save, l.Info));
         if (saves.Count > 1) body.Children.Add(pick);
-        var host = new Grid { Height = 380, Children = { new ProgressRing { IsActive = true, Width = 28, Height = 28, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } } };
+        var host = new Grid { Height = 380 };
         body.Children.Add(host);
         body.Children.Add(foot);
         var d = new ContentDialog { Title = T("Choose the pictures that stay"), Content = body, PrimaryButtonText = T("Done"), SecondaryButtonText = T("Save to a folder"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
@@ -183,12 +183,16 @@ public sealed partial class MainWindow
         }
         grid.SelectionChanged += (_, e) =>
         {
-            if (filling) return;
-            foreach (var p in e.AddedItems.OfType<KeepPicture>()) p.Kept = true;
-            foreach (var p in e.RemovedItems.OfType<KeepPicture>()) p.Kept = false;
+            if (filling || !read.TryGetValue(at, out var mine)) return;
+            foreach (var p in e.AddedItems.OfType<KeepPicture>().Where(mine.Contains)) p.Kept = true;
+            foreach (var p in e.RemovedItems.OfType<KeepPicture>().Where(mine.Contains)) p.Kept = false;
             Count();
         };
-        all.Click += (_, _) => { if (read[at].All(p => p.Kept)) grid.DeselectRange(new Microsoft.UI.Xaml.Data.ItemIndexRange(0, (uint)read[at].Count)); else grid.SelectAll(); };
+        all.Click += (_, _) =>
+        {
+            if (!read.TryGetValue(at, out var shown)) return; // (still being read)
+            if (shown.All(p => p.Kept)) grid.DeselectRange(new Microsoft.UI.Xaml.Data.ItemIndexRange(0, (uint)shown.Count)); else grid.SelectAll();
+        };
         void Count()
         {
             var shown = read.GetValueOrDefault(at) ?? [];
@@ -203,8 +207,11 @@ public sealed partial class MainWindow
             try
             {
                 at = i;
+                Count();
                 if (!read.ContainsKey(i))
                 {
+                    host.Children.Clear();
+                    host.Children.Add(new ProgressRing { IsActive = true, Width = 28, Height = 28, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
                     var l = saves[i];
                     var pictures = await Task.Run(() =>
                     {
@@ -229,7 +236,7 @@ public sealed partial class MainWindow
                 Count();
             }
             catch (OperationCanceledException) { }
-            catch (Exception e) { App.Log(e); host.Children.Clear(); host.Children.Add(Muted(ErrorText(e))); d.IsPrimaryButtonEnabled = d.IsSecondaryButtonEnabled = false; }
+            catch (Exception e) { App.Log(e); if (at == i) { host.Children.Clear(); host.Children.Add(Muted(ErrorText(e))); } } // (a save that is not read is not written)
         }
         pick.SelectionChanged += (_, _) => _ = Open(pick.SelectedIndex);
         Count();
@@ -237,10 +244,11 @@ public sealed partial class MainWindow
         if (saves.Count == 1 && at < 0) _ = Open(0);
         var answer = await ShowDialog(d);
         stop.Cancel();
-        if (answer == ContentDialogResult.None) return;
+        if (answer == ContentDialogResult.None || DryRun) return;
+        var chosen = read.ToList(); // (a save still being read may end meanwhile)
         try
         {
-            foreach (var (i, pictures) in read)
+            foreach (var (i, pictures) in chosen)
             {
                 var name = saves[i].Save.Name;
                 await Task.Run(() =>
@@ -257,7 +265,7 @@ public sealed partial class MainWindow
             if (answer != ContentDialogResult.Secondary) return;
             var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(AppWindow.Id);
             if (await picker.PickSingleFolderAsync() is not { } f) return;
-            var items = read.SelectMany(r => r.Value.Where(p => p.Kept).Select(p => (saves[r.Key].Save.Name, Item: p.Items[0]))).ToList();
+            var items = chosen.SelectMany(r => r.Value.Where(p => p.Kept).Select(p => (saves[r.Key].Save.Name, Item: p.Items[0]))).ToList();
             if (await SaveWork(T("Saving the pictures"), (say, ct) =>
             {
                 var made = 0;

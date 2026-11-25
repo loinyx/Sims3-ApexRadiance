@@ -42,6 +42,8 @@ public sealed partial class MainWindow
             SavesHost.Children.Add(Muted(T("Choose the game first.")));
             return;
         }
+        // (what could not be read is tried again: a file held for a moment, the kept pictures' list)
+        foreach (var key in _saveReads.Where(r => r.Value.IsCompleted && (r.Value is Task<SaveRead?> { IsCompletedSuccessfully: true } t ? t.Result is null or { Plan.Gains.Count: 0 } : r.Value.IsFaulted)).Select(r => r.Key).ToList()) { _saveReads.Remove(key); _savesSig = ""; }
         var docs = Docs;
         if (_savesNow is { } last && last.Docs == docs) DrawSaves(last);
         else if (_savesNow is not null) { _savesNow = null; _savePicks = null; _savesSig = ""; SavesHost.Children.Clear(); }
@@ -65,8 +67,8 @@ public sealed partial class MainWindow
         var sig = string.Join('\n', now.Here.Select(l => $"{l.Save.Dir}|{l.Info.LastPlayed.Ticks}|{l.Info.Bytes}").Prepend($"{Lang}|{_light}|{_running}|{_busy}|{Maintenance}|{_settings.InstallUpdatesOnPlay}"));
         if (sig == _savesSig) return;
         _savesSig = sig;
-        _savePicks ??= now.Here.Take(1).Select(l => l.Save.Dir).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        _savePicks.IntersectWith(now.Here.Select(l => l.Save.Dir));
+        if (_savePicks is null && now.Here.Count > 0) _savePicks = now.Here.Take(1).Select(l => l.Save.Dir).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _savePicks?.IntersectWith(now.Here.Select(l => l.Save.Dir));
         _saveSums = null;
         SavesHost.Children.Clear();
 
@@ -244,13 +246,14 @@ public sealed partial class MainWindow
     {
         var menu = new MenuFlyout { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight };
         var changes = new List<MenuFlyoutItem>();
-        void Item(string text, Func<Task> run, string icon, bool change = true, bool danger = false)
+        MenuFlyoutItem Item(string text, Func<Task> run, string icon, bool change = true, bool danger = false)
         {
             var i = MenuItem(text, () => _ = run(), icon, danger: danger);
             if (change) changes.Add(i);
             menu.Items.Add(i);
+            return i;
         }
-        Item(T("Make a copy"), () => CopySaves([l.Save]), "copy", change: false);
+        var copy = Item(T("Make a copy"), () => CopySaves([l.Save]), "copy", change: false);
         Item(T("Choose the pictures that stay"), () => KeepAsync([l]), "image", change: false);
         Item(T("Open folder"), () => { OpenFolder(l.Save.Dir); return Task.CompletedTask; }, "folder", change: false);
         menu.Items.Add(new MenuFlyoutSeparator());
@@ -259,7 +262,7 @@ public sealed partial class MainWindow
         Item(T("Keep out of the game"), () => StoreSave(l), "folder-input");
         menu.Items.Add(new MenuFlyoutSeparator());
         Item(T("Move to the Recycle Bin"), () => DeleteSave(l), "trash-2", danger: true);
-        menu.Opening += (_, _) => { foreach (var i in changes) i.IsEnabled = SavesBlocked() is null; };
+        menu.Opening += (_, _) => { foreach (var i in changes) i.IsEnabled = SavesBlocked() is null; copy.IsEnabled = !DryRun; };
         return menu;
     }
 
@@ -306,7 +309,7 @@ public sealed partial class MainWindow
         Option(CleanParts.RepeatedMemories, T("Repeated memories"), T("One of each picture stays"));
         List<SaveLook> Picked() => now.Here.Where(l => _savePicks!.Contains(l.Save.Dir)).ToList();
         var keep = Id2(Link(T("Choose the pictures that stay"), () => _ = KeepAsync(Picked())), "SaveKeep");
-        (keep.FontSize, keep.Margin) = (12, new Thickness(32, -6, 0, 10));
+        (keep.FontSize, keep.Margin) = (12, new Thickness(32, 0, 0, 12));
         Option(AllPictures, T("All memories and photos"), T("These pictures are gone for good"), keep);
         s.Children.Add(options);
 
@@ -389,25 +392,37 @@ public sealed partial class MainWindow
         FillSaves();
         if (done is null) return;
         var freed = T("{0} less", SaveSize(done.Sum(r => r.Before - r.After)));
-        if (error is null) SavesSay(InfoBarSeverity.Success, done.Count == 1 ? T("Save cleaned") : T("{0} saves cleaned", done.Count), freed, T("Undo"), () => _ = UndoClean(done));
+        if (error is null) SavesSay(InfoBarSeverity.Success, done.Count == 1 ? T("Save cleaned") : T("{0} saves cleaned", done.Count), freed, T("Undo"), () => _ = UndoClean(done), stays: true);
         else
         {
             App.Log(error);
-            SavesSay(InfoBarSeverity.Warning, T("{0} of {1} saves cleaned", done.Count, todo.Count), error is OperationCanceledException ? freed : freed + ". " + ErrorText(error), T("Undo"), () => _ = UndoClean(done));
+            SavesSay(InfoBarSeverity.Warning, T("{0} of {1} saves cleaned", done.Count, todo.Count), error is OperationCanceledException ? freed : freed + ". " + ErrorText(error), T("Undo"), () => _ = UndoClean(done), stays: true);
         }
     }
 
     async Task UndoClean(List<CleanResult> done)
     {
         var docs = Docs;
+        Exception? error = null;
         var back = await SaveWork(T("Putting the saves back"), (say, ct) =>
         {
-            say(T("Copying the save and checking the copy"), -1, true);
-            foreach (var r in done) SaveClean.Undo(docs, r, ct);
-            return done;
+            var list = new List<CleanResult>();
+            foreach (var r in done)
+                try
+                {
+                    say(r.Save.Name + "\n" + T("Copying the save and checking the copy"), -1, true);
+                    SaveClean.Undo(docs, r, ct);
+                    list.Add(r);
+                }
+                catch (Exception e) when (list.Count > 0) { error = e; break; }
+            return list;
         });
         FillSaves();
-        if (back is not null) SavesSay(InfoBarSeverity.Success, T("The saves are as they were before."));
+        if (back is null) return;
+        if (error is null) { SavesSay(InfoBarSeverity.Success, T("The saves are as they were before.")); return; }
+        App.Log(error);
+        var rest = done.Except(back).ToList();
+        SavesSay(InfoBarSeverity.Warning, T("{0} of {1} saves put back", back.Count, done.Count), error is OperationCanceledException ? "" : ErrorText(error), T("Try again"), () => _ = UndoClean(rest), stays: true);
     }
 
     async Task CopySaves(List<Save> saves)
@@ -523,18 +538,18 @@ public sealed partial class MainWindow
         d.Hide();
         await shown;
         if (error is OperationCanceledException) SavesSay(InfoBarSeverity.Informational, T("Stopped"), T("Nothing was changed."));
-        else if (error is not null) { App.Log(error); SavesSay(InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(error)); }
+        else if (error is not null) { App.Log(error); SavesSay(InfoBarSeverity.Error, T("That did not work"), ErrorText(error)); }
         return result;
     }
 
     void SavesBusy(bool on) => _savesBusy = on;
 
-    // a note at the foot of Saves, gone after a while (an error stays until it is closed)
-    void SavesSay(InfoBarSeverity sev, string title, string text = "", string? action = null, Action? run = null)
+    // a note at the foot of Saves, gone after a while (an error, and what undoes a clean, stay until closed)
+    void SavesSay(InfoBarSeverity sev, string title, string text = "", string? action = null, Action? run = null, bool stays = false)
     {
         if (_step != SavesScreen) return;
         var mine = ++_savesNote;
         SetInfo(SavesNote, sev, title, text, action, () => { SavesNote.IsOpen = false; run?.Invoke(); });
-        if (sev != InfoBarSeverity.Error) After(action is null ? 7000 : 20000, () => { if (mine == _savesNote) SavesNote.IsOpen = false; });
+        if (sev != InfoBarSeverity.Error && !stays) After(action is null ? 7000 : 20000, () => { if (mine == _savesNote) SavesNote.IsOpen = false; });
     }
 }

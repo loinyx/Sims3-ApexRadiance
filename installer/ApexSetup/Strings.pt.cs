@@ -2142,5 +2142,8 @@ public static partial class Strings
         ["This save has no memories or photos."] = "Este save não tem memórias nem fotos.",
         ["The launcher can't read which pictures you chose to keep, so it removes none. Try again."] = "O launcher não conseguiu ler quais imagens você escolheu manter, então não tira nenhuma. Tente de novo.",
         ["How the launcher works. Changes are saved as you make them."] = "Como o launcher funciona. As mudanças são salvas na hora.",
+        ["{0} of {1} saves put back"] = "{0} de {1} saves voltaram",
+        ["That did not work"] = "Não deu certo",
+        ["Which save"] = "Qual save",
     };
 }
