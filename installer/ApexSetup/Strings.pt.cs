@@ -2239,5 +2239,6 @@ public static partial class Strings
         ["Not checked"] = "Não verificado",
         ["Your mods were not checked"] = "Seus mods não foram verificados",
         ["The conflict check didn't finish. Check again in a moment."] = "A verificação de conflitos não terminou. Verifique de novo daqui a pouco.",
+        ["A save can't be kept out of the game or put back while the Saves folder is on another drive."] = "Não dá para guardar um save fora do jogo nem colocar de volta enquanto a pasta Saves está em outro disco.",
     };
 }

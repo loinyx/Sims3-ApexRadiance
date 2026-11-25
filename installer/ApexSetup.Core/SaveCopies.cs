@@ -21,8 +21,11 @@ public static class SaveCopies
     public const string StoredName = "Saves kept (Apex Launcher)";
     public static string StoredDir(string docs) => Path.Combine(docs, StoredName);
     static string SavesDir(string docs) => Path.Combine(docs, "Saves");
-    // (folders on their way in or out wait beside the saves folder, where the game does not look)
-    static string WorkDir(string root) => root + ".apex-work";
+    // (folders on their way in or out wait inside the saves folder: the same drive as the saves, whatever the folder links
+    // to. Every listing here and in Apex takes only *.sims3 folders; unverified that the game does the same, though it
+    // does not list its own <name>.sims3.backup folders)
+    static string WorkDir(string root) => Path.Combine(root, ".apex-work");
+    const int KeepOwn = 3;
 
     const int MaxFiles = 10_000;        // (a save has under ten files)
     const long MaxBytes = 16L << 30;
@@ -44,11 +47,14 @@ public static class SaveCopies
         try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }
-    static void Tidy(string root)
+    static void DropEmpty(string dir)
     {
-        try { if (Directory.Exists(WorkDir(root)) && !Directory.EnumerateFileSystemEntries(WorkDir(root)).Any()) Directory.Delete(WorkDir(root)); }
+        try { if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
+    static void Tidy(string root) => DropEmpty(WorkDir(root));
+    // the drive a folder is really on (the Saves folder can be a link to another one)
+    static string Drive(string dir) => Path.GetPathRoot(Directory.ResolveLinkTarget(dir, true)?.FullName ?? Path.GetFullPath(dir))!;
     static string Work(string dir, string what)
     {
         var work = WorkDir(Path.GetDirectoryName(dir)!);
@@ -117,6 +123,15 @@ public static class SaveCopies
         points.Sort((a, b) => a.When.CompareTo(b.When));
         points.Add(new(CopyKind.Now, s.Dir, s.LastPlayed, SaveInfo.Of(s).Bytes, null));
         return points;
+    }
+
+    // Each zip the launcher makes by itself (before a clean, before going back) is a whole save: past the newest three of
+    // a save they go to the Recycle Bin. Call after a change went through. A copy the player asked for carries no note
+    // and is never touched.
+    internal static void Thin(string docs, Save s)
+    {
+        try { foreach (var p in Timeline(docs, s).Where(p => p.Kind == CopyKind.Launcher && p.Note is BeforeClean or BeforeRestore).Reverse().Skip(KeepOwn)) Recycle(p.Path); }
+        catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }
 
     // a zip's files into a new folder. Untrusted input: the names are kept inside the folder, the count and the size are
@@ -216,6 +231,7 @@ public static class SaveCopies
             // (the folder that left is in the zip just made, whole and checked; one Windows can't take now goes at the next start)
             try { Recycle(old); } catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); }
             Tidy(Path.GetDirectoryName(s.Dir)!);
+            Thin(docs, s);
             return SaveOf(s.Dir);
         }
     }
@@ -223,10 +239,11 @@ public static class SaveCopies
     // What a change that was cut short (the launcher closed, the power went) left behind, put right: a save folder or a
     // save file that was moved aside goes back when nothing took its place, and to the Recycle Bin when something did
     // (what took its place was checked before the swap); copies that never got in place are removed. Call at start-up.
-    public static void Recover(string docs)
+    // False: it did not run, or not to the end (ask again later).
+    public static bool Recover(string docs)
     {
-        try { Engine.CheckWritable(); } catch (InvalidOperationException) { return; } // (a test run, the game running: next time)
-        if (!Monitor.TryEnter(Gate)) return;
+        try { Engine.CheckWritable(); } catch (InvalidOperationException) { return false; } // (a test run, the game running: next time)
+        if (!Monitor.TryEnter(Gate)) return false;
         try
         {
             foreach (var root in new[] { SavesDir(docs), StoredDir(docs) })
@@ -254,8 +271,9 @@ public static class SaveCopies
                     }
                 }
             }
+            return true;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); return false; }
         finally { Monitor.Exit(Gate); }
     }
 
@@ -279,6 +297,7 @@ public static class SaveCopies
     public static Save Rescue(string docs, Save lost, CancellationToken ct = default)
     {
         Engine.CheckWritable();
+        Recover(docs); // (a save a cut-short change left aside goes home first: its name must not look free)
         lock (Gate)
         {
             var to = Path.Combine(SavesDir(docs), lost.Name + ".sims3");
@@ -356,16 +375,26 @@ public static class SaveCopies
     static Save Move(string docs, Save s, string root, string? name)
     {
         Directory.CreateDirectory(root);
-        name ??= Taken(root, s.Name) ? FreeName(root, s.Name) : s.Name;
-        var to = Path.Combine(root, name + ".sims3");
-        Fs.Retry(() => Directory.Move(s.Dir, to));
-        if (Directory.Exists(s.Dir + ".backup"))
-            try { FailPoint("move"); Fs.Retry(() => Directory.Move(s.Dir + ".backup", to + ".backup")); }
-            catch { Fs.Retry(() => Directory.Move(to, s.Dir)); throw; }
-        if (name != s.Name) Follow(docs, s.Name, name);
-        try { if (Directory.Exists(StoredDir(docs)) && !Directory.EnumerateFileSystemEntries(StoredDir(docs)).Any()) Directory.Delete(StoredDir(docs)); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        return SaveOf(to);
+        try
+        {
+            // (a folder can't be moved to another drive in one step, and a copy would not be this safe)
+            if (!Drive(root).Equals(Drive(Path.GetDirectoryName(s.Dir)!), StringComparison.OrdinalIgnoreCase))
+                throw new SetupException("A save can't be kept out of the game or put back while the Saves folder is on another drive.");
+            name ??= Taken(root, s.Name) ? FreeName(root, s.Name) : s.Name;
+            var to = Path.Combine(root, name + ".sims3");
+            Fs.Retry(() => Directory.Move(s.Dir, to));
+            if (Directory.Exists(s.Dir + ".backup"))
+                try { FailPoint("move"); Fs.Retry(() => Directory.Move(s.Dir + ".backup", to + ".backup")); }
+                catch { Fs.Retry(() => Directory.Move(to, s.Dir)); throw; }
+            // (another save still has the old name, in the game or out of it: the copies, the history and the Gallery's
+            // household can't be told apart by name and stay with it; the stars go to both, so no starred memory is left
+            // without its protection)
+            if (!name.Equals(s.Name, StringComparison.OrdinalIgnoreCase) && new[] { SavesDir(docs), StoredDir(docs) }.Any(r => Directory.Exists(Path.Combine(r, s.Name + ".sims3"))))
+                try { SaveStars.Renamed(s.Name, name, keep: true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); }
+            else if (name != s.Name) Follow(docs, s.Name, name);
+            return SaveOf(to);
+        }
+        finally { DropEmpty(StoredDir(docs)); }
     }
 
     // what the launcher keeps by save name follows the save (each on its own: one that fails is logged, the rest still move)
@@ -399,6 +428,14 @@ public static class SaveCopies
     public static void Delete(Save s)
     {
         Engine.CheckWritable();
-        lock (Gate) Recycle(s.Dir);
+        lock (Gate)
+        {
+            Recycle(s.Dir);
+            // (out of the game nothing shows the game's previous version alone, and it would hold the name: it goes too)
+            var kept = Path.GetDirectoryName(s.Dir)!;
+            if (Path.GetFileName(kept) != StoredName) return;
+            if (Directory.Exists(s.Dir + ".backup")) Recycle(s.Dir + ".backup");
+            DropEmpty(kept);
+        }
     }
 }

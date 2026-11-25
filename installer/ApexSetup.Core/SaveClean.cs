@@ -196,6 +196,7 @@ public static class SaveClean
         // 4. the originals go: the zip holds them (one that stays is cleared at the next start)
         foreach (var p in swapped)
             try { Fs.Retry(() => File.Delete(p.Path + OldSuffix)); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        SaveCopies.Thin(plan.Docs, plan.Save);
         return new(plan.Save, plan.Before, plan.After, plan.Removed, copy);
     }
 
