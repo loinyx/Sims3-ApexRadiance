@@ -330,7 +330,11 @@ lamp's position, not on its colour or intensity.
    taken). A lamp missing from the registry stays in the lamp snapshot for 1 s (`PhysLampPick::CarryMissing`): the registry
    drops a dragged lamp for a few frames and every lamp of the lot while build mode edits it (709 `left the lot's registry`
    lines in 3 minutes, 175 at once within 50 ms, none deleted), which took them off every map and rewrote the directional
-   maps without them. `ExportLotProxy` takes each tile's floor from the tile instead of its grid ceiling less 3 m: where the
+   maps without them. A lamp deleted in that second is destroyed while the snapshot still holds it: its vtable is the light
+   base class's (4 slots and a string after them), so the game's directional step (`0x0069F280`), which calls slot +0x24,
+   ran the string's bytes as code (4.1.0, Buy mode deletes: 31 caught faults in 5 runs, one ended in a crash). `BasisStep`
+   and `BasisPartNow` now leave out a light whose slot +0x24 is not the position function `0x009691E0` (log line `Lamp X is
+   destroyed: left out of the directional map step`). `ExportLotProxy` takes each tile's floor from the tile instead of its grid ceiling less 3 m: where the
    grid ceiling is the story above's floor (story 3's 4.74 m tiles over story 2), story 2's floor came out at 1.74 m and
    `CeilingsUnderAbove` put a ceiling 0.75 m over story 1's rooms 2 and 8 (35 tiles; the probe: 24-27% of room 8's texels
    the game lit shaded by the occluders only), the square patches and the diagonal checkerboard on their floors. This also
