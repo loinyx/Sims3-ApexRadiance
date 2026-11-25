@@ -1367,8 +1367,8 @@ public sealed partial class MainWindow : Window
         if (FirstInstall && !_smoothDefaulted) { _smoothDefaulted = true; if (sm.On) _smoothWant = false; }
         // no NVIDIA card (or no driver to ask): no row; an NVIDIA card that cannot run it: the row, off, with the reason
         SmoothCard.Visibility = sm.Card is null && sm.Error is null ? Visibility.Collapsed : Visibility.Visible;
-        // (the bridge installed and staying: a pending change of renderer away from it blocks a turn-on)
-        var blocked = SmoothMotion.Blocked(sm, s.Layer == Layer.Bridge && _renderer == RBridge, SmoothMotion.SetupTurnedOn);
+        // (the bridge chosen, installed or not yet: the driver change runs after the components)
+        var blocked = SmoothMotion.Blocked(sm, _renderer == RBridge, SmoothMotion.SetupTurnedOn);
         if (blocked is not null) _smoothWant = null;
         _fillingSmooth = true;
         SmoothToggle.IsOn = _smoothWant ?? sm.On;

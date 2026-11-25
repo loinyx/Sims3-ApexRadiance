@@ -84,7 +84,8 @@ only when Setup turned it on, recorded in `%ProgramData%\Apex Radiance Setup\smo
 player turned on with Profile Inspector shows as on and stays. The game's exes stay in NVIDIA's own *Sims 3* profile: they
 do not present frames under the bridge. The profile matches exe names, so it covers every copy of the game on the PC, Steam
 or EA app. The row shows only with an NVIDIA card. It can be turned on with an RTX 40 or 50 series card, driver 571.86 or
-newer, and the RTX Remix bridge installed; otherwise it stays off and says why. When the bridge's exe belongs to a profile
+newer, and the RTX Remix bridge chosen (installed, or going in with the same Apply or first install, which make the driver
+change after the files); otherwise it stays off and says why, and the first install leaves the row out. When the bridge's exe belongs to a profile
 of the player's, Setup leaves it alone and names that profile. The profile is not part of restore points (it is a driver setting, not a game file). Turned on, Setup also brings
 Apex's frame limit (`[screen] fps_limit` in the game's `ApexRadiance.toml`) to 60 fps when there is none (the key absent or
 0); a limit the player chose stays as it is, and the row suggests 60 to 90 fps. That change has its own restore point
