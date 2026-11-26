@@ -39,6 +39,7 @@ public sealed partial class MainWindow
         if (_step != ModsScreen) Show(ModsScreen);
         if (!_modsLoaded) await LoadModsAsync();
         if (!_modsLoaded || AskLeaveMerge(() => Safe(FindContentAsync()))) return; // (the Mods screen says why it has no mods)
+        CloseOrder();
         _findPlace = _modPlace;
         ModList.SelectedItems.Clear();
         ModGrid.SelectedItems.Clear();
@@ -87,8 +88,8 @@ public sealed partial class MainWindow
         _findWatchesPlaces = true;
         ModFolders.Tapped += (_, e) =>
         {
-            for (var p = e.OriginalSource as DependencyObject; p is not null && _findPage is not null; p = VisualTreeHelper.GetParent(p))
-                if (p is ListViewItem item) { if (item.Content is FrameworkElement { Tag: string key } && key == _modPlace) CloseFind(); return; }
+            for (var p = e.OriginalSource as DependencyObject; p is not null && (_findPage ?? _orderPage) is not null; p = VisualTreeHelper.GetParent(p))
+                if (p is ListViewItem item) { if (item.Content is FrameworkElement { Tag: string key } && key == _modPlace) { CloseFind(); CloseOrder(); } return; }
         };
     }
 

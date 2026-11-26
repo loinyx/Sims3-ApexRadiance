@@ -242,6 +242,7 @@ public sealed partial class MainWindow
         }
         FillModDetails();
         FindFollows();
+        OrderFollows();
     }
 
     // the shown list changed: remove and insert rows in place, so the list animates instead of being rebuilt
@@ -1653,7 +1654,7 @@ public sealed partial class MainWindow
         var picked = DraftRow() is { } open ? [open] : Picked(); // (a merge with changes not saved stays open whatever the list shows)
         // (nothing chosen: no pane, the list has the whole width)
         var opens = ModDetailsPane.Visibility == Visibility.Collapsed;
-        ModDetailsPane.Visibility = _findPage is not null || picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        ModDetailsPane.Visibility = _findPage is not null || _orderPage is not null || picked.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         ModColDetails.Width = new GridLength(_modsNarrow || ModDetailsPane.Visibility == Visibility.Collapsed ? 0 : ModDetailsPane.Width + 16);
         // (the list gets narrower as the pane opens: the mod chosen stays in sight)
         if (opens && ModDetailsPane.Visibility == Visibility.Visible && picked.Count == 1 && picked[0] is var seen)

@@ -239,6 +239,13 @@ as the signed-in user, not as administrator: a change to the game folder or to a
     that moves files can be undone, also after the launcher ends midway.
   - **Tools** finds custom content (what a Sim, lot or save needs), finds the mod behind a problem by halves, clears the
     game's caches by group and opens the game's folders.
+  - **Load order** (Tools, `MainWindow.ModOrder.cs`) lists the packages that are on in the order the game reads them, in
+    place of the mods list. The order comes from `Mods\Resource.cfg`: a higher `Priority` first, then each `PackedFile`
+    line in turn, then Windows' name order inside one line (`ModConflicts.LoadKey`). Each line of `Resource.cfg` is a
+    heading with its priority; packages no line reads come last, under *Not read by the game*. A mod in a conflict the
+    order decides shows whom it wins over or loses to, from Health's check, and *See conflicts* opens it on its
+    Conflicts tab, where it can be given priority. A search and *Only mods that clash* narrow the list; without
+    `Resource.cfg` the page says the game reads no mods.
   - **Conflicts** compares what the game would read: tuning without comments, layout and attribute order, text tables by
     id, settings files by their values, window layouts without their size. Identical copies are no conflict. Health shows
     each conflict with its level, and a mod can be given priority where `Resource.cfg` allows it.

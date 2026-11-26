@@ -606,6 +606,7 @@ public sealed partial class MainWindow
     void ShowInMods(List<ModFile> hits)
     {
         CloseFind();
+        CloseOrder();
         ClearFilters();
         ModSearch.Text = "";
         (_fOnly, _pickOnce) = (hits.Select(h => h.Rel).ToHashSet(StringComparer.OrdinalIgnoreCase), true);
