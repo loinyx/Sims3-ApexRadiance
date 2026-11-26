@@ -87,8 +87,11 @@ splits a merge, or moves it to the Recycle Bin.
   merged file are never replaced.
 - Each file is copied under a temporary name, checked against the hash that was inspected, and renamed into place,
   never over a file; a replaced file goes to the Recycle Bin. Undo sends the added files to the Recycle Bin.
-- `.sims3pack` and `.ts3pack` files are refused with a pointer to the game's own launcher; programs (`.exe`, `.dll`,
-  `.asi`, scripts) are refused.
+- A `.sims3pack` (also inside a zip) is opened: each package of custom content in it (objects, clothes, hair,
+  patterns) is taken out as a mod named after its item (the package's manifest `PackageTitle`, else the Sims3Pack's
+  name) and checked as any package; a store item's protected package (`DBPP`) has its header written again from the
+  index at the end of the file. Lots, worlds and Sims are listed as left out, with a pointer to the game's own
+  launcher. The Sims3Pack itself stays where it was. Programs (`.exe`, `.dll`, `.asi`, scripts) are refused.
 
 ### Profiles
 
@@ -125,7 +128,8 @@ None. The view (place, list or grid, sort, collapsed groups) is remembered in `m
 
 ## Rejected approaches
 
-- Installing `.sims3pack` files: removed; they are left to the game's own launcher.
+- Installing `.sims3pack` files through the game's installer (lots, worlds, Sims): removed; they are left to the game's
+  own launcher. Custom content inside one is added as mods.
 
 ## See also
 

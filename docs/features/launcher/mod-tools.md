@@ -3,15 +3,15 @@
 The Mods screen's *Tools* menu holds the jobs a player does with many mods at once: *Merge mods* writes several packages
 as one file the game loads faster, *Find custom content* tells which mods a Sim, lot, save or list needs and which are
 missing, *Load order* shows which mod the game reads first ([Load order and conflicts](load-order-and-conflicts.md)),
-*Find a problem mod* finds the mod behind a problem by testing half of the mods at a time, and *Clear game caches*
-moves the game's caches aside for items that are missing or look wrong. The menu also opens the game's Mods, Saved Sims,
+*Find a problem mod* finds the mod behind a problem by testing half of the mods at a time. The game's caches are
+cleared from Saves > *Game caches* ([saves and backups](saves-and-backups.md#game-caches)). The menu also opens the game's Mods, Saved Sims,
 Library and Worlds folders, and a package in s3pe when it is installed.
 
 ## Status
 
 | | |
 |---|---|
-| Availability | Merge and split, Find a problem mod: Released in 4.1.0; Find custom content, Clear game caches by group, merges edited in one go: Released in 4.1.1; Load order: Released in 4.1.2 |
+| Availability | Merge and split, Find a problem mod: Released in 4.1.0; Find custom content, Clear game caches by group, merges edited in one go: Released in 4.1.1; Load order: Released in 4.1.2; game caches moved to Saves: Released in 4.1.3 |
 | Default | Always available |
 | Menu | Mods > Tools |
 | Configuration | `hunt.txt`, `cache-backup\`, `logs\` ([data files](data-and-files.md)); `merge.json` in each merge's folder |
@@ -62,9 +62,10 @@ by Health's findings go first. The state, including which mods were on before, i
 a restart puts every mod back. At the end: *Turn it off* or *Show it*. The page warns not to save the game during a
 round.
 
-### Clear game caches
+### Game caches
 
-`GameCaches.Clean` never deletes: it moves the chosen groups to `cache-backup\<time>` in the data folder. The copy is
+The caches are cleared from Saves > *Game caches* ([saves and backups](saves-and-backups.md#game-caches)), the page the
+Health action opens. `GameCaches.Clean` never deletes: it moves the chosen groups to `cache-backup\<time>` in the data folder. The copy is
 dropped after the next game session that ends normally; *Put the caches back* restores it. The groups, each shown only
 when it holds a file where noted:
 

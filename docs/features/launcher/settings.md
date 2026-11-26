@@ -26,7 +26,9 @@ on its own, and the release notes of five projects live on five GitHub pages.
    A change is saved to `settings.json` at once.
 2. **Look.** The colour theme colours only what stands out (the main button, switches, the selected place, links);
    surfaces stay neutral ([design system](../../launcher-design.md)). *Light or dark* follows Windows or stays as
-   chosen, also while the launcher is open.
+   chosen, also while the launcher is open. The theme also colours Apex Radiance's menu in the game: the launcher
+   writes its colours to `[ui] theme_*` in `ApexRadiance.toml` when it starts, when the theme changes and before Play
+   ([menu palette](../../ui.md)).
 3. **General** rows: *Language* (*Change*, see [Languages](languages.md)), *Game folder* (*Change*), *Logs* (*Open log
    folder*), *Repair or remove* (*Open*, [Components](../installer.md)), *Apex Launcher on this PC* (move, install, or
    use without installing; [self-update](self-update.md)), *Credits and licences*, and *Uninstall Apex Launcher*
