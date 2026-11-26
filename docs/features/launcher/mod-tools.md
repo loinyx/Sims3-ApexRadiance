@@ -40,7 +40,9 @@ change.
    the Disabled folder. Launchers up to 2.1 kept the originals under `Mods\`; they are moved on start.
 4. **Edit in one go** (`ModMergeTakeOut`, `MergeDraft`): take mods out (back on, back off, or to the Recycle Bin), add,
    replace, reorder and rename, held as a draft until *Save* or *Discard*. The planned moves are written to
-   `merge.json` before any file moves; a merge left with fewer than 2 mods is dissolved.
+   `merge.json` before any file moves; a merge left with fewer than 2 mods is dissolved. *Add mods* lists the player's
+   enabled packages not yet inside: first those of the merge's own folder (a switch shows *All mods*), searchable by
+   name or folder, with *Select all* and Ctrl+A for every mod shown.
 5. **Newer versions** (`ModMergeUpdate`): a package outside the merge that matches a mod inside by name without its
    version and shared resources is offered as an update; *Later* is remembered per file.
 6. **Split** puts the originals back (checked by hash) and the merged file in the Recycle Bin.

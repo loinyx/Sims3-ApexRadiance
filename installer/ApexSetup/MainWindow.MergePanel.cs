@@ -15,6 +15,7 @@ namespace ApexSetup;
 public sealed partial class MainWindow
 {
     MergeDraft? _draft;                 // of the merge that is open
+    string _mergeQuery = "";            // the search in the open merge's list of mods (kept while the panel repaints)
     MergeEditPlan? _draftPlan;          // what the draft would do, when it is known
     int _draftRun;
     string? _mergeInner;                // the mod inside whose details are open (its Rel)
@@ -64,7 +65,7 @@ public sealed partial class MainWindow
     {
         if (_draft is { } d && d.Dir.Equals(merge.Dir, StringComparison.OrdinalIgnoreCase) && d.Sha256 == merge.Sha256) { d.Rel = r.File.Rel; return; }
         ModMerge.Fresh();
-        (_draft, _draftPlan, _mergeOpen) = (new MergeDraft(merge), null, null);
+        (_draft, _draftPlan, _mergeOpen, _mergeQuery) = (new MergeDraft(merge), null, null, "");
         _draftRun++;
     }
 
@@ -370,7 +371,27 @@ public sealed partial class MainWindow
             (add.Height, add.Padding, add.CornerRadius, add.HorizontalContentAlignment, add.BorderThickness, add.Background) = (44, new Thickness(8, 0, 12, 0), new CornerRadius(8), HorizontalAlignment.Left, new Thickness(0), Res("ApexClearBrush"));
             list.Footer = add;
         }
-        list.ItemsSource = d.Items;
+        // A long merge has a search over its mods (name or file); while it filters, the order cannot be dragged
+        if (d.Items.Count >= 8)
+        {
+            var search = new TextBox { PlaceholderText = T("Search mods"), Text = _mergeQuery };
+            void Filter()
+            {
+                _mergeQuery = search.Text.Trim();
+                var q = _mergeQuery;
+                list.CanReorderItems = list.CanDragItems = list.AllowDrop = mine && q.Length == 0;
+                list.ItemsSource = q.Length == 0 ? d.Items
+                    : d.Items.Where(i => i.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || i.Rel.Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
+            }
+            search.TextChanged += (_, _) => { Filter(); PaintAll(); };
+            s.Children.Insert(s.Children.IndexOf(news) + 1, Design.Parts.SearchField(search, T("Search mods")));
+            Filter();
+        }
+        else
+        {
+            _mergeQuery = "";
+            list.ItemsSource = d.Items;
+        }
         PaintAll();
         s.Children.Add(list);
         FitInPane(list);
