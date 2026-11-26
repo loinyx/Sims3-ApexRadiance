@@ -32,7 +32,8 @@ public sealed class StickyNote
 public sealed class AlbumLook
 {
     public string Background { get; set; } = "desk";     // (the first boards had names; a colour now wins when set)
-    public string? Color { get; set; } = "#0A0A09";       // the board's one colour, "#RRGGBB", fading softly darker
+    public const string DefaultColor = "#0A0A09";
+    public string? Color { get; set; } = DefaultColor;       // the board's one colour, "#RRGGBB", fading softly darker
     public string Frame { get; set; } = "rounded";       // polaroid, print, washi, clip, rounded, kraft, deckle, doodle, stamp, film
     public string Font { get; set; } = "Segoe UI Variable";
     public double Height { get; set; }                     // the board's height its places were laid on

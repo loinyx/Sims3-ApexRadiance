@@ -852,14 +852,16 @@ public sealed partial class MainWindow
     static bool IsLight(Windows.UI.Color c) => (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255 > 0.6;
 
     // the album's one colour: its own, else the colour of the board it had before colours
-    static Windows.UI.Color BoardColor(AlbumLook look) => Hex(look.Color, Boards.FirstOrDefault(b => b.Key == look.Background) is { Key: not null } b ? b.From : Boards[0].From);
+    // (the default board is near black on dark and white on light; a colour the player picked stays as picked)
+    static Windows.UI.Color BoardColor(AlbumLook look) => _light && string.Equals(look.Color, AlbumLook.DefaultColor, StringComparison.OrdinalIgnoreCase) ? Rgb(0xFF, 0xFF, 0xFF)
+        : Hex(look.Color, Boards.FirstOrDefault(b => b.Key == look.Background) is { Key: not null } b ? b.From : Boards[0].From);
 
     // one hue, a touch lighter at the top, softly darker towards the bottom
     static Brush BoardBrush(AlbumLook look)
     {
         var c = BoardColor(look);
         return new LinearGradientBrush { StartPoint = new(0.2, 0), EndPoint = new(0.8, 1), GradientStops =
-            { new GradientStop { Color = Shade(c, 0.08), Offset = 0 }, new GradientStop { Color = c, Offset = 0.45 }, new GradientStop { Color = Shade(c, -0.42), Offset = 1 } } };
+            { new GradientStop { Color = Shade(c, 0.08), Offset = 0 }, new GradientStop { Color = c, Offset = 0.45 }, new GradientStop { Color = Shade(c, IsLight(c) ? -0.1 : -0.42), Offset = 1 } } }; // (a light board only greys a little)
     }
     // (the one of the two that reads better on it)
     static Windows.UI.Color BoardInk(AlbumLook look)
@@ -1960,7 +1962,7 @@ public sealed partial class MainWindow
         {
             new GradientStop { Color = look.Light == "spot" ? Windows.UI.Color.FromArgb(0x1C, 255, 255, 255) : Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0 },
             new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0.55 },
-            new GradientStop { Color = Windows.UI.Color.FromArgb((byte)(look.Light == "spot" ? 0x8C : 0x40), 0, 0, 0), Offset = 1 },
+            new GradientStop { Color = Windows.UI.Color.FromArgb((byte)((look.Light == "spot" ? 0x8C : 0x40) / (IsLight(BoardColor(look)) ? 2 : 1)), 0, 0, 0), Offset = 1 }, // (half the shade on a light board)
         },
     };
 
