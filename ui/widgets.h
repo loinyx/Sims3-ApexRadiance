@@ -335,8 +335,8 @@ bool SliderPercent(const char* label, float* v, float min, float max, const char
 // Numbers in the menu language's form: a decimal point between digits becomes a comma where the language writes one
 // ("1.66 GB" reads "1,66 GB" in Portuguese, German, French...). Edits s in place.
 void LocaleDecimal(char* s);
-// A text that starts with an ISO date ("2026-11-26", "2026-11-22 15:37") with that date in the menu language's own order
-// and separators ("26/11/2026" in Portuguese, "26.11.2026" in German); English, Swedish and the CJK languages keep it.
+// A text that starts with an ISO date ("yyyy-mm-dd", optionally with a time) with that date in the menu language's own order
+// and separators (dd/mm/yyyy in Portuguese, dd.mm.yyyy in German); English, Swedish and the CJK languages keep it.
 std::string LocaleDate(std::string_view text);
 // The shared control column's width for a row as wide as the space left here (pixels; 0 when too narrow): where
 // sliders, dropdowns and segmented choices start, for custom controls that should line up with them
