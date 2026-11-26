@@ -8,7 +8,7 @@ public enum CopyKind { Launcher, Game, Now }
 
 // A moment a save can go back to: a zip the launcher made (Note says why, when it made it by itself; Label and Pinned are the player's; Stored is what it takes on disk), the previous version
 // the game keeps (<name>.sims3.backup), or the save as it is. When: the day the save was like that; Bytes: its size then.
-public sealed record SavePoint(CopyKind Kind, string Path, DateTime When, long Bytes, string? Note, string? Label = null, bool Pinned = false, long Stored = 0);
+public sealed record SavePoint(CopyKind Kind, string Path, DateTime When, long Bytes, string? Note, string? Label = null, bool Pinned = false, long Stored = 0, string? Left = null);
 
 // Copies of a save and what is done with whole save folders: the list of them, going back to one, bringing back a save
 // that is gone or that the game only has a previous version of, keeping a save out of the game's sight, duplicate, rename, delete.
@@ -78,9 +78,20 @@ public static class SaveCopies
     // hash with what the zip gives back, then moved in. A save that changed meanwhile, a locked file or a full disk leaves
     // no zip.
     // check: each file compared with what the zip gives back. mods: the ones on, a list kept in the zip beside the save.
-    // companions: the save's data kept by mods outside Saves (SaveCompanions.Files), in the zip beside the save's folder.
+    // companions: the save's data kept by mods outside Saves (SaveCompanions.Files), in the zip beside the save's folder. A
+    // mod's data that can't be read or changes meanwhile (the game running) is left out of the zip, logged and named in its
+    // comment (SavePoint.Left); it never stops the backup.
     internal static void Zip(string dir, string zip, string? note, bool check = true, List<string>? mods = null, CancellationToken ct = default, bool overwrite = false,
         List<(string Entry, string File)>? companions = null)
+    {
+        var left = new SortedSet<string>(StringComparer.Ordinal);
+        while (true)
+            try { ZipOnce(dir, zip, note, check, mods, ct, overwrite, companions?.Where(c => !left.Contains(SaveCompanions.ModOf(c.Entry))).ToList(), left); return; }
+            catch (SaveCompanions.UnreadableException e) when (left.Add(e.Mod)) { Engine.Log(e); }
+    }
+
+    static void ZipOnce(string dir, string zip, string? note, bool check, List<string>? mods, CancellationToken ct, bool overwrite,
+        List<(string Entry, string File)>? companions, ISet<string> left)
     {
         var part = zip + ".part";
         var top = Path.GetFileName(dir);
@@ -91,14 +102,14 @@ public static class SaveCopies
             File.Delete(part); // (one a closed launcher left)
             using (var z = ZipFile.Open(part, ZipArchiveMode.Create))
             {
-                z.Comment = note ?? "";
+                z.Comment = SaveBackups.Comment(note, null, false, left);
                 foreach (var d in Directory.EnumerateDirectories(dir, "*", Deep).Where(d => !Directory.EnumerateFileSystemEntries(d).Any())) z.CreateEntry(Name(d) + "/");
                 var buf = new byte[1 << 20];
                 foreach (var (name, f) in files)
                 {
                     var entry = z.CreateEntry(name, CompressionLevel.Fastest);
                     if (File.GetLastWriteTime(f) is { Year: >= 1980 and <= 2107 } day) entry.LastWriteTime = day;
-                    using var from = Open(f);
+                    using var from = Companion(name, () => Open(f));
                     using var o = entry.Open();
                     for (int n; (n = from.Read(buf)) > 0;) { ct.ThrowIfCancellationRequested(); o.Write(buf, 0, n); }
                 }
@@ -116,14 +127,22 @@ public static class SaveCopies
                     ct.ThrowIfCancellationRequested();
                     if (!same || z.GetEntry(name) is not { } entry) { same = false; break; }
                     using var s = entry.Open();
-                    using var of = Open(f);
+                    using var of = Companion(name, () => Open(f));
                     same = Hash(s, ct) == Hash(of, ct);
+                    if (!same && SaveCompanions.IsCompanion(name)) throw new SaveCompanions.UnreadableException(SaveCompanions.ModOf(name), "changed while it was copied");
                 }
                 if (!same) throw new SetupException("The copy of {0} did not match the save. Try again.", Path.GetFileNameWithoutExtension(top));
             }
             File.Move(part, zip, overwrite);
         }
         catch { try { File.Delete(part); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } throw; }
+    }
+
+    // a file of the zip opened; one of a mod's data that can't be is that mod's to leave out
+    static FileStream Companion(string entry, Func<FileStream> open)
+    {
+        try { return open(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException && SaveCompanions.IsCompanion(entry)) { throw new SaveCompanions.UnreadableException(SaveCompanions.ModOf(entry), e.Message); }
     }
 
     // The launcher's zips of this save, the game's previous version and the save now, oldest first (Now is last).
@@ -151,8 +170,8 @@ public static class SaveCopies
                     try
                     {
                         using var z = ZipFile.OpenRead(zip);
-                        var (note, label, pinned) = SaveBackups.Said(z.Comment);
-                        zips.Add((name, new(CopyKind.Launcher, zip, when, z.Entries.Where(e => !SaveBackups.IsMods(e)).Sum(e => e.Length), note, label, pinned, size)));
+                        var (note, label, pinned, left) = SaveBackups.Said(z.Comment);
+                        zips.Add((name, new(CopyKind.Launcher, zip, when, z.Entries.Where(e => !SaveBackups.IsMods(e)).Sum(e => e.Length), note, label, pinned, size, left)));
                     }
                     catch (InvalidDataException) { } // (a zip that does not open is not a copy to offer)
                     // (one another program holds for a moment is there; what it says is not known, so it counts as the player's own)

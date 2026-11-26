@@ -90,16 +90,17 @@ public static class SaveBackups
 
     // ---------- what a zip says ----------
 
-    // the comment: why, then "name=" and "pin" lines (an older launcher reads the whole as a note it does not know, and
-    // leaves the zip alone)
-    internal static string Comment(string? note, string? label, bool pinned) =>
-        string.Join('\n', new[] { note ?? "", label is { Length: > 0 } ? "name=" + label : null, pinned ? "pin" : null }.OfType<string>());
+    // the comment: why, then "name=", "pin" and "left=" (the mods whose data was left out, SaveCopies.Zip) lines (an older
+    // launcher reads the whole as a note it does not know, and leaves the zip alone)
+    internal static string Comment(string? note, string? label, bool pinned, IEnumerable<string>? left = null) =>
+        string.Join('\n', new[] { note ?? "", label is { Length: > 0 } ? "name=" + label : null, pinned ? "pin" : null,
+            left?.Any() == true ? "left=" + string.Join(", ", left) : null }.OfType<string>());
 
-    internal static (string? Note, string? Label, bool Pinned) Said(string? comment)
+    internal static (string? Note, string? Label, bool Pinned, string? Left) Said(string? comment)
     {
         var lines = (comment ?? "").Split('\n');
-        var label = lines.Skip(1).FirstOrDefault(l => l.StartsWith("name=", StringComparison.Ordinal))?[5..];
-        return (lines[0].Length > 0 ? lines[0] : null, label is { Length: > 0 } ? label : null, lines.Skip(1).Contains("pin"));
+        string? Line(string key) => lines.Skip(1).FirstOrDefault(l => l.StartsWith(key, StringComparison.Ordinal))?[key.Length..] is { Length: > 0 } v ? v : null;
+        return (lines[0].Length > 0 ? lines[0] : null, Line("name="), lines.Skip(1).Contains("pin"), Line("left="));
     }
 
     // Its name and whether it is pinned, written over the comment at the zip's end: nothing before it is touched, and the
@@ -122,8 +123,8 @@ public static class SaveBackups
                 // (the end record: its signature, and a comment that reaches exactly to the end of the file)
                 while (at >= 0 && !(tail[at] == 0x50 && tail[at + 1] == 0x4B && tail[at + 2] == 5 && tail[at + 3] == 6 && (tail[at + 20] | tail[at + 21] << 8) == tail.Length - at - 22)) at--;
                 if (at < 0) throw new SetupException("This backup is damaged.");
-                var note = Said(Encoding.UTF8.GetString(tail, at + 22, tail.Length - at - 22)).Note;
-                var text = Encoding.UTF8.GetBytes(Comment(note, label, pinned));
+                var was = Said(Encoding.UTF8.GetString(tail, at + 22, tail.Length - at - 22));
+                var text = Encoding.UTF8.GetBytes(Comment(was.Note, label, pinned, was.Left is { } l ? [l] : null));
                 var end = new byte[2 + text.Length];
                 (end[0], end[1]) = ((byte)text.Length, (byte)(text.Length >> 8));
                 text.CopyTo(end, 2);

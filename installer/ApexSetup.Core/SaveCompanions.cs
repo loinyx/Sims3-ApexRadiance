@@ -18,6 +18,8 @@ public static class SaveCompanions
     public static string DeclDir(string docs) => Path.Combine(docs, "Save companions (Apex Launcher)");
     static string WorkRoot(string docs) => Path.Combine(DeclDir(docs), ".apex-work");
     static readonly Regex Plain = new("^[A-Za-z0-9._-]{1,64}$");
+    // key.allowed: letters, digits, ranges of them and plain punctuation, nothing a regular expression reads otherwise
+    static readonly Regex Allowed = new(@"^(?:[A-Za-z0-9]-[A-Za-z0-9]|[A-Za-z0-9 ._~!#$%&'()+,;=@{}-])+$");
     static readonly EnumerationOptions Deep = new() { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
 
     // the declarations that can be used; one that can't be read or points where it must not is logged and left out
@@ -57,7 +59,9 @@ public static class SaveCompanions
         Func<string, string> key = n => n;
         if (j.RootElement.TryGetProperty("key", out var k))
         {
-            var other = new Regex($"[^{k.GetProperty("allowed").GetString()}]");
+            var allowed = k.GetProperty("allowed").GetString() ?? "";
+            if (!Allowed.IsMatch(allowed)) throw new InvalidDataException("key.allowed: only letters, digits, ranges of them and plain punctuation");
+            var other = new Regex($"[^{allowed}]");
             var replace = k.TryGetProperty("replace", out var r) ? r.GetString() ?? "_" : "_";
             var max = k.TryGetProperty("maxLength", out var m) ? m.GetInt32() : 255;
             key = n =>
@@ -117,6 +121,15 @@ public static class SaveCompanions
         catch { Drop(work); throw; }
         return work;
     }
+    // the mod an entry of a backup belongs to (apex-companions/<mod>/...)
+    internal static string ModOf(string entry) => entry[Top.Length..] is var rest && rest.IndexOf('/') is var at and > 0 ? rest[..at] : rest;
+
+    // a mod's data that can't be read for a backup: that mod is left out of it (SaveCopies.Zip)
+    public sealed class UnreadableException(string mod, string why) : IOException($"save companion {mod}: left out of the backup, {why}")
+    {
+        public string Mod { get; } = mod;
+    }
+
     internal static bool IsCompanion(string entry) => entry.Replace('\\', '/').StartsWith(Top, StringComparison.Ordinal);
 
     // What Unpack laid out, put in the save's places. replace: what is there leaves for the Recycle Bin (a restore over the
@@ -228,7 +241,11 @@ public static class SaveCompanions
     internal static void Tidy(string docs)
     {
         Drop(WorkRoot(docs));
-        foreach (var c in Of(docs))
+        var all = Of(docs);
+        // (two mods with the same place: on a restore the later one's data is what stays; told once a start)
+        foreach (var g in all.SelectMany(c => c.Paths.Select(p => (c.Mod, P: p))).GroupBy(x => x.P, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+            Engine.Log(new InvalidDataException($"save companion {string.Join(", ", g.Select(x => x.Mod))}: the same place {g.Key}; the last one's data wins on a restore"));
+        foreach (var c in all)
             foreach (var p in c.Paths)
                 try
                 {

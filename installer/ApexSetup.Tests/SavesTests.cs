@@ -866,14 +866,15 @@ static class SavesTests
         File.WriteAllText(Path.Combine(decl, "nokey.json"), """{ "paths": ["ModData/all"] }""");
         File.WriteAllText(Path.Combine(decl, "broken.json"), "{ paths");
         File.WriteAllText(Path.Combine(decl, "overlap.json"), """{ "paths": ["ModData/o/{key}", "ModData/o/{key}/x.dat"] }""");
+        File.WriteAllText(Path.Combine(decl, "badkey.json"), """{ "paths": ["ModData/bk/{key}"], "key": { "allowed": "a](x+)+y[" } }""");
         var logged = new List<string>();
         var oldLog = Engine.Log;
         Engine.Log = e => logged.Add(e.Message);
         try
         {
             var of = SaveCompanions.Of(docs);
-            check(of.Count == 1 && of[0].Mod == "pages" && logged.Count(l => l.StartsWith("save companion")) == 5,
-                "companions: only a declaration with {key} in places outside Saves and Mods, none inside another, is used; the rest are logged");
+            check(of.Count == 1 && of[0].Mod == "pages" && logged.Count(l => l.StartsWith("save companion")) == 6,
+                "companions: only a declaration with {key} in places outside Saves and Mods, none inside another, and a plain key.allowed is used; the rest are logged");
 
             string Pages(string key) => Path.Combine(docs, "ModData", "pages", key);
             string Far(string key) => Path.Combine(docs, "ModData", "far", key + ".far");
@@ -897,6 +898,15 @@ static class SavesTests
                     "companions: a backup holds the save's folder and each declared place under apex-companions/<mod>/");
             var point = SaveCopies.Timeline(docs, s).First(p => p.Path == zip);
             var verified = !Throws<SetupException>(() => SaveBackups.Verify(point));
+
+            // a mod's file that can't be read (the game holds it) leaves that mod out of the backup, named in it; the save is in
+            string held;
+            using (new FileStream(Path.Combine(Pages("Town.sims3"), "a.page"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) held = Saves.Backup(s, docs);
+            using (var z = ZipFile.OpenRead(held))
+                check(!z.Entries.Any(e => e.FullName.StartsWith("apex-companions/")) && z.Entries.Any(e => e.FullName == "Town.sims3/Meta.data")
+                      && SaveCopies.Timeline(docs, s).First(p => p.Path == held).Left == "pages" && logged.Any(l => l.Contains("pages: left out of the backup")),
+                    "companions: a mod's file that can't be read leaves that mod out of the backup, which says so, and the backup is still made");
+            File.Delete(held);
 
             // restore over the save: the data goes back to that day; what was there is in the "before restoring" backup
             File.WriteAllText(Path.Combine(Pages("Town.sims3"), "a.page"), "page a, later");

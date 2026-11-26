@@ -24,7 +24,8 @@ public sealed partial class MainWindow
         _ => T(BackupWhys.First(w => w.Id == WhyId(p)).Text),
     };
     string BackupTitle(SavePoint p) => p.Label ?? SaveDay(p.When, hour: true);
-    string BackupSub(SavePoint p) => p.Label is null ? WhyText(p) : SaveDay(p.When, hour: true) + " · " + WhyText(p);
+    string BackupSub(SavePoint p) => (p.Label is null ? WhyText(p) : SaveDay(p.When, hour: true) + " · " + WhyText(p))
+        + (p.Left is { } left ? " · " + T("Mods' data left out: {0}", left) : "");
     string Lower(string t) => char.ToLower(t[0], LangCulture()) + t[1..]; // (inside a sentence)
     static string BackupCount(int n) => n == 1 ? T("1 backup") : T("{0} backups", n);
 
