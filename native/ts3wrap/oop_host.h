@@ -4,7 +4,7 @@
 #include "oop_channel.h"
 
 namespace OopHost {
-// Opens the section of game `pid`, starts the workers and marks the host ready. False when the section is absent.
+// Opens the section of game `pid`, loads the listed plugins (oop_plugin.h), starts the workers and marks the host ready. False when the section is absent.
 bool Start(DWORD pid);
 }
 

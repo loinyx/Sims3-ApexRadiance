@@ -1,6 +1,7 @@
 // Out-of-process helper channel checks (native/ts3wrap/oop_channel.h, oop_host.cpp). Built twice by run.ps1:
 //   x86 (the game's side): creates the section and events like features/oop_client.cpp, starts the x64 host and calls it
 //   x64 (OOP_TEST_HOST):   the restart host's service part, OopHost::Start(<client pid>), serving until the client ends
+// and the sample plugin echo_plugin.cpp (x64, next to the host): twice with its own tag, once with another ABI.
 #include "../../native/ts3wrap/oop_channel.h"
 #include <cstdio>
 #include <cstring>
@@ -42,6 +43,9 @@ int wmain(int argc, wchar_t** argv) {
     HANDLE req = CreateEventW(nullptr, FALSE, FALSE, name), done[kOopSlots];
     for (int i = 0; i < static_cast<int>(kOopSlots); i++) OopName(name, 96, L"Done", pid, i), done[i] = CreateEventW(nullptr, FALSE, FALSE, name);
     OopInit(c, 1);
+    // [oop] plugins as the game lists them: two plugins, a file that is not there, another ABI, a name with a path
+    const wchar_t* const plugins[] = {L"oop_echo1.dll", L"oop_missing.dll", L"oop_badabi.dll", L".\\oop_echo1.dll", L"oop_echo2.dll"};
+    for (int i = 0; i < 5; i++) wcscpy_s(c->plugins[i].name, plugins[i]);
 
     uint32_t outLen = 0;
     char out[64];
@@ -58,6 +62,19 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(OopCall(c, req, done, pi.hProcess, kOopEcho, 0, 0, "hello", 5, out, sizeof out, &outLen) == kOopOk && outLen == 5 && !memcmp(out, "hello", 5));
     CHECK(OopCall(c, req, done, pi.hProcess, kOopEcho, 0, 0, "hello", 5, out, 2, &outLen) == kOopFailed);  // answer too big
     CHECK(OopCall(c, req, done, pi.hProcess, kOopStbl + 5, 0, 0, "x", 1, out, sizeof out, &outLen) == kOopFailed);  // no such service
+    // plugins: each listed entry has its state, a loaded one answers on its service id
+    const uint32_t states[] = {kApexOopLoaded, kApexOopMissing, kApexOopWrongAbi, kApexOopRefused, kApexOopLoaded, kApexOopNone};
+    for (int i = 0; i < 6; i++) CHECK(c->plugins[i].state == states[i]);
+    for (int i = 0; i < 5; i++) CHECK(c->plugins[i].serviceId == kOopPluginBase + i);
+    CHECK(c->plugins[0].tag == 0x31484345u && c->plugins[0].pluginVersion == 7 && c->plugins[0].abi == kApexOopAbi);
+    CHECK(c->plugins[2].abi == 0x00020000u && c->plugins[4].tag == 0x32484345u);
+    uint32_t tag = 0;
+    CHECK(OopCall(c, req, done, pi.hProcess, kOopPluginBase, 1, 0, nullptr, 0, &tag, sizeof tag, &outLen) == kOopOk && tag == 0x31484345u);
+    CHECK(OopCall(c, req, done, pi.hProcess, kOopPluginBase + 4, 1, 0, nullptr, 0, &tag, sizeof tag, &outLen) == kOopOk && tag == 0x32484345u);
+    CHECK(OopCall(c, req, done, pi.hProcess, kOopPluginBase, 0, 0, "hello", 5, out, sizeof out, &outLen) == kOopOk && outLen == 5 && !memcmp(out, "hello", 5));
+    CHECK(OopCall(c, req, done, pi.hProcess, kOopPluginBase, 2, 0, "x", 1, out, sizeof out, &outLen) == kOopFailed);  // the plugin's error answer
+    for (uint32_t i = 1; i < 4; i++) CHECK(OopCall(c, req, done, pi.hProcess, kOopPluginBase + i, 0, 0, "x", 1, out, sizeof out, &outLen) == kOopFailed);  // not loaded
+    CHECK(OopCall(c, req, done, pi.hProcess, kOopServices, 0, 0, "x", 1, out, sizeof out, &outLen) == kOopFailed);  // past the last id
     // a full slot range round trip
     static uint8_t big[kOopPayload], back[kOopPayload];
     for (uint32_t i = 0; i < kOopPayload; i++) big[i] = static_cast<uint8_t>(i * 7);

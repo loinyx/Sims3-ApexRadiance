@@ -56,6 +56,7 @@
     <ClInclude Include="restart_channel.h" />
     <ClInclude Include="relaunch_rules.h" />
     <ClInclude Include="oop_channel.h" />
+    <ClInclude Include="oop_plugin.h" />
     <ClInclude Include="oop_host.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

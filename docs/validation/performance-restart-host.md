@@ -10,7 +10,7 @@ The feature is described in [features/performance/restart-host.md](../features/p
 |---|---|---|---|
 | `installer/ApexSetup.Tests` | Setup's *Restart host* component: install and removal, the `[ui] restart_host` edit (new file, missing table, existing key, other lines and line endings kept), undo through a restore point, removal with Apex, the off copy older Setups left, and the wait while Apex has older settings to copy | `dotnet run --project installer\ApexSetup.Tests` | .NET 8 SDK |
 | `tools/restart_host_test/` | The offer decision (low save, exit code, missing executable), the relaunch command line (switch added, an existing quoted or unquoted `-worldFile` replaced, bad names and overflow refused), the channel's name and checks, the save pick (newest file wins, `.backup` ignored), the relaunch rules: Steam start from an environment block (`SteamAppId`, `SteamGameId`, any case; non-digits, a 64-bit id and empty refused), EA app start (its variables or an `EA Games` folder; Steam and a look-alike folder not), the Steam URL (percent-encoded, UTF-8, quote and overflow refused), the bridge wait on a fake process list (by parent or folder; another game's bridge and other processes not) | `run.ps1` | none |
-| `tools/oop_helper_test/` | The out-of-process services channel: one layout for the x86 game and the x64 host, slot claim and take, a call without a host (timeout), echo round trips up to a full 256 KB slot, an answer larger than the caller's buffer, an unknown service, the round-trip time, and a host that ended (told at once) | `tools/oop_helper_test/run.ps1` | MSVC x86 and x64 |
+| `tools/oop_helper_test/` | The out-of-process services channel: one layout for the x86 game and the x64 host, slot claim and take, a call without a host (timeout), echo round trips up to a full 256 KB slot, an answer larger than the caller's buffer, an unknown service, the round-trip time, and a host that ended (told at once); plugins (`echo_plugin.cpp`): two loaded with their tags and service ids, a missing file, another ABI, a name with a path refused, a plugin's error answer | `tools/oop_helper_test/run.ps1` | MSVC x86 and x64 |
 
 ## Latest results
 
@@ -22,6 +22,7 @@ The feature is described in [features/performance/restart-host.md](../features/p
 | 2026-11-14 | branch `release/4.0.0`, uncommitted | `tools/restart_host_test`; `ts3wrap.vcxproj` Release x64; `restart_host.cpp` compiled alone (x86, `/W4`) | checks pass; built | none |
 | 2026-11-14 | branch `release/4.0.0`, uncommitted (bridge wait, Steam retry, EA app message, handoff wait, crash check) | `tools/restart_host_test`; `ts3wrap.vcxproj` Release x64; `restart_host.cpp` compiled alone (x86, `/W4`) | 24 checks pass; built | none |
 | 2026-11-26 | branch `feature/oop-helper` | `tools/oop_helper_test`; `tools/development/build.ps1 -Flavor Public` | all checks pass, round trip 7 us; `ApexRadiance.asi` and `ts3wrap.exe` built | none |
+| 2026-11-26 | branch `feature/oop-plugin-host` | `tools/oop_helper_test`; `tools/development/build.ps1 -Flavor Public`; `dumpbin /exports` | all checks pass, the plugin cases included; `ApexRadiance.asi` (four `ApexOop_` exports) and `ts3wrap.exe` built | none |
 
 ## In-game test plan
 

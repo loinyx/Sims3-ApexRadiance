@@ -4,6 +4,7 @@
 #include "oop_client.h"
 #include "apex_config.h"
 #include "apex_log.h"
+#include <algorithm>
 #include <mutex>
 #include <string>
 
@@ -54,6 +55,20 @@ bool Enable(OopService service, const char* name) {
     return true;
 }
 
+void EnablePlugins() {
+    const std::vector<std::string> names = ApexConfig::GetUi().oopPlugins;
+    for (uint32_t i = 0; i < names.size(); i++) {
+        const std::string& n = names[i];
+        wchar_t wide[kOopPluginName] = L"";
+        if (i >= kOopPlugins || n.find_first_of("\\/:") != std::string::npos || !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, n.c_str(), -1, wide, kOopPluginName)) {
+            LOG_WARNING("[OopHelper] Plugin " + n + " not listed for the host: [oop] plugins takes at most 8 bare file names of at most 31 characters");
+            continue;
+        }
+        if (!Enable(static_cast<OopService>(kOopPluginBase + i), n.c_str())) return;  // the restart host is off, or no section: logged
+        memcpy(g_chan->plugins[i].name, wide, sizeof wide);
+    }
+}
+
 bool WaitReady(DWORD ms) {
     if (!g_chan || g_lost) return false;
     for (DWORD waited = 0; !g_chan->hostReady; waited += 10) {
@@ -65,10 +80,10 @@ bool WaitReady(DWORD ms) {
     return true;
 }
 
-OopResult Call(OopService service, uint32_t op, uint32_t arg, const void* in, uint32_t inLen, void* out, uint32_t outCap, uint32_t* outLen) {
+OopResult Call(OopService service, uint32_t op, uint32_t arg, const void* in, uint32_t inLen, void* out, uint32_t outCap, uint32_t* outLen, DWORD timeoutMs) {
     if (!g_host || g_lost) return kOopHostGone;
-    const OopResult r = OopCall(g_chan, g_req, g_done, g_host, service, op, arg, in, inLen, out, outCap, outLen);
-    if (r == kOopTimeout) Lose("no answer within 2 s");
+    const OopResult r = OopCall(g_chan, g_req, g_done, g_host, service, op, arg, in, inLen, out, outCap, outLen, timeoutMs);
+    if (r == kOopTimeout) Lose("no answer in time");
     if (r == kOopHostGone) Lose("its process ended");
     return r;
 }
@@ -80,3 +95,34 @@ Host State() {
 }
 
 } // namespace OopClient
+
+// The calls another ASI in the game uses to reach a plugin of the host (native/ts3wrap/oop_plugin.h).
+extern "C" {
+
+__declspec(dllexport) uint32_t __cdecl ApexOop_Abi() { return kApexOopAbi; }
+
+__declspec(dllexport) uint32_t __cdecl ApexOop_HostState() {
+    OopClient::WaitReady(0);  // no wait: opens the host's process once its workers run
+    return static_cast<uint32_t>(OopClient::State());
+}
+
+__declspec(dllexport) uint32_t __cdecl ApexOop_Service(uint32_t tag, ApexOopServiceInfo* info) {
+    if (!tag || ApexOop_HostState() != kApexOopHostReady) return 0;
+    for (const OopPlugin& p : OopClient::g_chan->plugins) {
+        if (p.tag != tag) continue;
+        if (info) *info = {p.serviceId, p.abi, p.pluginVersion, p.state};
+        if (p.state == kApexOopLoaded) return p.serviceId;
+    }
+    return 0;
+}
+
+__declspec(dllexport) uint32_t __cdecl ApexOop_Call(uint32_t serviceId, uint32_t op, uint32_t arg, const void* in, uint32_t inLen, void* out, uint32_t outCap,
+                                                    uint32_t* outLen, uint32_t timeoutMs) {
+    // the built-in services but echo are Apex Radiance's own: their requests are not a public format
+    if (serviceId != kOopEcho && (serviceId < kOopPluginBase || serviceId >= kOopServices)) return kOopFailed;
+    OopClient::WaitReady(0);
+    // a timeout loses the host for every service, so a caller cannot make it shorter than 100 ms
+    return OopClient::Call(static_cast<OopService>(serviceId), op, arg, in, inLen, out, outCap, outLen, std::clamp<DWORD>(timeoutMs ? timeoutMs : 2000, 100, 2000));
+}
+
+} // extern "C"

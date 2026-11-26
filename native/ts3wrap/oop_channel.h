@@ -8,17 +8,21 @@
 // The game claims a free slot, writes the request into the slot's payload range, marks it and signals; a host worker
 // takes it, runs the service's handler on the same range and marks it done. Nothing here is ever written into a save.
 // A call that cannot be served (no host, host gone, a 2 s wait) returns false: the caller keeps its data in the game.
+#include "oop_plugin.h"
 #include <windows.h>
 #include <stdint.h>
 #include <wchar.h>
 
 static const uint32_t kOopMagic = 0x504F4F58;  // "XOOP"
-static const uint32_t kOopVersion = 1;
+static const uint32_t kOopVersion = 2;
 static const uint32_t kOopSlots = 8;
 static const uint32_t kOopPayload = 256u << 10; // per slot (2 MB in all: the view costs the game address space); a service chunks larger requests
 static const uint32_t kOopHeader = 4096;        // header + slots; the payload ranges start here
 
-enum OopService : uint32_t { kOopEcho = 0, kOopResRead = 1, kOopStbl = 2, kOopServices = 3 };
+// Built-in services keep the ids 0-15; the plugins of oop_plugin.h get 16-31 in list order.
+enum OopService : uint32_t { kOopEcho = 0, kOopResRead = 1, kOopStbl = 2, kOopPluginBase = 16, kOopServices = 32 };
+static const uint32_t kOopPlugins = 8;
+static const uint32_t kOopPluginName = 32;      // characters of a plugin file name, the terminator included
 enum OopState : int32_t { kOopFree = 0, kOopRequest = 1, kOopTaken = 2, kOopDone = 3, kOopError = 4, kOopWriting = 5 };
 
 struct OopSlot {
@@ -29,6 +33,13 @@ struct OopSlot {
     uint32_t reserved;
 };
 
+// One listed plugin: the game writes `name` before the host starts; the host fills the rest before it is ready.
+struct OopPlugin {
+    uint32_t tag, serviceId, abi, pluginVersion;
+    uint32_t state;  // ApexOopPluginState
+    wchar_t name[kOopPluginName];
+};
+
 struct OopChannel {
     uint32_t magic, version, size;
     uint32_t hostPid;            // set by the host once it opened the section
@@ -36,10 +47,12 @@ struct OopChannel {
     volatile uint32_t heartbeat; // the host bumps it every 250 ms (diagnostics: the game watches the host's process handle)
     uint32_t enabled;            // bit per service, written by the game before the host starts
     uint32_t calls[kOopServices];// served calls per service (host side)
+    OopPlugin plugins[kOopPlugins];
     OopSlot slots[kOopSlots];
 };
 static_assert(sizeof(OopSlot) == 32, "OopSlot: one layout for the x86 game and the x64 host");
-static_assert(sizeof(OopChannel) == 10 * 4 + kOopSlots * 32, "OopChannel: one layout for the x86 game and the x64 host");
+static_assert(sizeof(OopPlugin) == 20 + kOopPluginName * 2, "OopPlugin: one layout for the x86 game and the x64 host");
+static_assert(sizeof(OopChannel) == (7 + kOopServices) * 4 + kOopPlugins * sizeof(OopPlugin) + kOopSlots * 32, "OopChannel: one layout for the x86 game and the x64 host");
 static_assert(sizeof(OopChannel) <= kOopHeader, "OopChannel: header must fit before the payload ranges");
 
 static const size_t kOopSectionBytes = kOopHeader + static_cast<size_t>(kOopSlots) * kOopPayload;
@@ -76,7 +89,7 @@ inline int OopTake(OopChannel* c) {
 
 // A service handler (host side): reads `inLen` bytes from `io`, writes the answer over it (at most kOopPayload bytes) and
 // sets *outLen. False: an error answer.
-typedef bool (*OopHandler)(uint32_t op, uint32_t arg, uint8_t* io, uint32_t inLen, uint32_t* outLen);
+typedef ApexOopHandler OopHandler;
 
 // Host side: serve every requested slot; returns how many were served.
 inline int OopServe(OopChannel* c, const OopHandler* handlers, HANDLE const* done) {
@@ -93,8 +106,6 @@ inline int OopServe(OopChannel* c, const OopHandler* handlers, HANDLE const* don
     }
     return n;
 }
-
-enum OopResult { kOopOk = 0, kOopBusy, kOopFailed, kOopTimeout, kOopHostGone };
 
 // Game side: one call. `in` (inLen bytes) is copied into the slot; the answer (up to outCap bytes) into `out`. A timeout
 // or a dead host leaves the slot claimed for good: the caller latches to in process after any result but Ok/Busy/Failed.
