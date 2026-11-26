@@ -86,7 +86,9 @@ public sealed partial class MainWindow
         ToolTipService.SetToolTip(words, title + "\n" + sub);
         var size = SaveText(SaveSize(p.Stored), 13, "ApexSoftTextBrush");
         size.VerticalAlignment = VerticalAlignment.Center;
+        // (a save kept out of the game is still there: its backup opens beside it under another name, never as a second save of the same name)
         var (text, go) = e.Kind == SaveKindOf.Here ? (T("Restore"), (Func<Task>)(() => RestoreAsync(e, p)))
+            : e.Kind == SaveKindOf.Stored ? (T("Open as another save"), () => OpenAsAnother(e, p))
             : (T("Bring back"), () => BringBack(e.Name, (d, ct) => p.Kind == CopyKind.Game ? SaveCopies.Rescue(d, e.Look!.Save, ct) : SaveCopies.Restore(d, new Save(Path.Combine(d, "Saves", e.Save + ".sims3"), e.Save, p.When), p, ct)));
         var act = Dims(Button(text, go));
         (act.Height, act.VerticalAlignment, act.IsEnabled) = (36, VerticalAlignment.Center, SavesBlocked() is null);

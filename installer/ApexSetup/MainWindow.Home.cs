@@ -229,8 +229,8 @@ public sealed partial class MainWindow
             Width = 56, Height = 56, Padding = new Thickness(0), CornerRadius = new CornerRadius(8), Background = glass, BorderThickness = new Thickness(0), Flyout = menu,
             Content = new LucideIcon { Kind = "ellipsis", Size = 16, Stroke = ink, StrokeWidth = 1.75 },
         };
-        ToolTipService.SetToolTip(more, T("More"));
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, T("More"));
+        ToolTipService.SetToolTip(more, T("More options"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, T("More options"));
         row.Children.Add(more);
         return row;
     }
@@ -543,6 +543,8 @@ public sealed partial class MainWindow
         now.Click += async (_, _) =>
         {
             if (_savesBusy) return;
+            // (a test run, or the game writing its saves: nothing is copied, as on the Saves screen)
+            if (SavesBlocked() is { } why) { await Message(T("Back up now"), why); return; }
             SavesBusy(true); // (the window stays open until they are made)
             now.IsEnabled = false;
             now.Content = new ProgressRing { IsActive = true, Width = 12, Height = 12 };
@@ -597,6 +599,9 @@ public sealed partial class MainWindow
             };
             ToolTipService.SetToolTip(pin, isTop ? T("Home picture") : T("Use on Home"));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(pin, isTop ? T("Home picture") : T("Use on Home"));
+            // (shown when reached with the keyboard too, not only under the pointer)
+            pin.GotFocus += (_, _) => pin.Opacity = 1;
+            pin.LostFocus += (_, _) => pin.Opacity = isTop ? 1 : 0;
             pin.Click += (_, _) =>
             {
                 if (isTop) return;

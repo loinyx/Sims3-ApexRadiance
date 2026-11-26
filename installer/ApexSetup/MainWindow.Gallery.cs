@@ -80,6 +80,7 @@ public sealed partial class MainWindow
         var main = new StackPanel { Spacing = Design.Space.X6 };
         var narrow = new ScrollViewer { MaxHeight = 520 };
         narrow.Content = GalleryAlbums(narrow);
+        _galNarrow = narrow;
         var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible,
             Flyout = new Flyout { Content = Design.Parts.PopCard(new StackPanel { Width = 260, Children = { GallerySearch(), narrow } }, 6), FlyoutPresenterStyle = Design.Parts.Pop(274) } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, T("Albums"));
@@ -148,6 +149,9 @@ public sealed partial class MainWindow
     // the pictures the search finds (all of them with no search)
     string _galQuery = "";
     Border? _galRowsHost;
+    ScrollViewer? _galNarrow;
+    TextBlock? _galCount;
+    string PictureCount(int n) => n == 1 ? T("1 picture · newest first") : T("{0} pictures · newest first", n);
     IEnumerable<Picture> Found => _galQuery.Length == 0 ? _galPics : _galPics.Where(Matches);
     bool Matches(Picture p)
     {
@@ -172,7 +176,8 @@ public sealed partial class MainWindow
                 if (mine != typed || box.Text.Trim() == _galQuery) return;
                 _galQuery = box.Text.Trim();
                 if (_galSide is not null) _galSide.Content = GalleryAlbums();
-                if (!_galBook && _galRowsHost is not null) { _galLimit = 60; _galRowsHost.Child = GalleryRows(); }
+                if (_galNarrow is not null) _galNarrow.Content = GalleryAlbums(_galNarrow);
+                if (!_galBook && _galRowsHost is not null) { _galLimit = 60; _galRowsHost.Child = GalleryRows(); if (_galCount is not null) _galCount.Text = PictureCount(InAlbum().Count); }
                 else RefreshBoard();
             });
         };
@@ -313,7 +318,7 @@ public sealed partial class MainWindow
             var drop = new MenuFlyoutItem { Text = T("Delete album"), Icon = Lucide.Element("trash-2") };
             drop.Click += async (_, _) =>
             {
-                if (!await Confirm(T("Delete {0}?", one.Name), T("Only the album is deleted. Its pictures stay in your Screenshots folder and other albums."), T("Delete"))) return;
+                if (!await Confirm(T("Delete {0}?", one.Name), T("Only the album is deleted. Its pictures stay in your Screenshots folder and other albums."), T("Delete"), danger: true)) return;
                 _gal.Custom.Remove(one);
                 _gal.Albums.Remove(one.Key);
                 Keep();
@@ -356,9 +361,9 @@ public sealed partial class MainWindow
             : new TextBlock { Text = AlbumName(_galAlbum), FontSize = 28, FontWeight = FontWeights.SemiBold };
         name.Children.Add(_boardTitle);
         titles.Children.Add(name);
-        var hint = Muted(_galBook ? T("Drag to travel the timeline · click a picture to open it")
-            : pics.Count == 1 ? T("1 picture · newest first") : T("{0} pictures · newest first", pics.Count));
+        var hint = Muted(_galBook ? T("Drag to travel the timeline · click a picture to open it") : PictureCount(pics.Count));
         hint.FontSize = 13;
+        _galCount = _galBook ? null : hint;
         if (_galBook) { _boardHint = hint; hint.Foreground = Ink(look); hint.Opacity = 0.85; hint.TextWrapping = TextWrapping.NoWrap; hint.TextTrimming = TextTrimming.CharacterEllipsis; _boardTitle.TextTrimming = TextTrimming.CharacterEllipsis; }
         titles.Children.Add(hint);
         g.Children.Add(titles);
@@ -911,6 +916,7 @@ public sealed partial class MainWindow
         var whole = new Button { Content = T("Open album"), Height = Design.Size.Control };
         var shut = new Button { Content = new LucideIcon { Kind = "x", Size = 16, Follow = true, StrokeWidth = 1.75 }, Width = Design.Size.Control, Height = Design.Size.Control, Padding = new Thickness(0) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(shut, T("Close"));
+        ToolTipService.SetToolTip(shut, T("Close"));
         actions.Children.Add(whole);
         actions.Children.Add(shut);
         Grid.SetColumn(actions, 1);
@@ -1066,7 +1072,7 @@ public sealed partial class MainWindow
     }
 
     // while a picture is dragged: the picture whose middle it is over grows a little, ready to make an album with it
-    double Moved(FrameworkElement el) => Math.Abs(Canvas.GetLeft(el) - _dragFrom.X) + Math.Abs(Canvas.GetTop(el) - _dragFrom.Y);
+    double Moved(FrameworkElement el) => _dragFrom.TryGetValue(el, out var from) ? Math.Abs(Canvas.GetLeft(el) - from.X) + Math.Abs(Canvas.GetTop(el) - from.Y) : 0;
 
     void MarkUnder(FrameworkElement? me)
     {
@@ -1928,6 +1934,9 @@ public sealed partial class MainWindow
             _boardCalm = true;
             try
             {
+                // (a drag under way ends with the board it was on)
+                _dragging = 0;
+                _dragFrom.Clear();
                 if (page || _boardHost is null) { BuildGallery(); return; }
                 _boardHost.Child = GalleryBoard();
                 var look = Gallery.Look(_gal!, _galAlbum);
@@ -2185,7 +2194,7 @@ public sealed partial class MainWindow
                 var k = inPile.GetValueOrDefault(heap);
                 inPile[heap] = k + 1;
                 if (k == 0) pileBase[heap] = look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved
-                    ? new Placed { X = rawX[own] + parked.X, Y = Math.Clamp(parked.Y, roof, Math.Max(roof, BoardHeight - h - 70)) - 24 * s }
+                    ? new Placed { X = Math.Max(8, rawX[own] + parked.X), Y = Math.Clamp(parked.Y, roof, Math.Max(roof, BoardHeight - h - 70)) - 24 * s }
                     : Auto(own, true);
                 var under = pileBase[heap];
                 var shift = PileShift[k % PileShift.Length];
@@ -2304,10 +2313,12 @@ public sealed partial class MainWindow
             foreach (var card in cards)
             {
                 card.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY;
-                card.ManipulationStarted += (_, _) => { _dragging = true; Fan(false); foreach (var cc in cards) cc.Scale = new Vector3(1.04f, 1.04f, 1); };
+                card.ManipulationStarted += (_, _) => { _dragging++; Fan(false); foreach (var cc in cards) cc.Scale = new Vector3(1.04f, 1.04f, 1); };
                 card.ManipulationDelta += (_, e) =>
                 {
-                    var dx = e.Delta.Translation.X;
+                    // (kept on the board, as a single picture is)
+                    var left = Canvas.GetLeft(cards[0]);
+                    var dx = Math.Clamp(e.Delta.Translation.X, 8 - left, Math.Max(8 - left, (_boardCanvas?.Width ?? 2000) - cards[0].ActualWidth - 8 - left));
                     var dy = Math.Clamp(e.Delta.Translation.Y, -Canvas.GetTop(cards[0]) - 10, BoardHeight - 120 - Canvas.GetTop(cards[0]));
                     foreach (var cc in cards) { Canvas.SetLeft(cc, Canvas.GetLeft(cc) + dx); Canvas.SetTop(cc, Canvas.GetTop(cc) + dy); }
                     Canvas.SetLeft(tags, Canvas.GetLeft(tags) + dx);
@@ -2315,7 +2326,7 @@ public sealed partial class MainWindow
                 };
                 card.ManipulationCompleted += (_, _) =>
                 {
-                    _dragging = false;
+                    _dragging = Math.Max(0, _dragging - 1);
                     foreach (var cc in cards) cc.Scale = Vector3.One;
                     look.Places[c.Key] = new Placed { X = Canvas.GetLeft(cards[0]) - _boardAnchor.GetValueOrDefault(c.Key), Y = Canvas.GetTop(cards[0]), Moved = true };
                     Keep();
@@ -2399,6 +2410,7 @@ public sealed partial class MainWindow
             throwTimer.Interval = TimeSpan.FromMilliseconds(16);
             throwTimer.Tick += (_, _) =>
             {
+                if (_boardScroll != scroll) { StopGlide(); return; } // (the board laid again)
                 v *= 0.93;
                 var to = Math.Clamp(scroll.HorizontalOffset - v * 16, 0, scroll.ScrollableWidth);
                 if (Math.Abs(v) < 0.02 || to <= 0 || to >= scroll.ScrollableWidth) StopGlide();
@@ -2659,23 +2671,37 @@ public sealed partial class MainWindow
         if (blank && !bare && !shut) { outer.PointerEntered += (_, _) => capHost.Opacity = 1; outer.PointerExited += (_, _) => { if (!editing && Gallery.Peek(_gal!, p.Path).Caption is not { Length: > 0 }) capHost.Opacity = 0; }; }
 
         // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
-        outer.PointerEntered += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
-        outer.PointerExited += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, _restZ.GetValueOrDefault(outer, order * 10)); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
+        outer.PointerEntered += (_, _) => { if (_dragging > 0 || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
+        outer.PointerExited += (_, _) => { if (_dragging > 0 || pile is not null || still) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, _restZ.GetValueOrDefault(outer, order * 10)); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
         if (pile is null && !still) Draggable(outer, () =>
             {
                 if (_sideLit is { Tag: string key })
                 {
                     LightAlbum(null);
                     MarkUnder(null);
-                    Canvas.SetLeft(outer, _dragFrom.X);
-                    Canvas.SetTop(outer, _dragFrom.Y);
+                    var from = _dragFrom.GetValueOrDefault(outer);
+                    Canvas.SetLeft(outer, from.X);
+                    Canvas.SetTop(outer, from.Y);
                     DropOnAlbum(key, p);
                     return;
                 }
                 CardDropped(p, place, outer, pile);
             }, () => { MarkUnder(outer); LightAlbum(AlbumAt(_dragPoint)); }, shut ? null : () => OpenViewer(pics, pics.IndexOf(p), outer));
         if (pile is null && !shut) HandCursor.On(outer);
-        if (pile is null && !shut) outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
+        if (pile is null && !shut)
+        {
+            outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
+            // (reached and opened with the keyboard, named for a screen reader by its caption or its file)
+            outer.IsTabStop = true;
+            outer.UseSystemFocusVisuals = true;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(outer, info.Caption is { Length: > 0 } said ? said : Path.GetFileName(p.Path));
+            outer.KeyDown += (_, e) =>
+            {
+                if (!ReferenceEquals(e.OriginalSource, outer) || e.Key is not (Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Space)) return;
+                e.Handled = true;
+                OpenViewer(pics, pics.IndexOf(p), outer);
+            };
+        }
         HandCursor.On(caption);
         caption.Tapped += (_, e) =>
         {
@@ -2728,7 +2754,7 @@ public sealed partial class MainWindow
         if (color.A == 0) color = NoteColors[0].Color;
         var box = new TextBox { Text = note.Text, FontFamily = new FontFamily(look.Font), FontSize = 20, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, PlaceholderText = T("write here"),
             Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0), Foreground = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26)), Padding = new Thickness(0) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Add a note"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Note"));
         box.Resources["TextControlBackgroundFocused"] = Res("ApexClearBrush");
         box.Resources["TextControlBackgroundPointerOver"] = Res("ApexClearBrush");
         box.Resources["TextControlForegroundFocused"] = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
@@ -2751,6 +2777,8 @@ public sealed partial class MainWindow
         Land(tilt, note.Angle, 160 + order * 140, 0, look.Entrance);
         outer.PointerEntered += (_, _) => close.Opacity = 1;
         outer.PointerExited += (_, _) => close.Opacity = 0;
+        close.GotFocus += (_, _) => close.Opacity = 1; // (reached with the keyboard: seen, not only under the pointer)
+        close.LostFocus += (_, _) => close.Opacity = 0;
         close.Click += (_, _) =>
         {
             look.Notes.Remove(note);
@@ -2766,7 +2794,7 @@ public sealed partial class MainWindow
         return outer;
     }
 
-    bool _dragging;
+    int _dragging; // (drags under way: with inertia one can still glide while another starts)
     // A card held by a corner: it leans away from where it is pulled, the faster the more, and when let go it swings back
     // to rest on a spring with a small overshoot. The lean is the element's own Rotation, round the point it was picked up
     // by, so it never fights the tilt the card already has.
@@ -2819,7 +2847,8 @@ public sealed partial class MainWindow
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, string> CardPaths = new();
     readonly Dictionary<FrameworkElement, int> _restZ = [];
     // moved with the pointer (or a finger), lifted while it moves, kept where it is let go
-    Windows.Foundation.Point _dragFrom;
+    // (where each element was picked up: drags can overlap while one still glides)
+    readonly Dictionary<FrameworkElement, Windows.Foundation.Point> _dragFrom = [];
     void Draggable(FrameworkElement el, Action dropped, Action? moving = null, Action? tapped = null)
     {
         el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY | ManipulationModes.TranslateInertia;
@@ -2829,8 +2858,8 @@ public sealed partial class MainWindow
         el.ManipulationInertiaStarting += (_, e) => e.TranslationBehavior.DesiredDeceleration = 0.006;
         el.ManipulationStarted += (_, e) =>
         {
-            _dragFrom = new Windows.Foundation.Point(Canvas.GetLeft(el), Canvas.GetTop(el));
-            _dragging = true;
+            _dragFrom[el] = new Windows.Foundation.Point(Canvas.GetLeft(el), Canvas.GetTop(el));
+            _dragging++;
             Canvas.SetZIndex(el, Math.Max(Canvas.GetZIndex(el), 1000));
             swing.Hold(e.Position);
             el.Scale = new Vector3(1.06f, 1.06f, 1);
@@ -2839,6 +2868,8 @@ public sealed partial class MainWindow
             edge.Interval = TimeSpan.FromMilliseconds(16);
             edge.Tick += (_, _) =>
             {
+                // (the board laid again under the drag: this card and its scroller are gone)
+                if (el.XamlRoot is null || _boardScroll != sv) { StopEdge(); return; }
                 if (_sideLit is not null) return;
                 var left = Canvas.GetLeft(el) - sv.HorizontalOffset;
                 var right = left + el.ActualWidth - sv.ViewportWidth;
@@ -2853,31 +2884,36 @@ public sealed partial class MainWindow
             _timers.Add(edge);
             edge.Start();
         };
+        void StopEdge() { if (edge is not null) { edge.Stop(); _timers.Remove(edge); edge = null; } }
         el.ManipulationDelta += (_, e) =>
         {
+            // (thrown onto an album of the side pane: it stops there instead of gliding past)
+            if (e.IsInertial && _sideLit is not null) { e.Complete(); return; }
             var w = _boardCanvas?.Width ?? 2000;
             // (kept whole on the board)
             Canvas.SetLeft(el, Math.Clamp(Canvas.GetLeft(el) + e.Delta.Translation.X, 8, Math.Max(8, w - el.ActualWidth - 8)));
             Canvas.SetTop(el, Math.Clamp(Canvas.GetTop(el) + e.Delta.Translation.Y, 8, Math.Max(8, BoardHeight - el.ActualHeight - 8)));
             _dragPoint = el.TransformToVisual(null).TransformPoint(e.Position);
             swing.Pull(e.Velocities.Linear.X, e.IsInertial);
-            moving?.Invoke();
+            if (!e.IsInertial) moving?.Invoke();
         };
         el.ManipulationCompleted += (_, _) =>
         {
-            _dragging = false;
+            _dragging = Math.Max(0, _dragging - 1);
             swing.Let();
             el.Scale = Vector3.One;
-            if (edge is not null) { edge.Stop(); _timers.Remove(edge); edge = null; }
+            StopEdge();
             // (a press that barely moved is a click: the card goes back where it was and opens)
             if (Moved(el) < 8)
             {
-                Canvas.SetLeft(el, _dragFrom.X);
-                Canvas.SetTop(el, _dragFrom.Y);
+                var from = _dragFrom.GetValueOrDefault(el);
+                Canvas.SetLeft(el, from.X);
+                Canvas.SetTop(el, from.Y);
                 MarkUnder(null);
                 if (tapped is not null) { tapped(); return; }
             }
             dropped();
+            _dragFrom.Remove(el);
         };
     }
 
@@ -3114,6 +3150,9 @@ public sealed partial class MainWindow
         // (one viewer at a time: a click can arrive both as a tap and as a press that barely moved)
         if (_viewing || at < 0 || at >= pics.Count || Content.XamlRoot is not { } root) return;
         _viewing = true;
+        // (opened from Home before the Gallery ever was: its records and the saves are read here)
+        _gal ??= LoadGallery();
+        if (_galSaves.Count == 0 && _game is not null) _galSaves = Saves.List(Docs);
         var removed = false; // a picture went to the Recycle Bin from here
         // (the board is laid again on closing only when something was changed here, so an open album stays open)
         var opened = _gal is null ? null : System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
@@ -3182,7 +3221,7 @@ public sealed partial class MainWindow
         photo.PointerMoved += (_, e) => { if (grab is not { } g) return; var q = e.GetCurrentPoint(zoomer).Position; zoomer.ChangeView(gx - (q.X - g.X), gy - (q.Y - g.Y), null, true); };
         photo.PointerReleased += (_, e) => { grab = null; photo.ReleasePointerCapture(e.Pointer); };
         stage.Children.Add(zoomer);
-        Button Round(string glyph, string name, double size = 46)
+        Button Round(string glyph, string name, double size = Design.Size.ControlLarge)
         {
             var b = new Button { Content = new LucideIcon { Kind = glyph, Size = 16, Follow = true, StrokeWidth = 1.75 }, Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Padding = new Thickness(0),
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1F, 255, 255, 255)), BorderThickness = new Thickness(0) };
@@ -3228,7 +3267,7 @@ public sealed partial class MainWindow
         zoomLabel.Click += (_, _) => ZoomTo(1);
         zoomer.ViewChanged += (_, _) => zoomLabel.Content = $"{Math.Round(zoomer.ZoomFactor * 100)}%";
         stage.Children.Add(islandFrame);
-        var close = Round("x", T("Close"), 40);
+        var close = Round("x", T("Close"));
         // (the controls over the dark room keep the dark look in a light theme)
         foreach (var c in new FrameworkElement[] { prev, next, close, islandFrame }) c.RequestedTheme = ElementTheme.Dark;
         // (the way out is in the side panel's corner, as in every side panel; over the picture only in full screen, without it)
@@ -3263,9 +3302,11 @@ public sealed partial class MainWindow
                 v.Source = null;
             }
         }
+        Action? flushCaption = null; // (a caption typed and not yet left, kept whichever way the viewer closes)
         void Close(bool stay = true)
         {
             if (closing) return;
+            flushCaption?.Invoke();
             closing = true;
             StopVideo();
             root.Changed -= Resized;
@@ -3597,7 +3638,15 @@ public sealed partial class MainWindow
             var cap = new TextBox { Text = info.Caption ?? "", PlaceholderText = T("Write something about this moment…"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
                 FontFamily = new FontFamily(look.Font), FontSize = 20, MinHeight = 96, Padding = new Thickness(15, 11, 15, 11), CornerRadius = new CornerRadius(Design.Radius.Card) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cap, T("Caption"));
-            cap.LostFocus += (_, _) => { Gallery.Info(_gal!, p.Path).Caption = cap.Text.Trim(); Keep(); };
+            void Flush()
+            {
+                var typed = cap.Text.Trim();
+                if (typed == (Gallery.Peek(_gal!, p.Path).Caption ?? "")) return;
+                Gallery.Info(_gal!, p.Path).Caption = typed;
+                Keep();
+            }
+            cap.LostFocus += (_, _) => Flush();
+            flushCaption = Flush;
             side.Children.Add(cap);
 
             // what to do with it
@@ -3612,12 +3661,12 @@ public sealed partial class MainWindow
                 {
                     var t = new ToggleMenuFlyoutItem { Text = c.Name, IsChecked = c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase), Icon = Lucide.Element(AlbumIcon(c.Icon)) };
                     var one = c;
-                    t.Click += (_, _) => { Gallery.Toggle(_gal, one, p.Path); Fill(); };
+                    t.Click += (_, _) => { Gallery.Toggle(_gal, one, p.Path); Keep(); Fill(); };
                     albums.Items.Add(t);
                 }
                 if (_gal.Custom.Count > 0) albums.Items.Add(new MenuFlyoutSeparator());
                 var make = new MenuFlyoutItem { Text = T("New album…"), Icon = Lucide.Element("plus") };
-                make.Click += async (_, _) => { popup.IsOpen = false; if (await AlbumDialog(null, Gallery.HouseholdOf(p, _gal, _galSaves)) is { } made) Gallery.Toggle(_gal, made, p.Path); popup.IsOpen = true; Fill(); };
+                make.Click += async (_, _) => { popup.IsOpen = false; if (await AlbumDialog(null, Gallery.HouseholdOf(p, _gal, _galSaves)) is { } made) { Gallery.Toggle(_gal, made, p.Path); Keep(); } popup.IsOpen = true; Fill(); };
                 albums.Items.Add(make);
             };
             album.Flyout = albums;
@@ -3647,6 +3696,7 @@ public sealed partial class MainWindow
             bin.Click += async (_, _) =>
             {
                 if (!await Confirm(T("Move this picture to the Recycle Bin?"), T("You can restore it from the Recycle Bin."), T("Move to the Recycle Bin"), danger: true)) return;
+                flushCaption = null; // (its caption goes with it)
                 try { Gallery.Remove(_gal!, p.Path); removed = true; pics.RemoveAt(at); if (pics.Count == 0) { Close(); return; } at = Math.Min(at, pics.Count - 1); Fill(); }
                 catch (Exception e) { App.Log(e); await Message(T("The picture was not moved"), ErrorText(e)); }
             };
