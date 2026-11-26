@@ -268,9 +268,9 @@ public sealed partial class MainWindow
 
     // ---------- health: a small note in the picture's corner ----------
 
-    // The game's health over the picture, as a sibling of Play and More: the same glass, corners and ink (white on the picture,
-    // the theme's own on the plain card), the crystal floating in a little of the state's light, what the state is and the
-    // first thing to look at, and a chevron: the whole card opens Health.
+    // The game's health over the picture: a low glass card with the crystal larger than it, over its left edge, in a light of
+    // the state's colour; the state in words, the first thing to look at, and a chevron: the whole card opens Health. The
+    // glass is Play and More's (frosted on the picture, the theme's own on the plain card), its corners a card's.
     FrameworkElement HealthChip()
     {
         var calm = _healthState == HealthState.Ready;
@@ -285,21 +285,49 @@ public sealed partial class MainWindow
         Brush ink = photo ? new SolidColorBrush(Microsoft.UI.Colors.White) : Res("TextFillColorPrimaryBrush");
         Brush soft = photo ? new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0xCC)) : Res("ApexSoftTextBrush");
 
-        var g = new Grid { Padding = new Thickness(Design.Space.CardPad), ColumnSpacing = Design.Space.IconToText };
-        foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        // the crystal in its light, floating (a slow bob, still when Windows' animations are off)
-        // (the light stays still and breathes, wider than the crystal; the card's corners clip it, as glass holds a light)
-        const double size = 56, light = 150;
+        const double size = 64, light = 150, over = 26;
+        var root = new Grid();
+        // the card, starting under the crystal
+        var g = new Grid { Padding = new Thickness(size - over + Design.Space.X3, Design.Space.X3, Design.Space.X4, Design.Space.X3), ColumnSpacing = Design.Space.X3,
+            MinHeight = 56 };
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var black = Windows.UI.Color.FromArgb(255, 0, 0, 0);
+        Brush rest = photo ? Glass(0.42, black) : Res("ApexPillBrush"), hover = photo ? Glass(0.3, black) : Res("ApexHoverBrush");
+        var card = new Border { Child = g, Margin = new Thickness(over, 0, 0, 0), CornerRadius = new CornerRadius(Design.Radius.Card), Background = rest,
+            BorderThickness = new Thickness(1), BorderBrush = photo ? new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x24)) : Res("ApexCardBorderBrush"),
+            VerticalAlignment = VerticalAlignment.Center };
+        root.Children.Add(card);
+        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        words.Children.Add(new TextBlock { Text = title, FontSize = Design.TextSize.Body, FontWeight = FontWeights.SemiBold, Foreground = ink, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = Design.TextSize.Caption, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
+        g.Children.Add(words);
+        var go = Lucide.Icon("chevron-right", Design.Size.IconSmall, soft);
+        go.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(go, 1);
+        g.Children.Add(go);
+        // the crystal over the card's edge, in its light (the light stays still and breathes; the crystal floats)
         var pulse = new ScaleTransform();
-        var glow = new SoftGlow(StateTint(255), calm ? 0.55 : 0.75, 0.5) { Width = light, Height = light, Margin = new Thickness(-(light - size) / 2),
-            VerticalAlignment = VerticalAlignment.Center, RenderTransform = pulse, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
-        g.Children.Add(glow);
+        // (a round light that fades the same way on every side: SoftGlow is made for a page's top edge)
+        var tint = StateTint(255);
+        var fade = new Microsoft.UI.Xaml.Media.RadialGradientBrush();
+        foreach (var (at, share) in new[] { (0.0, 1.0), (0.25, 0.8), (0.45, 0.48), (0.65, 0.2), (0.82, 0.06), (1.0, 0.0) })
+            fade.GradientStops.Add(new GradientStop { Offset = at, Color = Alpha(tint, (byte)(share * (calm ? 0xB0 : 0xD8))) });
+        var glow = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = light, Height = light, Fill = fade, RenderTransform = pulse, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
         var bob = new CompositeTransform();
-        var holder = new Grid { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center, RenderTransform = bob };
+        var holder = new Grid { Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, RenderTransform = bob };
         var crystal = new Crystal(size) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         crystal.SetLevel(HealthLevel, animate: false);
         holder.Children.Add(crystal);
-        g.Children.Add(holder);
+        var gem = new Grid { Width = size, Height = size + 8, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+        gem.Children.Add(holder);
+        root.Children.Add(gem);
+        // (the light lies behind the button, so nothing clips it; the glass blurs what falls under it)
+        // (a canvas, as a grid would cut the light at its own edges)
+        var halo = new Canvas { Width = size, Height = size + 8, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+        Canvas.SetLeft(glow, -(light - size) / 2);
+        Canvas.SetTop(glow, -(light - size - 8) / 2);
+        halo.Children.Add(glow);
         if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
         {
             var float_ = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
@@ -318,38 +346,29 @@ public sealed partial class MainWindow
                 Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(s, axis);
                 grow.Children.Add(s);
             }
+            var breathe = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0.75, To = 1, Duration = TimeSpan.FromMilliseconds(3400),
+                EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(breathe, glow);
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(breathe, "Opacity");
+            grow.Children.Add(breathe);
             holder.Loaded += (_, _) => { float_.Begin(); grow.Begin(); };
             holder.Unloaded += (_, _) => { float_.Stop(); grow.Stop(); };
         }
-        var words = new StackPanel { Spacing = Design.Space.TitleToSub, VerticalAlignment = VerticalAlignment.Center };
-        words.Children.Add(new TextBlock { Text = title, FontSize = Design.TextSize.Lead, FontWeight = FontWeights.SemiBold, Foreground = ink, TextTrimming = TextTrimming.CharacterEllipsis });
-        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = Design.TextSize.Small, Foreground = soft, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis });
-        Grid.SetColumn(words, 1);
-        g.Children.Add(words);
-        var go = Lucide.Icon("chevron-right", Design.Size.IconSmall, soft);
-        go.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(go, 2);
-        g.Children.Add(go);
 
-        g.CornerRadius = new CornerRadius(Design.Radius.Card);
-        var b = new Button
-        {
-            Content = g, Width = 320, Padding = new Thickness(0), CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(0),
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = photo ? Glass(0.42, Windows.UI.Color.FromArgb(255, 0, 0, 0)) : Res("ApexPillBrush"),
-        };
-        // (on the picture: frosted dark glass, so the words read over a bright sky too)
-        if (photo)
-        {
-            (b.BorderThickness, b.BorderBrush) = (new Thickness(1), new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x24)));
-            b.Resources["ButtonBackgroundPointerOver"] = Glass(0.3, Windows.UI.Color.FromArgb(255, 0, 0, 0));
-            b.Resources["ButtonBackgroundPressed"] = Glass(0.55, Windows.UI.Color.FromArgb(255, 0, 0, 0));
-            b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x3A));
-        }
+        // the whole thing is the button; only the glass answers the pointer
+        var b = new Button { Content = root, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush"), MaxWidth = 420,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        foreach (var key in new[] { "ButtonBackgroundPointerOver", "ButtonBackgroundPressed" }) b.Resources[key] = Res("ApexClearBrush");
+        b.PointerEntered += (_, _) => card.Background = hover;
+        b.PointerExited += (_, _) => card.Background = rest;
+        b.PointerCanceled += (_, _) => card.Background = rest;
         b.Click += (_, _) => Show(HealthScreen);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title + (note.Length > 0 ? ". " + note : "") + ". " + T("Open Health"));
         HandCursor.On(b);
-        return b;
+        var all = new Grid();
+        all.Children.Add(halo);
+        all.Children.Add(b);
+        return all;
     }
 
     static Windows.UI.Color Alpha(Windows.UI.Color c, byte a) => Windows.UI.Color.FromArgb(a, c.R, c.G, c.B);
