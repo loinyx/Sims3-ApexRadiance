@@ -3987,8 +3987,12 @@ void NightLighting::DrawRefreshCard() {
         if (ApexUi::IconTextButton("Refresh lights", ApexUi::IconId::Lightbulb)) NightLighting::RefreshAll("button");
         ImGui::EndDisabled();
         ApexUi::CardDivider();
+        // (laid out as Terrain and lots above: a title, what it does, the action on the right)
+        ImGui::TextUnformatted(I18n::Tr("All lighting"));
         ApexUi::MutedText("Discard cached lighting and rebuild it without changing settings");
         ApexUi::Gap(ApexUi::kSpace3);
+        const float restartW = ApexUi::ButtonWidth("Restart lighting", true);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::fmax(0.0f, ImGui::GetContentRegionAvail().x - restartW));
         ImGui::BeginDisabled(g_menuLevel.load() < 0.0f || !g_live || !WorldSession::InWorld() || g_restart.active || g_restartRequested);
         if (ApexUi::IconTextButton("Restart lighting", ApexUi::IconId::RotateCcw)) NightLighting::Restart();
         ImGui::EndDisabled();

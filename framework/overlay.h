@@ -61,6 +61,10 @@ void SetVisible(bool visible);
 // menu closed); keys and every other click stay the game's. Render thread, each frame.
 void SetInteractive(bool interactive);
 void SetCaptureSuppressed(bool suppressed); // skip all Apex ImGui draw data for a player screenshot frame
+// Developer builds (the menu tour): the back buffer once, after the menu is drawn this frame or the next. `done` gets
+// B G R rows, top to bottom, and the size; nothing when the buffer can't be read (render thread)
+using FramePicture = void (*)(const unsigned char* bgr, unsigned width, unsigned height);
+void RequestFramePicture(FramePicture done);
 bool PostGameKeyPress(WPARAM vk); // post a synthetic key press to the game, bypassing Apex shortcut interception
 HWND Window();
 bool WndProcInstalled();

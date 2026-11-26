@@ -24,6 +24,7 @@
 #include "patch_base.h"
 #include "performance.h"
 #include "picture.h"
+#include "dev_switches.h"
 #include "recorder.h"
 #include "captures.h"
 #include "apex_capture.h"
@@ -104,6 +105,37 @@ int g_settingsTab = SettingsMenu;
 enum CaptureTab : int { CaptureShots, CaptureVideo };
 int g_captureTab = CaptureShots;
 bool g_takeShot = false; // Image > Capture: "Take one" was clicked (taken by RunShortcuts at the next frame)
+
+// ---- developer builds: the menu tour ----
+// APEX_MENU_TOUR=<folder>: once the menu can open, every page and tab in turn, each scrolled from the top to its end, with
+// a picture of the whole frame at each stop (NN-page-k.png), to review the menu's design in the game. Never in a public
+// build (Overlay::RequestFramePicture does nothing there).
+struct TourStop { const char* name; int page; int* tab; int value; };
+const TourStop kTour[] = {
+    {"overview", PageOverview, nullptr, 0},
+    {"lighting-lamps", PageLighting, &g_lightingTab, LightingLamps}, {"lighting-outside", PageLighting, &g_lightingTab, LightingOutside},
+    {"lighting-inside", PageLighting, &g_lightingTab, LightingInside}, {"lighting-fixes", PageLighting, &g_lightingTab, LightingFixes},
+    {"water", PageWaterSnow, nullptr, 0},
+    {"color-overview", PageColor, &g_colorTab, Picture::TabOverview}, {"color-basic", PageColor, &g_colorTab, Picture::TabBasic},
+    {"color-tones", PageColor, &g_colorTab, Picture::TabTones}, {"color-color", PageColor, &g_colorTab, Picture::TabColor},
+    {"color-detail", PageColor, &g_colorTab, Picture::TabDetail}, {"color-filters", PageColor, &g_colorTab, Picture::TabFilters},
+    {"color-luts", PageColor, &g_colorTab, Picture::TabLuts},
+    {"ambient-occlusion", PageAmbientOcclusion, nullptr, 0}, {"depth-blur", PageDepthBlur, nullptr, 0},
+    {"edge-smoothing", PageEdgeSmoothing, nullptr, 0}, {"banding", PageBanding, nullptr, 0}, {"display", PageDisplay, nullptr, 0},
+    {"capture-shots", PageCapture, &g_captureTab, CaptureShots}, {"capture-video", PageCapture, &g_captureTab, CaptureVideo},
+    {"shaders-look", PageShaders, &g_shadersTab, Looks::kTabLook}, {"shaders-installed", PageShaders, &g_shadersTab, Looks::kTabInstalled},
+    {"performance", PagePerformance, nullptr, 0}, {"lot-streaming", PageLotStreaming, nullptr, 0}, {"profiles", PageProfiles, nullptr, 0},
+    {"report", PageReport, nullptr, 0},
+    {"settings-menu", PageSettings, &g_settingsTab, SettingsMenu}, {"settings-shortcuts", PageSettings, &g_settingsTab, SettingsShortcuts},
+    {"settings-compatibility", PageSettings, &g_settingsTab, SettingsCompatibility}, {"settings-about", PageSettings, &g_settingsTab, SettingsAbout},
+    {"developer", PageDeveloper, nullptr, 0},
+};
+std::filesystem::path g_tourDir;  // empty: no tour
+std::filesystem::path g_tourFile; // the picture being taken
+size_t g_tourStop = 0;
+int g_tourShot = 0, g_tourWait = 0, g_tourPictures = 0;
+float g_tourScroll = -1.0f, g_tourMax = 0.0f, g_tourView = 0.0f; // the content's scroll to show, as far as it goes, its height
+bool g_tourAsked = false;
 
 // ---- menu state (render thread, inside the overlay's ImGui frame) ----
 char g_search[96] = {};           // the header's search query; non-empty = the content shows the results
@@ -1016,10 +1048,7 @@ void WaterSnowContent() {
     }
     if (lightsOn) NightLighting::DrawWaterCard();
     WaterReflectionsCard(ntr && !lightsOn);
-    if (lightsOn) {
-        if (!ApexUi::FilterActive()) ApexUi::Gap(ApexUi::kSpace3);
-        NightLighting::DrawSnowCard();
-    }
+    if (lightsOn) NightLighting::DrawSnowCard(); // (cards keep their own distance: no extra gap before this one)
 }
 
 void WaterSnowPage() {
@@ -1193,7 +1222,7 @@ const char* const kColorGroupNames[]={"Basic","Tones","Color","Detail","Filters"
 const char* const kColorGroupDescriptions[]={"Brightness, contrast, saturation, temperature and sharpness",
     "Midtones, shadows, highlights and blacks","Tint, vibrance, film tones and color mixer",
     "Clarity and darker corners","Film looks, light, camera and retro effects"};
-const IconId kColorGroupIcons[]={IconId::SunMedium,IconId::Contrast,IconId::Palette,IconId::Gem,IconId::Layers};
+const IconId kColorGroupIcons[]={IconId::SunMedium,IconId::Contrast,IconId::Palette,IconId::Gem,IconId::Library};
 // The group's switch in its card header; Basic, Tones, Color and Detail draw their rows in the same card (they were two
 // cards, one holding only the switch). While Color is off, a note turns it on in place.
 void ColorGroupHeader(int tab) {
@@ -1229,7 +1258,7 @@ void ColorOverview() {
             if(clicked) g_colorTab=tab;
         }
         bool on=p.enabled && p.lut,clicked=false;
-        if(ApexUi::OverviewRow("LUTs",IconId::Layers,"LUTs","Applies a color treatment defined in a file",nullptr,&on,true,nullptr,&clicked)) {p.lut=on;changed=true;}
+        if(ApexUi::OverviewRow("LUTs",IconId::Droplet,"LUTs","Applies a color treatment defined in a file",nullptr,&on,true,nullptr,&clicked)) {p.lut=on;changed=true;}
         if(clicked) g_colorTab=Picture::TabLuts;
         ImGui::EndDisabled();
     }
@@ -1243,7 +1272,19 @@ void ColorPage() {
     ApexUi::TabBar("##ColorTabs", &selected, kTabs, IM_COUNTOF(kTabs));
     g_colorTab=selected==0 ? Picture::TabOverview : selected==6 ? Picture::TabLuts : selected-1;
     if(g_colorTab==Picture::TabOverview) {ColorOverview();return;}
-    if(g_colorTab==Picture::TabLuts) {Picture::Get().RenderFiltersUI(true);return;}
+    if(g_colorTab==Picture::TabLuts) {
+        // (while Color is off, the same note and button as the other tabs, above the LUT card)
+        if(auto p=Picture::Get().GetParams();!p.enabled) {
+            ApexUi::IconNote(IconId::Info,"Color is off; your adjustments are kept");
+            if(ApexUi::IconTextButton("Turn on Color",IconId::Palette,nullptr,ApexUi::ButtonKind::Primary)) {
+                ApexUi::ReportChange("Color turned on");
+                p.enabled=true;Picture::Get().SetParams(p,true);
+            }
+            ApexUi::Gap(ApexUi::kSpace2);
+        }
+        Picture::Get().RenderFiltersUI(true);
+        return;
+    }
     ColorGroupHeader(g_colorTab);
     if (g_colorTab == Picture::TabFilters) Picture::Get().RenderFiltersUI();
 }
@@ -1438,7 +1479,7 @@ void ConflictsPage() {
 
 void AntiAliasingContent() {
     GameEdgeSmoothingNote("Edge Smoothing");
-    FeatureCard("EdgeSmoothing", IconId::Spline, "Edge Smoothing", "Clean edges on the world; menus stay sharp");
+    FeatureCard("EdgeSmoothing", IconId::Spline, "Edge Smoothing", "Smooths jagged edges on objects, walls and Sims"); // (not the page's subtitle again)
 }
 
 void EdgeSmoothingPage() {
@@ -1798,11 +1839,13 @@ void ReportHowCard() {
     if (ApexUi::BeginCard("##Card")) {
         ApexUi::CardHeader(IconId::Info, "How to report a problem", "Three steps, about a minute", nullptr, nullptr);
         ApexUi::CardDivider();
-        ApexUi::MutedText("1. Make the problem happen in the game (or keep it on screen).");
-        ApexUi::MutedText("2. Save a capture below, or use its shortcut in the game. A note at the top center confirms the capture and saving.");
-        ApexUi::MutedText("3. Open the captures folder, right-click the capture's folder, Send to \xE2\x80\xBA Compressed (zipped) folder, and send the .zip with a few "
-                          "words on what you saw: the Bugs tab on Nexus Mods, or GitHub.");
-        ApexUi::Gap(ApexUi::kSpace1);
+        // (numbered as the capture session's steps above: one look for every list of steps)
+        static const char* const kHow[3] = {"1. Make the problem happen in the game (or keep it on screen).",
+                                             "2. Save a capture below, or use its shortcut in the game. A note at the top center confirms the capture and saving.",
+                                             "3. Open the captures folder, right-click the capture's folder, Send to \xE2\x80\xBA Compressed (zipped) folder, and send the .zip with a few "
+                                             "words on what you saw: the Bugs tab on Nexus Mods, or GitHub."};
+        ApexUi::NumberedSteps(kHow, 3);
+        ApexUi::Gap(ApexUi::kSpace3);
         const std::string tip = I18n::Trf("Not sure it is Apex Radiance? Press {} (Compare with the game): if the problem goes away, it comes from the mod.",
                                           CaptureKey(Hotkeys::Action::Compare));
         ApexUi::IconNote(IconId::Lightbulb, tip.c_str());
@@ -1965,26 +2008,7 @@ void SessionHeroCard() {
             // the three steps as numbered bubbles
             static const char* const kSteps[3] = {"Start a session here", "Make the problem happen and save captures, with the buttons below or their keys",
                                                   "End it: one folder with the captures, the log and your settings, ready to send"};
-            ImVec2 previousCenter{};
-            for (int i = 0; i < 3; i++) {
-                const ImVec2 b = ImGui::GetCursorScreenPos();
-                const float br = std::max(9.0f * u, lineH * 0.45f);
-                const ImVec2 center(b.x + br, b.y + lineH * 0.5f);
-                if (i) dl->AddLine(ImVec2(previousCenter.x, previousCenter.y + br), ImVec2(center.x, center.y - br), ImGui::GetColorU32(Col(VioletTheme::kAccent, 0.3f)), u);
-                dl->AddCircleFilled(center, br, ImGui::GetColorU32(Col(VioletTheme::kAccentDark)), 24);
-                previousCenter = center;
-                const std::string n = std::to_string(i + 1);
-                const float numberSize = ImGui::GetFontSize() * 0.85f;
-                const ImVec2 ns = ImGui::GetFont()->CalcTextSizeA(numberSize, FLT_MAX, 0.0f, n.c_str());
-                dl->AddText(ImGui::GetFont(), numberSize, ImVec2(center.x - ns.x * 0.5f, center.y - ns.y * 0.5f),
-                            ImGui::GetColorU32(Col(VioletTheme::kText)), n.c_str());
-                ImGui::Dummy(ImVec2(2.0f * br, lineH));
-                ImGui::SameLine(0.0f, ApexUi::kSpace3 * u);
-                ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextColored(Col(VioletTheme::kText, 0.9f), "%s", I18n::Tr(kSteps[i]));
-                ImGui::PopTextWrapPos();
-                if (i < 2) ApexUi::Gap(ApexUi::kSpace2);
-            }
+            ApexUi::NumberedSteps(kSteps, 3);
             ApexUi::Gap(ApexUi::kSpace3);
             ImGui::Separator();
             ApexUi::Gap(ApexUi::kSpace2);
@@ -2337,12 +2361,12 @@ void TextSizeRow() {
     for (int i = 0; i < IM_COUNTOF(kSizes); i++)
         if (std::fabs(kSizes[i] - ui.fontScale) < std::fabs(kSizes[current] - ui.fontScale)) current = i;
     const float gap = ImGui::GetStyle().ItemSpacing.x;
-    const float stepW = ImGui::GetFrameHeight() * 1.4f; // - and + are equally wide
+    const float stepW = ApexUi::ButtonWidth("##TextSmaller", true); // (icon-only buttons, as wide as each other)
     const float valueW = ImGui::CalcTextSize("200%").x + 2.0f * ApexUi::kSpace1 * ApexUi::Unit();
-    const float resetW = ApexUi::ButtonWidth("Reset##TextSize", false);
+    const float resetW = ApexUi::ButtonWidth("Reset##TextSize", true);
     if (!ApexUi::BeginControlRow("Text size", "Makes the whole menu bigger or smaller", 2.0f * stepW + valueW + resetW + 3.0f * gap)) return;
     ImGui::BeginDisabled(current == 0);
-    if (ApexUi::TextButton("-##TextSmaller", "Smaller", ButtonKind::Secondary, stepW)) {
+    if (ApexUi::IconTextButton("##TextSmaller", IconId::Minus, "Smaller")) {
         ui.fontScale = kSizes[current - 1];
         ApexConfig::SetUi(ui);
     }
@@ -2358,14 +2382,14 @@ void TextSizeRow() {
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(current == IM_COUNTOF(kSizes) - 1);
-    if (ApexUi::TextButton("+##TextLarger", "Larger", ButtonKind::Secondary, stepW)) {
+    if (ApexUi::IconTextButton("##TextLarger", IconId::Plus, "Larger")) {
         ui.fontScale = kSizes[current + 1];
         ApexConfig::SetUi(ui);
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(kSizes[current] == 1.0f);
-    if (ApexUi::TextButton("Reset##TextSize", "Back to 100%")) {
+    if (ApexUi::IconTextButton("Reset##TextSize", IconId::RotateCcw, "Back to 100%")) {
         ui.fontScale = 1.0f;
         ApexConfig::SetUi(ui);
     }
@@ -2478,10 +2502,7 @@ void InfoRow(const char* label, const std::string& english, IconId icon = IconId
     ApexUi::EndControlRow();
 }
 
-void CreditLine(const char* text) {
-    ImGui::Bullet();
-    ApexUi::MutedText(text);
-}
+void CreditLine(const char* text) { ApexUi::BulletLine(text); }
 
 bool g_developerConfirmRequested = false;
 toml::table g_developerPendingProfile;
@@ -3548,7 +3569,7 @@ void CompatibilityTab() {
 void AboutTab() {
     ImGui::PushID("About");
     if (ApexUi::BeginCard("##Card")) {
-        const std::string versionLine = I18n::Trf(kPublicBuild ? "Version {}" : "Version {} - Developer mode", APEX_VERSION_STRING);
+        const std::string versionLine = I18n::Trf(kPublicBuild ? "Version {}" : "Version {} · Developer mode", APEX_VERSION_STRING);
         ApexUi::CardHeader(IconId::Info, APEX_PRODUCT_NAME " " APEX_PRODUCT_TAGLINE, versionLine.c_str(), nullptr, nullptr);
         ApexUi::CardDivider();
         ApexUi::CardGroup("Credits");
@@ -3839,6 +3860,7 @@ bool Header(ImVec2 origin, float w, float h) {
     return keepOpen;
 }
 
+float g_sidebarNeeds = 0.0f; // the open sidebar's width for its longest name (last frame's)
 void Sidebar(bool collapsed) {
     struct Item {
         int page;
@@ -3868,6 +3890,10 @@ void Sidebar(bool collapsed) {
     };
     const float u = ApexUi::Unit();
     const bool searching = g_search[0] != '\0';
+    // (the width the longest name needs in this language: the layout gives the sidebar that much from the next frame)
+    float widest = 0.0f;
+    for (const Item& item : items) widest = std::fmax(widest, ApexUi::SidebarItemWidth(item.label, item.page == PageShaders ? "Beta" : nullptr));
+    g_sidebarNeeds = widest + 2.0f * ImGui::GetStyle().WindowPadding.x;
     ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 2.0f * u);
     for (const Item& item : items) {
         if (kPublicBuild && item.page == PageDeveloper) continue;
@@ -3915,10 +3941,10 @@ void GameAaCompatibilityNotice(bool allEffects = false) {
         ApexUi::IconLabel(IconId::TriangleAlert, I18n::Tr("Turn off the game's Edge Smoothing"), ImGui::GetColorU32(Col(VioletTheme::kWarning)));
         ImGui::Spacing();
         ImGui::TextWrapped("%s", I18n::Tr("The Sims 3's Edge Smoothing prevents these enabled Apex effects from working:"));
-        if (overview ? aa : g_page == PageEdgeSmoothing) ImGui::BulletText("%s", I18n::Tr("Edge Smoothing"));
-        if (overview ? blur : g_page == PageDepthBlur) ImGui::BulletText("%s", I18n::Tr("Depth Blur"));
-        if (overview ? ao : g_page == PageAmbientOcclusion) ImGui::BulletText("%s", I18n::Tr("Ambient Occlusion"));
-        if (overview ? water : g_page == PageWaterSnow) ImGui::BulletText("%s", I18n::Tr("Water Reflections"));
+        if (overview ? aa : g_page == PageEdgeSmoothing) ApexUi::BulletLine("Edge Smoothing");
+        if (overview ? blur : g_page == PageDepthBlur) ApexUi::BulletLine("Depth Blur");
+        if (overview ? ao : g_page == PageAmbientOcclusion) ApexUi::BulletLine("Ambient Occlusion");
+        if (overview ? water : g_page == PageWaterSnow) ApexUi::BulletLine("Water Reflections");
         static bool instructions = false;
         if (ApexUi::IconTextButton("How to turn it off", IconId::Info, nullptr, ButtonKind::Primary)) instructions = !instructions;
         if (instructions) {
@@ -4827,7 +4853,8 @@ void MainWindow() {
         // Bands, in screen space: header | (sidebar | page) | footer, separated by 1 px hairlines that meet
         const ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
         const float headerH = std::floor(kHeaderH * u), footerH = std::floor(kFooterH * u);
-        const float sidebarW = std::floor((collapsed ? 56.0f : 184.0f) * u);
+        // (wide enough for every name in the menu's language, so none is cut; never under 184 or past a third of the window)
+        const float sidebarW = std::floor(collapsed ? 56.0f * u : std::clamp(g_sidebarNeeds, 184.0f * u, std::fmax(184.0f * u, ws.x / 3.0f)));
         const float bodyTop = wp.y + headerH + 1.0f;
         const float footerTop = std::floor(wp.y + ws.y - footerH);
         const float bodyH = std::fmax(footerTop - bodyTop, 60.0f * u);
@@ -4855,6 +4882,7 @@ void MainWindow() {
         ImGui::BeginChild("##Content", ImVec2(ws.x - sidebarW - 1.0f, bodyH), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_AlwaysVerticalScrollbar);
         if (!s_contentScrolls) ImGui::PopStyleColor(3);
         s_contentScrolls = ImGui::GetScrollMaxY() > 0.0f;
+        if (g_tourScroll >= 0.0f) ImGui::SetScrollY(g_tourScroll); // (developer builds: the menu tour)
         ImGui::PopStyleVar();
         if (g_search[0]) {
             SearchResults();
@@ -4867,6 +4895,8 @@ void MainWindow() {
         }
         // room for the download bar, which floats over the page's end: the last row scrolls above it
         if (const float barH = Looks::PacksBarHeight(); barH > 0.0f) ImGui::Dummy(ImVec2(0.0f, barH));
+        g_tourMax = ImGui::GetScrollMaxY();
+        g_tourView = ImGui::GetWindowHeight();
         ImGui::EndChild();
         StatusBar(ImVec2(wp.x, footerTop + 1.0f), ws.x, footerH - 1.0f, collapsed);
         // Leave the cursor at the window's end so ImGui does not grow the window
@@ -5499,8 +5529,7 @@ void ShortcutsContent() {
                                   : std::clamp(ui.hotkeyPreset, 0, Hotkeys::kMine);
     const float u = ApexUi::Unit();
     if (ApexUi::BeginControlRow("Key set", "Pick a ready set, or click a key below to record your own", 220.0f * u)) {
-        ImGui::SetNextItemWidth(220.0f * u);
-        if (ImGui::BeginCombo("##KeySet", I18n::Tr(kPresets[sel]))) {
+        if (ApexUi::BeginDropdown("##KeySet", I18n::Tr(kPresets[sel]), 220.0f * u)) {
             for (int i = 0; i < 3; i++)
                 if (ImGui::Selectable(I18n::Tr(kPresets[i]), sel == i)) ApplyPreset(i);
             if (sel == Hotkeys::kMine) ImGui::Selectable(I18n::Tr(kPresets[3]), true);
@@ -5560,22 +5589,13 @@ void ShortcutsTab() {
         const int selected = current.hotkeyPreset < 0 ? static_cast<int>(Hotkeys::Preset::FKeys)
             : std::clamp(current.hotkeyPreset, 0, Hotkeys::kMine);
         static const char* const presets[] = {"Letters", "Numbers", "F keys", "Custom"};
-        if (ApexUi::BeginControlRow("Shortcut preset", "Switch the main shortcuts together", 180.0f * ApexUi::Unit())) {
-            ImGui::SetNextItemWidth(180.0f * ApexUi::Unit());
-            if (ImGui::BeginCombo("##MainPreset", I18n::Tr(presets[selected]))) {
-                for (int i = 0; i < 3; ++i) {
-                    if (ImGui::Selectable(I18n::Tr(presets[i]), selected == i)) ApplyPreset(i);
-                    if (selected == i) ImGui::SetItemDefaultFocus();
-                }
-                if (selected == Hotkeys::kMine) {
-                    ImGui::BeginDisabled();
-                    ImGui::Selectable(I18n::Tr("Custom"), true);
-                    ImGui::EndDisabled();
-                }
-                ImGui::EndCombo();
-            }
-            ApexUi::EndControlRow();
-        }
+        // (the menu's own dropdown, as Language: Custom is listed only while the player's own keys are in use, and
+        // choosing it changes nothing)
+        int choice = selected;
+        if (ApexUi::SelectRow("Shortcut preset", "Switch the main shortcuts together", "##MainPreset", &choice, presets,
+                              selected == Hotkeys::kMine ? 4 : 3, 180.0f, static_cast<int>(Hotkeys::Preset::FKeys)) &&
+            choice != Hotkeys::kMine)
+            ApplyPreset(choice);
         for (int row : {RowMenu, RowCompare, RowRefresh, RowScreenshot, RowVideo, RowLooks}) {
             ImGui::BeginDisabled(row == RowScreenshot && !ApexConfig::GetUi().screenshotShortcutEnabled);
             if (ApexUi::BeginControlRow(RowName(row), nullptr, KeyChipWidth(row))) {
@@ -5778,6 +5798,57 @@ void CaptureTarget() {
     draw->AddLine(ImVec2(x, y + r - 3), ImVec2(x, y + r + 4), color, 1.5f);
 }
 
+void TourPictureTaken(const unsigned char* bgr, unsigned width, unsigned height) {
+    if (Captures::WritePng(g_tourFile, bgr, width, height)) ++g_tourPictures;
+    else LOG_WARNING("[Menu tour] could not write " + ApexUtil::ToUtf8(g_tourFile.wstring()));
+}
+
+// (developer builds) one step of the menu tour a frame: show the stop, let it settle, take its picture, scroll or move on
+void TourFrame() {
+    if constexpr (!kDevToolsBuild) return;
+    static bool read = false;
+    if (!read) {
+        read = true;
+        if (const wchar_t* dir = _wgetenv(L"APEX_MENU_TOUR"); dir && *dir) {
+            g_tourDir = dir;
+            std::error_code ec;
+            std::filesystem::create_directories(g_tourDir, ec);
+            LOG_INFO("[Menu tour] " + std::to_string(IM_COUNTOF(kTour)) + " pages into " + ApexUtil::ToUtf8(g_tourDir.wstring()));
+        }
+    }
+    if (g_tourDir.empty() || g_tourStop >= IM_COUNTOF(kTour)) return;
+    static int settle = 600; // (the game and Apex settle first: about ten seconds)
+    if (settle > 0) { --settle; return; }
+    if (!Overlay::IsVisible()) Overlay::SetVisible(true);
+    g_search[0] = 0;
+    const TourStop& stop = kTour[g_tourStop];
+    g_page = stop.page;
+    if (stop.tab) *stop.tab = stop.value;
+    if (g_tourScroll < 0.0f) { g_tourScroll = 0.0f; g_tourShot = 0; g_tourWait = 45; g_tourAsked = false; return; }
+    if (g_tourWait > 0) { --g_tourWait; return; }
+    if (!g_tourAsked) {
+        char name[96];
+        std::snprintf(name, sizeof name, "%02u-%s-%d.png", static_cast<unsigned>(g_tourStop + 1), stop.name, g_tourShot + 1);
+        g_tourFile = g_tourDir / name;
+        Overlay::RequestFramePicture(&TourPictureTaken);
+        g_tourAsked = true;
+        g_tourWait = 3;
+        return;
+    }
+    g_tourAsked = false;
+    if (g_tourScroll + 1.0f < g_tourMax) {
+        g_tourScroll = std::fmin(g_tourMax, g_tourScroll + g_tourView * 0.8f);
+        ++g_tourShot;
+        g_tourWait = 20;
+        return;
+    }
+    g_tourScroll = -1.0f;
+    if (++g_tourStop >= IM_COUNTOF(kTour)) {
+        LOG_INFO("[Menu tour] done: " + std::to_string(g_tourPictures) + " pictures");
+        Overlay::SetVisible(false);
+    }
+}
+
 std::atomic<bool> g_returnFromProbe{false};
 class GuiClient final : public Overlay::Client {
     bool eatProbeMouseUp = false; // window thread only: the confirming click must not also select/place a game object
@@ -5800,6 +5871,7 @@ class GuiClient final : public Overlay::Client {
             if (HintVisible() && !Captures::ScreenshotPending()) Hint();
             return;
         }
+        TourFrame();
         if (g_returnFromProbe.load() && !LightProbe::Busy() && !Captures::ScreenshotPending() && !Captures::Saving()) {
             g_returnFromProbe.store(false);
             g_page = PageReport;

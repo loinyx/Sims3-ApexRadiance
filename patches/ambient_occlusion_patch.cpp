@@ -1784,6 +1784,9 @@ class AmbientOcclusionPatch : public ApexPatch {
             g.p.quality = kQualityShown[std::clamp(shown, 0, kQualityCount - 1)];
             changed = true;
         }
+        // (Advanced is a card's last row, as everywhere in the menu: the map view group comes first)
+        ApexUi::CardGroup("Map view");
+        changed |= ApexUi::SwitchRow("Also in map view", &g.p.inMapView, "Soft shade around houses and trees when the map view is open", kDefaults.inMapView);
         if (ApexUi::BeginAdvanced("AoOptions", "Advanced")) {
             changed |= ApexUi::SwitchRow("Fewer directions when far", &g.p.zoomSlices,
                                          "Fewer directions per pixel when the camera looks far away; lighter on the graphics card",
@@ -1808,8 +1811,6 @@ class AmbientOcclusionPatch : public ApexPatch {
             ImGui::EndDisabled();
             ApexUi::EndAdvanced();
         }
-        ApexUi::CardGroup("Map view");
-        changed |= ApexUi::SwitchRow("Also in map view", &g.p.inMapView, "Soft shade around houses and trees when the map view is open", kDefaults.inMapView);
         if (changed) NotifySettingChanged();
     }
 

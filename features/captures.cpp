@@ -922,6 +922,13 @@ int SessionSeconds() {
     return g_session.empty() ? 0 : static_cast<int>((GetTickCount64() - g_sessionStart) / 1000);
 }
 
+bool WritePng(const std::filesystem::path& file, const unsigned char* bgr, unsigned width, unsigned height) {
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED); // (S_FALSE or RPC_E_CHANGED_MODE: COM is already there)
+    const bool ok = EncodePng(file, bgr, static_cast<size_t>(width) * height * 3, width, height, 3, GUID_WICPixelFormat24bppBGR);
+    if (SUCCEEDED(com)) CoUninitialize();
+    return ok;
+}
+
 bool WriteText(const std::filesystem::path& file, const std::string& text) {
     std::ofstream out(file, std::ios::binary | std::ios::trunc);
     out.write(text.data(), static_cast<std::streamsize>(text.size()));

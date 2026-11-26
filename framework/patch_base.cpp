@@ -155,8 +155,7 @@ class EnumOption final : public PatchSetting {
         bool changed = false;
         ImGui::TextUnformatted(description_.empty() ? key_.c_str() : description_.c_str());
         const char* current = (*v_ >= 0 && *v_ < static_cast<int>(choices_.size())) ? choices_[*v_].c_str() : "?";
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::BeginCombo(("##" + key_).c_str(), current)) {
+        if (ApexUi::BeginDropdown(("##" + key_).c_str(), current, -1.0f)) {
             for (int i = 0; i < static_cast<int>(choices_.size()); i++) {
                 const bool selected = *v_ == i;
                 if (ImGui::Selectable(choices_[i].c_str(), selected)) {
@@ -194,8 +193,7 @@ class NamedEnumOption final : public PatchSetting {
     bool Draw() override {
         bool changed = false;
         ImGui::TextUnformatted(description_.empty() ? key_.c_str() : description_.c_str());
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::BeginCombo(("##" + key_).c_str(), Name(*v_).c_str())) {
+        if (ApexUi::BeginDropdown(("##" + key_).c_str(), Name(*v_).c_str(), -1.0f)) {
             for (int i = 0; i < static_cast<int>(names_.size()); i++) {
                 if (ImGui::Selectable(names_[i].c_str(), *v_ == i)) {
                     *v_ = i;

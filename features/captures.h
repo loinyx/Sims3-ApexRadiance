@@ -27,6 +27,8 @@ enum class CaptureKind { Generic, Recording, LightCapture, LightingSnapshot };
 void Finish(const std::filesystem::path& folder, const std::string& what, CaptureKind kind = CaptureKind::Generic);
 // Render-thread capture output. Failed text is retained for RetrySave, without repeating the measurement.
 bool WriteText(const std::filesystem::path& file, const std::string& text);
+// B G R rows, top to bottom, as a lossless PNG (initialises COM on the calling thread when it has not)
+bool WritePng(const std::filesystem::path& file, const unsigned char* bgr, unsigned width, unsigned height);
 void SetDescription(const std::string& text);
 std::string SavedDescription();
 std::string SavedDescriptionTitle();

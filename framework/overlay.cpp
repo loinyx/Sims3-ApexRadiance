@@ -16,7 +16,9 @@
 #include "d3d9_extra_hooks.h"
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <deque>
+#include <vector>
 #include <utility>
 #include <format>
 #include <mutex>
@@ -356,6 +358,42 @@ void Frame(IDirect3DDevice9* device) {
 }
 
 namespace {
+// (developer builds) the menu tour's picture of this frame: the back buffer read into system memory, X8R8G8B8 only
+FramePicture g_framePicture = nullptr;
+void TakeFramePicture(IDirect3DDevice9* device) {
+    const FramePicture done = g_framePicture;
+    g_framePicture = nullptr;
+    IDirect3DSurface9 *back = nullptr, *flat = nullptr, *sys = nullptr;
+    D3DSURFACE_DESC d{};
+    if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &back)) || FAILED(back->GetDesc(&d)) ||
+        (d.Format != D3DFMT_X8R8G8B8 && d.Format != D3DFMT_A8R8G8B8)) {
+        if (back) back->Release();
+        return;
+    }
+    IDirect3DSurface9* from = back;
+    // (a multisampled buffer is resolved first: GetRenderTargetData reads only plain ones)
+    if (d.MultiSampleType != D3DMULTISAMPLE_NONE &&
+        SUCCEEDED(device->CreateRenderTarget(d.Width, d.Height, d.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &flat, nullptr)) &&
+        SUCCEEDED(device->StretchRect(back, nullptr, flat, nullptr, D3DTEXF_NONE)))
+        from = flat;
+    std::vector<unsigned char> bgr;
+    D3DLOCKED_RECT lr{};
+    if (from != back || d.MultiSampleType == D3DMULTISAMPLE_NONE)
+        if (SUCCEEDED(device->CreateOffscreenPlainSurface(d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr)) &&
+            SUCCEEDED(device->GetRenderTargetData(from, sys)) && SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+            bgr.resize(static_cast<size_t>(d.Width) * d.Height * 3);
+            for (UINT y = 0; y < d.Height; ++y) {
+                const unsigned char* row = static_cast<const unsigned char*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch;
+                for (UINT x = 0; x < d.Width; ++x) std::memcpy(&bgr[(static_cast<size_t>(y) * d.Width + x) * 3], row + x * 4, 3);
+            }
+            sys->UnlockRect();
+        }
+    if (sys) sys->Release();
+    if (flat) flat->Release();
+    back->Release();
+    if (!bgr.empty()) done(bgr.data(), d.Width, d.Height);
+}
+
 void DrawFrame(IDirect3DDevice9* device) {
     static FrameClock frameClock;
     const auto frameStart = FrameClock::Clock::now();
@@ -428,6 +466,7 @@ void DrawFrame(IDirect3DDevice9* device) {
     const auto input = ExtraHooks::MarkVertexInput(); // (the backend's SetFVF is undone by its state block, unseen)
     ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
     ExtraHooks::RestoreVertexInput(input);
+    if (g_framePicture) TakeFramePicture(device);
     const auto submitted = FrameClock::Clock::now();
     const auto ms = [](auto from, auto to) { return std::chrono::duration<double, std::milli>(to - from).count(); };
     static auto lastSlowLog = FrameClock::Clock::time_point{};
@@ -472,6 +511,10 @@ bool MouseOverMenu() {
     if (!g_visible.load() || !g_ready.load()) return false;
     std::lock_guard<std::mutex> lock(g_imguiLock);
     return ImGui::GetIO().WantCaptureMouse;
+}
+
+void RequestFramePicture(FramePicture done) {
+    if constexpr (kDevToolsBuild) g_framePicture = done;
 }
 
 void SetVisible(bool visible) {

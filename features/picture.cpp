@@ -2569,7 +2569,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         }
         resetFilter(&P::levelsBlack, &P::levelsWhite, &P::levelsGamma);
     });
-    card("Lut", IconId::Layers, "LUT", "Applies a color treatment defined in a file", &q.lut, [&] {
+    card("Lut", IconId::Droplet, "LUT", "Applies a color treatment defined in a file", &q.lut, [&] {
         static std::vector<std::string> files;
         static double listedAt = -10.0;
         if (ImGui::GetTime() - listedAt > 2.0) { // the folder is read at most every 2 s

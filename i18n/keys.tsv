@@ -602,7 +602,7 @@ Title (optional)	tr_menu.cpp:kEntries,tr_menu.cpp:kDirectReportEntries	Título (
 Description (optional)	tr_menu.cpp:kEntries	Descrição (opcional)	Descripción (opcional)	Description (facultative)	
 Blank fields use the capture type and diagnostic information. Your files are already saved.	tr_menu.cpp:kEntries	Campos em branco usam o tipo da captura e as informações de diagnóstico. Seus arquivos já estão salvos.	Los campos vacíos usan el tipo de captura y la información de diagnóstico. Tus archivos ya están guardados.	Les champs vides utilisent le type de capture et les informations de diagnostic. Vos fichiers sont déjà enregistrés.	
 Keep automatic details	tr_menu.cpp:kEntries	Manter dados automáticos	Mantener datos automáticos	Garder les détails automatiques	
-Version {} - Developer mode	tr_menu.cpp:kEntries	Versão {} - Modo desenvolvedor	Versión {} - Modo desarrollador	Version {} - Mode développeur	{}
+Version {} · Developer mode	tr_menu.cpp:kEntries	Versão {} · Modo desenvolvedor	Versión {} · Modo desarrollador	Version {} · Mode développeur	{}
 Enable developer mode	tr_menu.cpp:kEntries	Habilitar modo desenvolvedor	Activar modo desarrollador	Activer le mode développeur	
 Advanced tools for testing and diagnostics. Requires restarting the game	tr_menu.cpp:kEntries	Ferramentas avançadas para testes e diagnóstico. Requer reiniciar o jogo	Herramientas avanzadas para pruebas y diagnóstico. Requiere reiniciar el juego	Outils avancés de test et de diagnostic. Nécessite de relancer le jeu	
 Restart the game to apply the developer mode change	tr_menu.cpp:kEntries	Reinicie o jogo para aplicar a mudança do modo desenvolvedor	Reinicia el juego para aplicar el cambio del modo desarrollador	Relancez le jeu pour appliquer le changement du mode développeur	
@@ -635,7 +635,7 @@ Show the problem in the game before you start	tr_menu.cpp:kEntries	Deixe o probl
 Prepare the scene	tr_menu.cpp:kEntries	Prepare a cena	Prepara la escena	Préparez la scène	
 {}. {}	tr_menu.cpp:kEntries	{}. {}	{}. {}	{}. {}	{} {}
 Describe	tr_menu.cpp:kEntries	Descrever	Describir	Décrire	
-Record	tr_menu.cpp:kEntries	Registrar	Registrar	Enregistrer	
+Record	tr_menu.cpp:kEntries	Gravar	Grabar	Enregistrer	
 Prepare	tr_menu.cpp:kEntries	Preparar	Preparar	Préparer	
 Sims3SettingsSetter	tr_menu.cpp:kEntries	Sims3SettingsSetter	Sims3SettingsSetter	Sims3SettingsSetter	
 +	tr_menu.cpp:kEntries	+	+	+	
@@ -752,6 +752,7 @@ Borderless	tr_menu.cpp:kEntries	Sem bordas	Sin bordes	Sans bordure
 Play without a title bar or frame	tr_menu.cpp:kEntries	Jogue sem barra de título nem moldura	Juega sin barra de título ni marco	Jouez sans barre de titre ni cadre	
 Edge Smoothing	tr_menu.cpp:kEntries	Suavização de Bordas	Suavizado de Bordes	Lissage des Bords	
 Clean edges on the world; menus stay sharp	tr_menu.cpp:kEntries	Bordas limpas no mundo; os menus continuam nítidos	Bordes limpios en el mundo; los menús siguen nítidos	Des bords propres dans le monde ; les menus restent nets	
+Smooths jagged edges on objects, walls and Sims	tr_menu.cpp:kEntries	Suaviza os serrilhados de objetos, paredes e Sims	Suaviza los bordes dentados de objetos, paredes y Sims	Adoucit les bords crénelés des objets, des murs et des Sims	
 Lamps light up your neighborhood at night	tr_menu.cpp:kEntries	Lâmpadas iluminam seu bairro à noite	Las lámparas iluminan tu barrio de noche	Les lampes éclairent votre quartier la nuit	
 Needs Night Lights	tr_menu.cpp:kEntries	Precisa de Luzes Noturnas	Necesita Luces Nocturnas	Nécessite Lumières Nocturnes	
 Needs Depth Blur	tr_menu.cpp:kEntries	Precisa de Desfoque de Profundidade	Necesita Desenfoque de Profundidad	Nécessite Flou de Profondeur	
@@ -1994,6 +1995,7 @@ Lighting restart unavailable	tr_menu.cpp:kRefreshLightingCardEntries	Reinício d
 Refresh lights	tr_menu.cpp:kRefreshLightingCardEntries	Atualizar luzes	Actualizar luces	Actualiser les lumières	
 Recalculate lighting if something looks wrong	tr_menu.cpp:kRefreshLightingCardEntries	Recalcule a iluminação se algo parecer errado	Recalcula la iluminación si algo se ve mal	Recalculez l’éclairage si quelque chose semble incorrect	
 Terrain and lots	tr_menu.cpp:kRefreshLightingCardEntries	Terreno e lotes	Terreno y solares	Terrain et parcelles	
+All lighting	tr_menu.cpp:kRefreshLightingCardEntries	Toda a iluminação	Toda la iluminación	Tout l’éclairage	
 Use when light on the ground or a lot looks incorrect or has not updated	tr_menu.cpp:kRefreshLightingCardEntries	Use se a luz no terreno ou em um lote parecer errada ou não tiver atualizado	Úsalo si la luz en el terreno o en un solar se ve mal o no se ha actualizado	Utilisez si l’éclairage du terrain ou d’une parcelle semble incorrect ou ne s’est pas actualisé	
 Refresh terrain	tr_menu.cpp:kRefreshLightingCardEntries	Atualizar terreno	Actualizar terreno	Actualiser le terrain	
 Refresh lots	tr_menu.cpp:kRefreshLightingCardEntries	Atualizar lotes	Actualizar solares	Actualiser les parcelles	

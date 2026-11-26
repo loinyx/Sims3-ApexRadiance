@@ -2129,7 +2129,7 @@ bool AskSaveModal()
             ApexUi::SetNextRowUntranslated();
             ApexUi::CardHeader(IconId::Save, title.c_str(), "These changes are only in Apex until you save them to the look", nullptr, nullptr, true, &extra);
             ApexUi::CardDivider();
-            for (const std::string& l : lines) ImGui::BulletText("%s", l.c_str());
+            for (const std::string& l : lines) ApexUi::BulletLine(l.c_str(), false);
             if (!error.empty()) ApexUi::IconNote(IconId::TriangleAlert, error.c_str(), VioletTheme::kError);
             ApexUi::Gap(ApexUi::kSpace3);
             const char* discard = "Discard them";

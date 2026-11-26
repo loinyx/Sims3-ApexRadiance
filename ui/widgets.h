@@ -119,6 +119,12 @@ void Tooltip(const char* text);
 void PageTitle(const char* title, const char* subtitle);
 // Muted wrapped text
 void MutedText(const char* text);
+// One line of a list: a small muted dot in the middle of the first line, the words (muted, wrapped) beside it.
+// translate: look `text` up (false for text that is already the player's language or not to be translated)
+void BulletLine(const char* text, bool translate = true);
+// Steps in order: a numbered bubble each (joined by a thin line), the words wrapped beside it. A translated step that
+// starts with its own "1. " is shown without it (the bubble says the number).
+void NumberedSteps(const char* const* steps, int count);
 // A small turning arc on the text line, for work that is still running; the next item goes on the same line
 void BusySpinner(bool frameLine = false); // frameLine: centred on a line of buttons, else on a line of text
 // Small bold section label inside a card or page (kept for older callers; cards use GroupLabel)
@@ -230,6 +236,8 @@ void ShowFullText(std::string_view text);
 // icon-only rail (the label becomes the hover tooltip).
 // badge: a small chip at the item's right ("Beta"); with the sidebar collapsed it joins the tooltip
 bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed = false, const char* badge = nullptr);
+// The width a sidebar item needs to show its whole label (and badge) in the menu's language, at today's size
+float SidebarItemWidth(const char* label, const char* badge = nullptr);
 // Sidebar group label ("WORLD"): the GroupLabel look, aligned with the items' icons, with kSpace3 above it; collapsed =
 // a short hairline instead of the text
 void SidebarGroup(const char* text, bool collapsed = false);
@@ -258,6 +266,10 @@ bool SelectRow(const char* label, const char* description, const char* id, int* 
                float controlWidth = 220.0f, int defaultIndex = kNoDefaultIndex, bool stacked = false);
 // Whether the last SelectRow's dropdown list was open this frame (the language row merges every script's font then)
 bool SelectRowOpen();
+// The menu's dropdown on its own (SelectRow's closed control, for a list built by hand): `preview` (already the player's
+// language) cut with "…" before the chevron and shown whole on hover; width in pixels, -1 = the rest of the line. While it
+// returns true, submit ImGui::Selectable items, then ImGui::EndCombo().
+bool BeginDropdown(const char* id, const char* preview, float width);
 
 // "Advanced" section: a hairline, then a violet chevron row, collapsed by default (the state is kept per id while the
 // game runs). The contents are not indented and use the same rows. When it returns true, submit the contents and call

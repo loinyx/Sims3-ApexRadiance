@@ -589,7 +589,7 @@ const I18n::Entry kEntries[] = {
     {"Description (optional)", "Descrição (opcional)", "Descripción (opcional)", "Description (facultative)"},
     {"Blank fields use the capture type and diagnostic information. Your files are already saved.", "Campos em branco usam o tipo da captura e as informações de diagnóstico. Seus arquivos já estão salvos.", "Los campos vacíos usan el tipo de captura y la información de diagnóstico. Tus archivos ya están guardados.", "Les champs vides utilisent le type de capture et les informations de diagnostic. Vos fichiers sont déjà enregistrés."},
     {"Keep automatic details", "Manter dados automáticos", "Mantener datos automáticos", "Garder les détails automatiques"},
-    {"Version {} - Developer mode", "Versão {} - Modo desenvolvedor", "Versión {} - Modo desarrollador", "Version {} - Mode développeur"},
+    {"Version {} · Developer mode", "Versão {} · Modo desenvolvedor", "Versión {} · Modo desarrollador", "Version {} · Mode développeur"},
     {"Enable developer mode", "Habilitar modo desenvolvedor", "Activar modo desarrollador", "Activer le mode développeur"},
     {"Advanced tools for testing and diagnostics. Requires restarting the game", "Ferramentas avançadas para testes e diagnóstico. Requer reiniciar o jogo", "Herramientas avanzadas para pruebas y diagnóstico. Requiere reiniciar el juego", "Outils avancés de test et de diagnostic. Nécessite de relancer le jeu"},
     {"Restart the game to apply the developer mode change", "Reinicie o jogo para aplicar a mudança do modo desenvolvedor", "Reinicia el juego para aplicar el cambio del modo desarrollador", "Relancez le jeu pour appliquer le changement du mode développeur"},
@@ -623,7 +623,7 @@ const I18n::Entry kEntries[] = {
     {"Prepare the scene", "Prepare a cena", "Prepara la escena", "Préparez la scène"},
     {"{}. {}", "{}. {}", "{}. {}", "{}. {}"},
     {"Describe", "Descrever", "Describir", "Décrire"},
-    {"Record", "Registrar", "Registrar", "Enregistrer"},
+    {"Record", "Gravar", "Grabar", "Enregistrer"},
     {"Prepare", "Preparar", "Preparar", "Préparer"},
     {"Sims3SettingsSetter", "Sims3SettingsSetter", "Sims3SettingsSetter", "Sims3SettingsSetter"},
     {"+", "+", "+", "+"},
@@ -815,6 +815,7 @@ const I18n::Entry kEntries[] = {
     {"Edge Smoothing", "Suavização de Bordas", "Suavizado de Bordes", "Lissage des Bords"},
     {"Clean edges on the world; menus stay sharp", "Bordas limpas no mundo; os menus continuam nítidos", "Bordes limpios en el mundo; los menús siguen nítidos",
      "Des bords propres dans le monde ; les menus restent nets"},
+    {"Smooths jagged edges on objects, walls and Sims", "Suaviza os serrilhados de objetos, paredes e Sims", "Suaviza los bordes dentados de objetos, paredes y Sims", "Adoucit les bords crénelés des objets, des murs et des Sims"},
 
     // ---- Overview ----
     {"Lamps light up your neighborhood at night", "Lâmpadas iluminam seu bairro à noite", "Las lámparas iluminan tu barrio de noche",
@@ -1991,6 +1992,7 @@ const I18n::Entry kRefreshLightingCardEntries[] = {
     {"Refresh lights", "Atualizar luzes", "Actualizar luces", "Actualiser les lumières"},
     {"Recalculate lighting if something looks wrong", "Recalcule a iluminação se algo parecer errado", "Recalcula la iluminación si algo se ve mal", "Recalculez l’éclairage si quelque chose semble incorrect"},
     {"Terrain and lots", "Terreno e lotes", "Terreno y solares", "Terrain et parcelles"},
+    {"All lighting", "Toda a iluminação", "Toda la iluminación", "Tout l’éclairage"},
     {"Use when light on the ground or a lot looks incorrect or has not updated", "Use se a luz no terreno ou em um lote parecer errada ou não tiver atualizado", "Úsalo si la luz en el terreno o en un solar se ve mal o no se ha actualizado", "Utilisez si l’éclairage du terrain ou d’une parcelle semble incorrect ou ne s’est pas actualisé"},
     {"Refresh terrain", "Atualizar terreno", "Actualizar terreno", "Actualiser le terrain"},
     {"Refresh lots", "Atualizar lotes", "Actualizar solares", "Actualiser les parcelles"},

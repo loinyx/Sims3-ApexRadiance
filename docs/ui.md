@@ -23,7 +23,7 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
   at most 280 units wide), a Night/Day pill (moon or sun), a frame-time pill (`ms · fps`, as wide as "88.8 ms · 888 fps" at least, so a changing frame rate moves nothing) and Close (tooltip "Close
   (Esc); <key> opens it again"). Narrow windows drop the Night/Day pill, then the frame-time pill, to keep the search
   field at least 120 units wide; below 60 units the field is not drawn.
-- **Sidebar:** 184 units wide, or a 56-unit icon rail when collapsed (`[ui] sidebar_collapsed`); group labels. The
+- **Sidebar:** as wide as its longest name in the menu's language needs (`SidebarItemWidth`), 184 units at least and a third of the window at most, so no name is cut, or a 56-unit icon rail when collapsed (`[ui] sidebar_collapsed`); group labels. The
   collapse button and the version are in the footer. Collapsed items show their name as a tooltip and group labels become
   short hairlines. An item can carry a small violet chip at its right (`SidebarItem`'s `badge`): Shaders shows "Beta";
   collapsed, the chip joins the tooltip ("Shaders · Beta").
@@ -111,7 +111,7 @@ the overlay scales the style by `0.9 * pow(h / 1080, 0.8)` and the text size). N
 | Icons | `kIconSmall` 14 (notes, pills), `kIconMedium` 18 (card headers, sidebar, overview rows); setting rows have no icons |
 | Chips | 0.8x text, 6 side padding, 14% fill: muted for GPU cost ("~0.4 ms", tooltip "Measured cost on your GPU per frame"), amber for "Reload save" |
 | Changed dot | 3 radius, accent, 6 after the label (after the badge when there is one) |
-| Control rows | Sliders and segmented rows put the control on the right of the label in a column of 42% of the row (180 to 280 units), the slider value right of its track, when at least 160 units stay for the text; otherwise the control goes under the label. Measure the label/description block before vertical centring; if fewer than 120 units remain for text, the controls move below with an 8-unit gap. Optional measured control height for small chips |
+| Control rows | Sliders and segmented rows put the control on the right of the label in a column of 42% of the row (180 to 280 units), the slider value right of its track in a column at least as wide as "100%" (so every track of a card ends at the same place), when at least 160 units stay for the text; otherwise the control goes under the label. Measure the label/description block before vertical centring; if fewer than 120 units remain for text, the controls move below with an 8-unit gap. Optional measured control height for small chips |
 
 ### Components (`ApexUi`, `ui/widgets.h`)
 
@@ -139,6 +139,16 @@ the overlay scales the style by `0.9 * pow(h / 1080, 0.8)` and the text size). N
   colour).
 - `Segmented(id, current, labels, count, tooltips, compact, icons)`: shared width (a vertical list when they do not
   fit); `current = -1` = none selected. The chosen option is a very dark violet (`kSegmentOn`) with white text.
+- `BeginDropdown(id, preview, width)`: SelectRow's closed dropdown on its own, for lists built by hand (Shortcuts'
+  Key set, the generic setting combos): the preview cut with "…" before the Lucide chevron; ImGui's own arrow is never
+  used.
+- `BulletLine(text, translate)`: one line of a list, a small muted dot centred on the first line (credits, the game's
+  Edge Smoothing notice, a look's unsaved changes); ImGui's bullet is never used.
+- `NumberedSteps(steps, count)`: steps as numbered bubbles joined by a thin line (the capture session, How to report a
+  problem); a translated step's own "1. " is dropped.
+- Icon-only buttons: `IconTextButton("##id", icon, tooltip)` puts the icon in the middle with no text gap (Text size's
+  minus and plus).
+- `Advanced` is always a card's last row.
 - `BeginAdvanced(id, label, summary)` / `EndAdvanced`: hairline (reused when right after `CardDivider`), accent chevron and "Advanced",
   collapsed by default, contents not indented; an optional `summary` (already translated) follows the label, muted
   ("Advanced  ·  MP4, H.264" on Capture). `AdvancedNode` stays for the frame profiler.
