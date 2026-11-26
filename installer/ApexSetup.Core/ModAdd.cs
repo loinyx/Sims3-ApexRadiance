@@ -161,7 +161,7 @@ public sealed class ModAdd : IDisposable
         if (path.Length == 0) { Refuse(name, archive, PackText); return; } // (only named, in a zip: see Unzip)
         if (Sims3Pack.Read(path) is not { } pack) { Refuse(name, archive, PackBad); return; }
         var mods = pack.Files.Where(Sims3Pack.IsMod).ToList();
-        if (depth > 0 && (_bytesLeft -= mods.Sum(m => m.Length)) < 0) throw new TooBigException();
+        if (depth > 0 && (_bytesLeft -= mods.Aggregate(0L, (s, m) => s > long.MaxValue - m.Length ? long.MaxValue : s + m.Length)) < 0) throw new TooBigException();
         var title = Sims3Pack.FileName(pack.Title) ?? Path.GetFileNameWithoutExtension(name);
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var m in mods)
@@ -170,7 +170,7 @@ public sealed class ModAdd : IDisposable
             var to = Path.Combine(_temp, Guid.NewGuid().ToString("N") + ".package");
             bool ok;
             try { ok = Sims3Pack.Take(path, pack.Data, m, to); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or EndOfStreamException) { Engine.Log(e); ok = false; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or EndOfStreamException or ArgumentException or OverflowException) { Engine.Log(e); ok = false; }
             if (!ok) { Refuse(m.Name, name, PackBad); continue; }
             // (its item's own name, else the Sims3Pack's; the file inside is named by a number nobody knows)
             var own = Sims3Pack.Title(to) ?? title;

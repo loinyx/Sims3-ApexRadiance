@@ -43,7 +43,9 @@ public static class Sims3Pack
             foreach (XmlNode p in root.ChildNodes)
             {
                 if (!p.Name.Equals("PackagedFile", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!long.TryParse(Text(p, "Offset"), out var at) || !long.TryParse(Text(p, "Length"), out var len) || at < 0 || len <= 0 || data + at + len > f.Length) return null;
+                // (each compared with what is left, so a huge offset can't wrap the sum past the file's end)
+                if (!long.TryParse(Text(p, "Offset"), out var at) || !long.TryParse(Text(p, "Length"), out var len) || at < 0 || len <= 0 ||
+                    at > f.Length - data || len > f.Length - data - at || len > Array.MaxLength) return null;
                 files.Add(new(Path.GetFileName(Text(p, "Name")), Text(p, "ContentType").ToLowerInvariant(), at, len));
             }
             return (Text(root, "DisplayName"), files, data);
@@ -80,7 +82,10 @@ public static class Sims3Pack
     {
         if (string.IsNullOrWhiteSpace(t)) return null;
         t = string.Concat(t.Where(c => !Path.GetInvalidFileNameChars().Contains(c))).Trim().TrimEnd('.');
-        return t.Length == 0 ? null : t.Length > 80 ? t[..80].Trim() : t;
+        if (t.Length > 80) t = t[..80].Trim();
+        // (CON, NUL, COM1... are Windows' own names, with or without an extension)
+        if (System.Text.RegularExpressions.Regex.IsMatch(t, @"^(CON|PRN|AUX|NUL|COM\d|LPT\d)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) t += "_";
+        return t.Length == 0 ? null : t;
     }
 
     // A protected package's header written again. Its index is the file's tail: a flags word, the values its entries share,
@@ -108,13 +113,13 @@ public static class Sims3Pack
                 BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(44), (uint)(b.Length - at));
                 BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(60), 3);
                 BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(64), (uint)at);
-                var copy = (byte[])b.Clone();
-                head.CopyTo(copy, 0);
-                // (every resource inside the file, after the header and before the index)
-                var index = Dbpf.Index(new MemoryStream(copy));
-                if (index.Count != count || index.Any(e => e.Offset < Head || e.Offset + (long)e.Size > at)) continue;
+                // (tried in place: the scrambled header is put back when this layout does not fit, no copy of the file)
+                var was = b[..Head];
                 head.CopyTo(b, 0);
-                return true;
+                // (every resource inside the file, after the header and before the index)
+                var index = Dbpf.Index(new MemoryStream(b, writable: false));
+                if (index.Count == count && index.All(e => e.Offset >= Head && e.Offset + (long)e.Size <= at)) return true;
+                was.CopyTo(b, 0);
             }
         }
         return false;

@@ -3892,7 +3892,9 @@ void Sidebar(bool collapsed) {
     const bool searching = g_search[0] != '\0';
     // (the width the longest name needs in this language: the layout gives the sidebar that much from the next frame)
     float widest = 0.0f;
-    for (const Item& item : items) widest = std::fmax(widest, ApexUi::SidebarItemWidth(item.label, item.page == PageShaders ? "Beta" : nullptr));
+    for (const Item& item : items)
+        if (!(kPublicBuild && item.page == PageDeveloper))
+            widest = std::fmax(widest, ApexUi::SidebarItemWidth(item.label, item.page == PageShaders ? "Beta" : nullptr));
     g_sidebarNeeds = widest + 2.0f * ImGui::GetStyle().WindowPadding.x;
     ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 2.0f * u);
     for (const Item& item : items) {
@@ -5590,10 +5592,10 @@ void ShortcutsTab() {
             : std::clamp(current.hotkeyPreset, 0, Hotkeys::kMine);
         static const char* const presets[] = {"Letters", "Numbers", "F keys", "Custom"};
         // (the menu's own dropdown, as Language: Custom is listed only while the player's own keys are in use, and
-        // choosing it changes nothing)
+        // choosing it changes nothing; no default, so no reset button that would wipe the player's own keys)
         int choice = selected;
         if (ApexUi::SelectRow("Shortcut preset", "Switch the main shortcuts together", "##MainPreset", &choice, presets,
-                              selected == Hotkeys::kMine ? 4 : 3, 180.0f, static_cast<int>(Hotkeys::Preset::FKeys)) &&
+                              selected == Hotkeys::kMine ? 4 : 3, 180.0f) &&
             choice != Hotkeys::kMine)
             ApplyPreset(choice);
         for (int row : {RowMenu, RowCompare, RowRefresh, RowScreenshot, RowVideo, RowLooks}) {

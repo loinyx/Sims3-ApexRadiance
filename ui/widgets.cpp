@@ -1294,7 +1294,7 @@ bool DrawButton(const char* label, IconId icon, const char* tooltip, ButtonKind 
         const float k = held ? -0.14f : hovered ? 0.12f : 0.0f;
         const auto shade = [&](unsigned rgb) { return ImGui::GetColorU32(k >= 0.0f ? Mix(Col(rgb), Col(0xFFFFFF), k) : Mix(Col(rgb), Col(0x000000), -k)); };
         const int first = dl->VtxBuffer.Size;
-        dl->AddRectFilled(p, q, IM_COL32_WHITE, r);
+        dl->AddRectFilled(p, q, ImGui::GetColorU32(IM_COL32_WHITE), r); // (white times the style's alpha: the shade keeps that alpha)
         ImGui::ShadeVertsLinearColorGradientKeepAlpha(dl, first, dl->VtxBuffer.Size, p, ImVec2(q.x, p.y), shade(VioletTheme::kGradientFrom), shade(VioletTheme::kGradientTo));
         textCol = U32(VioletTheme::kOnGradient);
         iconCol = U32(VioletTheme::kOnGradient);
@@ -1700,13 +1700,14 @@ bool BeginDropdown(const char* id, const char* preview, float width) {
     const float u = Unit(), arrowSize = 12.0f * u;
     const float w = width < 0.0f ? ImGui::GetContentRegionAvail().x : width;
     const ImVec2 pos = ImGui::GetCursorScreenPos();
+    ImDrawList* const rowDrawList = ImGui::GetWindowDrawList(); // (before BeginCombo: an open combo's is the popup's)
     std::string cut;
     const bool fitted = FitText(preview, w - ImGui::GetStyle().FramePadding.x - 9.0f * u - arrowSize - kSpace1 * u, cut);
     ImGui::SetNextItemWidth(w);
     const bool open = ImGui::BeginCombo(id, fitted ? cut.c_str() : preview, ImGuiComboFlags_NoArrowButton);
     const bool hovered = ImGui::IsItemHovered();
     if (fitted && !open && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) FullTextTooltip(preview);
-    DrawIcon(ImGui::GetWindowDrawList(), IconId::ChevronDown, ImVec2(pos.x + w - 9.0f * u - arrowSize, pos.y + (ImGui::GetFrameHeight() - arrowSize) * 0.5f),
+    DrawIcon(rowDrawList, IconId::ChevronDown, ImVec2(pos.x + w - 9.0f * u - arrowSize, pos.y + (ImGui::GetFrameHeight() - arrowSize) * 0.5f),
              arrowSize, U32(open || hovered ? VioletTheme::kAccent : VioletTheme::kTextMuted));
     return open;
 }

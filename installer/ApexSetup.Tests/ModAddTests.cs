@@ -182,6 +182,16 @@ static class ModAddTests
                     "add: a Sims3Pack's custom content comes out as named packages, a protected one readable, its lot is told | " + string.Join(" | ", add.Items.Select(i => i.Name + "=" + (i.Problem ?? "ok"))));
             }
 
+            // a crafted list: an offset that would wrap past the file's end is refused as a damaged Sims3Pack, alone; a title
+            // that is one of Windows' own names gets a mark
+            var wrap = Encoding.ASCII.GetBytes("<?xml version=\"1.0\"?><Sims3Package><DisplayName>x</DisplayName><PackagedFile><Name>a.package</Name><Length>8</Length><Offset>9223372036854775800</Offset><ContentType>object</ContentType></PackagedFile></Sims3Package>");
+            var crafted = new byte[17 + wrap.Length + 8];
+            BitConverter.GetBytes(7).CopyTo(crafted, 0); "TS3Pack"u8.ToArray().CopyTo(crafted, 4); BitConverter.GetBytes(wrap.Length).CopyTo(crafted, 13); wrap.CopyTo(crafted, 17);
+            using (var add = Open(Put("Crafted.Sims3Pack", crafted), Put("fine.package", Pkg((Xml, 81, "fine")))))
+                check(add.Items.Single(i => i.Name == "Crafted.Sims3Pack").Problem!.StartsWith("The Sims3Pack can't be opened") && add.Items.Single(i => i.Name == "fine.package").Ok
+                      && Sims3Pack.FileName("con") == "con_" && Sims3Pack.FileName("Console") == "Console",
+                    "add: a Sims3Pack whose offset would wrap past its end is told alone, the rest still added; Windows' own names get a mark");
+
             // what comes out of one archive is limited, nested ones together, and none of a refused archive goes in
             ModAdd.MaxBytes = 100_000;
             var big = new byte[90_000];
