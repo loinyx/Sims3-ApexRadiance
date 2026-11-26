@@ -3346,7 +3346,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             const ApexUi::IconId icons[] = {ApexUi::IconId::Moon, ApexUi::IconId::MoonStar, ApexUi::IconId::Lightbulb, ApexUi::IconId::SlidersHorizontal};
             for (int i = 0; i < 4; ++i) {
                 const bool selected = i == 3 ? style < 0 : style == i;
-                const char* name = i == 3 ? "Custom" : kStyleNames[i];
+                const char* name = i == 3 ? "Custom balance" : kStyleNames[i]; // (its own key: "Personalizada" agrees with the balance in Portuguese)
                 const char* tip = i == 3 ? "Your individual lighting settings are active" : kStyleTips[i];
                 ImGui::PushID(i);
                 const bool clicked = ApexUi::ProfileChoiceRow("LightingStyle", icons[i], name, tip, selected);

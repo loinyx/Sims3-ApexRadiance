@@ -124,6 +124,12 @@ void PageTitle(const char* title, const char* subtitle);
 // committing action). True while open: call ImGui::EndPopup() then, as with BeginPopupModal.
 inline constexpr float kModalNarrow = 440.0f, kModalWide = 560.0f;
 bool BeginModal(const char* id, float widthUnits, bool* open = nullptr);
+// A dialog's footer: CardDivider, then its buttons on the right in one row (each under the other, right-aligned, when they
+// do not fit). Call ModalFooter with the first and the last button's widths (ButtonWidth), draw the first, then
+// ModalLastAction(lastWidth, oneRow) and the last. Inside a ControlSizeScope(Compact): footers use the compact size.
+// The committing action is last, a primary button with its icon.
+bool ModalFooter(float firstWidth, float lastWidth);
+void ModalLastAction(float lastWidth, bool oneRow);
 // A feature page's header: PageTitle with the feature's own controls on the title line, right-aligned with the cards'
 // switches below — [cost chip] [hold to compare] [extra toggle button] [switch]. While the switch is off the subtitle
 // reads offSubtitle (when given). In the search results it is the feature's switch row (title, subtitle). True on the

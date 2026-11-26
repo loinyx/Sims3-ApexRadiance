@@ -2369,8 +2369,10 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         int onCount = 0;
         for (const auto& f : kFilters) onCount += *f.on ? 1 : 0;
         const std::string sub = onCount ? I18n::Trf("{} of {} on", onCount, IM_COUNTOF(kFilters)) : std::string(I18n::Tr("No filter is on"));
+        // The Filters card: the group's switch and how many filters are on, the ones on as chips under it (one card: it was a
+        // header card and an In use card)
         if (ApexUi::BeginCard("##InUse")) {
-            ApexUi::CardHeader(IconId::ListChecks, "In use", sub.c_str(), nullptr, nullptr);
+            if (ApexUi::CardHeader(IconId::Library, "Filters", sub.c_str(), nullptr, &q.filtersEnabled, q.enabled)) changed = save = true;
             if (onCount) {
                 ApexUi::CardDivider();
                 // The names as chips, flowing onto the next line when the card is full
@@ -2403,6 +2405,15 @@ void Picture::RenderFiltersUI(bool lutOnly) {
             if(ApexUi::CardHeader(icon,name,what,nullptr,on,q.enabled && groupEnabled)) changed=save=true;
             ImGui::BeginDisabled(!q.enabled || !groupEnabled || !*on);
             controls(); ImGui::EndDisabled(); ImGui::PopID(); return;
+        }
+        if(lutOnly) {
+            if(ApexUi::CardHeader(icon,name,what,nullptr,on,q.enabled)) {changed=save=true;ApexUi::ReportChange(name);}
+            ApexUi::CardDivider();
+            ImGui::BeginDisabled(!q.enabled); // (the LUT folder and the file are usable before the LUT is on)
+            controls();
+            ImGui::EndDisabled();
+            ImGui::PopID();
+            return;
         }
         const float u=ApexUi::Unit(), gap=ApexUi::kSpace2*u;
         const ImVec2 switchSize=ApexUi::ToggleSwitchSize();

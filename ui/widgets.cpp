@@ -37,6 +37,7 @@ struct FilterState {
     bool active = false;
     std::vector<std::string> words; // lower case
     std::string crumb;
+    std::string card; // the card the next results belong to (its header's title), shown after the crumb
     int crumbId = -1;
     int clicked = -1;
     int drawn = 0;
@@ -408,9 +409,17 @@ void FilterCrumb() {
     }
     g_filter.drawn++;
     if (g_filter.crumb.empty()) return;
+    // "Lighting › Outside › Ground & Lots": the card tells apart rows with the same name (three "Brightness"); not when it
+    // repeats the crumb's last part
+    std::string crumb = g_filter.crumb;
+    if (!g_filter.card.empty()) {
+        const size_t sep = crumb.rfind("\xE2\x80\xBA");
+        const std::string_view last = sep == std::string::npos ? std::string_view(crumb) : std::string_view(crumb).substr(sep + 4); // (the separator and its space)
+        if (last != g_filter.card) crumb += " \xE2\x80\xBA " + g_filter.card;
+    }
     PushSized(nullptr, kSmallScale);
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    const ImVec2 ts = ImGui::CalcTextSize(g_filter.crumb.c_str());
+    const ImVec2 ts = ImGui::CalcTextSize(crumb.c_str());
     ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 3.0f * u);
     ImGui::PushID("##Crumb");
     ImGui::PushID(g_filter.drawn);
@@ -421,7 +430,7 @@ void FilterCrumb() {
     const bool hovered = ImGui::IsItemHovered();
     const ImU32 col = hovered ? U32(VioletTheme::kAccentLight) : U32(VioletTheme::kTextMuted);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddText(p, col, g_filter.crumb.c_str());
+    dl->AddText(p, col, crumb.c_str());
     if (hovered) dl->AddLine(ImVec2(p.x, p.y + ts.y), ImVec2(p.x + ts.x, p.y + ts.y), col, 1.0f);
     ImGui::PopFont();
     Tooltip("Open this page");
@@ -714,6 +723,19 @@ bool BeginModal(const char* id, float widthUnits, bool* open) {
     const bool shown = ImGui::BeginPopupModal(id, open, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
     ImGui::PopStyleVar(2);
     return shown;
+}
+
+bool ModalFooter(float firstWidth, float lastWidth) {
+    CardDivider();
+    const float available = ImGui::GetContentRegionAvail().x;
+    const float total = firstWidth + ImGui::GetStyle().ItemSpacing.x + lastWidth;
+    const bool oneRow = total <= available;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, available - (oneRow ? total : firstWidth)));
+    return oneRow;
+}
+void ModalLastAction(float lastWidth, bool oneRow) {
+    if (oneRow) ImGui::SameLine();
+    else ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - lastWidth));
 }
 
 bool PageHeader(const char* title, const char* subtitle, bool* toggle, bool toggleEnabled, const char* tooltip, HeaderExtra* extra,
@@ -2293,7 +2315,7 @@ bool SliderFloat(const char* label, float* v, float min, float max, const char* 
 // ---- cards ----
 
 bool BeginCard(const char* id, bool warning) {
-    if (Hidden()) return true; // search: no frame, the rows go straight into the results
+    if (Hidden()) { g_filter.card.clear(); return true; } // search: no frame, the rows go straight into the results
     const float u = Unit();
     ImVec4 background = Col(VioletTheme::kCardBg), border = Col(VioletTheme::kCardBorder);
     if (warning) {
@@ -2345,7 +2367,12 @@ bool CardHeader(IconId icon, const char* title, const char* subtitle, const char
         extra->held = false;
     }
     if (Hidden()) {
-        // Search: a header with a switch is a searchable row (title + subtitle); anything else draws nothing
+        // Search: a header with a switch is a searchable row (title + subtitle); anything else draws nothing. The title
+        // names the card in the crumbs of its rows.
+        {
+            const std::string_view shown = I18n::TrLabel(title);
+            g_filter.card.assign(shown.data(), shown.size());
+        }
         if (!toggle) return false;
         ImGui::BeginDisabled(!toggleEnabled);
         const bool clicked = SwitchRow(title, toggle, subtitle);
@@ -2627,7 +2654,8 @@ bool ProfileChoiceRow(const char* id, IconId icon, const char* name, const char*
     ImGui::BeginGroup();
     ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 2.0f * u);
     ImGui::PushTextWrapPos(startX + width - 32.0f * u - kSpace3 * u); // short of the radio circle, like the description
-    ImGui::TextUnformatted(T(name));
+    const std::string_view shownName = I18n::TrLabel(name); // ("Custom##LightingStyle": its own translation, shown without the ##)
+    ImGui::TextUnformatted(shownName.data(), shownName.data() + shownName.size());
     ImGui::PopTextWrapPos();
     RowDescription(description, startX + width - 32.0f * u - kSpace3 * u);
     ImGui::PopStyleVar();

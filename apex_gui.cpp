@@ -95,7 +95,7 @@ std::string g_oldStandaloneModule;        // under g_detailLock
 
 // Sidebar pages and the tabs of each page. The selected page and tabs are kept while the game runs (not saved).
 enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles, PageDisplay, PageCapture, PageShaders };
-enum LightingTab : int { LightingLamps, LightingOutside, LightingInside, LightingWater, LightingFixes };
+enum LightingTab : int { LightingLamps, LightingOutside, LightingInside, LightingFixes };
 enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, SettingsCompatibility, SettingsAbout };
 int g_page = PageOverview;
 int g_lightingTab = LightingLamps;
@@ -104,8 +104,6 @@ int g_shadersTab = Looks::kTabLook; // the Shaders page's tab (Looks::Tab)
 int g_settingsTab = SettingsMenu;
 enum CaptureTab : int { CaptureShots, CaptureVideo };
 int g_captureTab = CaptureShots;
-enum PerformanceTab : int { PerformancePlay, PerformanceLots };
-int g_performanceTab = PerformancePlay; // Performance's tabs: While you play, Lot streaming (its own page before)
 bool g_takeShot = false; // Image > Capture: "Take one" was clicked (taken by RunShortcuts at the next frame)
 
 // ---- developer builds: the menu tour ----
@@ -119,7 +117,7 @@ const TourStop kTour[] = {
     {"overview", PageOverview, nullptr, 0},
     {"lighting-lamps", PageLighting, &g_lightingTab, LightingLamps}, {"lighting-outside", PageLighting, &g_lightingTab, LightingOutside},
     {"lighting-inside", PageLighting, &g_lightingTab, LightingInside}, {"lighting-fixes", PageLighting, &g_lightingTab, LightingFixes},
-    {"water", PageLighting, &g_lightingTab, LightingWater},
+    {"water", PageWaterSnow, nullptr, 0},
     {"color-overview", PageColor, &g_colorTab, Picture::TabOverview}, {"color-basic", PageColor, &g_colorTab, Picture::TabBasic},
     {"color-tones", PageColor, &g_colorTab, Picture::TabTones}, {"color-color", PageColor, &g_colorTab, Picture::TabColor},
     {"color-detail", PageColor, &g_colorTab, Picture::TabDetail}, {"color-filters", PageColor, &g_colorTab, Picture::TabFilters},
@@ -128,7 +126,7 @@ const TourStop kTour[] = {
     {"edge-smoothing", PageEdgeSmoothing, nullptr, 0}, {"banding", PageBanding, nullptr, 0}, {"display", PageDisplay, nullptr, 0},
     {"capture-shots", PageCapture, &g_captureTab, CaptureShots}, {"capture-video", PageCapture, &g_captureTab, CaptureVideo},
     {"shaders-look", PageShaders, &g_shadersTab, Looks::kTabLook}, {"shaders-installed", PageShaders, &g_shadersTab, Looks::kTabInstalled},
-    {"performance", PagePerformance, &g_performanceTab, PerformancePlay}, {"lot-streaming", PagePerformance, &g_performanceTab, PerformanceLots}, {"profiles", PageProfiles, nullptr, 0},
+    {"performance", PagePerformance, nullptr, 0}, {"lot-streaming", PageLotStreaming, nullptr, 0}, {"profiles", PageProfiles, nullptr, 0},
     {"report", PageReport, nullptr, 0},
     {"settings-menu", PageSettings, &g_settingsTab, SettingsMenu}, {"settings-shortcuts", PageSettings, &g_settingsTab, SettingsShortcuts},
     {"settings-compatibility", PageSettings, &g_settingsTab, SettingsCompatibility}, {"settings-about", PageSettings, &g_settingsTab, SettingsAbout},
@@ -705,7 +703,8 @@ const OverviewTile* OverviewTiles(int& count) {
         {"Edges", IconId::Spline, "Edge Smoothing", "Clean edges on the world; menus stay sharp", PageEdgeSmoothing, nullptr, 0, EdgesOn, EdgesSet, EdgesSwitchable, EdgesDetail, true},
         {"Banding", IconId::Blend, "Banding Fix", "Smooth light and gradients, with no color steps", PageBanding, nullptr, 0, BandingOn, BandingSet, BandingSwitchable, BandingDetail, true},
         {"Display", IconId::Monitor, "Display", "Window mode, resolution and frame-rate limit", PageDisplay, nullptr, 0, DisplayOn, nullptr, AlwaysSwitchable, DisplayDetail, false},
-        {"Performance", IconId::Gauge, "Performance", "Fewer stutters while you play", PagePerformance, &g_performanceTab, PerformancePlay, PerfOn, PerfSet, PerfSwitchable, PerfDetail, true},
+        {"Performance", IconId::Gauge, "Performance", "Fewer stutters while you play", PagePerformance, nullptr, 0, PerfOn, PerfSet, PerfSwitchable, PerfDetail, true},
+        {"LotStreaming", IconId::Layers, "Lot Streaming", "How far lots show in full detail", PageLotStreaming, nullptr, 0, LotOn, LotSet, LotSwitchable, LotDetail, false},
     };
     count = IM_COUNTOF(kTiles);
     return kTiles;
@@ -970,7 +969,6 @@ void FixesTabContent() {
     if (NightLightsReady("the ground and lots")) NightLighting::DrawGameFixes();
 }
 
-void WaterSnowContent(); // below
 void LightingPage() {
     ApexPatch* ntr = Find(kNightLighting);
     bool on = ntr && ntr->IsEnabled();
@@ -980,13 +978,12 @@ void LightingPage() {
         SetPatch(ntr, on);
     if (!ntr) ApexUi::PageTitle("Lighting", "Warm lamp light around your lots at night");
     if (ntr) StateNotes(ntr);
-    static const char* const kTabs[] = {"Overview", "Outside", "Inside & floors", "Water & Snow", "Game fixes"};
+    static const char* const kTabs[] = {"Overview", "Outside", "Inside & floors", "Game fixes"};
     ApexUi::TabBar("##LightingTabs", &g_lightingTab, kTabs, IM_COUNTOF(kTabs));
     ImGui::BeginDisabled(ntr && !ntr->IsEnabled());
     switch (g_lightingTab) {
     case LightingOutside: OutsideTabContent(); break;
     case LightingInside: InsideTabContent(); break;
-    case LightingWater: WaterSnowContent(); break;
     case LightingFixes: FixesTabContent(); break;
     default: LampsTabContent(); break;
     }
@@ -1032,13 +1029,28 @@ void WaterReflectionsCard(bool pageNote = false) {
     ImGui::PopID();
 }
 
-// Lighting > Water & Snow: Lamp Glow, Water Reflections and Snow (all drawn by Night Lights; the Lighting page greys them
-// while it is off)
+// World > Water & Snow: Lamp Glow, Water Reflections and Snow, all drawn by Night Lights. A page of its own with no switch
+// for the whole page (Water Reflections has its own); while Night Lights is off, one note under the title turns it on
+// (a dependency on another page) and the cards stay readable, greyed.
 void WaterSnowContent() {
-    if (!NightLightsReady("")) return;
+    ApexPatch* ntr = Find(kNightLighting);
+    if (!ntr) return;
+    const bool lightsOn = ntr->IsEnabled() || ApexUi::FilterActive();
+    if (!lightsOn) {
+        if (!ntr->IsCompatibleWithCurrentVersion()) NotAvailableNote(ntr);
+        else TurnOnNote("Lamp Glow, Water Reflections and Snow need Night Lights", ntr, "Turn on Night Lights", IconId::MoonStar, "Night Lights turned on");
+        ApexUi::Gap(ApexUi::kSpace1);
+    }
+    ImGui::BeginDisabled(!lightsOn);
     NightLighting::DrawWaterCard();
     WaterReflectionsCard(true);
     NightLighting::DrawSnowCard(); // (cards keep their own distance: no extra gap before this one)
+    ImGui::EndDisabled();
+}
+
+void WaterSnowPage() {
+    ApexUi::PageTitle("Water & Snow", "Pond lighting, water reflections and sidewalk snow");
+    WaterSnowContent();
 }
 
 // ---- Image > Color ----
@@ -1240,8 +1252,9 @@ void ColorPage() {
     g_colorTab=selected==0 ? Picture::TabOverview : selected==6 ? Picture::TabLuts : selected-1;
     if(g_colorTab==Picture::TabOverview) {ColorOverview();return;}
     if(g_colorTab==Picture::TabLuts) {Picture::Get().RenderFiltersUI(true);return;}
-    ColorGroupHeader(g_colorTab);
+    // (Filters: its card with the group switch and the filters on is drawn by RenderFiltersUI)
     if (g_colorTab == Picture::TabFilters) Picture::Get().RenderFiltersUI();
+    else ColorGroupHeader(g_colorTab);
 }
 
 // ---- Image > Shaders ----
@@ -1486,7 +1499,7 @@ void LampLightingCard() {
 }
 
 void PerformanceCard() {
-    // The options in one card, in groups (the tab is its title: no header repeating it; the Overview row counts them)
+    // The options in one card, in groups (the page is its title: no header repeating it; the Overview row counts them)
     ImGui::PushID("PerformanceLighting");
     if (ApexUi::BeginCard("##Card")) {
         ApexUi::CardGroup("Camera and lighting");
@@ -1541,13 +1554,13 @@ void PerformanceCard() {
     ImGui::PopID();
 }
 
-// ---- System > Performance > Lot streaming (06/10) ----
+// ---- System > Lot Streaming (06/10, its own page) ----
 void LotStreamingCards() {
     // Lot detail: research and code by idavidveiga's fork (docs/features/performance/lot-streaming.md)
     // Every option here is experimental: its row's badge says it, as on While you play
     const bool badges = true;
     static constexpr const char* kHandled = "Handled by Sims3SettingsSetter, so Apex leaves it alone";
-    // One card (the tab is its title)
+    // One card (the page is its title)
     ImGui::PushID("PerformanceLotDetailStreaming");
     if (ApexUi::BeginCard("##Card")) {
 
@@ -1584,13 +1597,15 @@ void LotStreamingCards() {
     ImGui::PopID();
 }
 
-// A page of independent options (no switch for the whole page; the Overview row turns the While you play group on or off)
+// Pages of independent options (no switch for the whole page; the Overview rows turn their groups on or off)
 void PerformancePage() {
     ApexUi::PageTitle("Performance", "Fewer stutters while you play");
-    static const char* const kTabs[] = {"While you play", "Lot streaming"};
-    ApexUi::TabBar("##PerformanceTabs", &g_performanceTab, kTabs, IM_COUNTOF(kTabs));
-    if (g_performanceTab == PerformanceLots) LotStreamingCards();
-    else PerformanceCard();
+    PerformanceCard();
+}
+
+void LotStreamingPage() {
+    ApexUi::PageTitle("Lot Streaming", "How far lots show in full detail");
+    LotStreamingCards();
 }
 
 // System > Display: window mode, resolution and frame-rate limit (features/screen_control.cpp)
@@ -1647,20 +1662,6 @@ struct ReportState {
 };
 ReportState g_report;
 
-// Shared action alignment is also used by the developer-mode confirmation.
-bool ReportDialogActions(const char* first, bool firstIcon, const char* last, bool lastIcon) {
-    const float available = ImGui::GetContentRegionAvail().x;
-    const float firstWidth = ApexUi::ButtonWidth(first, firstIcon);
-    const float total = firstWidth + ImGui::GetStyle().ItemSpacing.x + ApexUi::ButtonWidth(last, lastIcon);
-    const bool oneRow = total <= available;
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, available - (oneRow ? total : firstWidth)));
-    return oneRow;
-}
-void ReportDialogLastAction(const char* label, bool withIcon, bool oneRow) {
-    if (oneRow) ImGui::SameLine();
-    else ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - ApexUi::ButtonWidth(label, withIcon)));
-}
-
 void ReportOptionalNotes() {
     const auto saved = Captures::LastSave();
     if (saved.serial != g_report.receiptSeen && !saved.saving && !Captures::Saving() && !Recorder::Active()) {
@@ -1689,12 +1690,13 @@ void ReportOptionalNotes() {
             ApexUi::MutedText("Enter a title to finish. The description is optional; your capture files are already saved.");
             if (g_report.notesDeleteError) ApexUi::IconNote(IconId::TriangleAlert, "Could not delete the capture. Check folder access and try again");
             if (g_report.notesError) ApexUi::IconNote(IconId::TriangleAlert, "Could not save the description. Check free space and folder access");
-            ApexUi::Gap(ApexUi::kSpace2);
             const auto filled = [](const char* value) { return std::string_view(value).find_first_not_of(" \t\r\n") != std::string_view::npos; };
             const bool titleValid = filled(g_report.optionalTitle);
-            const bool oneRow = ReportDialogActions("Cancel", false, "Save capture", true);
+            const ApexUi::ControlSizeScope footer(ApexUi::ControlSize::Compact);
+            // (the button that deletes the new capture says so: it is not a neutral Cancel)
+            const bool oneRow = ApexUi::ModalFooter(ApexUi::ButtonWidth("Delete capture", true), ApexUi::ButtonWidth("Save capture", true));
             ImGui::BeginDisabled(Captures::Saving() || Recorder::Active() || LightProbe::Busy());
-            if (ApexUi::TextButton("Cancel", "Deletes this new capture and closes the form")) {
+            if (ApexUi::IconTextButton("Delete capture", IconId::Trash2, "Deletes this new capture and closes the form", ButtonKind::Danger)) {
                 if (Captures::Delete(g_report.notesFolder)) {
                     g_report.scannedAt = 0;
                     g_report.notesFolder.clear();
@@ -1702,7 +1704,7 @@ void ReportOptionalNotes() {
                 } else g_report.notesDeleteError = true;
             }
             ImGui::EndDisabled();
-            ReportDialogLastAction("Save capture", true, oneRow);
+            ApexUi::ModalLastAction(ApexUi::ButtonWidth("Save capture", true), oneRow);
             ImGui::BeginDisabled(!titleValid || Captures::Saving() || Recorder::Active() || LightProbe::Busy());
             if (ApexUi::IconTextButton("Save capture", IconId::Save, nullptr, ButtonKind::Primary)) {
                 const std::string title = g_report.optionalTitle;
@@ -1842,7 +1844,7 @@ void ReportListCard() {
         for (const auto& e : g_report.list) total += e.bytes;
         const std::string sub = g_report.list.empty() ? std::string(I18n::Tr("None yet"))
                                                       : I18n::Trf("{} saved, {} in all; newest first", g_report.list.size(), SizeText(total));
-        ApexUi::CardHeader(IconId::Bookmark, "Your captures", sub.c_str(), nullptr, nullptr);
+        ApexUi::CardHeader(IconId::Image, "Your captures", sub.c_str(), nullptr, nullptr);
         ApexUi::CardDivider();
         const std::string openSession = Captures::SessionFolder();
         // (the five newest; the rest behind "Show all", so the card does not run down the whole page)
@@ -1913,7 +1915,7 @@ void SessionHeroCard() {
     const bool open = Captures::SessionActive();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, Col(open ? VioletTheme::kAccentDark : VioletTheme::kCardBg, open ? 0.28f : 1.0f));
     ImGui::PushStyleColor(ImGuiCol_Border, Col(VioletTheme::kAccent, open ? 0.65f : 0.35f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 14.0f * u);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, ImGui::GetStyle().ChildRounding); // (a card's corners)
     ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace3 * u));
     const bool visible = ImGui::BeginChild("##Hero", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding,
@@ -1928,7 +1930,7 @@ void SessionHeroCard() {
             ? I18n::Trf("Recording a session \xC2\xB7 {}:{:02} \xC2\xB7 {} captures", seconds / 60, seconds % 60, Captures::SessionCaptures())
             : std::string(I18n::Tr("The best way to report a problem: everything you capture goes into one folder"));
         ApexUi::CardHeader(IconId::Bug, "Capture session", subtitle.c_str(), nullptr, nullptr);
-        ApexUi::Gap(ApexUi::kSpace3);
+        ApexUi::CardDivider();
         if (!open) {
             // the three steps as numbered bubbles
             static const char* const kSteps[3] = {"Start a session here", "Make the problem happen and save captures, with the buttons below or their keys",
@@ -1986,9 +1988,10 @@ void ReportPage() {
     }
     ApexUi::PageTitle("Report a problem", "Save what helps fix a bug, then send it");
     SessionHeroCard();
+    // (How to report says "save a capture below": it comes before the capture card)
+    ReportHowCard();
     ReportCaptureCard();
     ReportListCard();
-    ReportHowCard();
     ReportOptionalNotes();
     const auto saved = Captures::LastSave();
     if (saved.failed) {
@@ -2452,12 +2455,11 @@ void DeveloperConfirmation() {
         ApexUi::MutedText("Diagnostic views can temporarily change the image. Measurements and extra checks can reduce performance while running.");
         ApexUi::MutedText("Captures and reports may contain your settings, local file paths and details about the current game session. Review them before sharing. Nothing is sent automatically.");
         ApexUi::MutedText("Restart the game after confirming. Measurements and recordings will not start automatically when you load a profile.");
-        ApexUi::Gap(ApexUi::kSpace2);
         {
-            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Primary);
-            const bool oneRow = ReportDialogActions("Cancel", false, "Enable developer mode", true);
+            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+            const bool oneRow = ApexUi::ModalFooter(ApexUi::ButtonWidth("Cancel", false), ApexUi::ButtonWidth("Enable developer mode", true));
             if (ApexUi::TextButton("Cancel")) { g_developerPendingProfile = {}; ImGui::CloseCurrentPopup(); }
-            ReportDialogLastAction("Enable developer mode", true, oneRow);
+            ApexUi::ModalLastAction(ApexUi::ButtonWidth("Enable developer mode", true), oneRow);
             if (ApexUi::IconTextButton("Enable developer mode", IconId::Wrench, nullptr, ButtonKind::Primary)) {
                 toml::table before; ApexConfig::CaptureFeatureState(before);
                 auto ui = ApexConfig::GetUi(); ui.developerMode = true; ApexConfig::SetUi(ui);
@@ -2476,8 +2478,7 @@ void DeveloperConfirmation() {
 void MenuTab() {
     ImGui::PushID("Menu");
     if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Settings, "Menu", "Language, text size and startup notice", nullptr, nullptr);
-        ApexUi::CardDivider();
+        // (the tab is its title: no header repeating it)
         LanguageRow();
         TextSizeRow();
         {
@@ -2943,11 +2944,10 @@ void PresetDialog() {
                 if(!s.confirmReplace.empty()) ApexUi::IconNote(IconId::TriangleAlert,I18n::Trf("\"{}\" already exists; replace it?",s.confirmReplace).c_str());
                 if(!s.message.empty()) ApexUi::IconNote(s.messageError?IconId::TriangleAlert:IconId::CircleCheck,s.message.c_str());
                 ImGui::EndChild();
-                ApexUi::CardDivider();
                 const char* action=importing?"Import":exporting?"Export":applying?"Apply":s.confirmReplace.empty()?"Save":"Replace";
-                const bool row=ReportDialogActions("Cancel",false,action,true);
+                const bool row=ApexUi::ModalFooter(ApexUi::ButtonWidth("Cancel",false),ApexUi::ButtonWidth(action,true));
                 if(ApexUi::TextButton("Cancel")) {s.dialog=ProfilesState::None;ImGui::CloseCurrentPopup();}
-                ReportDialogLastAction(action,true,row);
+                ApexUi::ModalLastAction(ApexUi::ButtonWidth(action,true),row);
                 const auto name=ApexConfig::SanitizeProfileName(s.name);
                 const bool valid=s.saveParts && !Loading() && (applying || (!name.empty() && (!importing || (!s.importPath.empty() && !ApexConfig::ProfileExists(name)))));
                 ImGui::BeginDisabled(!valid);
@@ -3160,21 +3160,16 @@ void PresetShortcutEditor() {
             const bool typing = keys.TypingOnly();
             if (conflict) ApexUi::IconNote(IconId::TriangleAlert, "This shortcut is already in use");
             else if (typing) ApexUi::IconNote(IconId::TriangleAlert, "Add Ctrl or Alt to letters, digits and Space");
-            ApexUi::Gap(ApexUi::kSpace3);
-            ApexUi::CardDivider();
-            const float available = ImGui::GetContentRegionAvail().x;
-            const float cancelWidth = ApexUi::ButtonWidth("Cancel", false), saveWidth = ApexUi::ButtonWidth("Save", false);
-            const float total = cancelWidth + ImGui::GetStyle().ItemSpacing.x + saveWidth;
-            const bool oneRow = total <= available;
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, available - (oneRow ? total : cancelWidth)));
+            const ApexUi::ControlSizeScope footer(ApexUi::ControlSize::Compact);
+            const float saveWidth = ApexUi::ButtonWidth("Save", true);
+            const bool oneRow = ApexUi::ModalFooter(ApexUi::ButtonWidth("Cancel", false), saveWidth);
             if (ApexUi::TextButton("Cancel") || close || !editorOpen || g_presetKeyCancelled.exchange(false)) {
                 g_presetKeyRecording = false;
                 ImGui::CloseCurrentPopup();
             }
-            if (oneRow) ImGui::SameLine();
-            else ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - saveWidth));
+            ApexUi::ModalLastAction(saveWidth, oneRow);
             ImGui::BeginDisabled(!g_presetKeyRecording.load() || !keys.HasMainKey() || conflict || typing);
-            if (ApexUi::TextButton("Save", nullptr, ApexUi::ButtonKind::Primary)) {
+            if (ApexUi::IconTextButton("Save", IconId::Save, nullptr, ApexUi::ButtonKind::Primary)) {
                 SetPresetShortcut(g_presetKeyEditing, keys);
                 g_presetKeyRecording = false;
                 ImGui::CloseCurrentPopup();
@@ -3423,8 +3418,7 @@ void BridgeGuide() {
 void CompatibilityTab() {
     ImGui::PushID("Compatibility");
     if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Puzzle, "Compatibility", "Game version, other mods and settings", nullptr, nullptr);
-        ApexUi::CardDivider();
+        // (the tab is its title: no header repeating it)
         const Startup startup = g_startup.load();
         InfoRow("Game", GetGameVersionName());
         const std::string& host = Platform::Get().host; // (wine_get_host_version: "Linux ...", "Darwin ..." for macOS)
@@ -3563,8 +3557,8 @@ const SearchPart* SearchParts(int& count) {
         {"Lighting", "Overview", PageLighting, &g_lightingTab, LightingLamps, LampsTabContent},
         {"Lighting", "Outside", PageLighting, &g_lightingTab, LightingOutside, OutsideTabContent},
         {"Lighting", "Inside & floors", PageLighting, &g_lightingTab, LightingInside, InsideTabContent},
-        {"Lighting", "Water & Snow", PageLighting, &g_lightingTab, LightingWater, WaterSnowContent},
         {"Lighting", "Game fixes", PageLighting, &g_lightingTab, LightingFixes, FixesTabContent},
+        {"Water & Snow", nullptr, PageWaterSnow, nullptr, 0, WaterSnowContent},
         {"Color", "Overview", PageColor, &g_colorTab, Picture::TabOverview, ColorOverview},
         {"Color", "Basic", PageColor, &g_colorTab, Picture::TabBasic, [] { PictureRows(Picture::TabBasic); }},
         {"Color", "Tones", PageColor, &g_colorTab, Picture::TabTones, [] { PictureRows(Picture::TabTones); }},
@@ -3579,8 +3573,8 @@ const SearchPart* SearchParts(int& count) {
         {"Edge Smoothing", nullptr, PageEdgeSmoothing, nullptr, 0, AntiAliasingContent},
         {"Banding Fix", nullptr, PageBanding, nullptr, 0, BandingTabContent},
         {"Display", nullptr, PageDisplay, nullptr, 0, DisplayContent},
-        {"Performance", "While you play", PagePerformance, &g_performanceTab, PerformancePlay, PerformanceCard},
-        {"Performance", "Lot streaming", PagePerformance, &g_performanceTab, PerformanceLots, LotStreamingCards},
+        {"Performance", nullptr, PagePerformance, nullptr, 0, PerformanceCard},
+        {"Lot Streaming", nullptr, PageLotStreaming, nullptr, 0, LotStreamingCards},
         {"Capture", "Screenshots", PageCapture, &g_captureTab, CaptureShots, CaptureShotsContent},
         {"Capture", "Video", PageCapture, &g_captureTab, CaptureVideo, CaptureVideoContent},
         {"Settings", "Menu", PageSettings, &g_settingsTab, SettingsMenu, MenuTab},
@@ -3790,10 +3784,11 @@ void Sidebar(bool collapsed) {
     };
     static const Item items[] = {
         // Each group answers one question: the world's light, the picture's effects, the game's system, the tools around
-        // them (Water & Snow is a Lighting tab, Lot streaming a Performance tab; what needs attention is a card on Overview)
+        // them (what needs attention is a card on Overview)
         {PageOverview, IconId::LayoutDashboard, "Overview", nullptr},
         {PageProfiles, IconId::Bookmark, "Presets", nullptr},
         {PageLighting, IconId::MoonStar, "Lighting", "WORLD"},
+        {PageWaterSnow, IconId::WavesHorizontal, "Water & Snow", nullptr},
         {PageColor, IconId::Palette, "Color", "IMAGE"},
         {PageShaders, IconId::SwatchBook, "Shaders", nullptr},
         {PageAmbientOcclusion, IconId::Contrast, "Ambient Occlusion", nullptr},
@@ -3802,6 +3797,7 @@ void Sidebar(bool collapsed) {
         {PageBanding, IconId::Blend, "Banding Fix", nullptr},
         {PageDisplay, IconId::Monitor, "Display", "SYSTEM"},
         {PagePerformance, IconId::Gauge, "Performance", nullptr},
+        {PageLotStreaming, IconId::Layers, "Lot Streaming", nullptr},
         {PageCapture, IconId::Camera, "Capture", "TOOLS"},
         {PageReport, IconId::Bug, "Report a problem", nullptr},
         {PageSettings, IconId::Settings, "Settings", nullptr},
@@ -3924,7 +3920,7 @@ void WelcomeProfileStep() {
     ApexUi::PageTitle("Welcome to " APEX_PRODUCT_NAME, "Choose how you want to start");
     ImGui::PushID("Welcome");
     if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::None, "Starting preset", "Click a preset to see it right away; change it later on the Presets page",
+        ApexUi::CardHeader(IconId::Bookmark, "Starting preset", "Click a preset to see it right away; change it later on the Presets page",
                            nullptr, nullptr);
         ApexUi::CardDivider();
         if (Platform::SteamDeck()) ApexUi::IconNote(IconId::Gauge, "Steam Deck: the Performance preset is recommended, for a steadier frame rate.");
@@ -3938,20 +3934,20 @@ void WelcomeProfileStep() {
             ImGui::PopID();
         }
         ImGui::EndDisabled();
-        ApexUi::CardDivider();
-        ApexUi::Gap(ApexUi::kSpace2);
         {
-            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Primary);
-            const float gap = ImGui::GetStyle().ItemSpacing.x;
-            const float actionsW = ApexUi::ButtonWidth("Keep my settings", false) + gap + ApexUi::ButtonWidth("Continue##Welcome", true);
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::fmax(0.0f, ImGui::GetContentRegionAvail().x - actionsW));
+            // (the dialogs' footer: divider, compact buttons on the right, the committing one last)
+            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+            const float continueW = ApexUi::ButtonWidth("Continue##Welcome", true);
+            const bool oneRow = ApexUi::ModalFooter(ApexUi::ButtonWidth("Keep my settings", false), continueW);
             if (ApexUi::TextButton("Keep my settings", "Puts back the settings you had before choosing a profile")) {
                 if (g_welcomePreviewed >= 0) ApplyFeatureStateForgetting(g_welcomeBefore);
                 LOG_INFO("[Menu] Welcome: settings kept");
                 g_welcomePreviewed = -1;
                 g_welcomeState = 2;
             }
-            ImGui::SameLine();
+            ApexUi::ModalLastAction(continueW, oneRow);
+            // (nothing picked yet: Keep my settings already says what Continue would do)
+            ImGui::BeginDisabled(g_welcomePreviewed < 0);
             if (ApexUi::IconTextButton("Continue##Welcome", IconId::Check,
                                        g_welcomePreviewed >= 0 ? "Keeps the profile you chose; Undo puts your settings back" : "Keeps your current settings",
                                        ButtonKind::Primary)) {
@@ -3962,6 +3958,7 @@ void WelcomeProfileStep() {
                 }
                 g_welcomeState = 2;
             }
+            ImGui::EndDisabled();
         }
     }
     ApexUi::EndCard();
@@ -4024,13 +4021,12 @@ void WelcomePage() {
 
 void DrawPage() {
     // Pages that became tabs or a card (a saved page, a tour stop or an old link still lands on them)
-    if (g_page == PageWaterSnow) g_page = PageLighting, g_lightingTab = LightingWater;
-    if (g_page == PageLotStreaming) g_page = PagePerformance, g_performanceTab = PerformanceLots;
     if (g_page == PageConflicts) g_page = PageOverview;
     // (nothing is drawn above a page's title: the game's Edge Smoothing warning is a card on Overview and a note under the
     // title of each page it affects)
     switch (g_page) {
     case PageLighting: LightingPage(); break;
+    case PageWaterSnow: WaterSnowPage(); break;
     case PageColor: ColorPage(); break;
     case PageShaders: ShadersPage(); break;
     case PageAmbientOcclusion: AmbientOcclusionPage(); break;
@@ -4038,6 +4034,7 @@ void DrawPage() {
     case PageDepthBlur: DepthBlurPage(); break;
     case PageEdgeSmoothing: EdgeSmoothingPage(); break;
     case PagePerformance: PerformancePage(); break;
+    case PageLotStreaming: LotStreamingPage(); break;
     case PageDisplay: DisplayPage(); break;
     case PageCapture: CapturePage(); break;
     case PageDeveloper:
@@ -4325,20 +4322,11 @@ void VersionButton(float x, float y, float h) {
         ImDrawList* pdl = ImGui::GetWindowDrawList();
         auto count = [](const char* const* lines) { int n = 0; for (const char* const* l = lines; l && *l; ++l) ++n; return n; };
         {
+            // (the dialogs' header: icon, title, the installed version under it, a divider)
             const ApexChangelog::Release& now = ApexChangelog::Get(0);
-            const float badge = 40.0f * u;
-            const ImVec2 b = ImGui::GetCursorScreenPos();
-            pdl->AddRectFilled(b, ImVec2(b.x + badge, b.y + badge), ImGui::GetColorU32(Col(VioletTheme::kAccentDark)), 12.0f * u);
-            const float is = 20.0f * u;
-            ApexUi::DrawIcon(pdl, IconId::Gift, ImVec2(b.x + (badge - is) * 0.5f, b.y + (badge - is) * 0.5f), is, ImGui::GetColorU32(Col(0xFFFFFF)));
-            ImGui::SetCursorScreenPos(ImVec2(b.x + badge + ApexUi::kSpace3 * u, b.y + 1.0f * u));
-            ImGui::BeginGroup();
-            ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize() * 1.05f);
-            ImGui::TextUnformatted(I18n::Tr("What's new"));
-            ImGui::PopFont();
-            ApexUi::MutedText(now.date[0] ? I18n::Trf("You have version {}, released {}", now.version, now.date).c_str() : I18n::Trf("You have version {}", now.version).c_str());
-            ImGui::EndGroup();
-            ImGui::SetCursorScreenPos(ImVec2(b.x, std::fmax(b.y + badge, ImGui::GetItemRectMax().y) + ApexUi::kSpace3 * u));
+            const std::string sub = now.date[0] ? I18n::Trf("You have version {}, released {}", now.version, now.date) : I18n::Trf("You have version {}", now.version);
+            ApexUi::CardHeader(IconId::Gift, "What's new", sub.c_str(), nullptr, nullptr);
+            ApexUi::CardDivider();
         }
         // The list: as tall as its releases, at most what the header and the footer leave
         const ImGuiStyle& style = ImGui::GetStyle();
@@ -4562,11 +4550,17 @@ void VersionButton(float x, float y, float h) {
                 ImGui::PopID();
             }
             g_whatsNewListH = ImGui::GetCursorPosY();
+            // More below: the list's last lines fade into the popup, so a cut line reads as "scroll for more"
+            if (ImGui::GetScrollY() < ImGui::GetScrollMaxY() - 1.0f) {
+                const ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
+                const float fade = 24.0f * u;
+                const ImU32 clear = ImGui::GetColorU32(ImGuiCol_PopupBg, 0.0f), solid = ImGui::GetColorU32(ImGuiCol_PopupBg);
+                ImGui::GetWindowDrawList()->AddRectFilledMultiColor(ImVec2(wp.x, wp.y + ws.y - fade), ImVec2(wp.x + ws.x, wp.y + ws.y), clear, clear, solid, solid);
+            }
         }
         ImGui::EndChild();
         const float listBottom = ImGui::GetItemRectMax().y;
-        ImGui::Separator();
-        ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace1 * u));
+        ApexUi::CardDivider(); // (the dialogs' footer divider)
         {
             // The list size on the left, the full list on the right
             const char* label = "See all versions";
@@ -5451,8 +5445,7 @@ void ShortcutsTab() {
     // (the same cards in the search results: their rows hide themselves when they do not match)
 
     if (ApexUi::BeginCard("##MainShortcuts")) {
-        ApexUi::CardHeader(IconId::Keyboard, "Shortcuts", "Choose a preset or click a shortcut to edit it", nullptr, nullptr);
-        ApexUi::CardDivider();
+        // (the tab is its title: no header repeating it; the preset row opens the card)
         const auto current = ApexConfig::GetUi();
         const int selected = current.hotkeyPreset < 0 ? static_cast<int>(Hotkeys::Preset::FKeys)
             : std::clamp(current.hotkeyPreset, 0, Hotkeys::kMine);

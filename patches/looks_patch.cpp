@@ -1907,18 +1907,14 @@ bool NewLookModal(bool openNow)
             }
             else from = 0;
             if (!error.empty()) ApexUi::IconNote(IconId::TriangleAlert, error.c_str(), VioletTheme::kError);
-            ApexUi::Gap(ApexUi::kSpace3);
-            const float available = ImGui::GetContentRegionAvail().x;
-            const float cancelW = ApexUi::ButtonWidth("Cancel", false), createW = ApexUi::ButtonWidth("Create", false);
-            const float total = cancelW + ImGui::GetStyle().ItemSpacing.x + createW;
-            const bool oneRow = total <= available;
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, available - (oneRow ? total : cancelW)));
+            const ApexUi::ControlSizeScope footer(ApexUi::ControlSize::Compact);
+            const float createW = ApexUi::ButtonWidth("Create", true);
+            const bool oneRow = ApexUi::ModalFooter(ApexUi::ButtonWidth("Cancel", false), createW);
             if (ApexUi::TextButton("Cancel") || close) ImGui::CloseCurrentPopup();
-            if (oneRow) ImGui::SameLine();
-            else ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - createW));
+            ApexUi::ModalLastAction(createW, oneRow);
             const bool can = !file.empty() && !taken;
             ImGui::BeginDisabled(!can);
-            if ((ApexUi::TextButton("Create", nullptr, ApexUi::ButtonKind::Primary) || (enter && can)) &&
+            if ((ApexUi::IconTextButton("Create", IconId::Plus, nullptr, ApexUi::ButtonKind::Primary) || (enter && can)) &&
                 (from == 1 ? SaveAsNewLook(name, error) : NewEmptyLook(name, error)))
             {
                 g_listDirty = true;
@@ -2125,10 +2121,11 @@ bool AskSaveModal()
             ApexUi::CardDivider();
             for (const std::string& l : lines) ApexUi::BulletLine(l.c_str(), false);
             if (!error.empty()) ApexUi::IconNote(IconId::TriangleAlert, error.c_str(), VioletTheme::kError);
-            ApexUi::Gap(ApexUi::kSpace3);
+            ApexUi::CardDivider();
+            const ApexUi::ControlSizeScope footer(ApexUi::ControlSize::Compact);
             const char* discard = "Discard them";
             const char* save = Looks::RefSource(g.preset) == Looks::Source::Mine ? "Save" : "Save in My looks";
-            const float discardW = ApexUi::ButtonWidth(discard, false), cancelW = ApexUi::ButtonWidth("Cancel", false), saveW = ApexUi::ButtonWidth(save, false);
+            const float discardW = ApexUi::ButtonWidth(discard, false), cancelW = ApexUi::ButtonWidth("Cancel", false), saveW = ApexUi::ButtonWidth(save, true);
             const float sp = ImGui::GetStyle().ItemSpacing.x, available = ImGui::GetContentRegionAvail().x;
             const bool oneRow = discardW + cancelW + saveW + 2.0f * sp + ApexUi::kSpace3 * u <= available;
             const float x0 = ImGui::GetCursorPosX();
@@ -2136,7 +2133,7 @@ bool AskSaveModal()
             if (oneRow) ImGui::SameLine(x0 + available - cancelW - sp - saveW); // Cancel then Save on the right
             if (ApexUi::TextButton("Cancel") || close) ImGui::CloseCurrentPopup();
             ImGui::SameLine();
-            if (ApexUi::TextButton(save, nullptr, ApexUi::ButtonKind::Primary))
+            if (ApexUi::IconTextButton(save, IconId::Save, nullptr, ApexUi::ButtonKind::Primary))
             {
                 if (SaveToLook(error))
                 {
@@ -3413,17 +3410,13 @@ bool SaveLookModal(bool openNow)
             if (!file.empty() && ApexUtil::FileExists(Looks::LooksFolder() + ApexUtil::ToWide(file)))
                 ApexUi::IconNote(IconId::TriangleAlert, "A look with this name exists; saving replaces it", VioletTheme::kWarning);
             if (!error.empty()) ApexUi::IconNote(IconId::TriangleAlert, error.c_str(), VioletTheme::kError);
-            ApexUi::Gap(ApexUi::kSpace3);
-            const float available = ImGui::GetContentRegionAvail().x;
-            const float cancelW = ApexUi::ButtonWidth("Cancel", false), saveW = ApexUi::ButtonWidth("Save", false);
-            const float total = cancelW + ImGui::GetStyle().ItemSpacing.x + saveW;
-            const bool oneRow = total <= available;
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, available - (oneRow ? total : cancelW)));
+            const ApexUi::ControlSizeScope footer(ApexUi::ControlSize::Compact);
+            const float saveW = ApexUi::ButtonWidth("Save", true);
+            const bool oneRow = ApexUi::ModalFooter(ApexUi::ButtonWidth("Cancel", false), saveW);
             if (ApexUi::TextButton("Cancel") || close) ImGui::CloseCurrentPopup();
-            if (oneRow) ImGui::SameLine();
-            else ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - saveW));
+            ApexUi::ModalLastAction(saveW, oneRow);
             ImGui::BeginDisabled(file.empty());
-            if ((ApexUi::TextButton("Save", nullptr, ApexUi::ButtonKind::Primary) || (enter && !file.empty())) && SaveAsNewLook(name, error))
+            if ((ApexUi::IconTextButton("Save", IconId::Save, nullptr, ApexUi::ButtonKind::Primary) || (enter && !file.empty())) && SaveAsNewLook(name, error))
             {
                 g_listDirty = true;
                 ApexUi::ReportChange(I18n::Trf("Saved as {}", Looks::RefName(g.preset)).c_str());

@@ -1235,8 +1235,13 @@ bool WhereRows(bool video, int& mode, std::string& custom) {
     int m = std::clamp(mode, 0, 2);
     const std::string where = m == kFolderCustom && !Trim(custom).empty()
         ? custom : ApexUtil::ToUtf8(DefaultFolder(m == kFolderApex ? kFolderApex : kFolderGame, video).wstring());
+    // (the description shows the folder's last two names, "...\The Sims 3\Recorded Videos": a full path broke mid-word)
+    std::string shown = where;
+    if (const size_t last = where.find_last_of("\\/"); last != std::string::npos && last > 0)
+        if (const size_t before = where.find_last_of("\\/", last - 1); before != std::string::npos)
+            shown = "\xE2\x80\xA6" + where.substr(before);
     ApexUi::SetNextRowAction(IconId::FolderOpen, "Open the folder");
-    if (ApexUi::SegmentedRow("Save to", where.c_str(), video ? "##VideoWhere" : "##ShotWhere", &m, kWhere, 3, video ? nullptr : kShotTips, nullptr, kFolderGame)) {
+    if (ApexUi::SegmentedRow("Save to", shown.c_str(), video ? "##VideoWhere" : "##ShotWhere", &m, kWhere, 3, video ? nullptr : kShotTips, nullptr, kFolderGame)) {
         // Other starts from the folder in use; type over it or press Change
         if (m == kFolderCustom && Trim(custom).empty()) custom = ApexUtil::ToUtf8(DefaultFolder(mode == kFolderApex ? kFolderApex : kFolderGame, video).wstring());
         if (m != kFolderCustom || !Trim(custom).empty()) { mode = m; ch = true; }
@@ -1366,7 +1371,7 @@ void VideoCard(bool lookOn, bool gameAa) {
             status = I18n::Tr("Saving the video\xE2\x80\xA6");
         } else {
             status = ApexConfig::KeyChordText(v.recordKey);
-            if (!v.external) status += " \xC2\xB7 " + I18n::Trf("about {} MB a minute", MbPerMinute(v));
+            // (the size a minute is in the Quality row's description, not repeated here)
             status = WithLast(status, last);
         }
         if (why) status = I18n::Tr(why); // in the header, in amber, with Record off
