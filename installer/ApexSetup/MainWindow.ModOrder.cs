@@ -128,14 +128,28 @@ public sealed partial class MainWindow
             ItemTemplate = EmptyCell(), ItemsSource = _orderItems, SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = true,
             CanDragItems = true, CanReorderItems = true, AllowDrop = true, Padding = new Thickness(0, 0, 0, Design.Space.X16 + Design.Space.X8),
         };
-        foreach (var k in new[] { "ListViewItemBackgroundPointerOver", "ListViewItemBackgroundPressed" }) _orderList.Resources[k] = Res("ApexClearBrush");
+        // (the row is the item, as the game list's: no list chrome around it, so rows join into one card and keyboard focus is
+        // the system ring on the card's own corners)
+        _orderList.ItemContainerStyle = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load(
+            "<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ListViewItem'>"
+            + "<Setter Property='Padding' Value='0'/><Setter Property='Margin' Value='0'/><Setter Property='MinHeight' Value='0'/>"
+            + "<Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='UseSystemFocusVisuals' Value='True'/>"
+            + "<Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ListViewItem'>"
+            + "<ContentPresenter Content='{TemplateBinding Content}' ContentTemplate='{TemplateBinding ContentTemplate}' HorizontalContentAlignment='Stretch' Background='Transparent'/>"
+            + "</ControlTemplate></Setter.Value></Setter></Style>");
         AutomationProperties.SetName(_orderList, T("Load order"));
         AutomationProperties.SetHelpText(_orderList, T("Alt with the up or down arrow moves a mod."));
         _orderList.ContainerContentChanging += (_, a) =>
         {
             if (a.InRecycleQueue || a.Item is not OrderItem r || a.ItemContainer.ContentTemplateRoot is not Grid g) return;
             a.ItemContainer.HorizontalContentAlignment = HorizontalAlignment.Stretch;
-            (a.ItemContainer.Padding, a.ItemContainer.MinHeight) = (new Thickness(0), 0);
+            (a.ItemContainer.Padding, a.ItemContainer.MinHeight, a.ItemContainer.Margin) = (new Thickness(0), 0, new Thickness(0));
+            // (the template keeps 4 around each item and draws its own white ring: rows join here, and the ring follows the card)
+            const double round = Design.Radius.Card;
+            a.ItemContainer.CornerRadius = r.Mod is null ? new CornerRadius(0)
+                : new CornerRadius(r.First ? round : 0, r.First ? round : 0, r.Last ? round : 0, r.Last ? round : 0);
+            (a.ItemContainer.FocusVisualPrimaryBrush, a.ItemContainer.FocusVisualSecondaryBrush) = (Res("ApexAccentBrush"), Res("ApexClearBrush"));
+            (a.ItemContainer.FocusVisualPrimaryThickness, a.ItemContainer.FocusVisualSecondaryThickness, a.ItemContainer.FocusVisualMargin) = (new Thickness(2), new Thickness(0), new Thickness(0));
             a.ItemContainer.IsTabStop = r.Mod is not null;
             HookOrderRow(a.ItemContainer);
             PaintOrderRow(a.ItemContainer, g, r);
@@ -613,8 +627,8 @@ public sealed partial class MainWindow
         }
         var outer = new Grid();
         if (r.Moved) outer.Children.Add(new Border { Width = 3, Margin = new Thickness(0, Design.Space.X3, 0, Design.Space.X3), HorizontalAlignment = HorizontalAlignment.Left, CornerRadius = new CornerRadius(0, 2, 2, 0), Background = Res("ApexAccentBrush") });
-        var row = new Grid { ColumnSpacing = Design.Space.X4, Padding = new Thickness(Design.Space.X3, Design.Space.X3, Design.Space.RowPad, Design.Space.X3) };
-        foreach (var w in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+        var row = new Grid { ColumnSpacing = Design.Space.IconToText, Padding = new Thickness(Design.Space.RowPad, Design.Space.X3, Design.Space.RowPad, Design.Space.X3) };
+        foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         outer.Children.Add(row);
         card.Child = outer;
         g.Children.Add(card);
@@ -625,7 +639,9 @@ public sealed partial class MainWindow
         if (unread || m.Locked) (grip.Tag, grip.Opacity) = ("fixed", 1); else grip.Opacity = c.FocusState != FocusState.Unfocused ? 1 : 0;
         if (m.Locked) ToolTipService.SetToolTip(grip, T("Installed by Apex Launcher, so it stays where it is"));
         card.Tag = grip;
-        Put(grip, 0);
+        // (in the row's left margin: it shows under the pointer and moves nothing)
+        (grip.HorizontalAlignment, grip.VerticalAlignment, grip.Margin, grip.IsHitTestVisible) = (HorizontalAlignment.Left, VerticalAlignment.Center, new Thickness(2, 0, 0, 0), false);
+        outer.Children.Add(grip);
         var number = new TextBlock
         {
             Text = r.At > 0 ? r.At.ToString(LangCulture()) : "–", FontSize = Design.TextSize.Small, FontWeight = FontWeights.SemiBold,
@@ -636,13 +652,13 @@ public sealed partial class MainWindow
         {
             Width = Design.Size.Tile, Height = Design.Size.Tile, CornerRadius = new CornerRadius(Design.Radius.Tile), Child = number,
             Background = Res(r.Moved ? "ApexAccentBrush" : unread ? "ApexClearBrush" : "ApexTileBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(unread ? 1 : 0),
-        }, 1);
+        }, 0);
         var name = Path.GetFileNameWithoutExtension(m.Name);
         var words = new StackPanel { Spacing = 2 };
         words.Children.Add(new TextBlock { Text = name, FontSize = Design.TextSize.Body, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         words.Children.Add(new TextBlock { Text = ModRow.Place(m), FontSize = Design.TextSize.Small, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
         ToolTipService.SetToolTip(words, m.Rel);
-        Put(words, 2);
+        Put(words, 1);
 
         var said = new List<string> { r.At > 0 ? r.At.ToString(LangCulture()) : T("Not read by the game"), name, ModRow.Place(m) };
         if (m.Locked) said.Add(T("Installed by Apex Launcher, so it stays where it is"));
@@ -667,7 +683,7 @@ public sealed partial class MainWindow
             see.Click += (_, _) => SeeConflicts(m);
             end.Children.Add(see);
         }
-        Put(end, 3);
+        Put(end, 2);
         AutomationProperties.SetName(c, string.Join(", ", said));
     }
 
@@ -685,7 +701,7 @@ public sealed partial class MainWindow
             var s = _order!.Secs[r.Section];
             var n = _orderWant.Count(w => w.Section == r.Section);
             (title, note) = (OrderWords(s), r.At == 0 ? ModCount(n) + " · " + T("read first") : ModCount(n));
-            var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X1, VerticalAlignment = VerticalAlignment.Center };
+            var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X2, VerticalAlignment = VerticalAlignment.Center };
             var prio = Button(T("Priority {0}", s.Priority), () => Safe(AskPriorityAsync(s)));
             (prio.Height, prio.MinHeight, prio.Padding, prio.FontSize) = (Design.Size.ControlSmall, 0, new Thickness(Design.Space.X3, 0, Design.Space.X3, 0), Design.TextSize.Small);
             AutomationProperties.SetName(prio, T("Change priority") + ", " + T("Priority {0}", s.Priority));
@@ -716,7 +732,7 @@ public sealed partial class MainWindow
         var head = Design.Parts.Title(Design.Parts.Heading(T("How the game reads")), T("The lines of Resource.cfg, from the one that counts most"));
         s.Children.Add(new Border { Child = head, Padding = new Thickness(Design.Space.CardPad, Design.Space.CardPad, Design.Space.CardPad, Design.Space.X4), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, 0, 0, 1) });
         _orderRules = new StackPanel();
-        s.Children.Add(new ScrollViewer { Content = _orderRules, MaxHeight = 420, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        s.Children.Add(_orderRules);
         var how = new StackPanel { Spacing = Design.Space.X3, Padding = new Thickness(Design.Space.CardPad, Design.Space.X4, Design.Space.CardPad, Design.Space.X4), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
         foreach (var (line, i) in new[]
         {
@@ -748,8 +764,10 @@ public sealed partial class MainWindow
             foot.Children.Add(b);
         }
         s.Children.Add(foot);
-        var panel = Design.Parts.PanelOf(new ScrollViewer { Content = s }, new Thickness(0));
+        var panel = Design.Parts.PanelOf(new ScrollViewer { Content = s, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, new Thickness(0));
         panel.VerticalAlignment = VerticalAlignment.Top;
+        // (beside the list it is no taller than the page, less the room the floating bar takes, and scrolls inside)
+        _orderBody.SizeChanged += (_, e) => { if (_orderUnder == false) panel.MaxHeight = Math.Max(240, e.NewSize.Height - Design.Space.X16 - Design.Space.X8); };
         return panel;
     }
 
@@ -784,7 +802,7 @@ public sealed partial class MainWindow
             var n = _orderWant.Count(w => w.Section == s.Index);
             var depth = s.Depth switch { 0 => T("Only the folder"), 1 => T("One level down"), var d => T("{0} levels down", d) };
             var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            words.Children.Add(new TextBlock { Text = OrderWords(s), FontSize = Design.TextSize.Small, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+            words.Children.Add(new TextBlock { Text = s.Folder.Length == 0 ? T("Mods") : s.Folder.Replace("/", " › "), FontSize = Design.TextSize.Small, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
             words.Children.Add(new TextBlock { Text = ModCount(n) + " · " + depth, FontSize = Design.TextSize.Caption, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
             ToolTipService.SetToolTip(words, "PackedFile " + s.Text);
             Grid.SetColumn(words, 1);
