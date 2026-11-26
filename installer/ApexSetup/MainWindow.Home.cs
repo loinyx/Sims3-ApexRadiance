@@ -283,7 +283,7 @@ public sealed partial class MainWindow
             : clashes.Count == 1 ? T(clashes[0].Title) : clashes.Count > 1 ? T("{0} conflicts between mods", clashes.Count) : "";
         var tint = StateTint(255);
         var white = new SolidColorBrush(Microsoft.UI.Colors.White);
-        var soft = new SolidColorBrush(Windows.UI.Color.FromArgb(0xC8, 255, 255, 255));
+        var soft = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0xC8));
         var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(10, 10, 18, 10), MaxWidth = 380 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -292,8 +292,8 @@ public sealed partial class MainWindow
         var glow = new SoftGlow(tint, calm ? 0.35 : 0.6, 0.5) { Width = 84, Height = 84, Margin = new Thickness(-20), IsHitTestVisible = false };
         var tile = new Grid { Width = 44, Height = 44 };
         tile.Children.Add(glow);
-        tile.Children.Add(new Border { CornerRadius = new CornerRadius(22), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x38, tint.R, tint.G, tint.B)),
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x66, tint.R, tint.G, tint.B)), BorderThickness = new Thickness(1) });
+        tile.Children.Add(new Border { CornerRadius = new CornerRadius(22), Background = new SolidColorBrush(Alpha(tint, 0x38)),
+            BorderBrush = new SolidColorBrush(Alpha(tint, 0x66)), BorderThickness = new Thickness(1) });
         (crystal.HorizontalAlignment, crystal.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center);
         tile.Children.Add(crystal);
         g.Children.Add(tile);
@@ -308,7 +308,7 @@ public sealed partial class MainWindow
             tile.Unloaded += (_, _) => breathe.Stop();
         }
         var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
-        words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = white, TextTrimming = TextTrimming.CharacterEllipsis });
+        words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = white, TextTrimming = TextTrimming.CharacterEllipsis });
         if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(words, 1);
         g.Children.Add(words);
@@ -319,18 +319,19 @@ public sealed partial class MainWindow
         var b = new Button
         {
             Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(32), BorderThickness = new Thickness(1),
-            Background = Glass(0.42, tint), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(calm ? (byte)0x3A : (byte)0x80, tint.R, tint.G, tint.B)),
+            Background = Glass(0.42, tint), BorderBrush = new SolidColorBrush(Alpha(tint, calm ? (byte)0x3A : (byte)0x80)),
         };
         // (frosted glass that blurs the picture behind it, a little lighter under the pointer)
         b.Resources["ButtonBackgroundPointerOver"] = Glass(0.3, tint);
         b.Resources["ButtonBackgroundPressed"] = Glass(0.55, tint);
-        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0xA0, tint.R, tint.G, tint.B));
+        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Alpha(tint, 0xA0));
         b.Click += (_, _) => Show(HealthScreen);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, HealthTitle() + ". " + T("Open Health"));
         HandCursor.On(b);
         return b;
     }
 
+    static Windows.UI.Color Alpha(Windows.UI.Color c, byte a) => Windows.UI.Color.FromArgb(a, c.R, c.G, c.B);
     // the dark glass, with a breath of the state's colour in it
     static Microsoft.UI.Xaml.Media.AcrylicBrush Glass(double tint, Windows.UI.Color hue) => new()
     {
