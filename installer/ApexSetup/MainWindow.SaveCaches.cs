@@ -61,6 +61,7 @@ public sealed partial class MainWindow
             // the files, one checkbox each: one unticked stays
             HyperlinkButton? link = null;
             Border? list = null;
+            Border? row = null;
             if (mine.Count > 0)
             {
                 var label = new TextBlock { Text = mine.Count == 1 ? T("1 file") : T("{0} files", mine.Count) };
@@ -68,20 +69,25 @@ public sealed partial class MainWindow
                 chevron.VerticalAlignment = VerticalAlignment.Center;
                 link = new HyperlinkButton { Padding = new Thickness(0), Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X1, Children = { label, chevron } } };
                 AutomationProperties.SetName(link, label.Text + ", " + T(name));
-                list = FileList(mine, Say);
-                list.Visibility = _cacheOpen.Contains(group) ? Visibility.Visible : Visibility.Collapsed;
-                var (l, c) = (list, chevron);
+                // (made on the first open: a page of closed rows draws no checkbox)
+                if (_cacheOpen.Contains(group)) list = FileList(mine, Say);
+                var c = chevron;
                 link.Click += (_, _) =>
                 {
                     var open = !_cacheOpen.Remove(group);
                     if (open) _cacheOpen.Add(group);
-                    l.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+                    if (open && list is null)
+                    {
+                        list = FileList(mine, Say);
+                        rows.Children.Insert(rows.Children.IndexOf(row) + 1, list);
+                    }
+                    if (list is not null) list.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
                     c.Kind = open ? "chevron-up" : "chevron-down";
                     AutomationProperties.SetItemStatus(link, open ? T("Expanded") : T("Collapsed"));
                 };
                 AutomationProperties.SetItemStatus(link, _cacheOpen.Contains(group) ? T("Expanded") : T("Collapsed"));
             }
-            rows.Children.Add(Row(icon, T(name), T(text), RowEnd(size, sw), link));
+            rows.Children.Add(row = Row(icon, T(name), T(text), RowEnd(size, sw), link));
             if (list is not null) rows.Children.Add(list);
             if (mine.Count > 0)
                 says.Add(() =>
@@ -122,18 +128,20 @@ public sealed partial class MainWindow
         }
     }
 
-    // a row's files under it: a checkbox for each, with its size and day; Select all and Clear all over them
+    // a row's files under it: a checkbox for each, with its size and day; Select all and Clear all over them. The page itself
+    // scrolls (no scroller inside it): the ten largest first, the rest on asking
     Border FileList(List<CacheFile> files, Action changed)
     {
+        const int First = 10;
         var boxes = new List<(CheckBox Box, CacheFile File)>();
         var list = new StackPanel();
-        foreach (var f in files)
+        void Add(CacheFile f)
         {
             var g = new Grid { ColumnSpacing = Design.Space.X4 };
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var file = SaveText(f.Rel, Design.TextSize.Small);
-            file.VerticalAlignment = VerticalAlignment.Center;
+            (file.VerticalAlignment, file.TextTrimming) = (VerticalAlignment.Center, TextTrimming.CharacterEllipsis);
             ToolTipService.SetToolTip(file, f.Path);
             g.Children.Add(file);
             var about = RowSize(SaveSize(f.Size) + " · " + SaveDay(f.When));
@@ -148,9 +156,23 @@ public sealed partial class MainWindow
             boxes.Add((box, f));
             list.Children.Add(box);
         }
+        foreach (var f in files.Take(First)) Add(f);
+        if (files.Count > First)
+        {
+            HyperlinkButton? more = null;
+            more = Link(T("Show {0} more", files.Count - First), () =>
+            {
+                list.Children.Remove(more);
+                foreach (var f in files.Skip(First)) Add(f);
+            });
+            more.Margin = new Thickness(0, Design.Space.X1, 0, 0);
+            list.Children.Add(more);
+        }
         void All(bool on)
         {
-            foreach (var (box, f) in boxes) { box.IsChecked = on; if (on) _cacheKeep.Remove(f.Path); else _cacheKeep.Add(f.Path); }
+            // (the files not shown yet go too)
+            foreach (var f in files) { if (on) _cacheKeep.Remove(f.Path); else _cacheKeep.Add(f.Path); }
+            foreach (var (box, _) in boxes) box.IsChecked = on;
             changed();
         }
         var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X4, Margin = new Thickness(0, 0, 0, Design.Space.X1), Children = { Link(T("Select all"), () => All(true)), Link(T("Clear all"), () => All(false)) } };
@@ -159,7 +181,7 @@ public sealed partial class MainWindow
         {
             Padding = new Thickness(Design.Space.RowPad + Design.Size.Tile + Design.Space.IconToText, Design.Space.X2, Design.Space.RowPad, Design.Space.X3),
             Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1),
-            Child = new StackPanel { Children = { acts, new ScrollViewer { Content = list, MaxHeight = Design.Size.Control * 9 } } }, // (nine files, then it scrolls)
+            Child = new StackPanel { Children = { acts, list } },
         });
     }
 
