@@ -1940,9 +1940,8 @@ bool LookRow()
 {
     const float u = ApexUi::Unit();
     const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-    const float avail = ImGui::GetContentRegionAvail().x;
-    float comboW = std::fmin(300.0f * u, std::fmax(160.0f * u, avail * 0.5f));
-    if (avail - comboW - ApexUi::kSpace3 * u < 120.0f * u) comboW = avail; // under the label (BeginControlRow): the list takes the row
+    // (the shared control column, as every list: beside the label, a long name ends in an ellipsis)
+    const float comboW = ApexUi::ControlColumnWidth();
     // changed here and not saved in the file: the changed dot, and on hover Reset = put back the look as saved
     const bool dirty = g.loaded && Dirty();
     ApexUi::SetNextRowDefault(dirty);
