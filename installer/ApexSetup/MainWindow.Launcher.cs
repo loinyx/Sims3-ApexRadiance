@@ -241,11 +241,18 @@ public sealed partial class MainWindow
         await StartGameAsync(g, save);
     }
 
+    // the launcher's colour theme into Apex's own menu, which reads it when the game starts
+    void MenuTheme(Game? g = null)
+    {
+        if ((g ?? _game) is { } game && !DryRun) Engine.SetMenuTheme(Scan.DocumentsFor(game), Design.Theme.Of(_settings.Theme).MenuColours());
+    }
+
     async Task StartGameAsync(Game g, string? save)
     {
         Process p;
         await BackupsBeforePlay();
         PlayPendingOptions(g);
+        MenuTheme(g);
         try { p = Launch.Start(g, save); }
         catch (Exception e) { App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
         var session = _session = new Session(p, Docs);
@@ -843,7 +850,7 @@ public sealed partial class MainWindow
             }
             HandCursor.On(b);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T(t.Name) + (on ? ", " + T("in use") : ""));
-            b.Click += (_, _) => { _settings.Theme = t.Id; _settings.Save(); Design.DesignSystem.Apply(t.Id); _settingsFocus = "theme"; ThemeChanged(); };
+            b.Click += (_, _) => { _settings.Theme = t.Id; _settings.Save(); Design.DesignSystem.Apply(t.Id); MenuTheme(); _settingsFocus = "theme"; ThemeChanged(); };
             if (on) _themeInUse = b;
             grid.Children.Add(b);
         }

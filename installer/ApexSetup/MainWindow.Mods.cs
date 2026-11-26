@@ -1040,6 +1040,7 @@ public sealed partial class MainWindow
             if (arrow is not null)
             {
                 (arrow.Background, arrow.BorderBrush) = (Res("ApexCardBrush"), Res("ApexCardBorderBrush"));
+                if (arrow.Content is LucideIcon icon) icon.Stroke = Res("ApexSoftTextBrush");
                 ToolTipService.SetToolTip(arrow, name);
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(arrow, name);
             }

@@ -69,7 +69,7 @@
                         </Grid>
                     </StackPanel>
                     <TextBlock Grid.Column="2" Text="{x:Bind Kind, Mode=OneWay}" FontSize="13" Foreground="{ThemeResource ApexMutedBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Opacity="{x:Bind TextOpacity, Mode=OneWay}" />
-                    <TextBlock Grid.Column="3" Text="{x:Bind Size}" FontSize="13" Foreground="{x:Bind SizeBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" Opacity="{x:Bind TextOpacity, Mode=OneWay}" />
+                    <TextBlock Grid.Column="3" Text="{x:Bind Size}" FontSize="13" Foreground="{x:Bind SizeBrush, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" Opacity="{x:Bind TextOpacity, Mode=OneWay}" />
                     <Grid Grid.Column="4">
                         <ToggleSwitch IsOn="{x:Bind IsOn, Mode=OneWay}" Visibility="{x:Bind ToggleVisible, Mode=OneWay}" Toggled="{x:Bind OnToggled}"
                                       OnContent="" OffContent="" MinWidth="0" Width="40" HorizontalAlignment="Right" AutomationProperties.Name="{x:Bind Name, Mode=OneWay}" />

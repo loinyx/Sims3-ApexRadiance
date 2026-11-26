@@ -140,6 +140,7 @@ public sealed partial class MainWindow : Window
         if (!tour) StartUpgrade();
         var pending = tour ? Task.CompletedTask : OpenPendingAsync();
         await LoadReleasesAsync();
+        if (!tour) MenuTheme();
         if (tour) _ = AuditTourAsync();
         await pending; // (before the dialogs below: a newer one would close theirs)
         // (the launcher's choices, applied as if Apply was clicked: the player already did, before Windows asked)
@@ -1010,7 +1011,9 @@ public sealed partial class MainWindow : Window
 
     // the status bars in a tint of their colour and the window's caption buttons, for the theme in use
     // (one brush each, its colour changed with the theme: what is on screen follows at once)
-    readonly SolidColorBrush QuietBox = new(), _over = new(), _overEdge = new(), _content = new(), _contentEdge = new();
+    // (brushes of their own whose colour changes with the theme: a control keeps the brush it read, so one of the theme's own
+    // brushes given here would stay in the old theme after a switch)
+    readonly SolidColorBrush QuietBox = new(), _over = new(), _overEdge = new(), _content = new(), _contentEdge = new(), _listBox = new(), _viewOn = new();
 
     void ThemeChrome()
     {
@@ -1027,7 +1030,8 @@ public sealed partial class MainWindow : Window
         // (the boxes of the list: drawn to be found, not to be seen first)
         (QuietBox.Color, _over.Color, _overEdge.Color) = (Tone("InputBorderHover"), Tone("Raised"), Tone("InputBorder"));
         ModListHead.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
-        ModList.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = ModList.Resources["CheckBoxCheckBackgroundStrokeUncheckedPointerOver"] = Res("ApexSoftTextBrush");
+        (_listBox.Color, _viewOn.Color) = (Tone("SoftText"), Tone("Selected"));
+        ModList.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = ModList.Resources["CheckBoxCheckBackgroundStrokeUncheckedPointerOver"] = _listBox;
         // (what opens over a screen: one quiet surface with an edge of its own. Here and not in App.xaml: a theme dictionary there
         // does not reach these. A contrast theme keeps its own)
         if (!new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast)
@@ -1041,7 +1045,7 @@ public sealed partial class MainWindow : Window
         // Mods' two views, as the gallery's: the one in use on a quiet pill
         foreach (var view in new[] { ModsViewList, ModsViewGallery })
             foreach (var state in new[] { "", "PointerOver", "Pressed" })
-                view.Resources["ToggleButtonBackgroundChecked" + state] = Res("ApexSelectedBrush");
+                view.Resources["ToggleButtonBackgroundChecked" + state] = _viewOn;
         if (AppWindow?.TitleBar is { } bar)
         {
             var fg = _light ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
