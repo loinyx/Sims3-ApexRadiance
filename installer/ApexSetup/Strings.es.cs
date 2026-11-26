@@ -2112,5 +2112,7 @@ public static partial class Strings
         ["Collapsed"] = "Contraído",
         ["Expanded"] = "Expandido",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Ábrelo desde el menú Inicio o el escritorio y tu juego estará listo",
+        ["Every check passed"] = "Todas las comprobaciones superadas",
+        ["Its own times and how many to keep"] = "Sus propios momentos y cuántas guardar",
     };
 }

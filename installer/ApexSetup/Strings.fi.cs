@@ -2104,5 +2104,7 @@ public static partial class Strings
         ["Collapsed"] = "Kutistettu",
         ["Expanded"] = "Laajennettu",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Avaa se Käynnistä-valikosta tai työpöydältä, niin pelisi on valmis",
+        ["Every check passed"] = "Kaikki tarkistukset läpäisty",
+        ["Its own times and how many to keep"] = "Omat ajat ja montako säilytetään",
     };
 }

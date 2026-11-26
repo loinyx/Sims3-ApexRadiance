@@ -2107,5 +2107,7 @@ public static partial class Strings
         ["Collapsed"] = "Sbaleno",
         ["Expanded"] = "Rozbaleno",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Otevřete ho z nabídky Start nebo z plochy a hra je připravená",
+        ["Every check passed"] = "Všechny kontroly prošly",
+        ["Its own times and how many to keep"] = "Vlastní časy a kolik uchovat",
     };
 }

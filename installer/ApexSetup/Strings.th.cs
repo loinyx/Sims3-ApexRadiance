@@ -2082,5 +2082,7 @@ public static partial class Strings
         ["Collapsed"] = "ยุบแล้ว",
         ["Expanded"] = "ขยายแล้ว",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "เปิดจากเมนูเริ่มหรือเดสก์ท็อป แล้วเกมของคุณก็พร้อม",
+        ["Every check passed"] = "ผ่านการตรวจทั้งหมด",
+        ["Its own times and how many to keep"] = "เวลาของตัวเองและจำนวนที่เก็บไว้",
     };
 }

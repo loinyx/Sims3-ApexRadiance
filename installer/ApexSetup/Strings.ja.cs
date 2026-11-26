@@ -2106,5 +2106,7 @@ public static partial class Strings
         ["Collapsed"] = "折りたたみ",
         ["Expanded"] = "展開",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "スタートメニューかデスクトップから開けば、ゲームの準備は完了です",
+        ["Every check passed"] = "すべてのチェックに合格",
+        ["Its own times and how many to keep"] = "独自のタイミングと保持する数",
     };
 }

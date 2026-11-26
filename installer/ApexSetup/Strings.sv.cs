@@ -2112,5 +2112,7 @@ public static partial class Strings
         ["Collapsed"] = "Hopfälld",
         ["Expanded"] = "Utfälld",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Öppna den från Start-menyn eller skrivbordet så är ditt spel redo",
+        ["Every check passed"] = "Alla kontroller godkända",
+        ["Its own times and how many to keep"] = "Egna tidpunkter och hur många som sparas",
     };
 }

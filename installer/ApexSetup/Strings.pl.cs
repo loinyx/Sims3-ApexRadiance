@@ -2082,5 +2082,7 @@ public static partial class Strings
         ["Collapsed"] = "Zwinięte",
         ["Expanded"] = "Rozwinięte",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Otwórz go z menu Start lub pulpitu, a gra będzie gotowa",
+        ["Every check passed"] = "Wszystkie testy zaliczone",
+        ["Its own times and how many to keep"] = "Własne terminy i ile zachować",
     };
 }

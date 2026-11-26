@@ -2114,5 +2114,7 @@ public static partial class Strings
         ["Collapsed"] = "Réduit",
         ["Expanded"] = "Développé",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Ouvrez-le depuis le menu Démarrer ou le bureau, et votre jeu est prêt",
+        ["Every check passed"] = "Toutes les vérifications sont passées",
+        ["Its own times and how many to keep"] = "Ses propres moments et combien en garder",
     };
 }

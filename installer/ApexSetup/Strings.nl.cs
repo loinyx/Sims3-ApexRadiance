@@ -2103,5 +2103,7 @@ public static partial class Strings
         ["Collapsed"] = "Ingeklapt",
         ["Expanded"] = "Uitgeklapt",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Open hem via het menu Start of het bureaublad en je spel is klaar",
+        ["Every check passed"] = "Alle controles geslaagd",
+        ["Its own times and how many to keep"] = "Eigen momenten en hoeveel er bewaard blijven",
     };
 }

@@ -2113,5 +2113,7 @@ public static partial class Strings
         ["Collapsed"] = "Eingeklappt",
         ["Expanded"] = "Ausgeklappt",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Öffne ihn über das Startmenü oder den Desktop, dann ist dein Spiel bereit",
+        ["Every check passed"] = "Alle Prüfungen bestanden",
+        ["Its own times and how many to keep"] = "Eigene Zeitpunkte und wie viele behalten werden",
     };
 }

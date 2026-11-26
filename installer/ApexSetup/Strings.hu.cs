@@ -2116,5 +2116,7 @@ public static partial class Strings
         ["Collapsed"] = "Összecsukva",
         ["Expanded"] = "Kibontva",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Nyisd meg a Start menüből vagy az asztalról, és a játékod kész",
+        ["Every check passed"] = "Minden ellenőrzés rendben",
+        ["Its own times and how many to keep"] = "Saját időpontok és hogy hányat tartson meg",
     };
 }

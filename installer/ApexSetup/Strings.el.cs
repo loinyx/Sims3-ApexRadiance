@@ -2115,5 +2115,7 @@ public static partial class Strings
         ["Collapsed"] = "Σύμπτυξη",
         ["Expanded"] = "Ανάπτυξη",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Άνοιξέ το από το μενού Έναρξη ή την επιφάνεια εργασίας και το παιχνίδι σου είναι έτοιμο",
+        ["Every check passed"] = "Όλοι οι έλεγχοι πέρασαν",
+        ["Its own times and how many to keep"] = "Δικές του ώρες και πόσα να κρατά",
     };
 }

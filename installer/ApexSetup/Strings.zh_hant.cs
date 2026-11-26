@@ -2082,5 +2082,7 @@ public static partial class Strings
         ["Collapsed"] = "已摺疊",
         ["Expanded"] = "已展開",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "從開始功能表或桌面開啟它，你的遊戲就準備好了",
+        ["Every check passed"] = "所有檢查均已通過",
+        ["Its own times and how many to keep"] = "自己的時間和保留數量",
     };
 }

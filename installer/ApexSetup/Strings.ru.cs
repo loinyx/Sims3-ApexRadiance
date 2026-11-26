@@ -2102,5 +2102,7 @@ public static partial class Strings
         ["Collapsed"] = "Свёрнуто",
         ["Expanded"] = "Развёрнуто",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Откройте его из меню «Пуск» или с рабочего стола, и игра готова",
+        ["Every check passed"] = "Все проверки пройдены",
+        ["Its own times and how many to keep"] = "Свои моменты и сколько хранить",
     };
 }

@@ -2104,5 +2104,7 @@ public static partial class Strings
         ["Collapsed"] = "접힘",
         ["Expanded"] = "펼쳐짐",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "시작 메뉴나 바탕 화면에서 열면 게임 준비가 끝납니다",
+        ["Every check passed"] = "모든 검사 통과",
+        ["Its own times and how many to keep"] = "자체 시점과 보관할 개수",
     };
 }

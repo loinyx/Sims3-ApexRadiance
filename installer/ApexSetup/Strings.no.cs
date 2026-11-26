@@ -2110,5 +2110,7 @@ public static partial class Strings
         ["Collapsed"] = "Skjult",
         ["Expanded"] = "Utvidet",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Åpne den fra Start-menyen eller skrivebordet, så er spillet ditt klart",
+        ["Every check passed"] = "Alle kontroller bestått",
+        ["Its own times and how many to keep"] = "Egne tidspunkter og hvor mange som beholdes",
     };
 }

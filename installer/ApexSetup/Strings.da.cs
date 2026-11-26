@@ -2104,5 +2104,7 @@ public static partial class Strings
         ["Collapsed"] = "Skjult",
         ["Expanded"] = "Udvidet",
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Åbn den fra menuen Start eller skrivebordet, så er dit spil klar",
+        ["Every check passed"] = "Alle tjek bestået",
+        ["Its own times and how many to keep"] = "Egne tidspunkter og hvor mange der gemmes",
     };
 }
