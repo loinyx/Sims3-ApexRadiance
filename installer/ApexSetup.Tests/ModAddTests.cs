@@ -3,7 +3,7 @@ using System.Text;
 using ApexSetup;
 
 // Adding files: each kind to its own place, what is already there (identical, another version, inside a merge), archives as
-// untrusted input (nested, a bomb, a false name, programs), the temporary files gone, Undo, and worlds with their plan.
+// untrusted input (nested, a bomb, a false name, programs), the temporary files gone, Undo, and worlds and world sets.
 static class ModAddTests
 {
     const uint Xml = 0x0333406C, Export = 0x05ED1226, Lot = 0x04F66BCC, Family = 0x062853A8, S3sa = 0x073FAA07, Names = 0x0166038C;
@@ -61,7 +61,7 @@ static class ModAddTests
                 && Of("House.package") is { Household: false } h && h.Added == Path.Combine(docs, "Library", "House.package")
                 && Of("Smiths.package") is { Household: true } s3 && s3.Added == Path.Combine(docs, "Library", "Smiths.package")
                 && Of("Town.world") is { Place: AddPlace.Worlds, Add: true, Added: null },
-                "add: a mod to Mods, a Sim to SavedSims, a lot and a family to Library, a world to the game's Worlds");
+                "add: a mod to Mods, a Sim to SavedSims, a lot and a family to Library, a world to InstalledWorlds");
             check(!ModAdd.IsLibrary(Dbpf.Index(Put("bundle.package", Pkg((Export, 1, "x"), (Export, 2, "x"), (Lot, 1, "l"), (Lot, 2, "l")))))
                 && !ModAdd.IsLibrary(Dbpf.Index(Put("script.package", Pkg((Export, 1, "x"), (Lot, 1, "l"), (S3sa, 1, "s")))))
                 && !ModAdd.IsLibrary(Dbpf.Index(Put("plain.package", Pkg((Lot, 1, "l"))))),
@@ -215,45 +215,72 @@ static class ModAddTests
             try { ModAdd.Open(game, docs, "Packages", [seven, Path.Combine(drop, "pack.zip")], list(), null, new CancellationToken(true)); } catch (OperationCanceledException) { canceled = true; }
             check(canceled && Temps() == temps, $"add: nothing temporary is left, canceled or not ({Temps()} of {temps})");
 
-            // worlds: the plan never takes a name in use, and what the administrator copy is given is checked again there
-            var worlds = ModAdd.WorldsDir(game);
-            Directory.CreateDirectory(worlds);
+            // worlds: into Documents\...\InstalledWorlds, never over a file; one of a name in use gets " (2)"
+            var worlds = ModAdd.WorldsDir(docs);
+            var gameWorlds = ModAdd.GameWorldsDir(game);
             var town = Put("Town.world", Pkg((Export, 1, "x"), (Export, 2, "y")));
             using (var add = Open(town))
             {
-                var plan = add.WorldPlan(add.Items);
-                ModAdd.AddWorlds(game, plan);
-                add.WorldsDone(add.Items, plan);
-                check(add.Items[0].Added == Path.Combine(worlds, "Town.world") && !ModAdd.WorldsNeedAdmin(game), "add: a world goes to the game's Worlds folder");
+                add.AddWorlds(add.Items);
+                check(add.Items[0].Added == Path.Combine(worlds, "Town.world") && !Directory.Exists(gameWorlds), "add: a world goes to InstalledWorlds, not the game's folder");
             }
             using (var add = Open(town, Put(@"v2\Town.world", Pkg((Export, 1, "x"), (Export, 2, "other")))))
             {
                 check(add.Items[0] is { SameAs: "Town.world", Add: false } && add.Items[1] is { Other: not null, CanReplace: false, Add: false }, "add: a world already there is told, and one of its name never replaces it");
-                var plan = add.WorldPlan([add.Items[1]]);
-                check(plan["name.0"] == "Town (2).world", "add: a second world of the same name gets \" (2)\"");
-                bool Refused(string key, string value)
-                {
-                    try { ModAdd.AddWorlds(game, new Dictionary<string, string>(plan) { [key] = value }); return false; }
-                    catch (Exception e) when (e is SetupException or IOException) { return true; }
-                }
-                var bad = Put("bad.world", "not a package at all"u8.ToArray());
-                check(Refused("name.0", @"..\..\Town (2).world") && Refused("name.0", "Town.exe") && Refused("name.0", "Town.world") && Refused("sha.0", "00") && Refused("file.0", bad)
-                    && Directory.GetFiles(worlds).Length == 1 && !File.Exists(Path.Combine(game.Root, "GameData", "Shared", "Town (2).world")),
-                    "add: a world plan with a path, another type, a name in use or other bytes is refused, and nothing is left");
+                add.AddWorlds([add.Items[1]]);
+                check(add.Items[1].Added == Path.Combine(worlds, "Town (2).world") && Directory.GetFiles(worlds).Length == 2, "add: a second world of the same name gets \" (2)\"");
             }
-            // (a Worlds folder that leads elsewhere; a link needs no rights as a junction)
-            Directory.Delete(worlds, true);
-            var elsewhere = Path.Combine(root, "elsewhere");
-            Directory.CreateDirectory(elsewhere);
-            using (var mk = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{worlds}\" \"{elsewhere}\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true })!) mk.WaitForExit();
-            if (Directory.Exists(worlds))
+            Directory.CreateDirectory(gameWorlds);
+            File.WriteAllBytes(Path.Combine(gameWorlds, "Bay.world"), Pkg((Export, 9, "game folder")));
+            using (var add = Open(Put("Bay.world", Pkg((Export, 9, "mine")))))
             {
-                var refused = false;
-                using (var add = Open(town))
-                    try { ModAdd.AddWorlds(game, add.WorldPlan(add.Items)); } catch (SetupException) { refused = true; }
-                check(refused && Directory.GetFiles(elsewhere).Length == 0, "add: nothing is written through a Worlds folder that is a link");
-                Directory.Delete(worlds);
+                add.AddWorlds(add.Items);
+                check(add.Items[0] is { Other: not null } && add.Items[0].Added == Path.Combine(worlds, "Bay (2).world"), "add: a name in the game's Worlds folder counts as taken too");
             }
+
+            // a world set: one archive with a *.worldset.json; every world under its own name, the set file beside them
+            const string SetJson = """{ "main": "Isle.world", "parts": ["Isle_r00_00.world", "Isle_r01_00.world"] }""";
+            byte[] W(string text) => Pkg((Export, 1, text), (Lot, 2, text));
+            var setZip = Zip("isle.zip", ("Isle/Isle.worldset.json", Encoding.UTF8.GetBytes(SetJson)), ("Isle/Isle.world", W("main")), ("Isle/Isle_r00_00.world", W("r00")), ("Isle/Isle_r01_00.world", W("r01")));
+            using (var add = Open(setZip))
+            {
+                var set = add.Items.Where(i => i.Set is not null).ToList();
+                // (the player ticks one: the set goes whole)
+                add.AddWorlds([set[1]]);
+                check(set.Count == 3 && add.Items.Count == 3 && set.All(i => i.Added == Path.Combine(worlds, i.Name)) && File.ReadAllText(Path.Combine(worlds, "Isle.worldset.json")) == SetJson,
+                    "add: a world set goes in whole, names unchanged, its .worldset.json beside it | " + string.Join(" | ", add.Items.Select(i => i.Name + "=" + (i.Problem ?? i.Added))));
+            }
+            using (var add = Open(setZip))
+            {
+                add.AddWorlds(add.Items);
+                check(add.Items.All(i => i.SameAs is not null && i.Added == Path.Combine(worlds, i.Name)) && Directory.GetFiles(worlds).Length == 7, "add: a set already installed is told and left as it is");
+            }
+            var taken = Zip("cove.zip", ("Cove.worldset.json", Encoding.UTF8.GetBytes("{}")), ("Cove.world", W("cove")), ("Town.world", W("not the town")));
+            using (var add = Open(taken))
+            {
+                var refused = add.Items.All(i => i.Problem is { } p && p.StartsWith("A world of this set is already installed") && !i.Add);
+                add.AddWorlds(add.Items);
+                check(refused && !File.Exists(Path.Combine(worlds, "Cove.world")) && !File.Exists(Path.Combine(worlds, "Cove.worldset.json")) && !File.Exists(Path.Combine(worlds, "Town (3).world")),
+                    "add: a set with a name another world has is refused whole, never renamed");
+            }
+            using (var add = Open(Zip("reef.zip", ("Reef.worldset.json", Encoding.UTF8.GetBytes("{}")), ("Reef.world", W("reef")), ("Reef_r00_00.world", W("r")), ("Reef_r01_00.world", W("r1")))))
+            {
+                File.Delete(add.Items[2].File); // (a world of it can't be read when it is copied)
+                var failed = false;
+                try { add.AddWorlds(add.Items); } catch (Exception e) when (e is IOException or SetupException) { failed = true; }
+                check(failed && !Directory.EnumerateFiles(worlds, "Reef*").Any() && add.Items.All(i => i.Added is null), "add: a set that fails halfway leaves none of it");
+            }
+            // an archive of worlds may pass the 2 GB other archives are held to (here the test limit)
+            ModAdd.MaxBytes = 100_000;
+            var letters = new Random(1);
+            var noisy = new string(Enumerable.Range(0, 150_000).Select(_ => (char)('a' + letters.Next(26))).ToArray()); // (packs about 2:1, as a world does)
+            using (var add = Open(Zip("big-world.zip", ("Big.world", Pkg((Export, 1, noisy))))))
+                check(add.Items is [{ Name: "Big.world", Ok: true }], "add: an archive with a world is held to the free space, not the archive limit | " + string.Join(" | ", add.Items.Select(i => i.Name + "=" + i.Problem)));
+            using (var add = Open(Zip("bomb-world.zip", ("Bomb.world", Pkg((Export, 1, Encoding.ASCII.GetString(new byte[150_000])))))))
+                check(add.Items is [{ Name: "bomb-world.zip", Problem: { } p3 }] && p3.Contains("too big"), "add: an archive with a world that unpacks past 20 times its size is refused (a bomb)");
+            using (var add = Open(Zip("big-mod.zip", ("Big.package", Pkg((Xml, 1, Encoding.ASCII.GetString(new byte[150_000])))))))
+                check(add.Items is [{ Name: "big-mod.zip", Problem: { } p2 }] && p2.Contains("too big"), "add: an archive of mods past the limit is still refused");
+            ModAdd.MaxBytes = oldMax;
         }
         catch (Exception e) { check(false, "add threw: " + e); }
         finally

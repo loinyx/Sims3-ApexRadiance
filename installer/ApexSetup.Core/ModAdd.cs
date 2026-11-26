@@ -31,6 +31,7 @@ public sealed class AddItem
     public bool Replace { get; set; }
     public string? Added { get; set; }              // where it went
     public string? Replaced { get; set; }           // the file that went to the Recycle Bin for it
+    public string? Set { get; set; }                // a world of a world set: the set's *.worldset.json (ModAdd.AddWorlds)
 
     public bool Ok => Problem is null;
 }
@@ -41,7 +42,8 @@ public sealed class AddItem
 // (archives go to a temporary folder that Dispose deletes); Add copies to a temporary name, checks the copy against the
 // bytes that were inspected, and renames it into place; a file there is never written over.
 // Where each goes: the game reads mods from Mods, *.sim from Documents\...\SavedSims, the lots and families it exports from
-// Documents\...\Library (ExportBinSubdirName in Default.ini) and worlds from GameData\Shared\NonPackaged\Worlds.
+// Documents\...\Library (ExportBinSubdirName in Default.ini) and custom worlds from Documents\...\InstalledWorlds, where its
+// own launcher installs them (the game's GameData\Shared\NonPackaged\Worlds is read too, but needs an administrator).
 public sealed class ModAdd : IDisposable
 {
     public static readonly string[] Extensions = [".package", ".sim", ".world", ".zip", ".rar", ".7z"];
@@ -53,6 +55,9 @@ public sealed class ModAdd : IDisposable
     const string NothingText = "There is no mod, Sim, lot or world in it.";
     const string NotOpened = "The archive can't be opened. It may be damaged or need a password. Extract it, then add the folder.";
     const string TooBig = "The archive is too big to open here. Extract it, then add the folder.";
+    const string SetTaken = "A world of this set is already installed under its name. Remove it, then add the set.";
+    const string SetBroken = "A world of this set can't be added, so none of the set is.";
+    public const string SetExtension = ".worldset.json";
 
     public static long MaxBytes = ModConflicts.UnpackCap; // taken out of one archive (settable for tests)
 
@@ -64,6 +69,8 @@ public sealed class ModAdd : IDisposable
     CancellationToken _ct;
     long _bytesLeft;
     int _filesLeft;
+    string? _set; // the *.worldset.json of the archive being opened
+    readonly Dictionary<string, string> _setNames = new(); // each set's file (taken out) and its name
 
     public List<AddItem> Items { get; } = [];
     public string Folder => _folder; // (relative to Mods)
@@ -158,7 +165,7 @@ public sealed class ModAdd : IDisposable
     {
         // (an archive in an archive is opened, one in that is not)
         if (depth > 1) { Refuse(name, archive, "This archive is inside too many others. Extract it, then add it."); return; }
-        if (depth == 0) (_bytesLeft, _filesLeft) = (MaxBytes, ModConflicts.UnpackFiles);
+        if (depth == 0) (_bytesLeft, _filesLeft, _set) = (MaxBytes, ModConflicts.UnpackFiles, null);
         var before = Items.Count;
         string? why = null;
         try
@@ -179,16 +186,45 @@ public sealed class ModAdd : IDisposable
         // (an archive is added whole as its maker packed it, or not at all)
         if (why is not null) { Items.RemoveRange(before, Items.Count - before); Refuse(name, archive, why); }
         else if (Items.Count == before && depth == 0) Refuse(name, archive, NothingText);
+        // (the worlds of an archive with a *.worldset.json are one set)
+        else if (depth == 0 && _set is not null) foreach (var i in Items.Skip(before).Where(i => i.Place == AddPlace.Worlds)) i.Set = _set;
+    }
+
+    // A world can be larger than the 2 GB other archives are held to: an archive with one may unpack to WorldRatio times
+    // its own size (a decompression bomb packs far tighter), and only while the temporary folder's drive keeps 1 GB free.
+    const long WorldRatio = 20;
+    long WorldCap(string archive)
+    {
+        try { return Math.Max(MaxBytes, Math.Min(new FileInfo(archive).Length * WorldRatio, new DriveInfo(Path.GetPathRoot(_temp)!).AvailableFreeSpace - (1L << 30))); }
+        catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { return MaxBytes; }
+    }
+    static bool IsWorld(string name) => name.EndsWith(".world", StringComparison.OrdinalIgnoreCase);
+
+    // a set's file is taken out (a small JSON file; one past 1 MB is no set) and kept to be installed with its worlds
+    void TakeSet(Stream from, string name)
+    {
+        if (_set is not null) return; // (one set per archive)
+        if (!ModLibrary.SafeFileName(name)) { Engine.Log(new InvalidDataException($"world set {name}: not a plain file name, left out")); return; }
+        var to = Path.Combine(_temp, Guid.NewGuid().ToString("N") + SetExtension);
+        using (var f = new FileStream(to, FileMode.CreateNew, FileAccess.Write))
+        {
+            var buffer = new byte[1 << 16];
+            for (int n, left = 1 << 20; (n = from.Read(buffer)) > 0;) { if ((left -= n) < 0) return; f.Write(buffer, 0, n); }
+        }
+        _setNames[to] = name;
+        _set = to;
     }
 
     void Unzip(string zip, string archive, int depth)
     {
         using var z = ZipFile.OpenRead(zip);
         if ((_filesLeft -= z.Entries.Count) < 0) throw new TooBigException();
+        if (depth == 0 && z.Entries.Any(e => IsWorld(e.FullName))) _bytesLeft = WorldCap(zip);
         foreach (var e in z.Entries)
         {
             _ct.ThrowIfCancellationRequested();
             if (EntryName(e.FullName) is not { } name) continue;
+            if (depth == 0 && name.EndsWith(SetExtension, StringComparison.OrdinalIgnoreCase)) { using var s = e.Open(); TakeSet(s, name); continue; }
             var ext = Path.GetExtension(name).ToLowerInvariant();
             if (!Extensions.Contains(ext)) { Take("", name, archive, depth + 1, given: false); continue; } // (named, never taken out)
             if (e.IsEncrypted) throw new InvalidDataException("encrypted entry");
@@ -222,7 +258,9 @@ public sealed class ModAdd : IDisposable
     string? Unpack(string path, string archive, int depth)
     {
         if (_bytesLeft <= 0 || _filesLeft <= 0) throw new TooBigException();
-        var (dir, files, unknown) = ModConflicts.Extract(path);
+        // (the cap is taken once, before extraction uses up the free space it is measured against)
+        long? worldCap = null;
+        var (dir, files, unknown) = ModConflicts.Extract(path, names => depth == 0 && names.Any(IsWorld) ? (worldCap = WorldCap(path)).Value : ModConflicts.UnpackCap);
         if (dir is null)
         {
             Engine.Log(new InvalidDataException(unknown));
@@ -235,10 +273,13 @@ public sealed class ModAdd : IDisposable
         try { Fs.Retry(() => Directory.Move(dir, here)); }
         catch { DeleteFolder(dir); throw; }
         _filesLeft -= files.Count;
+        if (worldCap is { } cap) _bytesLeft = cap;
         _bytesLeft -= files.Sum(f => new FileInfo(Path.Combine(here, f)).Length);
         if (_bytesLeft < 0 || _filesLeft < 0) throw new TooBigException();
         foreach (var f in files)
-            if (EntryName(f) is { } name) Take(Path.Combine(here, f), name, archive, depth + 1, given: false);
+            if (EntryName(f) is not { } name) continue;
+            else if (depth == 0 && name.EndsWith(SetExtension, StringComparison.OrdinalIgnoreCase)) { using var s = File.OpenRead(Path.Combine(here, f)); TakeSet(s, name); }
+            else Take(Path.Combine(here, f), name, archive, depth + 1, given: false);
         return null;
     }
 
@@ -269,7 +310,7 @@ public sealed class ModAdd : IDisposable
             [AddPlace.Mods] = mods.Select(m => (m.Path, m.Size)).ToList(),
             [AddPlace.SavedSims] = FilesIn(Dir(AddPlace.SavedSims), "*.sim"),
             [AddPlace.Library] = FilesIn(Dir(AddPlace.Library), "*.package"),
-            [AddPlace.Worlds] = [.. FilesIn(Dir(AddPlace.Worlds), "*.world"), .. FilesIn(Path.Combine(_docs, "InstalledWorlds"), "*.world")],
+            [AddPlace.Worlds] = [.. FilesIn(Dir(AddPlace.Worlds), "*.world"), .. FilesIn(GameWorldsDir(_game), "*.world")],
         };
         var seen = new Dictionary<(AddPlace, string), string>();
         var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -296,6 +337,15 @@ public sealed class ModAdd : IDisposable
             else if (i.Place == AddPlace.Mods) i.OtherMerge = inMerges.FirstOrDefault(x => Same(Path.GetFileName(x.Original.Rel), i.Name)).Merge;
             if (i.Place == AddPlace.Mods && !i.CanReplace && TooLong(Path.Combine(Dir(AddPlace.Mods), i.Name))) (i.Problem, i.Add) = (LongText, false);
         }
+        // A set goes in whole under its own names: a world of it with a problem, or a name another world has, refuses all of
+        // it; one already there under its name is left as it is.
+        foreach (var set in Items.Where(i => i.Set is not null).GroupBy(i => i.Set))
+        {
+            var why = set.Any(i => !i.Ok) ? SetBroken : set.Any(i => i.Other is not null) ? SetTaken : null;
+            foreach (var i in set)
+                if (why is not null) (i.Problem, i.Add) = (i.Problem ?? why, false);
+                else if (i.SameAs is { } same && !Same(same, i.Name)) (i.SameAs, i.OtherMod, i.Add) = (null, null, true); // (the same bytes under another name do not stand for it)
+        }
     }
 
     // (a package's list of names and its store receipt are not content)
@@ -315,7 +365,7 @@ public sealed class ModAdd : IDisposable
     {
         AddPlace.SavedSims => Path.Combine(_docs, "SavedSims"),
         AddPlace.Library => Path.Combine(_docs, "Library"),
-        AddPlace.Worlds => WorldsDir(_game),
+        AddPlace.Worlds => WorldsDir(_docs),
         _ => ModLibrary.Under(_docs, _folder),
     };
 
@@ -382,62 +432,65 @@ public sealed class ModAdd : IDisposable
             if (i.Added is { } p && File.Exists(p) && Same(Hash(p), i.Sha)) ModMerge.Recycle(p);
     }
 
-    // ---------- worlds: in the game's own folder, where Windows asks for an administrator ----------
+    // ---------- worlds: into Documents\...\InstalledWorlds ----------
 
-    public static string WorldsDir(Game g) => Path.Combine(g.Root, "GameData", "Shared", "NonPackaged", "Worlds");
+    public static string WorldsDir(string docs) => Path.Combine(docs, "InstalledWorlds");
+    public static string GameWorldsDir(Game g) => Path.Combine(g.Root, "GameData", "Shared", "NonPackaged", "Worlds");
 
-    public static bool WorldsNeedAdmin(Game g) => !Elevation.IsElevated && !(Directory.Exists(WorldsDir(g)) && Elevation.CanWrite(WorldsDir(g)));
-
-    // what the administrator copy is given: each world's file, the name it takes and the hash of what the player saw
-    public Dictionary<string, string> WorldPlan(IReadOnlyList<AddItem> worlds)
-    {
-        var plan = new Dictionary<string, string>();
-        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int n = 0; n < worlds.Count; n++)
-        {
-            var name = worlds[n].Name;
-            for (int k = 2; File.Exists(Path.Combine(WorldsDir(_game), name)) || !taken.Add(name); k++) name = $"{Path.GetFileNameWithoutExtension(worlds[n].Name)} ({k}).world";
-            plan[$"name.{n}"] = name;
-            plan[$"file.{n}"] = worlds[n].File;
-            plan[$"sha.{n}"] = worlds[n].Sha;
-        }
-        return plan;
-    }
-
-    // Also run by the administrator copy, from a plan another program could have changed: only whole Sims 3 packages, under a
-    // plain *.world name, into this game's Worlds folder (none of it a link to another place), and never over a file.
-    public static void AddWorlds(Game g, IReadOnlyDictionary<string, string> plan)
+    // The worlds chosen, each a checked copy of what the player saw and never over a file. One on its own whose name is
+    // taken in either worlds folder gets " (k)" (saves go on using the world they were made in). A world set goes in whole,
+    // its *.worldset.json beside it, with every name unchanged, or not at all. Added says where each went; the first
+    // failure is thrown once the rest are done.
+    public void AddWorlds(IReadOnlyList<AddItem> worlds)
     {
         Engine.CheckWritable();
-        var dir = WorldsDir(g);
-        foreach (var d in new[] { "GameData", @"GameData\Shared", @"GameData\Shared\NonPackaged", @"GameData\Shared\NonPackaged\Worlds" }.Select(d => Path.Combine(g.Root, d)))
-            if (Directory.Exists(d) && File.GetAttributes(d).HasFlag(FileAttributes.ReparsePoint)) throw new SetupException("The game's Worlds folder leads to another place, so nothing was added to it.");
+        var dir = Dir(AddPlace.Worlds);
+        Directory.CreateDirectory(dir);
+        bool Taken(string name) => File.Exists(Path.Combine(dir, name)) || File.Exists(Path.Combine(GameWorldsDir(_game), name));
         Exception? first = null;
-        for (int n = 0; plan.TryGetValue($"name.{n}", out var name); n++)
+        foreach (var i in worlds.Where(w => w.Set is null && w.Ok && w.Place == AddPlace.Worlds))
             try
             {
-                if (!ModLibrary.SafeFileName(name) || !name.EndsWith(".world", StringComparison.OrdinalIgnoreCase)) throw new SetupException("That name can't be used for a file or folder.");
-                if (!plan.TryGetValue($"file.{n}", out var file) || !plan.TryGetValue($"sha.{n}", out var sha)) throw new SetupException("The file could not be read.");
-                if (File.Exists(Path.Combine(dir, name))) throw new SetupException("A file with that name already exists here.");
-                Directory.CreateDirectory(dir);
-                var part = Copy(file, dir, sha);
+                var name = i.Name;
+                for (var k = 2; Taken(name); k++) name = $"{Path.GetFileNameWithoutExtension(i.Name)} ({k}).world";
+                i.Added = Place(i, dir, name);
+            }
+            catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); first ??= e; }
+        foreach (var set in Items.Where(i => i.Set is not null && worlds.Any(w => w.Set == i.Set && w.Ok)).GroupBy(i => i.Set!))
+            try
+            {
+                if (set.Any(i => !i.Ok)) throw new SetupException(SetBroken);
+                var json = Path.Combine(dir, _setNames[set.Key]);
+                // (a world of the set already there under its name, the same bytes, stays as it is)
+                string? Has(AddItem i) => new[] { dir, GameWorldsDir(_game) }.Select(d => Path.Combine(d, i.Name)).FirstOrDefault(p => File.Exists(p) && Same(Hash(p), i.Sha));
+                var todo = set.Where(i => Has(i) is null).ToList();
+                if (todo.Any(i => Taken(i.Name)) || File.Exists(json) && !Same(Hash(json), Hash(set.Key))) throw new SetupException(SetTaken);
+                var added = new List<string>();
                 try
                 {
-                    if (ModInstall.PackageProblems(part).FirstOrDefault() is { } bad) throw new SetupException(bad);
-                    Fs.Retry(() => File.Move(part, Path.Combine(dir, name)));
+                    foreach (var i in todo) added.Add(Place(i, dir, i.Name));
+                    if (!File.Exists(json)) { var part = Copy(set.Key, dir, Hash(set.Key)); Fs.Retry(() => File.Move(part, json)); added.Add(json); }
                 }
-                finally { TryDelete(part); }
+                catch { foreach (var a in added) TryDelete(a); throw; }
+                foreach (var i in set) i.Added = Has(i);
             }
-            catch (Exception e) { Engine.Log(e); first ??= e; }
+            catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException or KeyNotFoundException) { Engine.Log(e); first ??= e; }
         if (first is not null) throw first;
     }
 
-    // which of the plan's worlds are there now, read back
-    public void WorldsDone(IReadOnlyList<AddItem> worlds, IReadOnlyDictionary<string, string> plan)
+    // a checked copy under its name; a whole Sims 3 package, or nothing
+    static string Place(AddItem i, string dir, string name)
     {
-        for (int n = 0; n < worlds.Count; n++)
-            try { if (Path.Combine(WorldsDir(_game), plan[$"name.{n}"]) is var p && File.Exists(p) && Same(Hash(p), worlds[n].Sha)) worlds[n].Added = p; }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        if (!ModLibrary.SafeFileName(name)) throw new SetupException("That name can't be used for a file or folder.");
+        var to = Path.Combine(dir, name);
+        var part = Copy(i.File, dir, i.Sha);
+        try
+        {
+            if (ModInstall.PackageProblems(part).FirstOrDefault() is { } bad) throw new SetupException(bad);
+            Fs.Retry(() => File.Move(part, to));
+            return to;
+        }
+        finally { TryDelete(part); }
     }
 
     // ---------- files ----------

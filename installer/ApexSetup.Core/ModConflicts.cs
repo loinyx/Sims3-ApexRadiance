@@ -545,8 +545,9 @@ public static partial class ModConflicts
         return o;
     };
 
-    // the extracted folder and its files ('/' names, sorted), or why not
-    public static (string? Dir, List<string> Files, string? Unknown) Extract(string archive)
+    // the extracted folder and its files ('/' names, sorted), or why not. capOf: the byte cap for these entry names
+    // (UnpackCap without it)
+    public static (string? Dir, List<string> Files, string? Unknown) Extract(string archive, Func<IReadOnlyList<string>, long>? capOf = null)
     {
         var tools = Extractors();
         var hint = tools.Any(t => t.Kind == "7z") ? "" : $"; 7-Zip may read it ({SevenZipInstall}), then scan again";
@@ -560,12 +561,13 @@ public static partial class ModConflicts
             if (entries.FirstOrDefault(x => !SafeName(x.Name) || x.Type is 'l' or 'h') is { Name: not null } bad)
                 return (null, new(), $"archive refused: unsafe entry \"{(bad.Name.Length > 80 ? bad.Name[..80] : bad.Name)}\" (absolute path, '..' or link)");
             if (entries.Count > UnpackFiles) return (null, new(), $"archive refused: {entries.Count} entries (cap {UnpackFiles})");
-            if (entries.Sum(x => Math.Max(0, x.Size)) > UnpackCap) return (null, new(), $"archive refused: over {UnpackCap >> 30} GB unpacked");
+            var cap = capOf?.Invoke(entries.Select(x => x.Name).ToList()) ?? UnpackCap;
+            if (entries.Sum(x => Math.Max(0, x.Size)) > cap) return (null, new(), $"archive refused: over {cap >> 30} GB unpacked");
             var dir = Directory.CreateTempSubdirectory("modscan-").FullName;
             try
             {
-                if (kind == "tar") Run(exe, "-xf", archive, "-C", dir);
-                else Run(exe, "x", "-y", "-snl-", "-o" + dir, "--", archive);
+                if (kind == "tar") RunCapped(exe, dir, cap, "-xf", archive, "-C", dir);
+                else RunCapped(exe, dir, cap, "x", "-y", "-snl-", "-o" + dir, "--", archive);
                 var files = new List<string>();
                 long total = 0;
                 void Walk(string d)
@@ -578,10 +580,11 @@ public static partial class ModConflicts
                     }
                 }
                 Walk(dir);
-                if (total > UnpackCap || files.Count > UnpackFiles) { Remove(dir); return (null, new(), "archive refused: over the size or file cap after extraction"); }
+                if (total > cap || files.Count > UnpackFiles) { Remove(dir); return (null, new(), "archive refused: over the size or file cap after extraction"); }
                 files.Sort(StringComparer.Ordinal);
                 return (dir, files, null);
             }
+            catch (UnpackCapException) { Remove(dir); return (null, new(), "archive refused: over the size cap while extracting"); }
             catch (Exception e) when (e is InvalidDataException or IOException or System.ComponentModel.Win32Exception)
             {
                 Remove(dir);
@@ -621,7 +624,20 @@ public static partial class ModConflicts
         return o;
     }
 
-    static string Run(string exe, params string[] args)
+    // An extraction whose files pass cap bytes is stopped (the listing's sizes are the archive's word only): the folder is
+    // measured while the extractor runs and once after it ends.
+    public sealed class UnpackCapException() : IOException("over the size cap while extracting");
+    public static string RunCapped(string exe, string dir, long cap, params string[] args)
+    {
+        static long Size(string d) => Directory.EnumerateFiles(d, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint })
+            .Sum(f => { try { return new FileInfo(f).Length; } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return 0; } });
+        var o = Run(exe, () => Size(dir) > cap, args);
+        if (Size(dir) > cap) throw new UnpackCapException();
+        return o;
+    }
+
+    static string Run(string exe, params string[] args) => Run(exe, null, args);
+    static string Run(string exe, Func<bool>? over, params string[] args)
     {
         var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, CreateNoWindow = true };
         foreach (var a in args) psi.ArgumentList.Add(a);
@@ -629,7 +645,14 @@ public static partial class ModConflicts
         p.StandardInput.Close(); // (an encrypted archive fails instead of asking for a password)
         var err = p.StandardError.ReadToEndAsync();
         var outp = p.StandardOutput.ReadToEndAsync();
-        if (!p.WaitForExit(300_000)) { try { p.Kill(true); } catch (InvalidOperationException) { } throw new InvalidDataException($"{Path.GetFileName(exe)} timed out"); }
+        var until = DateTime.UtcNow.AddMinutes(5);
+        while (!p.WaitForExit(over is null ? 300_000 : 500))
+        {
+            var big = over?.Invoke() == true;
+            if (!big && over is not null && DateTime.UtcNow < until) continue;
+            try { p.Kill(true); p.WaitForExit(); } catch (InvalidOperationException) { }
+            throw big ? new UnpackCapException() : (Exception)new InvalidDataException($"{Path.GetFileName(exe)} timed out");
+        }
         if (p.ExitCode != 0) throw new InvalidDataException((err.Result.Trim() is { Length: > 0 } m ? m : outp.Result.Trim()).Split('\n')[0].Trim());
         return outp.Result;
     }
