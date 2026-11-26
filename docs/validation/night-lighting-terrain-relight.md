@@ -32,6 +32,7 @@ FPS or absence of visible flicker.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-25 | `02a40a7c` (release ASI) | `tools/ingame_runner` jobs `smoke` (ApexTest-Town, 5 min), `capture` and `night-lot-load` (on) on ApexTest-Night | All passed: 60 fps, p99 20.5 ms, no warning of a feature; F8 picture and video written; 20 lot jumps at night with no fault; 128 Apex shaders from the ASI, 0 compiled | RTX Remix bridge, Steam 1.67.2 |
 | 2026-11-12 | not committed (3.1.2 working tree) | LOD hold fixture (`run_lod_hold_checks.ps1`) | 42 passed, 0 failed; with the `LotGroundY` fallback removed, its check fails | None |
 | 2026-10-29 | `7eca05b` | Edit dispatch fixture, with a `RebuildActive` stub and its executable renamed (Windows asked to elevate a program named `dispatch_checks.exe`, which is why it was cancelled before) | 194 passed, 0 failed | None |
 | 2026-10-29 | `7eca05b` | Terrain queue fixture (`run_queue_checks.ps1`) | Does not compile: the paced full rebuild (`g_rb`, `StepRebuild`, `kSlowMs`) is not in its extracted code; with it added, 386 of 11,963 assertions fail on the release rules of chunks changed since. Not updated in this release | None |

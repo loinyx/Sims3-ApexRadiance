@@ -24,6 +24,12 @@ described in [features/installer.md](../features/installer.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-25 | `43c2f8c2` | `installer/ApexSetup.Tests` | All passed | none |
+| 2026-11-25 | `43c2f8c2` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `43c2f8c2` | `installer/ui-smoke/Run-UiSmoke.ps1` (full, dry run) | Every screen and step passed up to the language cycle; there the launcher closed (0xC000027B in Microsoft.UI.Xaml) after 15 to 20 changes of language while UI Automation read the window. The same happens on `6a272a14`. Sixty changes of language in a row without UI Automation, on Home and on Components, left it running | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `09c42079` | Layout tour (`APEX_LAUNCHER_AUDIT_TOUR`): nine screens at five window sizes, in the 21 languages | Texts cut short fixed: row details take up to three lines, the facts of a save and the profile's name wrap; what is left is the row of mod types, which scrolls | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `43c2f8c2` | `installer/ui-smoke/Run-ModsHarness.ps1` | 6 of 11 steps passed (turn off and on, tag, notes, rename and undo, start a hunt); the others look for the Set folder by an older name and fail from there | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `785921fc` to `43c2f8c2` | Published exe in a sandbox: every screen, the 18 dialogs, menus, messages and the install, dark and light, English and Portuguese | Rendered as expected; captures reviewed | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-25 | `5166d9cd` and the review fixes after it | `installer/ApexSetup.Tests` | All passed, with new checks of packages that look damaged and of files replaced between two plans of a merge | none |
 | 2026-11-25 | `5166d9cd` and the review fixes after it | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-25 | `5166d9cd` and the review fixes after it | Merge of 4000 generated packages (1.9 GB, NVMe): core run, and the launcher in a sandbox | Run 6.6 s to 3.4 s, plan again 1.3 s to 0.4 s, 234,857 progress reports to 53, peak 208 MB, same SHA-256; in the launcher 4.1.0's dialog answered again after about 8 minutes, this one stayed responsive and took 5.7 s | Windows 11, RTX 4070 Ti SUPER |
