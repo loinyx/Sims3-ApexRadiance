@@ -350,7 +350,8 @@ public sealed partial class MainWindow
         _defaultsFor = null;
         _modsLoaded = false;
         RefreshGame(); // (starts the full check too)
-        if (_step is Welcome or GameStep or WizardSettings && !FirstInstall) Show(Home); // (a first install finished in the administrator window)
+        // (the administrator window's Finish closes it; this window then opens on Home, as Finish does here)
+        if (!FirstInstall) Show(Home);
         else RefreshAll();
         return false;
     }

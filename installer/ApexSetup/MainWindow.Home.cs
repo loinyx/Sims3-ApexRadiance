@@ -330,8 +330,10 @@ public sealed partial class MainWindow
         // the light around the crystal, round, over the glass's edge rather than under it (glass would blur it into a block)
         var tint = StateTint(255);
         var fade = new Microsoft.UI.Xaml.Media.RadialGradientBrush();
+        // (on the picture the light has to carry over its colours; on the plain card the same strength blooms into a block)
+        var peak = photo ? (calm ? 0xC0 : 0xE8) : (calm ? 0x38 : 0x50);
         foreach (var (at, share) in new[] { (0.0, 1.0), (0.25, 0.8), (0.45, 0.48), (0.65, 0.2), (0.82, 0.06), (1.0, 0.0) })
-            fade.GradientStops.Add(new GradientStop { Offset = at, Color = Alpha(tint, (byte)(share * (calm ? 0xC0 : 0xE8))) });
+            fade.GradientStops.Add(new GradientStop { Offset = at, Color = Alpha(tint, (byte)(share * peak)) });
         var pulse = new ScaleTransform();
         var glow = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = light, Height = light, Fill = fade, RenderTransform = pulse, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
         // (a canvas, so nothing cuts the light at a box's edge)
