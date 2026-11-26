@@ -159,6 +159,7 @@ static class SavesTests
             Whole(check, docs, recycled);
             Namesakes(check, Path.Combine(root, "Docs2"), recycled);
             Backups(check, Path.Combine(root, "Docs3"), recycled);
+            Companions(check, Path.Combine(root, "Docs4"), recycled);
             if (Environment.GetEnvironmentVariable("APEX_SAVES_REAL") is { Length: > 0 } real) Real(check, real, Path.Combine(root, "Real"), recycled);
         }
         catch (Exception e) { check(false, "saves: exception " + e); }
@@ -849,6 +850,126 @@ static class SavesTests
         var files = Snap(s.Dir);
         ok &= Same(files.ToDictionary(x => x.Key, x => x.Value[..64]), Snap(SaveCopies.Restore(docs, home, point).Dir).ToDictionary(x => x.Key, x => x.Value[..64]));
         return ok;
+    }
+
+    // Data a mod keeps for each save outside Saves, declared in Save companions (Apex Launcher): backups, restore, rename,
+    // duplicate, delete, export and import carry it; a declaration that points into Saves or Mods, or a zip whose names
+    // leave the place, writes nothing.
+    static void Companions(Action<bool, string> check, string docs, string recycled)
+    {
+        var decl = SaveCompanions.DeclDir(docs);
+        Directory.CreateDirectory(decl);
+        const string Good = """{ "paths": ["ModData/pages/{key}", "ModData/far/{key}.far"], "key": { "allowed": "A-Za-z0-9._-", "replace": "_", "maxLength": 100 } }""";
+        File.WriteAllText(Path.Combine(decl, "pages.json"), Good);
+        File.WriteAllText(Path.Combine(decl, "insaves.json"), """{ "paths": ["Saves/{key}", "Saves backups (Apex Launcher)/{key}"] }""");
+        File.WriteAllText(Path.Combine(decl, "outside.json"), """{ "paths": ["../{key}"] }""");
+        File.WriteAllText(Path.Combine(decl, "nokey.json"), """{ "paths": ["ModData/all"] }""");
+        File.WriteAllText(Path.Combine(decl, "broken.json"), "{ paths");
+        var logged = new List<string>();
+        var oldLog = Engine.Log;
+        Engine.Log = e => logged.Add(e.Message);
+        try
+        {
+            var of = SaveCompanions.Of(docs);
+            check(of.Count == 1 && of[0].Mod == "pages" && logged.Count(l => l.StartsWith("save companion")) == 4,
+                "companions: only a declaration with {key} in places outside Saves and Mods is used, the rest are logged");
+
+            string Pages(string key) => Path.Combine(docs, "ModData", "pages", key);
+            string Far(string key) => Path.Combine(docs, "ModData", "far", key + ".far");
+            Dictionary<string, string> Data(string key) => Directory.Exists(Pages(key))
+                ? Directory.EnumerateFiles(Pages(key), "*", SearchOption.AllDirectories).ToDictionary(f => Path.GetRelativePath(Pages(key), f), Sha, StringComparer.OrdinalIgnoreCase)
+                    .Append(new("far", File.Exists(Far(key)) ? Sha(Far(key)) : "-")).ToDictionary(x => x.Key, x => x.Value)
+                : new() { ["far"] = File.Exists(Far(key)) ? Sha(Far(key)) : "-" };
+            void Write(string path, string text) { Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllText(path, text); }
+
+            var s = Make(docs, "Town");
+            Write(Path.Combine(Pages("Town.sims3"), "a.page"), "page a");
+            Write(Path.Combine(Pages("Town.sims3"), "sub", "b.page"), "page b");
+            Write(Far("Town.sims3"), "far sims");
+            var was = Data("Town.sims3");
+
+            // a backup holds them beside the save's folder, and the backup still checks and lists as before
+            var zip = Saves.Backup(s, docs);
+            using (var z = ZipFile.OpenRead(zip))
+                check(z.GetEntry("apex-companions/pages/ModData/pages/{key}/a.page") is not null && z.GetEntry("apex-companions/pages/ModData/pages/{key}/sub/b.page") is not null
+                      && z.GetEntry("apex-companions/pages/ModData/far/{key}.far") is not null && z.Entries.Any(e => e.FullName == "Town.sims3/Meta.data"),
+                    "companions: a backup holds the save's folder and each declared place under apex-companions/<mod>/");
+            var point = SaveCopies.Timeline(docs, s).First(p => p.Path == zip);
+            var verified = !Throws<SetupException>(() => SaveBackups.Verify(point));
+
+            // restore over the save: the data goes back to that day; what was there is in the "before restoring" backup
+            File.WriteAllText(Path.Combine(Pages("Town.sims3"), "a.page"), "page a, later");
+            Write(Path.Combine(Pages("Town.sims3"), "c.page"), "page c, later");
+            File.Delete(Far("Town.sims3"));
+            var later = Data("Town.sims3");
+            s = SaveCopies.Restore(docs, s, point);
+            var before = SaveCopies.Timeline(docs, s).First(p => p.Note == SaveCopies.BeforeRestore);
+            using (var z = ZipFile.OpenRead(before.Path)) verified &= z.GetEntry("apex-companions/pages/ModData/pages/{key}/c.page") is not null;
+            check(verified && Same(was, Data("Town.sims3")) && !Directory.Exists(Path.Combine(decl, ".apex-work")) && Directory.GetFiles(Path.Combine(docs, "ModData", "pages")).Length == 0
+                  && Directory.GetDirectories(Path.Combine(docs, "ModData", "pages")).Length == 1,
+                "companions: a restore puts the data back as it was, and the data it replaced is in the backup made before it");
+            s = SaveCopies.Restore(docs, s, before);
+            check(Same(later, Data("Town.sims3")), "companions: Undo of the restore brings the later data back");
+            s = SaveCopies.Restore(docs, s, point);
+
+            // a backup made before the mod declared anything leaves its data as it is
+            File.Move(Path.Combine(decl, "pages.json"), Path.Combine(decl, "pages.off"));
+            var plain = Saves.Backup(s, docs);
+            File.Move(Path.Combine(decl, "pages.off"), Path.Combine(decl, "pages.json"));
+            File.WriteAllText(Path.Combine(Pages("Town.sims3"), "a.page"), "page a, newer");
+            var newer = Data("Town.sims3");
+            s = SaveCopies.Restore(docs, s, SaveCopies.Timeline(docs, s).First(p => p.Path == plain));
+            check(Same(newer, Data("Town.sims3")), "companions: a backup without the data leaves the data there as it is");
+            s = SaveCopies.Restore(docs, s, point);
+
+            // opened as another save: its own copy under its own key ("Town (2).sims3" -> "Town__2_.sims3")
+            var other = SaveCopies.RestoreAs(docs, s, point);
+            check(other.Name == "Town (2)" && Same(was, Data("Town__2_.sims3")) && Same(was, Data("Town.sims3")), "companions: a backup opened as another save gets its own copy of the data");
+
+            // rename moves it, duplicate copies it, delete recycles only the deleted save's
+            var renamed = SaveCopies.Rename(docs, other, "Harbour");
+            check(Same(was, Data("Harbour.sims3")) && !Directory.Exists(Pages("Town__2_.sims3")) && !File.Exists(Far("Town__2_.sims3")), "companions: a rename moves the data to the new key");
+            var twin = SaveCopies.Duplicate(docs, renamed, "Twin");
+            check(Same(was, Data("Twin.sims3")) && Same(was, Data("Harbour.sims3")), "companions: a duplicate gets its own copy");
+            var bin = Directory.GetFileSystemEntries(recycled).Length;
+            SaveCopies.Delete(twin);
+            check(!Directory.Exists(Pages("Twin.sims3")) && !File.Exists(Far("Twin.sims3")) && Directory.GetFileSystemEntries(recycled).Length == bin + 3 && Same(was, Data("Harbour.sims3")),
+                "companions: a deleted save's data goes to the Recycle Bin with it; the other saves' stays");
+
+            // two names one key rule makes alike share the place: deleting or renaming one leaves it to the other
+            var (one, two) = (Make(docs, "a b"), Make(docs, "a_b"));
+            Write(Path.Combine(Pages("a_b.sims3"), "a.page"), "shared");
+            SaveCopies.Delete(one);
+            var kept = Directory.Exists(Pages("a_b.sims3"));
+            SaveCopies.Rename(docs, SaveCopies.Duplicate(docs, two, "a+b"), "Third");
+            check(kept && Directory.Exists(Pages("a_b.sims3")) && !Directory.Exists(Pages("Third.sims3")), "companions: data two saves share is never deleted or moved away from one of them");
+
+            // export and import: across machines the data arrives with the save; an import never writes over another's
+            var export = Path.Combine(Path.GetDirectoryName(docs)!, "town-export.zip");
+            SaveBackups.Export(SaveCopies.Timeline(docs, s).Last(), export);
+            var docs2 = Path.Combine(Path.GetDirectoryName(docs)!, "DocsOther");
+            Directory.CreateDirectory(SaveCompanions.DeclDir(docs2));
+            File.WriteAllText(Path.Combine(SaveCompanions.DeclDir(docs2), "pages.json"), Good);
+            var arrived = SaveBackups.Import(docs2, export);
+            var data2 = Directory.EnumerateFiles(Path.Combine(docs2, "ModData", "pages", "Town.sims3"), "*", SearchOption.AllDirectories).Count();
+            var here = SaveBackups.Import(docs, export);
+            check(arrived.Name == "Town" && data2 == 2 && File.Exists(Path.Combine(docs2, "ModData", "far", "Town.sims3.far")) && here.Name == "Town (2)" && Same(was, Data("Town__2_.sims3")) && Same(was, Data("Town.sims3")),
+                "companions: an exported save imported elsewhere brings its data, under the key of the name it gets");
+
+            // a zip from anywhere: names that leave the place, or a mod not declared here, write nothing
+            var evil = Path.Combine(Path.GetDirectoryName(docs)!, "evil.zip");
+            using (var z = ZipFile.Open(evil, ZipArchiveMode.Create))
+            {
+                foreach (var f in Directory.EnumerateFiles(s.Dir)) z.CreateEntryFromFile(f, "Evil.sims3/" + Path.GetFileName(f));
+                using (var o = new StreamWriter(z.CreateEntry("apex-companions/other/ModData/x/{key}/y.txt").Open())) o.Write("x");
+                using (var o = new StreamWriter(z.CreateEntry("apex-companions/pages/ModData/pages/{key}/../../../../../../../../escaped.txt").Open())) o.Write("x");
+            }
+            var evilSave = SaveBackups.Import(docs, evil);
+            check(evilSave.Name == "Evil" && !File.Exists(Path.Combine(Path.GetDirectoryName(docs)!, "escaped.txt")) && !File.Exists(Path.Combine(docs, "escaped.txt")) && !Directory.Exists(Pages("Evil.sims3"))
+                  && !Directory.Exists(Path.Combine(docs, "ModData", "x")) && !Directory.Exists(Path.Combine(decl, ".apex-work")),
+                "companions: an imported zip whose names leave the place, or that holds an undeclared mod's data, writes none of it");
+        }
+        finally { Engine.Log = oldLog; }
     }
 
     // every save of a real Saves folder (a COPY: it is only read), each copied to the temporary folder first

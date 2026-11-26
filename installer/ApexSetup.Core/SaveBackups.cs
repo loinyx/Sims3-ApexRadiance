@@ -349,6 +349,8 @@ public static class SaveBackups
     public static void Export(SavePoint p, string to)
     {
         Engine.CheckDry();
+        // (the save as it is takes mods' data along; the game's previous version is older than that data)
+        if (p.Kind == CopyKind.Now) { SaveCopies.Zip(p.Path, to, null, overwrite: true, companions: SaveCompanions.Files(Path.GetDirectoryName(Path.GetDirectoryName(p.Path)!)!, Path.GetFileNameWithoutExtension(p.Path))); return; }
         if (p.Kind != CopyKind.Launcher) { SaveCopies.Zip(p.Path, to, null, overwrite: true); return; }
         if (Path.GetFullPath(to).Equals(Path.GetFullPath(p.Path), StringComparison.OrdinalIgnoreCase)) return;
         var part = to + ".part";
@@ -369,7 +371,7 @@ public static class SaveBackups
         try
         {
             using var z = ZipFile.OpenRead(zip);
-            var worlds = z.Entries.Where(e => e.Name.EndsWith(".nhd", StringComparison.OrdinalIgnoreCase)).Select(e => e.FullName.Replace('\\', '/')).Select(n => n[..(n.LastIndexOf('/') + 1)]).Distinct().ToList();
+            var worlds = z.Entries.Where(e => e.Name.EndsWith(".nhd", StringComparison.OrdinalIgnoreCase) && !SaveCompanions.IsCompanion(e.FullName)).Select(e => e.FullName.Replace('\\', '/')).Select(n => n[..(n.LastIndexOf('/') + 1)]).Distinct().ToList();
             if (worlds.Count == 0) throw new SetupException("There is no save in this file.");
             if (worlds.Count > 1) throw new SetupException("This file has more than one save. Put each one in its own zip.");
             top = worlds[0];
@@ -377,6 +379,8 @@ public static class SaveBackups
         }
         catch (InvalidDataException e) { Engine.Log(e); throw new SetupException("This file can't be opened. Choose a .zip file."); }
         foreach (var end in new[] { ".backup", ".sims3" }) if (name.EndsWith(end, StringComparison.OrdinalIgnoreCase)) name = name[..^end.Length];
-        return SaveCopies.Bring(docs, name, to => SaveCopies.Unzip(zip, to, ct, top));
+        var made = SaveCopies.Bring(docs, name, to => SaveCopies.Unzip(zip, to, ct, top));
+        SaveCopies.Companions(() => SaveCompanions.FromZip(docs, zip, made.Name, false, ct));
+        return made;
     }
 }

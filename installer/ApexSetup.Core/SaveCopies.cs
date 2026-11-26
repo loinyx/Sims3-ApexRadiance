@@ -64,7 +64,7 @@ public static class SaveCopies
     }
     static void Tidy(string root) => DropEmpty(WorkDir(root));
     // the drive a folder is really on (the Saves folder can be a link to another one)
-    static string Drive(string dir) => Path.GetPathRoot(Directory.ResolveLinkTarget(dir, true)?.FullName ?? Path.GetFullPath(dir))!;
+    internal static string Drive(string dir) => Path.GetPathRoot(Directory.ResolveLinkTarget(dir, true)?.FullName ?? Path.GetFullPath(dir))!;
     static string Work(string dir, string what)
     {
         var work = WorkDir(Path.GetDirectoryName(dir)!);
@@ -77,23 +77,25 @@ public static class SaveCopies
     // hash with what the zip gives back, then moved in. A save that changed meanwhile, a locked file or a full disk leaves
     // no zip.
     // check: each file compared with what the zip gives back. mods: the ones on, a list kept in the zip beside the save.
-    internal static void Zip(string dir, string zip, string? note, bool check = true, List<string>? mods = null, CancellationToken ct = default, bool overwrite = false)
+    // companions: the save's data kept by mods outside Saves (SaveCompanions.Files), in the zip beside the save's folder.
+    internal static void Zip(string dir, string zip, string? note, bool check = true, List<string>? mods = null, CancellationToken ct = default, bool overwrite = false,
+        List<(string Entry, string File)>? companions = null)
     {
         var part = zip + ".part";
         var top = Path.GetFileName(dir);
         string Name(string p) => top + "/" + Path.GetRelativePath(dir, p).Replace('\\', '/');
         try
         {
-            var files = Directory.EnumerateFiles(dir, "*", Deep).Where(f => !Saves.Passing(f)).ToList();
+            var files = Directory.EnumerateFiles(dir, "*", Deep).Where(f => !Saves.Passing(f)).Select(f => (Entry: Name(f), File: f)).Concat(companions ?? []).ToList();
             File.Delete(part); // (one a closed launcher left)
             using (var z = ZipFile.Open(part, ZipArchiveMode.Create))
             {
                 z.Comment = note ?? "";
                 foreach (var d in Directory.EnumerateDirectories(dir, "*", Deep).Where(d => !Directory.EnumerateFileSystemEntries(d).Any())) z.CreateEntry(Name(d) + "/");
                 var buf = new byte[1 << 20];
-                foreach (var f in files)
+                foreach (var (name, f) in files)
                 {
-                    var entry = z.CreateEntry(Name(f), CompressionLevel.Fastest);
+                    var entry = z.CreateEntry(name, CompressionLevel.Fastest);
                     if (File.GetLastWriteTime(f) is { Year: >= 1980 and <= 2107 } day) entry.LastWriteTime = day;
                     using var from = Open(f);
                     using var o = entry.Open();
@@ -108,10 +110,10 @@ public static class SaveCopies
             using (var z = ZipFile.OpenRead(part))
             {
                 var same = z.Entries.Count(e => !e.FullName.EndsWith('/') && !SaveBackups.IsMods(e)) == files.Count;
-                foreach (var f in check ? files : [])
+                foreach (var (name, f) in check ? files : [])
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (!same || z.GetEntry(Name(f)) is not { } entry) { same = false; break; }
+                    if (!same || z.GetEntry(name) is not { } entry) { same = false; break; }
                     using var s = entry.Open();
                     using var of = Open(f);
                     same = Hash(s, ct) == Hash(of, ct);
@@ -204,9 +206,11 @@ public static class SaveCopies
         {
             using var z = ZipFile.OpenRead(zip);
             if (z.Entries.Count > MaxFiles) throw Bad("too many files");
-            // (the zip holds the save's folder at the top: its name is dropped, the save may have been renamed since)
+            // (the zip holds the save's folder at the top: its name is dropped, the save may have been renamed since. Mods'
+            // data beside it is SaveCompanions')
             var names = z.Entries.Select(e => e.FullName.Replace('\\', '/')).ToList();
-            var top = names.Count > 0 && names[0].IndexOf('/') is var cut and > 0 && names.All(n => n.StartsWith(names[0][..(cut + 1)], StringComparison.Ordinal)) ? cut + 1 : 0;
+            var own = names.Where(n => !SaveCompanions.IsCompanion(n)).ToList();
+            var top = own.Count > 0 && own[0].IndexOf('/') is var cut and > 0 && own.All(n => n.StartsWith(own[0][..(cut + 1)], StringComparison.Ordinal)) ? cut + 1 : 0;
             var root = Path.GetFullPath(to) + Path.DirectorySeparatorChar;
             Directory.CreateDirectory(to);
             long total = 0;
@@ -214,7 +218,7 @@ public static class SaveCopies
             for (var i = 0; i < names.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                if (only is not null && !names[i].StartsWith(only, StringComparison.Ordinal)) continue;
+                if (only is not null ? !names[i].StartsWith(only, StringComparison.Ordinal) : SaveCompanions.IsCompanion(names[i])) continue;
                 var rel = names[i][(only?.Length ?? top)..];
                 if (rel.Length == 0 || rel == SaveBackups.ModsName) continue;
                 var path = Path.GetFullPath(Path.Combine(to, rel));
@@ -244,7 +248,7 @@ public static class SaveCopies
     }
 
     // a folder copied whole, each file read back and compared
-    static void CopyDir(string from, string to, CancellationToken ct)
+    internal static void CopyDir(string from, string to, CancellationToken ct)
     {
         Directory.CreateDirectory(to);
         foreach (var d in Directory.EnumerateDirectories(from, "*", Deep)) Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, d)));
@@ -268,11 +272,12 @@ public static class SaveCopies
         lock (Gate)
         {
             string tmp = Work(s.Dir, "new"), old = Work(s.Dir, "old");
-            string? kept = null;
+            string? kept = null, mods = null;
             try
             {
                 if (from.Kind == CopyKind.Launcher) Unzip(from.Path, tmp, ct); else CopyDir(from.Path, tmp, ct);
                 if (!Directory.EnumerateFiles(tmp, "*.nhd").Any()) throw new SetupException("This save can't be used: {0}", "no world file in it");
+                if (from.Kind == CopyKind.Launcher) mods = SaveCompanions.Unpack(docs, from.Path, ct);
                 FailPoint("extract");
                 var here = Directory.Exists(s.Dir);
                 if (here) kept = Saves.Backup(s, docs, BeforeRestore);
@@ -290,11 +295,14 @@ public static class SaveCopies
             catch
             {
                 Drop(tmp);
+                if (mods is not null) Drop(mods);
                 // (nothing changed: the copy made for this restore is not a point anyone asked for)
                 if (kept is not null && Directory.Exists(s.Dir)) try { File.Delete(kept); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
                 Tidy(Path.GetDirectoryName(s.Dir)!);
                 throw;
             }
+            // (mods' data the backup has follows the save; what it replaces is in the zip just made too)
+            if (mods is not null) Companions(() => SaveCompanions.PutIn(docs, mods, s.Name, true));
             // (the folder that left is in the zip just made, whole and checked; one Windows can't take now goes at the next start)
             try { if (Directory.Exists(old)) Recycle(old); } catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); }
             Tidy(Path.GetDirectoryName(s.Dir)!);
@@ -308,6 +316,7 @@ public static class SaveCopies
     {
         Engine.CheckWritable();
         var made = Bring(docs, s.Name, to => { if (from.Kind == CopyKind.Launcher) Unzip(from.Path, to, ct); else CopyDir(from.Path, to, ct); });
+        if (from.Kind == CopyKind.Launcher) Companions(() => SaveCompanions.FromZip(docs, from.Path, made.Name, false, ct));
         try { if (made.Name != s.Name) SaveStars.Renamed(s.Name, made.Name, keep: true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); }
         return made;
     }
@@ -375,6 +384,7 @@ public static class SaveCopies
                     }
                 }
             }
+            SaveCompanions.Tidy(docs);
             // (a backup cut short; one being made is newer)
             if (Directory.Exists(Saves.BackupDir(docs)))
                 foreach (var f in Directory.EnumerateFiles(Saves.BackupDir(docs), "*.zip.part").Where(f => File.GetLastWriteTime(f) < DateTime.Now.AddDays(-1)).ToList()) File.Delete(f);
@@ -465,6 +475,7 @@ public static class SaveCopies
             var root = SavesDir(docs);
             name = name is null ? FreeName(root, s.Name, Kept(docs, root)) : NewName(docs, root, name);
             var copy = CopyAs(s.Dir, Path.Combine(root, name + ".sims3"), ct);
+            Companions(() => SaveCompanions.Copy(docs, s.Name, name, ct));
             try { SaveStars.Renamed(s.Name, name, keep: true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or SetupException) { Engine.Log(e); }
             return copy;
         }
@@ -531,6 +542,7 @@ public static class SaveCopies
         });
         Try(() => BackupChoices.Change(c => { if (c.Saves.Remove(from, out var own)) c.Saves[to] = own; }));
         Try(() => SaveHealth.Renamed(from, to));
+        Try(() => SaveCompanions.Move(docs, from, to));
         Try(() => SaveStars.Renamed(from, to));
         Try(() =>
         {
@@ -545,13 +557,20 @@ public static class SaveCopies
         });
     }
 
-    // a save (or a lost one's .backup) to the Recycle Bin, whole
+    // mods' data follows a change that went through; a part that fails is logged and does not undo the change
+    internal static void Companions(Action a)
+    {
+        try { a(); } catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); }
+    }
+
+    // a save (or a lost one's .backup) to the Recycle Bin, whole, with mods' data no other save uses
     public static void Delete(Save s)
     {
         Engine.CheckWritable();
         lock (Gate)
         {
             Recycle(s.Dir);
+            Companions(() => SaveCompanions.Delete(Path.GetDirectoryName(Path.GetDirectoryName(s.Dir)!)!, s.Name));
             // (out of the game nothing shows the game's previous version alone, and it would hold the name: it goes too)
             var kept = Path.GetDirectoryName(s.Dir)!;
             if (Path.GetFileName(kept) != StoredName) return;

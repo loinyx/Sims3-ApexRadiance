@@ -62,7 +62,8 @@ public static class Saves
         // (never over an older copy: one made in the same second takes the next)
         while (File.Exists(zip = Path.Combine(dir, $"{s.Name} {Stamp(when)}.zip"))) when = when.AddSeconds(1);
         // (a copy that lets a change go ahead is always compared with the save)
-        SaveCopies.Zip(s.Dir, zip, note, choices.Check || note is SaveCopies.BeforeClean or SaveCopies.BeforeRestore || Games.IsRunning(), choices.RememberMods ? SaveBackups.ModsNow(docs) : null, ct);
+        SaveCopies.Zip(s.Dir, zip, note, choices.Check || note is SaveCopies.BeforeClean or SaveCopies.BeforeRestore || Games.IsRunning(), choices.RememberMods ? SaveBackups.ModsNow(docs) : null, ct,
+            companions: SaveCompanions.Files(docs, s.Name));
         return zip;
     }
 }
