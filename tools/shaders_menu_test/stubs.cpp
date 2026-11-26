@@ -15,6 +15,18 @@
 #include "crash_report.h"
 #include "hook_guard.h"
 #include "game_addresses.h"
+#include "sim_mask.h"
+#include "platform.h"
+
+// (the hooks and the Sim mask the Shaders page reaches; none runs here)
+namespace SimMask { void Want(bool) {} View Current() { return {}; } const char* Unavailable() { return nullptr; } }
+namespace Platform { bool RemixBridge() { return false; } }
+namespace D3D9Hooks {
+IDirect3DPixelShader9* BoundPixelShader(IDirect3DDevice9*) { return nullptr; }
+IDirect3DVertexShader9* BoundVertexShader(IDirect3DDevice9*) { return nullptr; }
+void SettleDeferredShaders(IDirect3DDevice9*) {}
+}
+namespace ExtraHooks { void SetBeforeDrawUP(BeforeDrawUP) {} }
 
 std::vector<std::unique_ptr<ApexPatch> (*)()> g_factories;
 PatchRegistration::PatchRegistration(PatchFactory factory, FeatureInfo) { g_factories.push_back(factory); }

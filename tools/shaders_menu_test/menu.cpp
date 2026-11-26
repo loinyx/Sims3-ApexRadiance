@@ -1,3 +1,4 @@
+#include <cstdlib>
 // Draws Image > Shaders and Image > Capture in every language, at two widths and two text scales, in each state, and
 // checks the layout of the last of four frames from the recorded controls (rec.h) and the text in the draw lists.
 #define NOMINMAX
@@ -265,6 +266,14 @@ int main(int argc, char** argv)
     io.ConfigErrorRecoveryEnableAssert = false;
     io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures; // as the game's DX9 backend: glyphs rasterised on demand
     io.Fonts->TexDesiredFormat = ImTextureFormat_RGBA32;
+    // APEX_MENU_THEME=accent,dark,light,segment,from,to,ink (RRGGBB each): a launcher colour theme, as [ui] theme_* sets it
+    if (const char* theme = std::getenv("APEX_MENU_THEME")) {
+        unsigned* into[] = {&VioletTheme::kAccent, &VioletTheme::kAccentDark, &VioletTheme::kAccentLight, &VioletTheme::kSegmentOn,
+                            &VioletTheme::kGradientFrom, &VioletTheme::kGradientTo, &VioletTheme::kOnGradient};
+        std::string s(theme);
+        for (size_t i = 0, at = 0; i < 7 && at < s.size(); ++i, at = s.find(',', at) == std::string::npos ? s.size() : s.find(',', at) + 1)
+            *into[i] = static_cast<unsigned>(std::stoul(s.substr(at, 6), nullptr, 16));
+    }
     VioletTheme::ApplyStyle(ImGui::GetStyle());
     VioletTheme::LoadFonts(io);
     g_looksPatch = Fixture::StartLooks();
