@@ -2101,5 +2101,8 @@ public static partial class Strings
         ["This folder can't be used"] = "이 폴더는 사용할 수 없어요",
         ["Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder."] = "{0}에서는 관리자 권한 없이 Apex Launcher가 스스로 최신 상태를 유지할 수 없어요. 다른 폴더를 선택하세요.",
         ["Frame generation was turned off"] = "프레임 생성을 껐어요",
+        ["{0} min"] = "{0}분",
+        ["Scroll left"] = "왼쪽으로 스크롤",
+        ["Scroll right"] = "오른쪽으로 스크롤",
     };
 }

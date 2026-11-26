@@ -81,7 +81,7 @@ public sealed partial class MainWindow
         var narrow = new ScrollViewer { MaxHeight = 520 };
         narrow.Content = GalleryAlbums(narrow);
         var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible,
-            Flyout = new Flyout { Content = new StackPanel { Width = 260, Children = { GallerySearch(), narrow } } } };
+            Flyout = new Flyout { Content = Design.Parts.PopCard(new StackPanel { Width = 260, Children = { GallerySearch(), narrow } }, 6), FlyoutPresenterStyle = Design.Parts.Pop(274) } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, T("Albums"));
         if (_galBook) main.Children.Add(picker);
         ShowSide(GallerySearch(), albums, () => picker.Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible);
@@ -1276,9 +1276,7 @@ public sealed partial class MainWindow
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.Children.Add(Design.Parts.Title(Design.Parts.TitleText(T("Customise")), AlbumName(_galAlbum)));
-        var x = Design.Parts.OverPicture(Design.Parts.Icon("x", T("Close")), VerticalAlignment.Top);
-        (x.Margin, x.Background) = (new Thickness(0), Res("ApexTileBrush"));
-        x.Click += (_, _) => ToggleCustomize(false);
+        var x = Design.Parts.PanelClose(T("Close"), () => ToggleCustomize(false));
         Grid.SetColumn(x, 1);
         head.Children.Add(x);
         root.Children.Add(head);
@@ -2366,18 +2364,51 @@ public sealed partial class MainWindow
             Play(grow);
         };
         var panning = false;
-        double grabX = 0, grabOffset = 0;
+        double grabX = 0, grabOffset = 0, lastX = 0, speed = 0;
+        ulong lastAt = 0;
+        Microsoft.UI.Dispatching.DispatcherQueueTimer? throwTimer = null;
+        void StopGlide() { if (throwTimer is null) return; throwTimer.Stop(); _timers.Remove(throwTimer); throwTimer = null; }
         canvas.PointerPressed += (_, e) =>
         {
             if (e.OriginalSource != canvas) return;
+            StopGlide();
             panning = canvas.CapturePointer(e.Pointer);
-            grabX = e.GetCurrentPoint(scroll).Position.X;
+            var at = e.GetCurrentPoint(scroll);
+            (grabX, lastX, lastAt, speed) = (at.Position.X, at.Position.X, at.Timestamp, 0);
             grabOffset = scroll.HorizontalOffset;
             e.Handled = true;
         };
-        canvas.PointerMoved += (_, e) => { if (panning) scroll.ChangeView(grabOffset - (e.GetCurrentPoint(scroll).Position.X - grabX), null, null, true); };
-        canvas.PointerReleased += (_, e) => { panning = false; canvas.ReleasePointerCapture(e.Pointer); };
+        canvas.PointerMoved += (_, e) =>
+        {
+            if (!panning) return;
+            var at = e.GetCurrentPoint(scroll);
+            // (the speed of the last moves, in pixels a millisecond, smoothed so one jerk does not throw the board)
+            if (at.Timestamp > lastAt) speed = speed * 0.4 + (at.Position.X - lastX) / ((at.Timestamp - lastAt) / 1000.0) * 0.6;
+            (lastX, lastAt) = (at.Position.X, at.Timestamp);
+            scroll.ChangeView(grabOffset - (at.Position.X - grabX), null, null, true);
+        };
+        canvas.PointerReleased += (_, e) =>
+        {
+            if (!panning) return;
+            panning = false;
+            canvas.ReleasePointerCapture(e.Pointer);
+            // (a throw: the board runs on and slows down; a hold that stopped before letting go stays)
+            if (e.GetCurrentPoint(scroll).Timestamp - lastAt > 80_000 || Math.Abs(speed) < 0.15) return;
+            var v = Math.Clamp(speed, -6, 6);
+            throwTimer = DispatcherQueue.CreateTimer();
+            throwTimer.Interval = TimeSpan.FromMilliseconds(16);
+            throwTimer.Tick += (_, _) =>
+            {
+                v *= 0.93;
+                var to = Math.Clamp(scroll.HorizontalOffset - v * 16, 0, scroll.ScrollableWidth);
+                if (Math.Abs(v) < 0.02 || to <= 0 || to >= scroll.ScrollableWidth) StopGlide();
+                scroll.ChangeView(to, null, null, true);
+            };
+            _timers.Add(throwTimer);
+            throwTimer.Start();
+        };
         canvas.PointerCaptureLost += (_, _) => panning = false;
+        scroll.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => StopGlide()), true);
         var inside = new Grid();
         inside.Children.Add(scroll);
         var frame = new Border { Height = BoardHeight, Child = inside };
@@ -2476,7 +2507,7 @@ public sealed partial class MainWindow
                 inner.Children.Add(caption);
                 stamp.Children.Add(inner);
                 // (a postmark over the corner, with the day)
-                var mark = new Grid { Width = 74, Height = 74, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -22, -26, 0), Rotation = -14, CenterPoint = new Vector3(37, 37, 0) };
+                var mark = new Grid { Width = 70, Height = 70, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -40, -44, 0), Rotation = -14, CenterPoint = new Vector3(35, 35, 0) };
                 mark.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB0, 0x6A, 0x4E, 0x8C)), StrokeThickness = 2 });
                 mark.Children.Add(new TextBlock { Text = p.Taken.ToString("dd MMM\nyyyy", LangCulture()).ToUpperInvariant(), FontSize = 11, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xC0, 0x6A, 0x4E, 0x8C)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
                 stamp.Children.Add(mark);
@@ -2489,7 +2520,8 @@ public sealed partial class MainWindow
                 film.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
                 film.Children.Add(Holes());
                 caption.Foreground = new SolidColorBrush(Rgb(0xE6, 0xE0, 0xD2));
-                caption.Margin = new Thickness(2, 2, 2, 0);
+                caption.FontSize = Math.Min(caption.FontSize, 16);
+                caption.Margin = new Thickness(2, 0, 2, 0);
                 film.Children.Add(caption);
                 body = film;
                 break;
@@ -2547,10 +2579,13 @@ public sealed partial class MainWindow
                 body = clipped;
                 break;
             case "deckle":
-                // (an old print: a cream border with a scalloped edge, a touch of sepia, the caption on the border)
+                // (an old print: a cream border with a scalloped edge all round, a touch of sepia, the caption on the border)
                 var cream = Rgb(0xEF, 0xE6, 0xD0);
                 var aged = new Grid();
-                var print2 = new StackPanel { Background = new SolidColorBrush(cream), Padding = new Thickness(12, 12, 12, 10) };
+                // (round dots on the edge, each touching the next: the scallops)
+                aged.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle { Fill = new SolidColorBrush(cream), Stroke = new SolidColorBrush(cream), StrokeThickness = 10,
+                    StrokeDashArray = [0, 1.05], StrokeDashCap = PenLineCap.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
+                var print2 = new StackPanel { Padding = new Thickness(14, 14, 14, 10) };
                 var tinted = new Grid { Width = w, Height = h };
                 tinted.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
                 tinted.Children.Add(new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x38, 0x8A, 0x5A, 0x20)) });
@@ -2559,14 +2594,6 @@ public sealed partial class MainWindow
                 caption.Margin = new Thickness(2, 6, 0, 0);
                 print2.Children.Add(caption);
                 aged.Children.Add(print2);
-                StackPanel Scallops(bool top)
-                {
-                    var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = top ? VerticalAlignment.Top : VerticalAlignment.Bottom, Margin = new Thickness(0, top ? -5 : 0, 0, top ? 0 : -5) };
-                    for (int q = 0; q < (int)((w + 24) / 10); q++) row.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 10, Height = 10, Fill = new SolidColorBrush(cream) });
-                    return row;
-                }
-                aged.Children.Add(Scallops(true));
-                aged.Children.Add(Scallops(false));
                 body = aged;
                 break;
             case "doodle":
@@ -2740,19 +2767,72 @@ public sealed partial class MainWindow
     }
 
     bool _dragging;
+    // A card held by a corner: it leans away from where it is pulled, the faster the more, and when let go it swings back
+    // to rest on a spring with a small overshoot. The lean is the element's own Rotation, round the point it was picked up
+    // by, so it never fights the tilt the card already has.
+    sealed class Swing(FrameworkElement el, Microsoft.UI.Dispatching.DispatcherQueue queue, HashSet<Microsoft.UI.Dispatching.DispatcherQueueTimer> timers)
+    {
+        double _angle, _spin, _target;
+        bool _held;
+        Microsoft.UI.Dispatching.DispatcherQueueTimer? _tick;
+        Vector3 _rest;
+
+        public void Hold(Windows.Foundation.Point at)
+        {
+            if (_tick is null) _rest = el.CenterPoint;
+            el.CenterPoint = new Vector3((float)at.X, (float)at.Y, 0);
+            _held = true;
+            Run();
+        }
+
+        // the pointer's speed across, in pixels a millisecond: about 9 degrees at a brisk pull, never past 14
+        public void Pull(double speedX, bool gliding) => _target = gliding ? 0 : Math.Clamp(speedX * 9, -14, 14);
+
+        public void Let() { _held = false; _target = 0; }
+
+        void Run()
+        {
+            if (_tick is not null) return;
+            _tick = queue.CreateTimer();
+            _tick.Interval = TimeSpan.FromMilliseconds(16);
+            _tick.Tick += (_, _) =>
+            {
+                // (a damped spring: firm enough to follow the hand, loose enough to overshoot once when let go)
+                const double dt = 0.016, stiff = 140, damp = 11;
+                _spin += (stiff * (_target - _angle) - damp * _spin) * dt;
+                _angle += _spin * dt;
+                if (!_held && Math.Abs(_angle) < 0.05 && Math.Abs(_spin) < 0.5)
+                {
+                    el.Rotation = 0;
+                    el.CenterPoint = _rest;
+                    _tick.Stop();
+                    timers.Remove(_tick);
+                    _tick = null;
+                    return;
+                }
+                el.Rotation = (float)_angle;
+            };
+            timers.Add(_tick);
+            _tick.Start();
+        }
+    }
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, string> CardPaths = new();
     readonly Dictionary<FrameworkElement, int> _restZ = [];
     // moved with the pointer (or a finger), lifted while it moves, kept where it is let go
     Windows.Foundation.Point _dragFrom;
     void Draggable(FrameworkElement el, Action dropped, Action? moving = null, Action? tapped = null)
     {
-        el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY;
+        el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY | ManipulationModes.TranslateInertia;
         Microsoft.UI.Dispatching.DispatcherQueueTimer? edge = null;
-        el.ManipulationStarted += (_, _) =>
+        var swing = new Swing(el, DispatcherQueue, _timers);
+        // (let go, it glides a short way, slowing as paper on paper does)
+        el.ManipulationInertiaStarting += (_, e) => e.TranslationBehavior.DesiredDeceleration = 0.006;
+        el.ManipulationStarted += (_, e) =>
         {
             _dragFrom = new Windows.Foundation.Point(Canvas.GetLeft(el), Canvas.GetTop(el));
             _dragging = true;
             Canvas.SetZIndex(el, Math.Max(Canvas.GetZIndex(el), 1000));
+            swing.Hold(e.Position);
             el.Scale = new Vector3(1.06f, 1.06f, 1);
             if (_boardScroll is not { } sv) return;
             edge = DispatcherQueue.CreateTimer();
@@ -2780,11 +2860,13 @@ public sealed partial class MainWindow
             Canvas.SetLeft(el, Math.Clamp(Canvas.GetLeft(el) + e.Delta.Translation.X, 8, Math.Max(8, w - el.ActualWidth - 8)));
             Canvas.SetTop(el, Math.Clamp(Canvas.GetTop(el) + e.Delta.Translation.Y, 8, Math.Max(8, BoardHeight - el.ActualHeight - 8)));
             _dragPoint = el.TransformToVisual(null).TransformPoint(e.Position);
+            swing.Pull(e.Velocities.Linear.X, e.IsInertial);
             moving?.Invoke();
         };
         el.ManipulationCompleted += (_, _) =>
         {
             _dragging = false;
+            swing.Let();
             el.Scale = Vector3.One;
             if (edge is not null) { edge.Stop(); _timers.Remove(edge); edge = null; }
             // (a press that barely moved is a click: the card goes back where it was and opens)
@@ -3149,11 +3231,15 @@ public sealed partial class MainWindow
         var close = Round("x", T("Close"), 40);
         // (the controls over the dark room keep the dark look in a light theme)
         foreach (var c in new FrameworkElement[] { prev, next, close, islandFrame }) c.RequestedTheme = ElementTheme.Dark;
-        close.HorizontalAlignment = HorizontalAlignment.Right; close.VerticalAlignment = VerticalAlignment.Top; close.Margin = new Thickness(0, -32, -40, 0);
+        // (the way out is in the side panel's corner, as in every side panel; over the picture only in full screen, without it)
+        close.HorizontalAlignment = HorizontalAlignment.Right; close.VerticalAlignment = VerticalAlignment.Top; close.Margin = new Thickness(0, 64, 24, 0); close.Visibility = Visibility.Collapsed;
         stage.Children.Add(close);
         shell.Children.Add(stage);
 
         var (panel, side, foot) = Design.Parts.SidePanel(new Thickness(0, 48, 16, 16)); // (under the window's own buttons)
+        var panelClose = Design.Parts.PanelClose(T("Close"), () => { });
+        panelClose.Margin = new Thickness(0, Design.Space.CardPad, Design.Space.CardPad, 0);
+        ((Grid)panel.Child).Children.Add(panelClose);
         Grid.SetColumn(panel, 1);
         shell.Children.Add(panel);
         var flight = new Canvas { IsHitTestVisible = false };
@@ -3226,6 +3312,7 @@ public sealed partial class MainWindow
             Play(away);
         }
         close.Click += (_, _) => Close();
+        panelClose.Click += (_, _) => Close();
         stage.Tapped += (_, e) => { if (!e.Handled) Close(); };
         foreach (var c in new UIElement[] { islandFrame, prev, next, close }) c.Tapped += (_, e) => e.Handled = true;
         void Resized(XamlRoot sender, XamlRootChangedEventArgs e) { shell.Width = root.Size.Width; shell.Height = root.Size.Height; }
@@ -3471,7 +3558,9 @@ public sealed partial class MainWindow
             var day = Design.Parts.TitleText("");
             day.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = p.Taken.ToString("M", culture) });
             day.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "  " + p.Taken.Year, Foreground = Res("ApexMutedBrush"), FontWeight = FontWeights.Normal });
-            side.Children.Add(Design.Parts.Title(day, $"{char.ToUpper(weekday[0], culture)}{weekday[1..]} · {p.Taken.ToString("t", culture)} · {T("{0} of {1}", at + 1, pics.Count)}"));
+            var dayTitle = Design.Parts.Title(day, $"{char.ToUpper(weekday[0], culture)}{weekday[1..]} · {p.Taken.ToString("t", culture)} · {T("{0} of {1}", at + 1, pics.Count)}");
+            dayTitle.Margin = new Thickness(0, 0, Design.Size.ControlSmall + Design.Space.X2, 0); // (clear of the close button)
+            side.Children.Add(dayTitle);
 
             // whose it is (a menu to change it), and its file
             var names = _galSaves.Select(s => s.Name).ToList();
@@ -3581,7 +3670,7 @@ public sealed partial class MainWindow
             panel.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
             stage.Padding = on ? new Thickness(0) : new Thickness(56, 48, 56, 48);
             dim.Background = new SolidColorBrush(on ? Microsoft.UI.Colors.Black : Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08));
-            close.Margin = on ? new Thickness(0, 64, 24, 0) : new Thickness(0, -32, -40, 0);
+            close.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
             prev.Margin = on ? new Thickness(16, 0, 0, 0) : new Thickness(-36, 0, 0, 0);
             next.Margin = on ? new Thickness(0, 0, 16, 0) : new Thickness(0, 0, -36, 0);
             islandFrame.Margin = on ? new Thickness(0, 0, 0, 24) : new Thickness(0, 0, 0, -30);

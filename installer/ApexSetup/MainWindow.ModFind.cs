@@ -104,13 +104,8 @@ public sealed partial class MainWindow
         void Put(FrameworkElement e, int row) { Grid.SetRow(e, row); page.Children.Add(e); }
 
         var top = new StackPanel { Spacing = 2 };
-        var back = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        back.Children.Add(Lucide.Icon("chevron-left", 15));
-        back.Children.Add(new TextBlock { Text = T("Mods") });
-        var backButton = new Button { Content = back, Height = 32, Padding = new Thickness(8, 0, 12, 0), Margin = new Thickness(-8, 0, 0, 2), Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(backButton, T("Back to your mods"));
-        ToolTipService.SetToolTip(backButton, T("Back to your mods"));
-        backButton.Click += (_, _) => CloseFind(focus: true);
+        var backButton = Design.Parts.Back(T("Mods"), T("Back to your mods"), () => CloseFind(focus: true));
+        backButton.Margin = new Thickness(0, 0, 0, Design.Space.X4);
         top.Children.Add(backButton);
         top.Children.Add(PageHead(T("Find custom content"), T("See which mods a file uses and what is missing.")));
         Put(top, 0);

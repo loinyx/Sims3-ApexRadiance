@@ -2101,5 +2101,8 @@ public static partial class Strings
         ["This folder can't be used"] = "Tätä kansiota ei voi käyttää",
         ["Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder."] = "Apex Launcher ei voi pitää itseään ajan tasalla sijainnissa {0} ilman järjestelmänvalvojan lupaa. Valitse toinen kansio.",
         ["Frame generation was turned off"] = "Kuvien generointi poistettiin käytöstä",
+        ["{0} min"] = "{0} min",
+        ["Scroll left"] = "Vieritä vasemmalle",
+        ["Scroll right"] = "Vieritä oikealle",
     };
 }

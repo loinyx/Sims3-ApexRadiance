@@ -711,13 +711,7 @@ public sealed partial class MainWindow
 
     void FillInnerDetails(ModRow r, MergeRecord merge, MergeOriginal o, bool mine)
     {
-        var back = new Button { Padding = new Thickness(2, 4, 10, 4), Margin = new Thickness(-4, 0, 0, 0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush") };
-        var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        label.Children.Add(Lucide.Icon("chevron-left", 16, Res("ApexSoftTextBrush")));
-        label.Children.Add(new TextBlock { Text = _draft?.Name ?? r.Name, FontSize = 13, Foreground = Res("ApexSoftTextBrush"), MaxWidth = 250, TextTrimming = TextTrimming.CharacterEllipsis });
-        back.Content = label;
-        AutomationProperties.SetName(back, T("Back to {0}", r.Name));
-        back.Click += (_, _) => CloseInner();
+        var back = Design.Parts.Back(_draft?.Name ?? r.Name, T("Back to {0}", r.Name), CloseInner);
         ModRow row;
         try { row = InnerRow(merge, o); }
         catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException or InvalidDataException)

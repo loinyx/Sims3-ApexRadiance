@@ -2113,5 +2113,8 @@ public static partial class Strings
         ["This folder can't be used"] = "Ez a mappa nem használható",
         ["Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder."] = "Az Apex Launcher rendszergazdai engedély nélkül nem tudja naprakészen tartani magát itt: {0}. Válassz másik mappát.",
         ["Frame generation was turned off"] = "A képkocka-generálás ki lett kapcsolva",
+        ["{0} min"] = "{0} perc",
+        ["Scroll left"] = "Görgetés balra",
+        ["Scroll right"] = "Görgetés jobbra",
     };
 }

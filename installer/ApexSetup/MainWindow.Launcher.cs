@@ -793,20 +793,31 @@ public sealed partial class MainWindow
         foreach (var t in Design.Theme.All.Append(Design.Theme.Of(Design.Theme.Windows)))
         {
             var on = t.Id == Design.DesignSystem.Theme.Id;
-            var colour = new Border { Height = 48, CornerRadius = new CornerRadius(Design.Radius.Control), Background = Design.DesignSystem.Swatch(t) };
+            // (the colour in a ring: the theme in use ringed in the text's colour, one under the pointer in a quiet line; the
+            // ring and the colour share one rounding, so the tile is the same shape at every corner)
+            var colour = new Border { Height = 52, CornerRadius = new CornerRadius(Design.Radius.Control), Background = Design.DesignSystem.Swatch(t) };
             if (on)
             {
                 var tick = Lucide.Icon("check", 18, new Microsoft.UI.Xaml.Media.SolidColorBrush(t.Gradient().Ink), 2.5);
                 (tick.HorizontalAlignment, tick.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center);
                 colour.Child = tick;
             }
+            var ring = new Border { Child = colour, Padding = new Thickness(3), BorderThickness = new Thickness(2), CornerRadius = new CornerRadius(Design.Radius.Control + 5),
+                BorderBrush = on ? Res("TextFillColorPrimaryBrush") : Res("ApexClearBrush") };
             var b = new Button
             {
-                Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush"), CornerRadius = new CornerRadius(Design.Radius.Card),
+                Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush"), CornerRadius = new CornerRadius(Design.Radius.Control + 5),
                 HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Content = new StackPanel { Spacing = Design.Space.X2, Children = { colour, new TextBlock { Text = T(t.Name), FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
+                Content = new StackPanel { Spacing = Design.Space.X2, Children = { ring, new TextBlock { Text = T(t.Name), FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
                     Foreground = on ? Res("TextFillColorPrimaryBrush") : Res("ApexMutedBrush") } } },
             };
+            foreach (var key in new[] { "ButtonBackgroundPointerOver", "ButtonBackgroundPressed" }) b.Resources[key] = Res("ApexClearBrush");
+            if (!on)
+            {
+                b.PointerEntered += (_, _) => ring.BorderBrush = Res("ApexInputBorderHoverBrush");
+                b.PointerExited += (_, _) => ring.BorderBrush = Res("ApexClearBrush");
+            }
+            HandCursor.On(b);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T(t.Name) + (on ? ", " + T("in use") : ""));
             b.Click += (_, _) => { _settings.Theme = t.Id; _settings.Save(); Design.DesignSystem.Apply(t.Id); ThemeChanged(); };
             grid.Children.Add(b);
@@ -902,35 +913,58 @@ public sealed partial class MainWindow
 
     // What Play puts in first, each with its versions and the first line of its notes: update and play, play as it is, or
     // nothing (true, false, null)
+    // Play with updates waiting: each one in a row (its icon, what it is, the version it goes from and to), and the choice of
+    // updating first, playing as it is or staying
     async Task<bool?> UpdatesFirst(List<string> ups)
     {
-        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Medium };
-        body.Children.Add(new TextBlock { Text = T("The game starts once they are installed. Your settings stay."), Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        var body = new StackPanel { Spacing = Design.Space.X4, Width = Design.Dialogs.Medium };
+        body.Children.Add(Design.Dialogs.Words(T("The game starts once they are installed. Your settings stay.")));
         var list = new StackPanel();
         foreach (var c in ups)
         {
-            var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(16, 12, 16, 12), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
+            var from = InstalledOf(c);
+            var to = ReleaseOf(c)?.Version;
+            var g = new Grid { ColumnSpacing = Design.Space.IconToText, MinHeight = 64, Padding = new Thickness(16, 12, 16, 12), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             FrameworkElement icon = c == Components.Apex
                 ? new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/apex_logo.png")), Width = 40, Height = 40 }
-                : Design.IconTile.Of(c == Components.Modernization ? "hammer" : c is Components.Bridge or Components.Dxvk ? "layers" : "package");
-            icon.VerticalAlignment = VerticalAlignment.Top;
+                : Design.IconTile.Of(c == Components.Modernization ? "wrench" : c is Components.Bridge or Components.Dxvk ? "monitor" : c == Components.RestartHost ? "rotate-ccw" : "package");
+            icon.VerticalAlignment = VerticalAlignment.Center;
             g.Children.Add(icon);
-            var words = new StackPanel { Spacing = 2 };
-            var head = new TextBlock { FontSize = 14, TextWrapping = TextWrapping.Wrap };
-            head.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Name(c), FontWeight = FontWeights.SemiBold });
-            var from = InstalledOf(c);
-            if (ReleaseOf(c)?.Version is { } to)
-                head.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "  " + (from is { Length: > 0 } && from != "?" ? from + " \u2192 " + to : to), Foreground = Res("ApexMutedBrush") });
-            words.Children.Add(head);
-            if (Paragraphs(ReleaseOf(c)?.Body).FirstOrDefault() is { } headline)
-                words.Children.Add(new TextBlock { Text = headline, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis });
+            // (what the component does, as Components says it; the release's own title only for one with no line of its own)
+            var what = c switch
+            {
+                Components.Apex => T("Lighting, picture and performance for The Sims 3"),
+                Components.Modernization => T("Fixes stutters, Sims getting stuck and crashes"),
+                Components.Bridge => T("About 600 MB more memory for big worlds"),
+                Components.Dxvk => T("Vulkan, fewer stutters"),
+                Components.RestartHost => T("Opens your last save again with free memory when the game is running out"),
+                _ => Paragraphs(ReleaseOf(c)?.Body).FirstOrDefault() ?? "",
+            };
+            var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            words.Children.Add(new TextBlock { Text = Name(c), FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+            if (what.Length > 0) words.Children.Add(new TextBlock { Text = what, FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis });
             Grid.SetColumn(words, 1);
             g.Children.Add(words);
+            // (the versions on the right: the one installed faint, the new one plain)
+            if (to is not null)
+            {
+                var versions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X1, VerticalAlignment = VerticalAlignment.Center };
+                if (from is { Length: > 0 } && from != "?")
+                {
+                    versions.Children.Add(new TextBlock { Text = from, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+                    versions.Children.Add(Lucide.Icon("arrow-right", 14, Res("ApexMutedBrush")));
+                }
+                versions.Children.Add(new Border { Padding = new Thickness(8, 2, 8, 3), CornerRadius = new CornerRadius(Design.Radius.Tag), Background = Res("ApexAccentSoftBrush"),
+                    Child = new TextBlock { Text = to, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexAccentBrush") } });
+                Grid.SetColumn(versions, 2);
+                g.Children.Add(versions);
+            }
             list.Children.Add(g);
         }
-        body.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexRaisedBrush") });
+        body.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexRaisedBrush") });
         var r = await ShowDialog(new ContentDialog
         {
             Tag = "download", Title = ups.Count == 1 ? T("1 update installs first") : T("{0} updates install first", ups.Count), Content = body,
@@ -1014,11 +1048,9 @@ public sealed partial class MainWindow
     // the way back from a page of a screen, over its title (the chevron stands on the title's edge)
     static Button BackButtonTo(string name, Action go, string id)
     {
-        var back = new Button { Content = Labeled("chevron-left", name), Padding = new Thickness(8, 6, 12, 6), Margin = new Thickness(-11, 0, 0, 6), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left,
-            Background = Res("ApexClearBrush") };
-        back.Click += (_, _) => go();
+        var back = Design.Parts.Back(name, T("Back to {0}", name), go);
+        back.Margin = new Thickness(0, 0, 0, Design.Space.X4);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(back, id);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(back, T("Back to {0}", name));
         return back;
     }
     static TextBlock PageSub(string t) { var s = Muted(t); (s.FontSize, s.LineHeight) = (14, 20); return s; }

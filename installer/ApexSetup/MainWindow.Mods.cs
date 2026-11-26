@@ -972,6 +972,15 @@ public sealed partial class MainWindow
             ModTypesScroll.ViewChanged += (_, _) => TypesMore();
             ModTypesScroll.SizeChanged += (_, _) => TypesMore();
             ModTypes.SizeChanged += (_, _) => TypesMore();
+            // (an arrow at each end, round as the pills and as high: the one back only once the row has moved)
+            var row = (Grid)ModTypesScroll.Parent;
+            _typesLess = new Border { Width = 72, Margin = new Thickness(0, 0, 0, 12), HorizontalAlignment = HorizontalAlignment.Left, IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+            row.Children.Add(_typesLess);
+            _typesBack = TypesArrow("chevron-left", T("Scroll left"), -1);
+            _typesOn = TypesArrow("chevron-right", T("Scroll right"), 1);
+            (_typesBack.HorizontalAlignment, _typesOn.HorizontalAlignment) = (HorizontalAlignment.Left, HorizontalAlignment.Right);
+            row.Children.Add(_typesBack);
+            row.Children.Add(_typesOn);
         }
         TypesMore();
         _typesShown.Clear();
@@ -996,14 +1005,33 @@ public sealed partial class MainWindow
         }
     }
 
-    // the pills fade into the page where there are more of them to the right
+    // the pills fade into the page where there are more of them, with an arrow on that side
     bool _typesWatched;
+    Border? _typesLess;
+    Button? _typesBack, _typesOn;
+    Button TypesArrow(string icon, string name, int way)
+    {
+        var b = Design.Parts.IconBoxed(icon, name, Design.Size.ControlSmall);
+        (b.CornerRadius, b.Background, b.VerticalAlignment, b.Visibility) = (new CornerRadius(Design.Size.ControlSmall / 2), Res("ApexCardBrush"), VerticalAlignment.Top, Visibility.Collapsed);
+        ToolTipService.SetToolTip(b, name);
+        b.Click += (_, _) => ModTypesScroll.ChangeView(Math.Clamp(ModTypesScroll.HorizontalOffset + way * ModTypesScroll.ViewportWidth * 0.7, 0, ModTypesScroll.ScrollableWidth), null, null, false);
+        return b;
+    }
     void TypesMore()
     {
-        var more = ModTypesScroll.Visibility == Visibility.Visible && ModTypesScroll.HorizontalOffset < ModTypesScroll.ScrollableWidth - 1;
+        var shown = ModTypesScroll.Visibility == Visibility.Visible;
+        var less = shown && ModTypesScroll.HorizontalOffset > 1;
+        var more = shown && ModTypesScroll.HorizontalOffset < ModTypesScroll.ScrollableWidth - 1;
+        if (_typesBack is not null) _typesBack.Visibility = less ? Visibility.Visible : Visibility.Collapsed;
+        if (_typesOn is not null) _typesOn.Visibility = more ? Visibility.Visible : Visibility.Collapsed;
+        if (_typesLess is not null)
+        {
+            _typesLess.Visibility = less ? Visibility.Visible : Visibility.Collapsed;
+            if (less) _typesLess.Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(1, 0), GradientStops = { new GradientStop { Color = Tone("Content"), Offset = 0.4 }, new GradientStop { Color = Tone("Content", 0), Offset = 1 } } };
+        }
         ModTypesMore.Visibility = more ? Visibility.Visible : Visibility.Collapsed;
         if (!more) return;
-        ModTypesMore.Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(1, 0), GradientStops = { new GradientStop { Color = Tone("Content", 0), Offset = 0 }, new GradientStop { Color = Tone("Content"), Offset = 1 } } };
+        ModTypesMore.Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(1, 0), GradientStops = { new GradientStop { Color = Tone("Content", 0), Offset = 0 }, new GradientStop { Color = Tone("Content"), Offset = 0.6 } } };
     }
 
     // the chips in the search box: every filter in use, each with a button that takes it away
@@ -1589,8 +1617,8 @@ public sealed partial class MainWindow
         body.Children.Add(scroll);
         Grid.SetRow(foot, 2);
         body.Children.Add(foot);
-        flyout.Content = body;
-        flyout.FlyoutPresenterStyle = new Style(typeof(FlyoutPresenter)) { Setters = { new Setter(Control.PaddingProperty, new Thickness(0)), new Setter(FrameworkElement.MaxWidthProperty, 360.0) } };
+        flyout.Content = Design.Parts.PopCard(body);
+        flyout.FlyoutPresenterStyle = Design.Parts.Pop(360);
         flyout.ShowAt(anchor);
     }
 

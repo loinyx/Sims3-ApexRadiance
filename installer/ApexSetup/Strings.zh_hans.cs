@@ -2098,5 +2098,8 @@ public static partial class Strings
         ["This folder can't be used"] = "无法使用此文件夹",
         ["Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder."] = "没有管理员权限，Apex Launcher 无法在 {0} 中保持自身为最新。请选择其他文件夹。",
         ["Frame generation was turned off"] = "帧生成已关闭",
+        ["{0} min"] = "{0} 分钟",
+        ["Scroll left"] = "向左滚动",
+        ["Scroll right"] = "向右滚动",
     };
 }

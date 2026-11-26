@@ -2100,5 +2100,8 @@ public static partial class Strings
         ["This folder can't be used"] = "Deze map kan niet worden gebruikt",
         ["Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder."] = "Apex Launcher kan zichzelf in {0} niet up-to-date houden zonder beheerdersrechten. Kies een andere map.",
         ["Frame generation was turned off"] = "Framegeneratie is uitgezet",
+        ["{0} min"] = "{0} min",
+        ["Scroll left"] = "Naar links scrollen",
+        ["Scroll right"] = "Naar rechts scrollen",
     };
 }

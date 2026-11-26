@@ -597,15 +597,22 @@ public sealed partial class MainWindow
 
     // the window's background, as chosen in Settings: Windows' Mica (tinted by the desktop wallpaper), its stronger kind,
     // Acrylic, or the launcher's own solid colour
+    // (a new backdrop only when its kind changes: the one in place follows light and dark by itself, and replacing it at every
+    // change of theme made the window's drawing fail after two or three changes)
+    string? _backdropKind;
     void ApplyBackdrop()
     {
-        SystemBackdrop = _settings.Backdrop switch
+        if (_backdropKind != _settings.Backdrop)
         {
-            "micaalt" => new MicaBackdrop { Kind = Microsoft.UI.Composition.SystemBackdrops.MicaKind.BaseAlt },
-            "acrylic" => new DesktopAcrylicBackdrop(),
-            "solid" => null,
-            _ => new MicaBackdrop(),
-        };
+            _backdropKind = _settings.Backdrop;
+            SystemBackdrop = _settings.Backdrop switch
+            {
+                "micaalt" => new MicaBackdrop { Kind = Microsoft.UI.Composition.SystemBackdrops.MicaKind.BaseAlt },
+                "acrylic" => new DesktopAcrylicBackdrop(),
+                "solid" => null,
+                _ => new MicaBackdrop(),
+            };
+        }
         // (the theme's pane over what Windows lets through: a tint of the wallpaper, never lighter than the page)
         Root.Background = _settings.Backdrop == "solid" ? Res("ApexPaneBrush") : new SolidColorBrush(Tone("Pane", 0xE6));
     }

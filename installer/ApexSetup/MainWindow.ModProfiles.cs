@@ -49,15 +49,7 @@ public sealed partial class MainWindow
     static (Flyout Flyout, StackPanel Rows) RowsFlyout(double width, FlyoutPlacementMode placement)
     {
         var rows = new StackPanel { Width = width, Spacing = 2, XYFocusKeyboardNavigation = XYFocusKeyboardNavigationMode.Enabled };
-        var presenter = new Style(typeof(FlyoutPresenter))
-        {
-            Setters =
-            {
-                new Setter(Control.PaddingProperty, new Thickness(6)), new Setter(FrameworkElement.MaxWidthProperty, width + 14),
-                new Setter(Control.CornerRadiusProperty, new CornerRadius(10)),
-            },
-        };
-        return (new Flyout { Content = rows, Placement = placement, FlyoutPresenterStyle = presenter }, rows);
+        return (new Flyout { Content = Design.Parts.PopCard(rows, 6), Placement = placement, FlyoutPresenterStyle = Design.Parts.Pop(width + 14) }, rows);
     }
 
     static Button FlyoutRow(FrameworkElement icon, string title, string? help, Action click, bool enabled = true)

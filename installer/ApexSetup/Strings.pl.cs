@@ -2079,5 +2079,8 @@ public static partial class Strings
         ["This folder can't be used"] = "Tego folderu nie można użyć",
         ["Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder."] = "Apex Launcher nie może sam się aktualizować w {0} bez uprawnień administratora. Wybierz inny folder.",
         ["Frame generation was turned off"] = "Generowanie klatek zostało wyłączone",
+        ["{0} min"] = "{0} min",
+        ["Scroll left"] = "Przewiń w lewo",
+        ["Scroll right"] = "Przewiń w prawo",
     };
 }

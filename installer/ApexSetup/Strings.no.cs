@@ -2107,5 +2107,8 @@ public static partial class Strings
         ["This folder can't be used"] = "Denne mappen kan ikke brukes",
         ["Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder."] = "Apex Launcher kan ikke holde seg oppdatert i {0} uten administratortillatelse. Velg en annen mappe.",
         ["Frame generation was turned off"] = "Bildegenerering ble slått av",
+        ["{0} min"] = "{0} min",
+        ["Scroll left"] = "Rull til venstre",
+        ["Scroll right"] = "Rull til høyre",
     };
 }

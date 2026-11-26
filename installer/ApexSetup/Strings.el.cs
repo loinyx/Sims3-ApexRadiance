@@ -2112,5 +2112,8 @@ public static partial class Strings
         ["This folder can't be used"] = "Δεν μπορεί να χρησιμοποιηθεί αυτός ο φάκελος",
         ["Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder."] = "Το Apex Launcher δεν μπορεί να ενημερώνεται μόνο του στο {0} χωρίς άδεια διαχειριστή. Διάλεξε άλλον φάκελο.",
         ["Frame generation was turned off"] = "Η δημιουργία καρέ απενεργοποιήθηκε",
+        ["{0} min"] = "{0} λεπ.",
+        ["Scroll left"] = "Κύλιση αριστερά",
+        ["Scroll right"] = "Κύλιση δεξιά",
     };
 }

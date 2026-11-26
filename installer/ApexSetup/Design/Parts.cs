@@ -13,7 +13,40 @@ public static class Parts
 {
     static Brush B(string name) => App.Brush("Apex" + name + "Brush");
 
+    // ---------- what opens from a button ----------
+
+    // A panel that opens from a button (Flyout): the card is drawn here, rounded, with its edge, because the presenter's
+    // own corners came out square. Pop gives the presenter nothing of its own; PopCard is the card round the content.
+    public static Style Pop(double maxWidth) => new(typeof(FlyoutPresenter))
+    {
+        Setters =
+        {
+            new Setter(Control.PaddingProperty, new Thickness(0)), new Setter(FrameworkElement.MaxWidthProperty, maxWidth + 2),
+            new Setter(Control.BackgroundProperty, B("Clear")), new Setter(Control.BorderThicknessProperty, new Thickness(0)),
+            new Setter(Control.CornerRadiusProperty, new CornerRadius(Radius.Card)),
+        },
+    };
+
+    public static Border PopCard(UIElement content, double pad = 0) => new()
+    {
+        Child = content, Padding = new Thickness(pad), CornerRadius = new CornerRadius(Radius.Card), BorderThickness = new Thickness(1),
+        Background = (Brush)Application.Current.Resources["FlyoutPresenterBackground"], BorderBrush = (Brush)Application.Current.Resources["FlyoutBorderThemeBrush"],
+    };
+
     // ---------- buttons ----------
+
+    // the way back from a page to the screen it opened from: a button as the page's others (Check now), an arrow and the
+    // screen's name, over the title on the left
+    public static Button Back(string to, string name, Action go)
+    {
+        var words = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.X2 };
+        words.Children.Add(Lucide.Icon("arrow-left", Size.IconSmall));
+        words.Children.Add(new TextBlock { Text = to, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 260, TextTrimming = TextTrimming.CharacterEllipsis });
+        var b = Named(new Button { Content = words, Height = Size.ControlSmall, Padding = new Thickness(10, 0, 14, 0), HorizontalAlignment = HorizontalAlignment.Left }, name);
+        ToolTipService.SetToolTip(b, null);
+        b.Click += (_, _) => go();
+        return b;
+    }
 
     // a button that shows its fill only under the pointer
     public static T Ghost<T>(T b) where T : Control
@@ -71,9 +104,18 @@ public static class Parts
         return (PanelOf(g, margin), body, foot);
     }
 
+    // a side panel's way out: in its top corner, inside it, as the mod details', the picture's and Customise's
+    public static Button PanelClose(string name, Action go)
+    {
+        var x = Icon("x", name);
+        (x.Background, x.HorizontalAlignment, x.VerticalAlignment) = (B("Tile"), HorizontalAlignment.Right, VerticalAlignment.Top);
+        x.Click += (_, _) => go();
+        return x;
+    }
+
     public static Border PanelOf(UIElement child, Thickness margin) => new()
     {
-        Child = child, Width = Size.SidePanel, Margin = margin, CornerRadius = new CornerRadius(Radius.Panel), Background = B("Card"), BorderBrush = B("CardBorder"), BorderThickness = new Thickness(1),
+        Child = child, Width = Size.SidePanel, Margin = margin, CornerRadius = new CornerRadius(Radius.Card), Background = B("Card"), BorderBrush = B("CardBorder"), BorderThickness = new Thickness(1),
     };
 
     // a footer's main action over the width left, what else it does after it

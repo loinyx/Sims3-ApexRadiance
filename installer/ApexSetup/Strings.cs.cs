@@ -2104,5 +2104,8 @@ public static partial class Strings
         ["This folder can't be used"] = "Tuto složku nelze použít",
         ["Apex Launcher can't keep itself up to date in {0} without administrator permission. Choose another folder."] = "Apex Launcher se v {0} bez oprávnění správce neumí udržovat aktuální. Vyberte jinou složku.",
         ["Frame generation was turned off"] = "Generování snímků bylo vypnuto",
+        ["{0} min"] = "{0} min",
+        ["Scroll left"] = "Posunout doleva",
+        ["Scroll right"] = "Posunout doprava",
     };
 }
