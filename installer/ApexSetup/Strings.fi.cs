@@ -2106,5 +2106,18 @@ public static partial class Strings
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Avaa se Käynnistä-valikosta tai työpöydältä, niin pelisi on valmis",
         ["Every check passed"] = "Kaikki tarkistukset läpäisty",
         ["Its own times and how many to keep"] = "Omat ajat ja montako säilytetään",
+        ["Load order"] = "Latausjärjestys",
+        ["The order the game reads your mods in. When two change the same thing, the one read first wins."] = "Järjestys, jossa peli lukee modisi. Kun kaksi muuttaa samaa asiaa, ensin luettu voittaa.",
+        ["Which mod the game reads first"] = "Minkä modin peli lukee ensin",
+        ["Only mods that clash"] = "Vain ristiriitaiset modit",
+        ["Priority {0}"] = "Etusija {0}",
+        ["Not read by the game"] = "Peli ei lue tätä",
+        ["Wins over {0}"] = "Voittaa: {0}",
+        ["Loses to {0}"] = "Häviää: {0}",
+        ["See conflicts"] = "Näytä ristiriidat",
+        ["The Mods folder has no Resource.cfg, so the game reads no mods."] = "Mods-kansiossa ei ole Resource.cfg-tiedostoa, joten peli ei lue yhtään modia.",
+        ["None of your mods change the same thing as another."] = "Mikään modisi ei muuta samaa asiaa kuin toinen.",
+        ["No mods are turned on."] = "Yhtään modia ei ole laitettu päälle.",
+        ["Resource.cfg could not be read"] = "Resource.cfg-tiedostoa ei voitu lukea",
     };
 }

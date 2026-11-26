@@ -2104,5 +2104,18 @@ public static partial class Strings
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Откройте его из меню «Пуск» или с рабочего стола, и игра готова",
         ["Every check passed"] = "Все проверки пройдены",
         ["Its own times and how many to keep"] = "Свои моменты и сколько хранить",
+        ["Load order"] = "Порядок загрузки",
+        ["The order the game reads your mods in. When two change the same thing, the one read first wins."] = "Порядок, в котором игра читает ваши моды. Если два мода меняют одно и то же, побеждает тот, что прочитан первым.",
+        ["Which mod the game reads first"] = "Какой мод игра читает первым",
+        ["Only mods that clash"] = "Только конфликтующие моды",
+        ["Priority {0}"] = "Приоритет {0}",
+        ["Not read by the game"] = "Игра не читает",
+        ["Wins over {0}"] = "Побеждает: {0}",
+        ["Loses to {0}"] = "Уступает: {0}",
+        ["See conflicts"] = "Показать конфликты",
+        ["The Mods folder has no Resource.cfg, so the game reads no mods."] = "В папке Mods нет Resource.cfg, поэтому игра не читает ни одного мода.",
+        ["None of your mods change the same thing as another."] = "Ни один из ваших модов не меняет то же, что другой.",
+        ["No mods are turned on."] = "Ни один мод не включён.",
+        ["Resource.cfg could not be read"] = "Не удалось прочитать Resource.cfg",
     };
 }

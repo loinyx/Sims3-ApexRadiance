@@ -2108,5 +2108,18 @@ public static partial class Strings
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "スタートメニューかデスクトップから開けば、ゲームの準備は完了です",
         ["Every check passed"] = "すべてのチェックに合格",
         ["Its own times and how many to keep"] = "独自のタイミングと保持する数",
+        ["Load order"] = "読み込み順",
+        ["The order the game reads your mods in. When two change the same thing, the one read first wins."] = "ゲームが Mod を読む順番です。2 つの Mod が同じものを変更する場合、先に読まれたほうが優先されます。",
+        ["Which mod the game reads first"] = "ゲームが最初に読む Mod",
+        ["Only mods that clash"] = "競合する Mod のみ",
+        ["Priority {0}"] = "優先度 {0}",
+        ["Not read by the game"] = "ゲームに読まれません",
+        ["Wins over {0}"] = "{0} より優先",
+        ["Loses to {0}"] = "{0} が優先",
+        ["See conflicts"] = "競合を表示",
+        ["The Mods folder has no Resource.cfg, so the game reads no mods."] = "Mods フォルダーに Resource.cfg がないため、ゲームは Mod を読み込みません。",
+        ["None of your mods change the same thing as another."] = "ほかの Mod と同じものを変更している Mod はありません。",
+        ["No mods are turned on."] = "オンになっている Mod はありません。",
+        ["Resource.cfg could not be read"] = "Resource.cfg を読み取れませんでした",
     };
 }

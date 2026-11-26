@@ -2106,5 +2106,18 @@ public static partial class Strings
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Åbn den fra menuen Start eller skrivebordet, så er dit spil klar",
         ["Every check passed"] = "Alle tjek bestået",
         ["Its own times and how many to keep"] = "Egne tidspunkter og hvor mange der gemmes",
+        ["Load order"] = "Indlæsningsrækkefølge",
+        ["The order the game reads your mods in. When two change the same thing, the one read first wins."] = "Den rækkefølge, spillet læser dine mods i. Når to ændrer det samme, vinder den, der læses først.",
+        ["Which mod the game reads first"] = "Hvilket mod spillet læser først",
+        ["Only mods that clash"] = "Kun mods i konflikt",
+        ["Priority {0}"] = "Prioritet {0}",
+        ["Not read by the game"] = "Læses ikke af spillet",
+        ["Wins over {0}"] = "Vinder over {0}",
+        ["Loses to {0}"] = "Taber til {0}",
+        ["See conflicts"] = "Se konflikter",
+        ["The Mods folder has no Resource.cfg, so the game reads no mods."] = "Mappen Mods mangler Resource.cfg, så spillet læser ingen mods.",
+        ["None of your mods change the same thing as another."] = "Ingen af dine mods ændrer det samme som et andet.",
+        ["No mods are turned on."] = "Ingen mods er slået til.",
+        ["Resource.cfg could not be read"] = "Resource.cfg kunne ikke læses",
     };
 }

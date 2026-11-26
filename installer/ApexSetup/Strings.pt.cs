@@ -2129,5 +2129,18 @@ public static partial class Strings
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Abra pelo menu Iniciar ou pela área de trabalho e seu jogo estará pronto",
         ["Every check passed"] = "Todas as verificações passaram",
         ["Its own times and how many to keep"] = "Horários próprios e quantos guardar",
+        ["Load order"] = "Ordem de carregamento",
+        ["The order the game reads your mods in. When two change the same thing, the one read first wins."] = "A ordem em que o jogo lê seus mods. Quando dois mudam a mesma coisa, vale o que for lido primeiro.",
+        ["Which mod the game reads first"] = "Qual mod o jogo lê primeiro",
+        ["Only mods that clash"] = "Só mods em conflito",
+        ["Priority {0}"] = "Prioridade {0}",
+        ["Not read by the game"] = "O jogo não lê",
+        ["Wins over {0}"] = "Vence {0}",
+        ["Loses to {0}"] = "Perde para {0}",
+        ["See conflicts"] = "Ver conflitos",
+        ["The Mods folder has no Resource.cfg, so the game reads no mods."] = "A pasta Mods não tem o Resource.cfg, então o jogo não lê nenhum mod.",
+        ["None of your mods change the same thing as another."] = "Nenhum dos seus mods muda a mesma coisa que outro.",
+        ["No mods are turned on."] = "Nenhum mod está ligado.",
+        ["Resource.cfg could not be read"] = "Não deu para ler o Resource.cfg",
     };
 }

@@ -2114,5 +2114,18 @@ public static partial class Strings
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Öppna den från Start-menyn eller skrivbordet så är ditt spel redo",
         ["Every check passed"] = "Alla kontroller godkända",
         ["Its own times and how many to keep"] = "Egna tidpunkter och hur många som sparas",
+        ["Load order"] = "Inläsningsordning",
+        ["The order the game reads your mods in. When two change the same thing, the one read first wins."] = "Ordningen som spelet läser dina moddar i. När två ändrar samma sak vinner den som läses först.",
+        ["Which mod the game reads first"] = "Vilken modd spelet läser först",
+        ["Only mods that clash"] = "Bara moddar i konflikt",
+        ["Priority {0}"] = "Företräde {0}",
+        ["Not read by the game"] = "Läses inte av spelet",
+        ["Wins over {0}"] = "Vinner över {0}",
+        ["Loses to {0}"] = "Förlorar mot {0}",
+        ["See conflicts"] = "Visa konflikter",
+        ["The Mods folder has no Resource.cfg, so the game reads no mods."] = "Mods-mappen saknar Resource.cfg, så spelet läser inga moddar.",
+        ["None of your mods change the same thing as another."] = "Ingen av dina moddar ändrar samma sak som en annan.",
+        ["No mods are turned on."] = "Inga moddar är påslagna.",
+        ["Resource.cfg could not be read"] = "Resource.cfg kunde inte läsas",
     };
 }

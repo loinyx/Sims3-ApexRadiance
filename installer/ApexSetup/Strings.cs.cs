@@ -2109,5 +2109,18 @@ public static partial class Strings
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "Otevřete ho z nabídky Start nebo z plochy a hra je připravená",
         ["Every check passed"] = "Všechny kontroly prošly",
         ["Its own times and how many to keep"] = "Vlastní časy a kolik uchovat",
+        ["Load order"] = "Pořadí načítání",
+        ["The order the game reads your mods in. When two change the same thing, the one read first wins."] = "Pořadí, ve kterém hra čte vaše mody. Když dva mění totéž, vyhraje ten, který se přečte jako první.",
+        ["Which mod the game reads first"] = "Který mod hra čte jako první",
+        ["Only mods that clash"] = "Jen kolidující mody",
+        ["Priority {0}"] = "Priorita {0}",
+        ["Not read by the game"] = "Hra ho nečte",
+        ["Wins over {0}"] = "Má přednost před: {0}",
+        ["Loses to {0}"] = "Přednost má: {0}",
+        ["See conflicts"] = "Zobrazit konflikty",
+        ["The Mods folder has no Resource.cfg, so the game reads no mods."] = "Ve složce Mods chybí Resource.cfg, takže hra nečte žádné mody.",
+        ["None of your mods change the same thing as another."] = "Žádný z vašich modů nemění totéž co jiný.",
+        ["No mods are turned on."] = "Žádné mody nejsou zapnuté.",
+        ["Resource.cfg could not be read"] = "Resource.cfg nelze přečíst",
     };
 }

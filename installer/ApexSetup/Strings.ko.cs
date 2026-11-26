@@ -2106,5 +2106,18 @@ public static partial class Strings
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "시작 메뉴나 바탕 화면에서 열면 게임 준비가 끝납니다",
         ["Every check passed"] = "모든 검사 통과",
         ["Its own times and how many to keep"] = "자체 시점과 보관할 개수",
+        ["Load order"] = "불러오는 순서",
+        ["The order the game reads your mods in. When two change the same thing, the one read first wins."] = "게임이 모드를 읽는 순서예요. 두 모드가 같은 것을 바꾸면 먼저 읽힌 쪽이 적용돼요.",
+        ["Which mod the game reads first"] = "게임이 먼저 읽는 모드",
+        ["Only mods that clash"] = "충돌하는 모드만",
+        ["Priority {0}"] = "우선순위 {0}",
+        ["Not read by the game"] = "게임이 읽지 않음",
+        ["Wins over {0}"] = "{0}보다 우선",
+        ["Loses to {0}"] = "{0} 쪽이 우선",
+        ["See conflicts"] = "충돌 보기",
+        ["The Mods folder has no Resource.cfg, so the game reads no mods."] = "Mods 폴더에 Resource.cfg가 없어서 게임이 모드를 하나도 읽지 않아요.",
+        ["None of your mods change the same thing as another."] = "다른 모드와 같은 것을 바꾸는 모드가 없어요.",
+        ["No mods are turned on."] = "켜진 모드가 없어요.",
+        ["Resource.cfg could not be read"] = "Resource.cfg를 읽을 수 없어요",
     };
 }

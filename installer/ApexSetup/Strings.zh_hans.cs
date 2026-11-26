@@ -2103,5 +2103,18 @@ public static partial class Strings
         ["Open it from the Start menu or the desktop and your game is ready to play"] = "从开始菜单或桌面打开它，你的游戏就准备好了",
         ["Every check passed"] = "所有检查均已通过",
         ["Its own times and how many to keep"] = "自己的时间和保留数量",
+        ["Load order"] = "加载顺序",
+        ["The order the game reads your mods in. When two change the same thing, the one read first wins."] = "游戏读取模组的顺序。两个模组修改同一内容时，先读取的生效。",
+        ["Which mod the game reads first"] = "游戏先读取哪个模组",
+        ["Only mods that clash"] = "仅冲突的模组",
+        ["Priority {0}"] = "优先级 {0}",
+        ["Not read by the game"] = "游戏不读取",
+        ["Wins over {0}"] = "优先于 {0}",
+        ["Loses to {0}"] = "{0} 优先",
+        ["See conflicts"] = "查看冲突",
+        ["The Mods folder has no Resource.cfg, so the game reads no mods."] = "Mods 文件夹中没有 Resource.cfg，因此游戏不读取任何模组。",
+        ["None of your mods change the same thing as another."] = "你的模组之间没有修改同一内容的。",
+        ["No mods are turned on."] = "没有开启的模组。",
+        ["Resource.cfg could not be read"] = "无法读取 Resource.cfg",
     };
 }
