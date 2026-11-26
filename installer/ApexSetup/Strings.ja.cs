@@ -2121,5 +2121,7 @@ public static partial class Strings
         ["None of your mods change the same thing as another."] = "ほかの Mod と同じものを変更している Mod はありません。",
         ["No mods are turned on."] = "オンになっている Mod はありません。",
         ["Resource.cfg could not be read"] = "Resource.cfg を読み取れませんでした",
+        ["Walnut"] = "ウォールナット",
+        ["Neon"] = "ネオン",
     };
 }

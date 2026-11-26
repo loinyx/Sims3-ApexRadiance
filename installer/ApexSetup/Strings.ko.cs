@@ -2119,5 +2119,7 @@ public static partial class Strings
         ["None of your mods change the same thing as another."] = "다른 모드와 같은 것을 바꾸는 모드가 없어요.",
         ["No mods are turned on."] = "켜진 모드가 없어요.",
         ["Resource.cfg could not be read"] = "Resource.cfg를 읽을 수 없어요",
+        ["Walnut"] = "월넛",
+        ["Neon"] = "네온",
     };
 }

@@ -2097,5 +2097,7 @@ public static partial class Strings
         ["None of your mods change the same thing as another."] = "ไม่มีม็อดตัวใดเปลี่ยนสิ่งเดียวกับม็อดตัวอื่น",
         ["No mods are turned on."] = "ไม่มีม็อดที่เปิดอยู่",
         ["Resource.cfg could not be read"] = "อ่าน Resource.cfg ไม่ได้",
+        ["Walnut"] = "วอลนัท",
+        ["Neon"] = "นีออน",
     };
 }

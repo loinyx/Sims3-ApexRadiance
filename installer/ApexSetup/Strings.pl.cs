@@ -2097,5 +2097,7 @@ public static partial class Strings
         ["None of your mods change the same thing as another."] = "Żaden z twoich modów nie zmienia tego samego co inny.",
         ["No mods are turned on."] = "Żaden mod nie jest włączony.",
         ["Resource.cfg could not be read"] = "Nie udało się odczytać Resource.cfg",
+        ["Walnut"] = "Orzech",
+        ["Neon"] = "Neon",
     };
 }

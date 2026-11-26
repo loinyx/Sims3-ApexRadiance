@@ -2130,5 +2130,7 @@ public static partial class Strings
         ["None of your mods change the same thing as another."] = "Κανένα mod σου δεν αλλάζει το ίδιο πράγμα με κάποιο άλλο.",
         ["No mods are turned on."] = "Κανένα mod δεν είναι ενεργοποιημένο.",
         ["Resource.cfg could not be read"] = "Δεν ήταν δυνατό να διαβαστεί το Resource.cfg",
+        ["Walnut"] = "Καρυδιά",
+        ["Neon"] = "Νέον",
     };
 }

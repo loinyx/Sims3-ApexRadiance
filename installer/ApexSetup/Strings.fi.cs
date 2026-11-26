@@ -2119,5 +2119,7 @@ public static partial class Strings
         ["None of your mods change the same thing as another."] = "Mikään modisi ei muuta samaa asiaa kuin toinen.",
         ["No mods are turned on."] = "Yhtään modia ei ole laitettu päälle.",
         ["Resource.cfg could not be read"] = "Resource.cfg-tiedostoa ei voitu lukea",
+        ["Walnut"] = "Pähkinä",
+        ["Neon"] = "Neon",
     };
 }

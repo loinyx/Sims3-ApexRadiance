@@ -2097,5 +2097,7 @@ public static partial class Strings
         ["None of your mods change the same thing as another."] = "你的模組之間沒有修改同一內容的。",
         ["No mods are turned on."] = "沒有開啟的模組。",
         ["Resource.cfg could not be read"] = "無法讀取 Resource.cfg",
+        ["Walnut"] = "胡桃木",
+        ["Neon"] = "霓虹",
     };
 }

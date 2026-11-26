@@ -2131,5 +2131,7 @@ public static partial class Strings
         ["None of your mods change the same thing as another."] = "Egyik modod sem módosítja ugyanazt, mint egy másik.",
         ["No mods are turned on."] = "Nincs bekapcsolt mod.",
         ["Resource.cfg could not be read"] = "A Resource.cfg nem olvasható",
+        ["Walnut"] = "Dió",
+        ["Neon"] = "Neon",
     };
 }

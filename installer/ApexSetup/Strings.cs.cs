@@ -2122,5 +2122,7 @@ public static partial class Strings
         ["None of your mods change the same thing as another."] = "Žádný z vašich modů nemění totéž co jiný.",
         ["No mods are turned on."] = "Žádné mody nejsou zapnuté.",
         ["Resource.cfg could not be read"] = "Resource.cfg nelze přečíst",
+        ["Walnut"] = "Ořech",
+        ["Neon"] = "Neon",
     };
 }
