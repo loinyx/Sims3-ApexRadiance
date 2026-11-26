@@ -124,6 +124,21 @@ try
         catch (InvalidOperationException e) { Check(e.Message == Engine.RestartHostWaitsText && !File.Exists(apexToml) && !File.Exists(B("ts3wrap.exe")), "restart host: waits for Apex's copy of older settings"); }
         Directory.Delete(Path.Combine(docs, "S3SS"), true);
     }
+    // 2c. the colour theme of Apex's menu: [ui] theme keys, only in a file the game made; in place when there, the rest kept
+    {
+        var apexToml = Engine.ApexToml(docs);
+        Check(!Engine.SetMenuTheme(docs, [("theme", "orchid")]) && !File.Exists(apexToml), "menu theme: nothing before the game made ApexRadiance.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(apexToml)!);
+        var made = "[ui]\r\nfont_scale = 1.25\r\ntheme = \"amethyst\"\r\n\r\n[screen]\r\nfps_limit = 60\r\n";
+        File.WriteAllText(apexToml, made);
+        var keys = new[] { ("theme", "orchid"), ("theme_accent", "#C05AA0") };
+        Check(Engine.SetMenuTheme(docs, keys) && Read(apexToml) == "[ui]\r\nfont_scale = 1.25\r\ntheme = \"orchid\"\r\ntheme_accent = \"#C05AA0\"\r\n\r\n[screen]\r\nfps_limit = 60\r\n"
+              && !Engine.SetMenuTheme(docs, keys), "menu theme: changed in place, the new key at the end of [ui], the rest kept; the same again writes nothing | " + Read(apexToml));
+        File.WriteAllText(apexToml, "[screen]\nfps_limit = 60\n");
+        Check(Engine.SetMenuTheme(docs, keys) && Read(apexToml) == "[screen]\nfps_limit = 60\n\n[ui]\ntheme = \"orchid\"\ntheme_accent = \"#C05AA0\"\n", "menu theme: [ui] made when there is none | " + Read(apexToml));
+        File.Delete(apexToml);
+        Directory.Delete(Path.GetDirectoryName(apexToml)!);
+    }
 
     // 3. DXVK installed by hand: the bridge backs it up and puts it back
     File.WriteAllText(B("d3d9.dll"), "... DXVK v2.7 ...");
@@ -1691,6 +1706,7 @@ ModKindsTests.Run(Check);
 GameSettingsTests.Run(Check);
 HealthTests.Run(Check);
 ModToolsTests.Run(Check);
+ModLoadOrderTests.Run(Check);
 ModProfilesTests.Run(Check);
 ModAddTests.Run(Check);
 GalleryTests.Run(Check);

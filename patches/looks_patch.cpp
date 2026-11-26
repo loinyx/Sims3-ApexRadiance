@@ -1368,7 +1368,10 @@ std::string DownloadLabel(const std::vector<std::string>& folders)
 
 std::string SizeText(uint32_t kb)
 {
-    return kb < 1024 ? I18n::Trf("{} KB", std::max<uint32_t>(1, kb)) : I18n::Trf("{:.1f} MB", kb / 1024.0);
+    if (kb < 1024) return I18n::Trf("{} KB", std::max<uint32_t>(1, kb));
+    std::string s = I18n::Trf("{:.1f} MB", kb / 1024.0);
+    ApexUi::LocaleDecimal(s.data()); // "56,3 MB" where the language writes a comma
+    return s;
 }
 
 // Starts downloads; the player stays where they are (the download bar and the rows that wait show the progress)
@@ -1881,11 +1884,8 @@ bool NewLookModal(bool openNow)
         ImGui::OpenPopup("##NewLook");
     }
     const float u = ApexUi::Unit();
-    const float modalWidth = std::max(1.0f, std::min(420.0f * u, ImGui::GetIO().DisplaySize.x - 32.0f));
-    ImGui::SetNextWindowSize(ImVec2(modalWidth, 0.0f), ImGuiCond_Always);
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     bool changed = false;
-    if (ImGui::BeginPopupModal("##NewLook", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
+    if (ApexUi::BeginModal("##NewLook", ApexUi::kModalNarrow))
     {
         {
             ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
@@ -1910,18 +1910,14 @@ bool NewLookModal(bool openNow)
             }
             else from = 0;
             if (!error.empty()) ApexUi::IconNote(IconId::TriangleAlert, error.c_str(), VioletTheme::kError);
-            ApexUi::Gap(ApexUi::kSpace3);
-            const float available = ImGui::GetContentRegionAvail().x;
-            const float cancelW = ApexUi::ButtonWidth("Cancel", false), createW = ApexUi::ButtonWidth("Create", false);
-            const float total = cancelW + ImGui::GetStyle().ItemSpacing.x + createW;
-            const bool oneRow = total <= available;
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, available - (oneRow ? total : cancelW)));
+            const ApexUi::ControlSizeScope footer(ApexUi::ControlSize::Compact);
+            const float createW = ApexUi::ButtonWidth("Create", true);
+            const bool oneRow = ApexUi::ModalFooter(ApexUi::ButtonWidth("Cancel", false), createW);
             if (ApexUi::TextButton("Cancel") || close) ImGui::CloseCurrentPopup();
-            if (oneRow) ImGui::SameLine();
-            else ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - createW));
+            ApexUi::ModalLastAction(createW, oneRow);
             const bool can = !file.empty() && !taken;
             ImGui::BeginDisabled(!can);
-            if ((ApexUi::TextButton("Create", nullptr, ApexUi::ButtonKind::Primary) || (enter && can)) &&
+            if ((ApexUi::IconTextButton("Create", IconId::Plus, nullptr, ApexUi::ButtonKind::Primary) || (enter && can)) &&
                 (from == 1 ? SaveAsNewLook(name, error) : NewEmptyLook(name, error)))
             {
                 g_listDirty = true;
@@ -1944,9 +1940,8 @@ bool LookRow()
 {
     const float u = ApexUi::Unit();
     const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-    const float avail = ImGui::GetContentRegionAvail().x;
-    float comboW = std::fmin(300.0f * u, std::fmax(160.0f * u, avail * 0.5f));
-    if (avail - comboW - ApexUi::kSpace3 * u < 120.0f * u) comboW = avail; // under the label (BeginControlRow): the list takes the row
+    // (the shared control column, as every list: beside the label, a long name ends in an ellipsis)
+    const float comboW = ApexUi::ControlColumnWidth();
     // changed here and not saved in the file: the changed dot, and on hover Reset = put back the look as saved
     const bool dirty = g.loaded && Dirty();
     ApexUi::SetNextRowDefault(dirty);
@@ -1999,8 +1994,7 @@ bool LookRow()
         if (!wasOpen || g_listDirty) { g_list = Looks::ListLooks(); g_listDirty = false; }
         if (!wasOpen) { query[0] = 0; g_renaming.clear(); }
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-        ImGui::SetNextItemWidth(-1.0f);
-        ImGui::InputTextWithHint("##LookSearch", I18n::Tr("Search looks"), query, sizeof(query));
+        ApexUi::SearchField("##LookSearch", "Search looks", query, sizeof(query));
         const std::string q = Lower(query);
         int shown = 0, groups = 0;
         std::string starred; // the look whose star was clicked this frame
@@ -2112,10 +2106,8 @@ bool AskSaveModal()
         ImGui::OpenPopup("##AskSave");
     }
     const float u = ApexUi::Unit();
-    ImGui::SetNextWindowSize(ImVec2(std::max(1.0f, std::min(440.0f * u, ImGui::GetIO().DisplaySize.x - 32.0f)), 0.0f), ImGuiCond_Always);
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     bool changed = false;
-    if (ImGui::BeginPopupModal("##AskSave", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
+    if (ApexUi::BeginModal("##AskSave", ApexUi::kModalNarrow))
     {
         bool go = false;
         {
@@ -2129,12 +2121,13 @@ bool AskSaveModal()
             ApexUi::SetNextRowUntranslated();
             ApexUi::CardHeader(IconId::Save, title.c_str(), "These changes are only in Apex until you save them to the look", nullptr, nullptr, true, &extra);
             ApexUi::CardDivider();
-            for (const std::string& l : lines) ImGui::BulletText("%s", l.c_str());
+            for (const std::string& l : lines) ApexUi::BulletLine(l.c_str(), false);
             if (!error.empty()) ApexUi::IconNote(IconId::TriangleAlert, error.c_str(), VioletTheme::kError);
-            ApexUi::Gap(ApexUi::kSpace3);
+            ApexUi::CardDivider();
+            const ApexUi::ControlSizeScope footer(ApexUi::ControlSize::Compact);
             const char* discard = "Discard them";
             const char* save = Looks::RefSource(g.preset) == Looks::Source::Mine ? "Save" : "Save in My looks";
-            const float discardW = ApexUi::ButtonWidth(discard, false), cancelW = ApexUi::ButtonWidth("Cancel", false), saveW = ApexUi::ButtonWidth(save, false);
+            const float discardW = ApexUi::ButtonWidth(discard, false), cancelW = ApexUi::ButtonWidth("Cancel", false), saveW = ApexUi::ButtonWidth(save, true);
             const float sp = ImGui::GetStyle().ItemSpacing.x, available = ImGui::GetContentRegionAvail().x;
             const bool oneRow = discardW + cancelW + saveW + 2.0f * sp + ApexUi::kSpace3 * u <= available;
             const float x0 = ImGui::GetCursorPosX();
@@ -2142,7 +2135,7 @@ bool AskSaveModal()
             if (oneRow) ImGui::SameLine(x0 + available - cancelW - sp - saveW); // Cancel then Save on the right
             if (ApexUi::TextButton("Cancel") || close) ImGui::CloseCurrentPopup();
             ImGui::SameLine();
-            if (ApexUi::TextButton(save, nullptr, ApexUi::ButtonKind::Primary))
+            if (ApexUi::IconTextButton(save, IconId::Save, nullptr, ApexUi::ButtonKind::Primary))
             {
                 if (SaveToLook(error))
                 {
@@ -2985,10 +2978,8 @@ bool AddShadersModal(bool openNow)
     }
     const float u = ApexUi::Unit();
     const ImVec2 display = ImGui::GetIO().DisplaySize;
-    ImGui::SetNextWindowSize(ImVec2(std::max(1.0f, std::min(560.0f * u, display.x - 32.0f)), 0.0f), ImGuiCond_Always);
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     bool changed = false;
-    if (ImGui::BeginPopupModal("##AddShaders", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
+    if (ApexUi::BeginModal("##AddShaders", ApexUi::kModalWide))
     {
         {
             Looks::Fx::BrowsePacks(); // the downloaded packs' shaders are checked (no network): their rows fill in
@@ -3002,8 +2993,7 @@ bool AddShadersModal(bool openNow)
             ApexUi::CardHeader(IconId::Plus, "Add shaders", sub.c_str(), nullptr, nullptr, true, &extra);
             ApexUi::CardDivider();
             if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-            ImGui::SetNextItemWidth(-1.0f);
-            ImGui::InputTextWithHint("##ShaderSearch", I18n::Tr("Search shaders"), query, sizeof(query));
+            ApexUi::SearchField("##ShaderSearch", "Search shaders", query, sizeof(query));
             ApexUi::Gap(ApexUi::kSpace2);
             static const char* const kKinds[] = { "All kinds", "Color", "Sharpen", "Light", "Film & camera", "Stylized" };
             ApexUi::SelectRow("Kind", "Only shaders of this kind", "##ShaderKind", &kind, kKinds, IM_COUNTOF(kKinds));
@@ -3017,7 +3007,7 @@ bool AddShadersModal(bool openNow)
             // (chromeH without the online line; on a screen too short for both, the line goes and the buttons stay)
             static float chromeH = 0.0f, leadH = 0.0f;
             const bool showLead = display.y - 32.0f - chromeH - leadH >= 60.0f * u; // at least a row and a half of the list
-            const float listH = std::clamp(display.y - 32.0f - chromeH - (showLead ? leadH : 0.0f), 40.0f * u, 420.0f * u);
+            const float listH = std::clamp(display.y - 32.0f - chromeH - (showLead ? leadH : 0.0f), 12.0f * u, 420.0f * u); // (an 800 x 600 screen at 200% text still fits)
             ImGui::BeginChild("##ShaderList", ImVec2(0.0f, listH), ImGuiChildFlags_AlwaysUseWindowPadding);
             ImGui::PopStyleVar();
             // the rows that match, per source: worked out again only when the search, the kind, the sources, the run list
@@ -3175,7 +3165,7 @@ bool AddShadersModal(bool openNow)
                     }
                 }
             }
-            if (!shown && !q.empty()) ApexUi::MutedText(I18n::Tr("No shader matches"));
+            if (!shown && !q.empty()) ApexUi::IconNote(IconId::Search, "No shader matches");
             ImGui::EndChild();
             ApexUi::CardDivider();
             // footer: when Apex goes online, then Import .fx at the left and Done at the right (stacked when narrow)
@@ -3198,7 +3188,7 @@ bool AddShadersModal(bool openNow)
             SameLineIfFits(doneW, gap, right);
             ImGui::SetCursorScreenPos(ImVec2(right - doneW, ImGui::GetCursorScreenPos().y));
             if (ApexUi::TextButton("Done", nullptr, ApexUi::ButtonKind::Primary) || close) ImGui::CloseCurrentPopup();
-            chromeH = ImGui::GetItemRectMax().y - ImGui::GetWindowPos().y + ImGui::GetScrollY() + ImGui::GetStyle().WindowPadding.y - listH - (showLead ? leadH : 0.0f);
+            chromeH = ImGui::GetItemRectMax().y - ImGui::GetWindowPos().y + ImGui::GetScrollY() + ImGui::GetCurrentWindow()->WindowPadding.y /* (the modal's own padding, BeginModal) */ - listH - (showLead ? leadH : 0.0f);
         }
         ImGui::EndPopup();
     }
@@ -3403,11 +3393,8 @@ bool SaveLookModal(bool openNow)
         ImGui::OpenPopup("##SaveLook");
     }
     const float u = ApexUi::Unit();
-    const float modalWidth = std::max(1.0f, std::min(420.0f * u, ImGui::GetIO().DisplaySize.x - 32.0f));
-    ImGui::SetNextWindowSize(ImVec2(modalWidth, 0.0f), ImGuiCond_Always);
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     bool changed = false;
-    if (ImGui::BeginPopupModal("##SaveLook", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
+    if (ApexUi::BeginModal("##SaveLook", ApexUi::kModalNarrow))
     {
         {
             ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
@@ -3425,17 +3412,13 @@ bool SaveLookModal(bool openNow)
             if (!file.empty() && ApexUtil::FileExists(Looks::LooksFolder() + ApexUtil::ToWide(file)))
                 ApexUi::IconNote(IconId::TriangleAlert, "A look with this name exists; saving replaces it", VioletTheme::kWarning);
             if (!error.empty()) ApexUi::IconNote(IconId::TriangleAlert, error.c_str(), VioletTheme::kError);
-            ApexUi::Gap(ApexUi::kSpace3);
-            const float available = ImGui::GetContentRegionAvail().x;
-            const float cancelW = ApexUi::ButtonWidth("Cancel", false), saveW = ApexUi::ButtonWidth("Save", false);
-            const float total = cancelW + ImGui::GetStyle().ItemSpacing.x + saveW;
-            const bool oneRow = total <= available;
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, available - (oneRow ? total : cancelW)));
+            const ApexUi::ControlSizeScope footer(ApexUi::ControlSize::Compact);
+            const float saveW = ApexUi::ButtonWidth("Save", true);
+            const bool oneRow = ApexUi::ModalFooter(ApexUi::ButtonWidth("Cancel", false), saveW);
             if (ApexUi::TextButton("Cancel") || close) ImGui::CloseCurrentPopup();
-            if (oneRow) ImGui::SameLine();
-            else ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - saveW));
+            ApexUi::ModalLastAction(saveW, oneRow);
             ImGui::BeginDisabled(file.empty());
-            if ((ApexUi::TextButton("Save", nullptr, ApexUi::ButtonKind::Primary) || (enter && !file.empty())) && SaveAsNewLook(name, error))
+            if ((ApexUi::IconTextButton("Save", IconId::Save, nullptr, ApexUi::ButtonKind::Primary) || (enter && !file.empty())) && SaveAsNewLook(name, error))
             {
                 g_listDirty = true;
                 ApexUi::ReportChange(I18n::Trf("Saved as {}", Looks::RefName(g.preset)).c_str());
@@ -3807,7 +3790,7 @@ public:
                     }
                     if (ApexUi::ActionMenuItem("Save as a new look\xE2\x80\xA6", IconId::Save, g.loaded)) { openSave = true; ImGui::CloseCurrentPopup(); }
                     if (ApexUi::ActionMenuItem("Open the Shaders folder", IconId::FolderOpen)) { ShowShadersFolder(); ImGui::CloseCurrentPopup(); }
-                    if (ApexUi::ActionMenuItem("Check again", IconId::RotateCcw))
+                    if (ApexUi::ActionMenuItem("Check again", IconId::RefreshCw))
                     {
                         Looks::Fx::RequestScan(); // look in the Shaders folder again and compile what changed
                         g_checkPending = true;
@@ -3823,7 +3806,8 @@ public:
             bool listed = false; // any shader in the list, runnable or not
             for (size_t i = 0; i < g.order.size(); ++i) listed |= !IsRemoved(i);
             if (total == 0 && !ApexUi::FilterActive())
-                ApexUi::MutedText(I18n::Tr(!g.loaded ? "Choose a look to see its shaders"
+                // (off, the chosen look isn't read: its list shows once Shaders is on)
+                ApexUi::MutedText(I18n::Tr(!g.loaded ? (!isEnabled && !g.preset.empty() ? "Turn on Shaders to see this look's shaders" : "Choose a look to see its shaders")
                                            : !listed  ? "No shaders yet: use Add shaders to build this look"
                                                       : "No shader of this look can run here"));
             std::vector<std::string> getPacks; // packs a Download of the missing rows would fetch (Download all)
@@ -3951,7 +3935,7 @@ public:
             if (kb) sub += "  \xC2\xB7  " + SizeText(kb);
             bool check = false;
             ApexUi::HeaderExtra extra;
-            extra.iconOff = extra.iconOn = IconId::RotateCcw;
+            extra.iconOff = extra.iconOn = IconId::RefreshCw;
             extra.value = &check;
             extra.tooltip = "Check again";
             ApexUi::CardHeader(IconId::Package, "Installed packs", sub.c_str(), nullptr, nullptr, true, &extra);
@@ -4042,7 +4026,6 @@ public:
                 ApexUi::CardDivider();
                 // a check waits for Shaders to be on: say so instead of nothing happening; else the last import's or check's result
                 std::string msg = g_fxMessagePacks ? std::string() : g_fxMessage;
-                if (msg.empty() && !g.active && (!Looks::Fx::Scanned() || Looks::Fx::Scanning())) msg = I18n::Tr("Turn on Shaders to check what changed");
                 if (!msg.empty()) ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, msg.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
             }
             const std::vector<Looks::Fx::Listed> listed = files.empty() ? std::vector<Looks::Fx::Listed>() : Looks::Fx::List();
@@ -4143,8 +4126,7 @@ public:
             if (!ApexUi::FilterActive())
             {
                 ApexUi::CardDivider();
-                ImGui::SetNextItemWidth(-1.0f);
-                ImGui::InputTextWithHint("##PackSearch", I18n::Tr("Search packs"), query, sizeof(query));
+                ApexUi::SearchField("##PackSearch", "Search packs", query, sizeof(query));
                 ApexUi::Gap(ApexUi::kSpace2);
             }
             const std::string q = ApexUi::FilterActive() ? std::string() : Lower(query);
@@ -4180,7 +4162,7 @@ public:
                 }
                 ImGui::PopID();
             }
-            if (!shown && !q.empty()) ApexUi::MutedText(I18n::Tr("No pack matches"));
+            if (!shown && !q.empty()) ApexUi::IconNote(IconId::Search, "No pack matches");
         }
         if (showMore) ApexUi::EndCard();
 

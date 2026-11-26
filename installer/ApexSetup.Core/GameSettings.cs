@@ -72,8 +72,18 @@ public static class GameSettings
     static string PathOf(SettingFile f, string bin, string docs) =>
         f switch { SettingFile.Rules => RulesFile(bin), SettingFile.Ini => Path.Combine(bin, "Sims3.ini"), _ => Engine.OptionsIni(docs) };
 
-    internal static string ReadText(string f) => File.ReadAllText(f, Encoding.Latin1);
-    internal static void WriteText(string f, string text) => Fs.Write(f, text, Encoding.Latin1);
+    // the game's files are plain bytes; one saved again by an editor as UTF-16 or UTF-8 with its mark is read as that, and
+    // written back the same way
+    internal static string ReadText(string f)
+    {
+        var b = File.ReadAllBytes(f);
+        var e = EncodingOf(b);
+        var skip = e.GetPreamble().Length;
+        return e.GetString(b, skip, b.Length - skip);
+    }
+    internal static void WriteText(string f, string text) => Fs.Write(f, text, File.Exists(f) ? EncodingOf(File.ReadAllBytes(f)) : Encoding.Latin1);
+    static Encoding EncodingOf(byte[] b) => b is [0xFF, 0xFE, ..] ? Encoding.Unicode : b is [0xFE, 0xFF, ..] ? Encoding.BigEndianUnicode
+        : b is [0xEF, 0xBB, 0xBF, ..] ? Encoding.UTF8 : Encoding.Latin1;
 
     // what the files hold now; a setting without its place in the file is left out. Without Options.ini, its settings are the
     // game's defaults.
@@ -220,21 +230,25 @@ public static class GameSettings
     }
 
     // ---------- GraphicsRules.sgr: option X ... setting $Y ... prop $ConfigGroup Name value ... end ----------
+    // (as the game reads it: any case, and a comment may close a line)
+
+    const RegexOptions Loose = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+    const string Tail = @"\s*(?:(?:#|//).*)?$";
 
     static (List<string> Lines, int From, int To)? Block(string text, string option, string setting)
     {
         var lines = text.Split('\n').ToList();
-        var at = lines.FindIndex(l => Regex.IsMatch(l, @"^\s*option\s+" + option + @"\s*$"));
+        var at = lines.FindIndex(l => Regex.IsMatch(l, @"^\s*option\s+" + Regex.Escape(option) + Tail, Loose));
         if (at < 0) return null;
-        var end = lines.FindIndex(at, l => Regex.IsMatch(l, @"^\s*end\s*$"));
+        var end = lines.FindIndex(at, l => Regex.IsMatch(l, @"^\s*end" + Tail, Loose));
         if (end < 0) return null;
-        var from = lines.FindIndex(at, end - at, l => Regex.IsMatch(l, @"^\s*setting\s+" + Regex.Escape(setting) + @"\s*$"));
+        var from = lines.FindIndex(at, end - at, l => Regex.IsMatch(l, @"^\s*setting\s+" + Regex.Escape(setting) + Tail, Loose));
         if (from < 0) return null;
-        var to = lines.FindIndex(from + 1, end - from - 1, l => Regex.IsMatch(l, @"^\s*setting\s"));
+        var to = lines.FindIndex(from + 1, end - from - 1, l => Regex.IsMatch(l, @"^\s*setting\s", Loose));
         return (lines, from, to < 0 ? end : to);
     }
 
-    static Regex PropLine(string name) => new(@"^(\s*prop\s+\$ConfigGroup\s+" + name + @"\s+)(.*?)(\s*)$");
+    static Regex PropLine(string name) => new(@"^(\s*prop\s+\$ConfigGroup\s+" + Regex.Escape(name) + @"\s+)(.*?)(\s*(?:(?:#|//).*)?)$", Loose);
     static int PropAt((List<string> Lines, int From, int To) b, string name) => b.Lines.FindIndex(b.From + 1, b.To - b.From - 1, l => PropLine(name).IsMatch(l));
 
     static string? Prop(string text, string option, string setting, string name) =>

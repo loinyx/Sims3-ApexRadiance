@@ -8,6 +8,7 @@
 #include "apex_log.h"
 #include "build_flavor.h"
 #include "imgui.h"
+#include "ui/widgets.h"
 #include <windows.h>
 #include <d3d9.h>
 #include <atomic>
@@ -323,7 +324,7 @@ void RenderDeveloperUI() {
                         static_cast<unsigned long long>(s.timedOut), static_cast<unsigned long long>(s.dropped), static_cast<unsigned long long>(s.gamePath));
     ImGui::TextDisabled("Deferred locks %.1f ms (slowest %.2f ms); state 2 without its lock %.1f ms", s.resumeMs, s.resumeMaxMs, s.state2Ms);
     bool defer = g_defer.load();
-    if (ImGui::Checkbox("Defer compositor tile locks (off = the game's own wait, for A/B)##CrDefer", &defer)) g_defer.store(defer);
+    if (ApexUi::Checkbox("Defer compositor tile locks (off = the game's own wait, for A/B)##CrDefer", &defer)) g_defer.store(defer);
 }
 
 } // namespace CompositorReadback

@@ -2369,8 +2369,11 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         int onCount = 0;
         for (const auto& f : kFilters) onCount += *f.on ? 1 : 0;
         const std::string sub = onCount ? I18n::Trf("{} of {} on", onCount, IM_COUNTOF(kFilters)) : std::string(I18n::Tr("No filter is on"));
+        // The Filters card: the group's switch and how many filters are on, the ones on as chips under it (one card: it was a
+        // header card and an In use card)
         if (ApexUi::BeginCard("##InUse")) {
-            ApexUi::CardHeader(IconId::ListChecks, "In use", sub.c_str(), nullptr, nullptr);
+            bool groupOn = q.enabled && q.filtersEnabled; // (shown off while Color is off, as the other groups' switches)
+            if (ApexUi::CardHeader(IconId::Library, "Filters", sub.c_str(), nullptr, &groupOn, q.enabled)) { q.filtersEnabled = groupOn; changed = save = true; }
             if (onCount) {
                 ApexUi::CardDivider();
                 // The names as chips, flowing onto the next line when the card is full
@@ -2379,7 +2382,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
                 for (const auto& f : kFilters) {
                     if (!*f.on) continue;
                     if (!first && ImGui::GetItemRectMax().x + gap + ApexUi::ChipSize(f.name).x <= right) ImGui::SameLine(0.0f, gap);
-                    ApexUi::Chip(f.name, 0xCECBF6); // accent light (violet_theme.h)
+                    ApexUi::Chip(f.name, VioletTheme::kAccentLight); // (follows the theme)
                     first = false;
                 }
             }
@@ -2393,7 +2396,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         int on = 0;
         for (const auto& f : kFilters) on += f.family == index && *f.on ? 1 : 0;
         const std::string label = on ? I18n::Trf("{} ({} on)", I18n::Tr(kFamilies[index]), on) : std::string(I18n::Tr(kFamilies[index]));
-        ApexUi::SectionLabel(label.c_str());
+        ApexUi::GroupLabel(label.c_str());
         familyVisible=ApexUi::BeginCard(kFamilies[index]); familyOpen=true;
     };
     auto card = [&](const char* id, IconId icon, const char* name, const char* what, bool* on, auto&& controls) {
@@ -2404,10 +2407,21 @@ void Picture::RenderFiltersUI(bool lutOnly) {
             ImGui::BeginDisabled(!q.enabled || !groupEnabled || !*on);
             controls(); ImGui::EndDisabled(); ImGui::PopID(); return;
         }
+        if(lutOnly) {
+            if(ApexUi::CardHeader(icon,name,what,nullptr,on,q.enabled)) {changed=save=true;ApexUi::ReportChange(name);}
+            ApexUi::CardDivider();
+            ImGui::BeginDisabled(!q.enabled); // (the LUT folder and the file are usable before the LUT is on)
+            controls();
+            ImGui::EndDisabled();
+            ImGui::PopID();
+            return;
+        }
         const float u=ApexUi::Unit(), gap=ApexUi::kSpace2*u;
         const ImVec2 switchSize=ApexUi::ToggleSwitchSize();
         // Right-aligned cluster: disclosure, switch; retained in narrow layouts.
         const float controlsW=24.0f*u+switchSize.x+gap;
+        if(!*on) ApexUi::SetNextRowIconColor(VioletTheme::kTextMuted); // (an off filter's icon is muted, as headers and overview rows)
+        ImGui::BeginDisabled(!q.enabled); // (the whole row greyed while Color is off, as on the other tabs)
         const bool visible=ApexUi::BeginControlRow(name,what,controlsW,icon,30.0f*u);
         if(visible) {
             bool expanded=ImGui::GetStateStorage()->GetBool(ImGui::GetID("Expanded"),lutOnly);
@@ -2430,6 +2444,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
                 ImGui::EndDisabled();
             }
         }
+        ImGui::EndDisabled();
         ImGui::PopID();
     };
     // "Reset this filter": the given settings of the card back to their defaults (its switch stays as it is)
@@ -2569,7 +2584,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         }
         resetFilter(&P::levelsBlack, &P::levelsWhite, &P::levelsGamma);
     });
-    card("Lut", IconId::Layers, "LUT", "Applies a color treatment defined in a file", &q.lut, [&] {
+    card("Lut", IconId::Droplet, "LUT", "Applies a color treatment defined in a file", &q.lut, [&] {
         static std::vector<std::string> files;
         static double listedAt = -10.0;
         if (ImGui::GetTime() - listedAt > 2.0) { // the folder is read at most every 2 s
@@ -2607,7 +2622,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
                 ApexUi::EndAdvanced();
             }
         }
-        if (ApexUi::IconTextButton("Open the LUTs folder", IconId::ExternalLink, "Opens Apex Radiance\\LUTs in Explorer (created if needed)")) ShowLutFolder();
+        if (ApexUi::IconTextButton("Open the LUTs folder", IconId::FolderOpen, "Opens Apex Radiance\\LUTs in Explorer (created if needed)")) ShowLutFolder();
     });
 
     family(2);

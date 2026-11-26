@@ -21,21 +21,27 @@ inline constexpr float kPrimaryPadding = 14.0f;
 inline constexpr float kControlIconGap = 6.0f;
 inline constexpr float kCheckboxSize = 20.0f;
 
-// Palette (0xRRGGBB)
-inline constexpr unsigned kAccent = 0x7F77DD;      // violet: toggles on, icons, slider fill, "Advanced"
-inline constexpr unsigned kAccentDark = 0x534AB7;  // highlighted pill, hovered buttons
-inline constexpr unsigned kAccentLight = 0xCECBF6; // text on the dark violet
-inline constexpr unsigned kSegmentOn = 0x2A2650;   // the chosen option of a segmented control (white text)
-inline constexpr unsigned kWindowBg = 0x0B0C0E;
-inline constexpr unsigned kCardBg = 0x131417;
-inline constexpr unsigned kCardBorder = 0x1B1C20;
-inline constexpr unsigned kSelectedBg = 0x1C1D22;  // selected sidebar item, neutral pills
-inline constexpr unsigned kHoverBg = 0x111215;
-inline constexpr unsigned kSidebarBg = 0x08090A; // the sidebar, a step below the window
-inline constexpr unsigned kToggleOff = 0x303137;
-inline constexpr unsigned kText = 0xE8E8EC;
-inline constexpr unsigned kTextMuted = 0x8B8C96;
-inline constexpr unsigned kTextFaint = 0x5E5F68; // handles and hints that should not compete with the text (drag grips)
+// Palette (0xRRGGBB). The accent is Apex Launcher's colour theme: the launcher writes it to [ui] theme_accent,
+// theme_accent_dark, theme_accent_light and theme_segment_on (apex_config.cpp reads them before the menu is made), and
+// these are Amethyst's when it has not. The surfaces and texts are the launcher's neutral greys in every theme.
+inline unsigned kAccent = 0x7F77DD;      // toggles on, icons, slider fill, "Advanced" (white text reads on it)
+inline unsigned kAccentDark = 0x534AB7;  // highlighted pill, hovered buttons
+inline unsigned kAccentLight = 0xCECBF6; // text on the dark accent
+inline unsigned kSegmentOn = 0x2A2650;   // the chosen option of a segmented control (white text)
+inline unsigned kGradientFrom = 0x534AB7; // the main button: the theme's gradient, left to right, as the launcher's
+inline unsigned kGradientTo = 0x534AB7;
+inline unsigned kOnGradient = 0xFFFFFF;   // its words and icon: the ink that reads on all of the gradient
+inline constexpr unsigned kWindowBg = 0x050505;
+inline constexpr unsigned kCardBg = 0x111111;
+inline constexpr unsigned kCardBorder = 0x1F1F1F;
+inline constexpr unsigned kSelectedBg = 0x1D1D1D;  // selected sidebar item, neutral pills
+inline constexpr unsigned kHoverBg = 0x0F0F0F;
+inline constexpr unsigned kPopupBg = 0x161616; // dialogs, dropdowns, menus and tooltips: one step above a card, opaque
+inline constexpr unsigned kSidebarBg = 0x040404; // the sidebar, a step below the window
+inline constexpr unsigned kToggleOff = 0x2A2A2A;
+inline constexpr unsigned kText = 0xFFFFFF;
+inline constexpr unsigned kTextMuted = 0x959595;
+inline constexpr unsigned kTextFaint = 0x5F5F5F; // handles and hints that should not compete with the text (drag grips)
 inline constexpr unsigned kError = 0xE8716B;   // soft red: error notes
 inline constexpr unsigned kWarning = 0xE0A84F; // amber: warning notes, "Reload save" badges
 inline constexpr unsigned kSuccess = 0x7DBE9A; // muted green: "All changes saved" in the status bar

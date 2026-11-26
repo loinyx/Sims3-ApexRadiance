@@ -19,6 +19,7 @@ const I18n::Entry kEntries[] = {
     {"Changes lamp intensity on the Lighting page. Water settings, lamp colors and room background light stay as they are.", "Muda a intensidade das lâmpadas na página Iluminação. Os ajustes da água, as cores das lâmpadas e a luz ambiente dos cômodos não mudam.", "Cambia la intensidad de las lámparas en la página Iluminación. Los ajustes del agua, los colores de las lámparas y la luz ambiental no cambian.", "Modifie l’intensité des lampes dans la page Éclairage. Les réglages de l’eau, la couleur des lampes et la lumière ambiante restent inchangés."},
     {"Undo choice", "Desfazer escolha", "Deshacer elección", "Annuler le choix"},
     {"Lighting balance changed", "Equilíbrio da iluminação alterado", "Equilibrio de iluminación cambiado", "Équilibre de l’éclairage modifié"},
+    {"Lighting balance", "Equilíbrio da iluminação", "Equilibrio de iluminación", "Équilibre de l’éclairage"},
     {"Lighting balance restored", "Equilíbrio da iluminação restaurado", "Equilibrio de iluminación restaurado", "Équilibre de l’éclairage rétabli"},
     {"Want to adjust one part?", "Quer ajustar uma parte?", "¿Quieres ajustar una parte?", "Vous souhaitez ajuster une partie ?"},
     {"Use the tabs above. Your combination is shown as Custom.", "Use as abas acima. Sua combinação aparece como Personalizada.", "Usa las pestañas de arriba. Tu combinación aparece como Personalizada.", "Utilisez les onglets ci-dessus. Votre combinaison apparaît comme Personnalisée."},
@@ -28,7 +29,7 @@ const I18n::Entry kEntries[] = {
     {"Filters tiny highlights without temporal smoothing. Turn off to compare the original", "Filtra brilhos muito pequenos sem suavização temporal. Desative para comparar com o original", "Filtra destellos muy pequeños sin suavizado temporal. Desactívalo para comparar con el original", "Filtre les petits reflets sans lissage temporel. Désactivez pour comparer avec l’original"},
     {"Softens too-bright lamps but keeps their color. Turn off to compare the original", "Suaviza lâmpadas fortes demais mantendo a cor. Desative para comparar com o original", "Suaviza las lámparas demasiado intensas conservando el color. Desactívalo para comparar con el original", "Atténue les lampes trop fortes en gardant leur couleur. Désactivez pour comparer avec l’original"},
     // ---- features (names and hover descriptions) ----
-    {"Night Lights", "Luzes Noturnas", "Luces Nocturnas", "Lumières Nocturnes"},
+    {"Night Lights", "Luzes noturnas", "Luces nocturnas", "Lumières nocturnes"},
     {"At night, street lamps and lot lamps light the ground, objects, fences, walls, roofs, ponds and "
      "snow around them with smooth, warm light and no hard edges at lot borders. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
      "À noite, postes e lâmpadas do lote iluminam o chão, objetos, cercas, paredes, telhados, lagos e neve em volta com luz "
@@ -42,7 +43,7 @@ const I18n::Entry kEntries[] = {
     {"Lamps on any floor of a lot light the ground and the yard around the house, with no hard edge at "
      "lot borders or between floors. Part of Night Lights in " APEX_PRODUCT_NAME ". Credits: @loinyx",
      "Lâmpadas de qualquer andar do lote iluminam o chão e o quintal em volta da casa, sem bordas marcadas nas divisas dos "
-     "lotes nem entre andares. Parte das Luzes Noturnas do " APEX_PRODUCT_NAME ". Créditos: @loinyx",
+     "lotes nem entre andares. Parte das Luzes noturnas do " APEX_PRODUCT_NAME ". Créditos: @loinyx",
      "Las lámparas de cualquier piso de un solar iluminan el suelo y el jardín alrededor de la casa, sin bordes marcados en "
      "los límites de los solares ni entre pisos. Parte de Luces Nocturnas en " APEX_PRODUCT_NAME ". Créditos: @loinyx",
      "Les lampes de n'importe quel étage d'un terrain éclairent le sol et le jardin autour de la maison, sans bord net aux "
@@ -108,13 +109,13 @@ const I18n::Entry kEntries[] = {
      "Cuánto ilumina la luna el mundo de noche; 100% es el juego", "À quel point la lune éclaire le monde la nuit ; 100% = le jeu"},
     {"Not available on this game version", "Não disponível nesta versão do jogo", "No disponible en esta versión del juego",
      "Non disponible sur cette version du jeu"},
-    {"Reset Night Lights", "Restaurar Luzes Noturnas", "Restablecer Luces Nocturnas", "Réinitialiser Lumières Nocturnes"},
-    {"Put every Night Lights setting back to default", "Volta todas as opções de Luzes Noturnas ao padrão",
+    {"Reset Night Lights", "Restaurar Luzes noturnas", "Restablecer Luces Nocturnas", "Réinitialiser Lumières Nocturnes"},
+    {"Put every Night Lights setting back to default", "Volta todas as opções de Luzes noturnas ao padrão",
      "Devuelve todos los ajustes de Luces Nocturnas a sus valores predeterminados", "Remet tous les réglages de Lumières Nocturnes par défaut"},
-    {"Night Lights reset", "Luzes Noturnas restauradas", "Luces Nocturnas restablecidas", "Lumières Nocturnes réinitialisées"},
+    {"Night Lights reset", "Luzes noturnas restauradas", "Luces Nocturnas restablecidas", "Lumières Nocturnes réinitialisées"},
 
     // ---- Lighting > Ground ----
-    {"Ground & Lots", "Chão e Lotes", "Suelo y Solares", "Sol et Terrains"},
+    {"Ground & Lots", "Chão e lotes", "Suelo y solares", "Sol et terrains"},
     {"Lamp light on grass, streets and lots", "Luz das lâmpadas na grama, ruas e lotes", "Luz de lámparas en césped, calles y solares",
      "Lumière des lampes sur l'herbe, les rues et les terrains"},
     {"Street lamps light lots", "Postes iluminam os lotes", "Las farolas iluminan los solares", "Les réverbères éclairent les terrains"},
@@ -262,7 +263,7 @@ const I18n::Entry kEntries[] = {
      "Al anochecer, la luz del suelo se rehace con todas las lámparas encendidas",
      "À la tombée de la nuit, la lumière au sol est recalculée avec toutes les lampes allumées"},
     {"Delay after dusk", "Espera depois de anoitecer", "Espera tras anochecer", "Délai après le crépuscule"},
-    {"Waits after dusk so every lamp has switched on first", "Espera depois de anoitecer para todas as lâmpadas acenderem antes",
+    {"Waits after dusk so every lamp has switched on first", "Aguarda todas as lâmpadas acenderem",
      "Espera tras anochecer para que todas las lámparas se enciendan antes", "Attend après le crépuscule que toutes les lampes soient allumées"},
 
     // ---- Lighting > Objects ----
@@ -339,7 +340,7 @@ const I18n::Entry kEntries[] = {
      "Brillo de los techos iluminados; 60% es el predeterminado", "Luminosité des toits éclairés ; 60% par défaut"},
 
     // ---- Water & Snow > Water ----
-    {"Lamp Glow", "Brilho das Lâmpadas", "Resplandor de Lámparas", "Lueur des Lampes"},
+    {"Lamp Glow", "Brilho das lâmpadas", "Resplandor de lámparas", "Lueur des lampes"},
     {"Lamp light on ponds at night", "Luz das lâmpadas nos lagos à noite", "Luz de lámparas en los estanques de noche", "Lumière des lampes sur les étangs la nuit"},
     {"Lamps glow on ponds", "Lâmpadas brilham nos lagos", "Las lámparas brillan en los estanques", "Les lampes luisent sur les étangs"},
     {"Ponds glow and sparkle near lamps at night", "Lagos brilham e cintilam perto das lâmpadas à noite",

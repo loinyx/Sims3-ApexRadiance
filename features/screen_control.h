@@ -64,7 +64,7 @@ bool FpsCounterShown();
 void DrawFpsCounter();
 // Overview: the Frame rate half of the status card (render thread); true when the player clicked it (the caller opens
 // the Display page)
-bool RenderFpsTile();
+bool RenderFpsTile(bool sideBySide = true); // sideBySide: beside Game memory (its band lines the two up; stacked, none)
 // "Borderless · 3840 × 2160 · 165 fps": the window mode, the back buffer and the limit, translated
 std::string Summary();
 

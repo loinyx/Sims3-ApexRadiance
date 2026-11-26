@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [4.1.3](4.1.3.md): Apex Launcher 2.3.2 with Game caches in Saves, Sims3Packs added as mods and its colour theme in the menu, which had a design pass over every page; a crash with the RTX Remix bridge fixed.
 - [4.1.2](4.1.2.md): Apex Launcher 2.3.1 with a Load order page, a health card on Home, scrapbook frames drawn anew and a fix for pictures that closed the launcher.
 - [4.1.1](4.1.1.md): Apex Launcher 2.3 with a new look, Game settings, backups of saves, adding any file, and faster merges; deleting lamps in Buy mode no longer crashes.
 - [4.1.0](4.1.0.md): Apex Radiance Setup becomes Apex Launcher, with Play, Health, Mods, Saves, a Gallery of pictures and videos, light and dark that follow Windows.

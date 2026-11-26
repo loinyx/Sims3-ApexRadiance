@@ -38,6 +38,27 @@ public sealed record Theme(string Id, string Name, (double L, double C, double H
         return new(Windows, "Windows colour", [(l, c, h), (Math.Max(0.45, l - 0.07), c, (h + 12) % 360)]);
     }
 
+    // Its colours in Apex's own menu, which is always dark and puts white words on the accent: the accent, a darker one for
+    // highlighted pills and hovered buttons, a light one for words on that, and the chosen option of a segmented control.
+    // Lightness as the menu's own violet had them (0x7F77DD, 0x534AB7, 0xCECBF6, 0x2A2650); hue and strength the theme's.
+    public (string Key, string Value)[] MenuColours()
+    {
+        var c = Math.Min(0.16, Stops[0].C);
+        static string Hex(Color x) => $"#{x.R:X2}{x.G:X2}{x.B:X2}";
+        return
+        [
+            ("theme", Id),
+            ("theme_accent", Hex(Oklch.Of(0.62, c, Hue))),
+            ("theme_accent_dark", Hex(Oklch.Of(0.47, c, Hue))),
+            ("theme_accent_light", Hex(Oklch.Of(0.86, c * 0.4, Hue))),
+            ("theme_segment_on", Hex(Oklch.Of(0.29, c * 0.5, Hue))),
+            // (the main button: the gradient and the ink of the launcher's own main buttons)
+            ("theme_gradient_from", Hex(Gradient().Stops[0])),
+            ("theme_gradient_to", Hex(Gradient().Stops[^1])),
+            ("theme_ink", Hex(Gradient().Ink)),
+        ];
+    }
+
     // the gradient as colours, and the ink that reads on all of it
     (Color[] Stops, Color Ink)? _made; // (worked out once)
     public (Color[] Stops, Color Ink) Gradient() => _made ??= Make();

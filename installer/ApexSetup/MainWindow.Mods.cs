@@ -856,7 +856,7 @@ public sealed partial class MainWindow
     async void OnModsAdd(object sender, RoutedEventArgs e)
     {
         var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
-        foreach (var x in ModAdd.Extensions) picker.FileTypeFilter.Add(x);
+        foreach (var x in ModAdd.Extensions.Concat(ModAdd.Packs)) picker.FileTypeFilter.Add(x);
         var files = await picker.PickMultipleFilesAsync();
         if (files is null || files.Count == 0) return;
         await InstallFilesAsync(files.Select(f => f.Path).ToList());
@@ -1040,6 +1040,7 @@ public sealed partial class MainWindow
             if (arrow is not null)
             {
                 (arrow.Background, arrow.BorderBrush) = (Res("ApexCardBrush"), Res("ApexCardBorderBrush"));
+                if (arrow.Content is LucideIcon icon) icon.Stroke = Res("ApexSoftTextBrush");
                 ToolTipService.SetToolTip(arrow, name);
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(arrow, name);
             }

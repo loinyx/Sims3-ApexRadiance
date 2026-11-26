@@ -7,7 +7,7 @@ namespace ApexPresets {
 
 namespace {
 
-// Performance: Quality without Ambient Occlusion, Depth Blur and Picture.
+// Performance: Quality without Ambient Occlusion, Depth Blur and Picture, and Classic lamp updates (easier on the GPU).
 constexpr const char* kPerformance = R"toml(
 [patches.AmbientOcclusion]
 alcance = 1.658
@@ -68,6 +68,7 @@ enabled = true
 
 [patches.NightTerrainRelight]
 atrasoSegundos = 2.0
+lampLightingMode = "classic"
 automaticoAoAnoitecer = true
 azulNosComodos = 0.0
 bordasDosMapasDeLuz = true
@@ -243,6 +244,7 @@ enabled = true
 
 [patches.NightTerrainRelight]
 atrasoSegundos = 2.0
+lampLightingMode = "instant"
 automaticoAoAnoitecer = true
 azulNosComodos = 0.0
 bordasDosMapasDeLuz = true
@@ -418,6 +420,7 @@ enabled = true
 
 [patches.NightTerrainRelight]
 atrasoSegundos = 2.0
+lampLightingMode = "instant"
 automaticoAoAnoitecer = true
 azulNosComodos = 0.0
 bordasDosMapasDeLuz = true
@@ -534,8 +537,8 @@ vignette_size = 0.5
 
 const Preset kPresets[kCount] = {
     {"Performance", "More FPS with lighter effects", "rocket", kPerformance},
-    {"Balanced", "A balance of looks and speed", "sun-medium", kDefaultPreset},
-    {"Quality", "The best look, for stronger PCs", "aperture", kQuality},
+    {"Balanced", "A balance of looks and speed", "sliders-horizontal", kDefaultPreset},
+    {"Quality", "The best look, for stronger PCs", "sparkles", kQuality},
 };
 
 } // namespace

@@ -93,8 +93,8 @@ Updates, Appearance, General) and [Saves and backups](saves-and-backups.md#setti
 
 ## Rejected approaches
 
-- Sims3Pack support (installing `.sims3pack` files the way the game's own launcher does): removed; `.sims3pack` files
-  are refused with a pointer to the game's launcher ([Mods](mods.md#adding-files)).
+- Installing `.sims3pack` files the way the game's own launcher does: removed. Since 4.1.3 the custom content inside
+  one is added as mods; lots, worlds and Sims are left to the game's launcher ([Mods](mods.md#adding-files)).
 
 ## See also
 

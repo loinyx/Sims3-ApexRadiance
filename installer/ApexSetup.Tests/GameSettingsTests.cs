@@ -57,6 +57,25 @@ static class GameSettingsTests
             Make(Path.Combine(here, "ApexRadiance.toml"));
             check(Scan.ApexDir(english, german, after) == here && Scan.ApexDir(english, german, before) == there, "Apex folder: with settings in both, the one the installed ASI reads");
 
+            // a GraphicsRules.sgr saved again by an editor: other case, comments closing lines, UTF-16 with its mark
+            {
+                var root2 = Directory.CreateTempSubdirectory("ApexGameSettingsVariant-").FullName;
+                var bin2 = Path.Combine(root2, "Game", "Bin");
+                Directory.CreateDirectory(bin2);
+                var rules2 = Path.Combine(bin2, "GraphicsRules.sgr");
+                var variant = Rules.Replace("option LightingQuality", "OPTION lightingquality   # edited").Replace("    setting $High", "    Setting $high // best")
+                    .Replace("ShadowMapSize 2048", "shadowmapsize 2048 # was 1024").Replace("\r\nend\r\noption SimQuality", "\r\nEnd # lighting\r\noption SimQuality");
+                File.WriteAllText(rules2, variant, Encoding.Unicode);
+                var read = GameSettings.Now(bin2, docs);
+                check(read.GetValueOrDefault("shadow") == "2048" && read.GetValueOrDefault("sims") == "2048", "game settings: an edited GraphicsRules.sgr (case, comments, UTF-16) is still read");
+                GameSettings.ApplyBin(new Game(root2, bin2, "TS3W.exe", Edition.Steam, "1.67.2"), docs, new Dictionary<string, string> { ["shadow"] = "4096" });
+                var bytes = File.ReadAllBytes(rules2);
+                check(bytes is [0xFF, 0xFE, ..] && GameSettings.Now(bin2, docs).GetValueOrDefault("shadow") == "4096"
+                      && File.ReadAllText(rules2, Encoding.Unicode) == variant.Replace("shadowmapsize 2048 # was 1024", "shadowmapsize 4096 # was 1024"),
+                    "game settings: a UTF-16 GraphicsRules.sgr is written back as UTF-16, only its value changed, its comment kept");
+                try { Directory.Delete(root2, true); } catch (IOException) { }
+            }
+
             Put(rules, Rules); Put(ini, Ini); Put(options, Options);
             var now = GameSettings.Now(bin, docs);
             check(now["shadow"] == "2048" && now["sims"] == "2048" && now["bloom"] == "0" && now["reads"] == "20000000" && now["walk.radius"] == "0.15"

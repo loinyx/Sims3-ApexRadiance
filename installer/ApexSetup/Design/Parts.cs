@@ -181,6 +181,29 @@ public static class Parts
 
     // ---------- fields ----------
 
+    // a search field: the search icon inside its start, the field with no frame of its own, one border around both that
+    // takes the accent while the field has focus (the Mods page's search, for fields built in code)
+    public static Border SearchField(TextBox t, string name)
+    {
+        var none = B("Clear");
+        (t.BorderThickness, t.Background, t.MinHeight, t.MinWidth, t.Padding, t.VerticalAlignment) = (new Thickness(0), none, Size.ControlSmall, 0, new Thickness(0, 5, 0, 6), VerticalAlignment.Center);
+        foreach (var k in new[] { "TextControlBackgroundFocused", "TextControlBackgroundPointerOver", "TextControlBorderBrushFocused", "TextControlBorderBrushPointerOver" }) t.Resources[k] = none;
+        t.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(t, name);
+        var g = new Grid { ColumnSpacing = Space.X3 };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        var icon = Lucide.Icon("search", Size.IconSmall, B("Muted"));
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        g.Children.Add(icon);
+        Grid.SetColumn(t, 1);
+        g.Children.Add(t);
+        var box = new Border { Child = g, Height = Size.Control, CornerRadius = new CornerRadius(Radius.Control), BorderThickness = new Thickness(1), BorderBrush = B("InputBorder"), Background = B("Card"), Padding = new Thickness(11, 0, Space.X1, 0) };
+        t.GotFocus += (_, _) => box.BorderBrush = B("Accent");
+        t.LostFocus += (_, _) => box.BorderBrush = B("InputBorder");
+        return box;
+    }
+
     // over a field, as the field's own header
     public static TextBlock Label(string text) => new() { Text = text, FontSize = TextSize.Body, Foreground = B("SoftText") };
 

@@ -33,6 +33,8 @@ controls past the window's edge at several window sizes. Build commands are in [
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-26 | `df5c0894` | `installer/ApexSetup.Tests` | All passed | none |
+| 2026-11-26 | `df5c0894` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run, portable, a data folder of its own) | 237 steps: 1 and 3 failures in two runs, each an element not found in time (Mods grid, Health pages), none logged; 0 failures on `a56065c5` | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-26 | `0eb74a39` | `installer/ApexSetup.Tests` | All passed | none |
 | 2026-11-26 | `0eb74a39` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run, a data folder of its own) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-25 | `af2b44ab` | `installer/ApexSetup.Tests` | All passed | none |

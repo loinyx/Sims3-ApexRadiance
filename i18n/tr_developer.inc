@@ -315,7 +315,7 @@ const I18n::Entry kDevBuildExtra[] = {
 {"The last shader's answer is kept", "A resposta do último shader é mantida", "Se conserva la respuesta del último shader", "La réponse du dernier shader est conservée"},
 {"Gradient correction front cache", "Cache frontal da correção de degradês", "Caché frontal de la corrección de degradados", "Cache frontal de la correction des dégradés"},
 {"Shader copies found without a lock", "Cópias de shader encontradas sem trava", "Copias de shader encontradas sin bloqueo", "Copies de shader trouvées sans verrou"},
-{"Night Lights shader facts", "Dados de shader das Luzes Noturnas", "Datos de shader de Luces Nocturnas", "Données de shader des Lumières Nocturnes"},
+{"Night Lights shader facts", "Dados de shader das Luzes noturnas", "Datos de shader de Luces Nocturnas", "Données de shader des Lumières Nocturnes"},
 {"One lookup per pixel shader change", "Uma consulta por troca de pixel shader", "Una consulta por cambio de pixel shader", "Une recherche par changement de pixel shader"},
 {"Rig mode once per draw", "Modo do rig uma vez por desenho", "Modo del rig una vez por dibujo", "Mode du rig une fois par dessin"},
 {"Read once instead of at every check", "Lido uma vez em vez de a cada verificação", "Se lee una vez en lugar de en cada comprobación", "Lu une fois au lieu de à chaque vérification"},

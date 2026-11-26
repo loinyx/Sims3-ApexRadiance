@@ -1092,7 +1092,8 @@ ASI. It never hooks the game; it meets Apex Radiance only through files:
   `Game\Bin\Apex Radiance backup\setup.json` ([components](features/installer.md)).
 - It reads `ApexRadiance.toml` in the Documents folder the installed ASI uses (section 5.3) for the capture folders
   ([Gallery](features/launcher/gallery.md)) and writes only `[ui] restart_host` and `[screen] fps_limit`, each in a
-  restore point.
+  restore point, and the launcher's colour theme for the menu (`[ui] theme` and `theme_accent`, `theme_accent_dark`,
+  `theme_accent_light`, `theme_segment_on`, `theme_gradient_from`, `theme_gradient_to`, `theme_ink`), at its start, when the theme changes and before Play.
 - It reads Apex Radiance's log and crash report for Health's stability timeline ([Health](features/launcher/health.md)).
 - It starts the game's exe itself, optionally with `-worldFile`; the ASI's [Save name fix](features/save-name-fix.md)
   keeps such a save's name.

@@ -986,6 +986,50 @@ public static class Engine
         return string.Join('\n', list);
     }
 
+    // ---------- the colour theme of Apex's own menu: [ui] theme and its colours ----------
+
+    // The launcher's theme for the menu in the game: its id and the colours worked out from it ("#RRGGBB"), which Apex reads
+    // when the game starts (apex_config.cpp ReadThemeColours) and keeps when it saves its settings. Only into a file the game
+    // has made (a new one would skip Apex's welcome page); no restore point, as it changes only colours. False when nothing
+    // changed or the file can't be written.
+    public static bool SetMenuTheme(string docs, IReadOnlyList<(string Key, string Value)> keys)
+    {
+        var f = ApexToml(docs);
+        try
+        {
+            if (!File.Exists(f)) return false;
+            var text = File.ReadAllText(f);
+            var now = keys.Aggregate(text, (t, k) => WithUiText(t, k.Key, k.Value));
+            if (now == text) return false;
+            Fs.Retry(() => Fs.WriteAtomic(f, now));
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log(e); return false; }
+    }
+
+    // [ui] key = "value": the line changed where it is, else added at the end of [ui] (and [ui] made when there is none)
+    public static string WithUiText(string text, string key, string value)
+    {
+        var cr = text.Contains("\r\n") ? "\r" : "";
+        var line = $"{key} = \"{value}\"";
+        var (lines, at, end) = UiTable(text);
+        if (at < 0)
+            return text + (text.Length == 0 || text.EndsWith('\n') ? "" : cr + "\n") + (text.Length == 0 ? "" : cr + "\n") + $"[ui]{cr}\n{line}{cr}\n";
+        var pattern = new Regex(@"^\s*" + Regex.Escape(key) + @"\s*=");
+        for (int i = at + 1; i < end; i++)
+            if (pattern.IsMatch(lines[i]))
+            {
+                if (lines[i].TrimEnd('\r') == line) return text;
+                lines[i] = line + (lines[i].EndsWith('\r') ? "\r" : "");
+                return string.Join('\n', lines);
+            }
+        var last = end - 1;
+        while (last > at && lines[last].Trim().Length == 0) last--;
+        var list = lines.ToList();
+        list.Insert(last + 1, line + cr);
+        return string.Join('\n', list);
+    }
+
     // the text without [ui] restart_host (undo of a key Setup added)
     public static string WithoutRestartHost(string text)
     {

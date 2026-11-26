@@ -106,7 +106,11 @@ public sealed partial class MainWindow
         {
             // the picture as a rounded card inside the page's margins, at full strength unless Settings softens it, with a soft
             // shade in the corner where the words sit so they read on any picture without a box over it
-            pic.Children.Add(new Image { Source = Thumb(shot, 2000), Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Center, Opacity = Math.Clamp(_settings.HomePictureStrength, 30, 100) / 100.0 });
+            // The picture is never cut: the top takes its own shape once it is read.
+            var source = Thumb(shot, 2000);
+            source.ImageOpened += (_, _) => { if (source.PixelWidth > 0) { _homeRatio = (double)source.PixelHeight / source.PixelWidth; FitHome(); } };
+            var strength = Math.Clamp(_settings.HomePictureStrength, 30, 100) / 100.0;
+            pic.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Center, Opacity = strength });
             var black = Windows.UI.Color.FromArgb(255, 8, 8, 8);
             pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0xC8), (0.3, 0x66), (0.6, 0)]) });
             pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0x8C), (0.35, 0x26), (0.55, 0)], across: true) });
@@ -157,6 +161,7 @@ public sealed partial class MainWindow
     StackPanel? _homeWords;
     TextBlock? _homeName;
     bool _homeFitHooked, _homeOnPhoto;
+    double _homeRatio = 9 / 16.0;
 
     // the top keeps the picture's own wide shape as the window grows, within the share of the window Settings' picture
     // height allows (a plain card takes the height of its words); the name grows a little with it
@@ -164,8 +169,8 @@ public sealed partial class MainWindow
     {
         double w = Scroller.ActualWidth, h = Scroller.ActualHeight;
         if (_homeHero is null || w <= 0 || h <= 0) return;
-        var share = Math.Clamp(_settings.HomePictureHeight / 480.0 * 0.9, 0.42, 0.88);
-        if (_homeOnPhoto) _homeHero.Height = Math.Clamp(w * 0.44, 360, Math.Max(360, h * share));
+        // (the picture inside the page margins at its own shape, plus the margin above it)
+        if (_homeOnPhoto) _homeHero.Height = Math.Max(360, (w - 2 * Design.Space.Page) * _homeRatio + Design.Space.X6);
         if (_homeName is not null) { _homeName.FontSize = Math.Clamp(w / 32, 40, 64); _homeName.LineHeight = _homeName.FontSize * 1.08; }
         if (_homeWords is not null) _homeWords.MaxWidth = Math.Max(560, w * 0.42);
     }

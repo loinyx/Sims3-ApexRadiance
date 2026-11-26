@@ -126,6 +126,8 @@ int CheckedThisSession() { return 0; }
 void Instance::Release() {}
 bool Instance::Run(IDirect3DDevice9*, size_t, IDirect3DSurface9*, IDirect3DTexture9*, const std::vector<float>&) { return false; }
 bool Instance::Create(IDirect3DDevice9*, std::shared_ptr<const Effect>, std::string*) { return false; }
+bool DefaultRoom(uint64_t, uint64_t, std::string*) { return true; }
+void SetRoomCheck(RoomFn) {}
 } // namespace Looks::Fx
 
 namespace Looks::Packs {

@@ -1,7 +1,8 @@
 # Apex Launcher: saves and backups
 
 The Saves screen lists the game's saves with their household photo, world, size and backups, and the saves the player
-kept out of the game or that are gone from it. Each save can be renamed, duplicated, kept out of the game, deleted to
+kept out of the game or that are gone from it, and *Game caches*, the caches the game makes again by itself for every
+save. Each save can be renamed, duplicated, kept out of the game, deleted to
 the Recycle Bin and cleaned of the pictures and memories that make it large. Backups are zips of a save's folder, made
 on request or automatically when the game closes, before Play or once a day; each can be restored over the save or
 opened as another one, named, pinned, checked, exported and imported. Every change that moves a save offers Undo.
@@ -10,7 +11,7 @@ opened as another one, named, pinned, checked, exported and imported. Every chan
 
 | | |
 |---|---|
-| Availability | Saves with their household photo and a backup: Released in 4.1.0; cleaning, rename, duplicate, kept-out and gone saves, automatic backups, restore, import and export: Released in 4.1.1 |
+| Availability | Saves with their household photo and a backup: Released in 4.1.0; cleaning, rename, duplicate, kept-out and gone saves, automatic backups, restore, import and export: Released in 4.1.1; Game caches, the Clean panel's parts as rows, copies of a save inside it: Released in 4.1.3 |
 | Default | Automatic backups off |
 | Menu | Saves |
 | Configuration | `backups.json`, `save-stars.json`, `save-sizes.json` ([data files](data-and-files.md)) |
@@ -43,9 +44,11 @@ leaves the game's files out of step.
 
 ### Cleaning
 
-`SaveClean` removes, by the player's choice, *Portraits and thumbnails*, *Repeated memories* (one of each stays) and
-*All memories and photos* (only the pictures the player chose to keep stay), and always reclaims unused room in the
-files. Game data, lot textures, the save's own household picture and starred pictures (*Choose the pictures that stay*,
+`SaveClean` removes, by the player's choice, each part on its own row with its size (*Empty* and its switch off when
+there is nothing to take): *Sims' portraits*, *Lot and household thumbnails*, *Repeated memories* (one of each
+stays), *All memories* and *Selfies, cards and photo booth* (only the pictures the player chose to keep stay), and
+*Copies of the save inside it* (`.sims3` folders nested in the save, which the game does not read; measured, in the
+backup zip and undone with it). *Unused space* in the files is always reclaimed. Game data, lot textures, the save's own household picture and starred pictures (*Choose the pictures that stay*,
 `save-stars.json`) are never removed. It rewrites the world `.nhd` files and `TravelDB.package`; a package with a part
 it does not know refuses the whole save. The plan is exact to the byte before anything is written, and a gain under
 50 KB is not offered.
@@ -57,6 +60,15 @@ it does not know refuses the whole save. The plan is exact to the byte before an
 4. *Undo* restores the zip, unless the save was played since.
 
 *Clean several* cleans more than one save, each with its own backup first.
+
+### Game caches
+
+A place in the Saves side pane (*Look after your saves*) with the game's caches, grouped by when to clear them (*When
+something looks wrong*: Create a Sim, Scripts, Worlds, Thumbnails, Downloads index, Online) and by *Disk space*
+(unfinished content files, backups of installed content, old error logs). Each group is a row with its size and a
+switch; *n files* opens its files, the ten largest first with *Show more*, each a checkbox (an unticked file stays),
+with *Select all* and *Clear all*. *Free up* moves what is chosen aside; *Put the caches back* restores the last
+copy. The groups, their files and what is never touched: [mod tools](mod-tools.md#game-caches).
 
 ### Backups
 

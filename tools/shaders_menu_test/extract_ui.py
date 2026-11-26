@@ -14,7 +14,7 @@ looks=part(gui,'void LookLutRow()','// Tab Look: the look card')+part(gui,'void 
 looks=replace(looks,'PictureParams pp = Picture::Get().GetParams();','PictureParams pp{g_fixtureTwin, g_fixtureTwin, g_fixtureTwin ? "Film.cube" : ""};')
 looks='bool LookTwin(const std::string& technique, Looks::Twin& out, bool act);\n'+looks
 looks=replace(looks,'Picture::Get().SetParams(pp, true);','')
-pages+=looks+part(gui,'bool LooksOn()','void LotStreamingPage()')
+pages+=looks+part(gui,'bool LooksOn()','// ---- System > Report a problem')
 root.joinpath('pages.inc').write_text(pages,encoding='utf-8')
 packs=Path('features/looks_packs.cpp').read_text(encoding='utf-8')
 root.joinpath('failure_text.inc').write_text(part(packs,'const char* FailureText(','Failure Unpack('),encoding='utf-8')

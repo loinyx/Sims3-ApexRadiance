@@ -373,6 +373,12 @@ public static class SaveCopies
                         var file = old[..^SaveClean.OldSuffix.Length];
                         if (File.Exists(file)) Recycle(old); else Fs.Retry(() => File.Move(old, file));
                     }
+                    // (a copy of the save inside it a clean moved aside: back where it was, nothing lost; the next clean takes it)
+                    foreach (var old in Directory.EnumerateDirectories(dir, "*" + SaveClean.OldSuffix).ToList())
+                    {
+                        var home = old[..^SaveClean.OldSuffix.Length];
+                        if (Directory.Exists(home)) Recycle(old); else Fs.Retry(() => Directory.Move(old, home));
+                    }
                 }
             }
             // (a backup cut short; one being made is newer)

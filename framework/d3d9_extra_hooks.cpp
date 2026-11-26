@@ -224,6 +224,9 @@ HRESULT __stdcall HookedSetScissorRect(IDirect3DDevice9* dev, const RECT* r) {
     return oSetScissorRect(dev, r);
 }
 HRESULT __stdcall HookedSetVertexDeclaration(IDirect3DDevice9* dev, IDirect3DVertexDeclaration9* decl) {
+    // The game sets the declaration of its vertex format object (TS3W.exe 1.67.2 +0x20EFB0, field +0x14); a freed object there
+    // passed 0x200, and the RTX Remix bridge read through it and crashed. No pointer below 64 KB is valid: refused like a bad call.
+    if (decl && reinterpret_cast<uintptr_t>(decl) < 0x10000) return D3DERR_INVALIDCALL;
     g_fvfLast.store(false, std::memory_order_relaxed);
     if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setDecl) D3D9Hooks::g_traceCaller = _ReturnAddress(), tr->setDecl(dev, decl);
     return oSetVertexDeclaration(dev, decl);

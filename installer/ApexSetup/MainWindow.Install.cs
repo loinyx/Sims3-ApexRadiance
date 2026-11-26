@@ -43,7 +43,7 @@ public sealed partial class MainWindow
             detail.Text = dir;
         }
         Show();
-        var row = Row("folder", T("Folder"), "", Button(T("Change"), async () => { if (await PickInstallFolder() is { } dir) { _installFolder = dir; Show(); } }));
+        var row = Row("folder", T("Apex Launcher folder"), "", Button(T("Change"), async () => { if (await PickInstallFolder() is { } dir) { _installFolder = dir; Show(); } }));
         ((StackPanel)((Grid)row.Child).Children[1]).Children.Add(detail);
         return row;
     }

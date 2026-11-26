@@ -23,6 +23,7 @@
 // (ReportChange); the menu turns the last report of a frame into the undo toast.
 #include "imgui.h"
 #include "icons.h"
+#include "violet_theme.h"
 #include <climits>
 #include <limits>
 #include <string>
@@ -117,12 +118,34 @@ inline constexpr float kIconMedium = 18.0f; // card headers, sidebar, overview r
 void Tooltip(const char* text);
 // Large bold page title and its muted subtitle, then the gap before the first card
 void PageTitle(const char* title, const char* subtitle);
+// Every dialog in one shape: kModalNarrow (one field or a question) or kModalWide (a list or a grid) units wide (never
+// wider than the screen less 32 px), centred on the screen, a card's padding (kSpace4) and corners, its height following
+// its content. Then CardHeader + CardDivider, the body, and CardDivider + the buttons on the right (Cancel, then the
+// committing action). True while open: call ImGui::EndPopup() then, as with BeginPopupModal.
+inline constexpr float kModalNarrow = 440.0f, kModalWide = 560.0f;
+bool BeginModal(const char* id, float widthUnits, bool* open = nullptr);
+// A dialog's footer: CardDivider, then its buttons on the right in one row (each under the other, right-aligned, when they
+// do not fit). Call ModalFooter with the first and the last button's widths (ButtonWidth), draw the first, then
+// ModalLastAction(lastWidth, oneRow) and the last. Inside a ControlSizeScope(Compact): footers use the compact size.
+// The committing action is last, a primary button with its icon.
+bool ModalFooter(float firstWidth, float lastWidth);
+void ModalLastAction(float lastWidth, bool oneRow);
+// A feature page's header: PageTitle with the feature's own controls on the title line, right-aligned with the cards'
+// switches below — [cost chip] [hold to compare] [extra toggle button] [switch]. While the switch is off the subtitle
+// reads offSubtitle (when given). In the search results it is the feature's switch row (title, subtitle). True on the
+// frame the switch was clicked. Every page whose feature can be turned off uses it: the switch never lives in a card.
+bool PageHeader(const char* title, const char* subtitle, bool* toggle, bool toggleEnabled = true, const char* tooltip = nullptr,
+                struct HeaderExtra* extra = nullptr, const char* chip = nullptr, const char* offSubtitle = "Off · your settings are kept");
 // Muted wrapped text
 void MutedText(const char* text);
+// One line of a list: a small muted dot in the middle of the first line, the words (muted, wrapped) beside it.
+// translate: look `text` up (false for text that is already the player's language or not to be translated)
+void BulletLine(const char* text, bool translate = true);
+// Steps in order: a numbered bubble each (joined by a thin line), the words wrapped beside it. A translated step that
+// starts with its own "1. " is shown without it (the bubble says the number).
+void NumberedSteps(const char* const* steps, int count);
 // A small turning arc on the text line, for work that is still running; the next item goes on the same line
 void BusySpinner(bool frameLine = false); // frameLine: centred on a line of buttons, else on a line of text
-// Small bold section label inside a card or page (kept for older callers; cards use GroupLabel)
-void SectionLabel(const char* text);
 // Group label inside a card: regular menu font, muted, without letter spacing
 void GroupLabel(const char* text);
 // A quiet label that opens a group of rows inside a card ("What stays sharp"): the row divider above it when it follows
@@ -135,7 +158,11 @@ bool CardGroupToggle(const char* id, const char* text, bool openByDefault = true
 // A note: a small icon and wrapped text in a subtly tinted rounded box, in the given colour (0xRRGGBB). Info notes use
 // IconId::Info and the default muted colour, warnings IconId::TriangleAlert and VioletTheme::kWarning, errors
 // IconId::TriangleAlert and VioletTheme::kError. The box is one item: hover it for a Tooltip.
-void IconNote(IconId icon, const char* text, unsigned rgb = 0x8B8C96);
+void IconNote(IconId icon, const char* text, unsigned rgb = VioletTheme::kTextMuted);
+// A note with its action inside it, on the right ("Color is off" with Turn on Color): the words wrap beside the icon,
+// a compact primary button centred on the note's height. True when the button was clicked. enabled: the button's state.
+bool NoteAction(IconId icon, const char* text, const char* action, IconId actionIcon, bool enabled = true,
+                unsigned rgb = VioletTheme::kTextMuted);
 // Short read-only facts side by side (one under the other when narrow): each a small muted label over its value, both
 // translated. Not a setting row: hidden in the search results like notes
 void FactRow(const char* const* labels, const char* const* values, int count);
@@ -154,8 +181,9 @@ public:
     ControlSizeScope& operator=(const ControlSizeScope&) = delete;
 };
 
-// Native-style diagnostic checkbox: a 20-unit box, independent of input frame heights.
+// The launcher's checkbox: a 20-unit rounded square, accent-filled with a white tick when on.
 // Labels are supplied by the caller (developer English or already translated).
+void DrawCheckBox(ImDrawList* dl, ImVec2 topLeft, float box, bool on, bool hovered); // the box alone, for a custom row
 bool Checkbox(const char* label, bool* value);
 // Diagnostic integers retain native integer behavior inside a measured, responsive control row.
 bool DiagnosticIntRow(const char* label, int* value, int min, int max, const char* description = nullptr, ImGuiSliderFlags flags = 0);
@@ -230,6 +258,8 @@ void ShowFullText(std::string_view text);
 // icon-only rail (the label becomes the hover tooltip).
 // badge: a small chip at the item's right ("Beta"); with the sidebar collapsed it joins the tooltip
 bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed = false, const char* badge = nullptr);
+// The width a sidebar item needs to show its whole label (and badge) in the menu's language, at today's size
+float SidebarItemWidth(const char* label, const char* badge = nullptr);
 // Sidebar group label ("WORLD"): the GroupLabel look, aligned with the items' icons, with kSpace3 above it; collapsed =
 // a short hairline instead of the text
 void SidebarGroup(const char* text, bool collapsed = false);
@@ -258,6 +288,10 @@ bool SelectRow(const char* label, const char* description, const char* id, int* 
                float controlWidth = 220.0f, int defaultIndex = kNoDefaultIndex, bool stacked = false);
 // Whether the last SelectRow's dropdown list was open this frame (the language row merges every script's font then)
 bool SelectRowOpen();
+// The menu's dropdown on its own (SelectRow's closed control, for a list built by hand): `preview` (already the player's
+// language) cut with "…" before the chevron and shown whole on hover; width in pixels, -1 = the rest of the line. While it
+// returns true, submit ImGui::Selectable items, then ImGui::EndCombo().
+bool BeginDropdown(const char* id, const char* preview, float width);
 
 // "Advanced" section: a hairline, then a violet chevron row, collapsed by default (the state is kept per id while the
 // game runs). The contents are not indented and use the same rows. When it returns true, submit the contents and call
@@ -298,6 +332,18 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
 bool SliderCommitted();
 // Shorthand: percentage display (*v x 100, "%.0f%%"); tooltip = the description; def = the default
 bool SliderPercent(const char* label, float* v, float min, float max, const char* tooltip = nullptr, float def = kNoDefault, IconId icon = IconId::None);
+// Numbers in the menu language's form: a decimal point between digits becomes a comma where the language writes one
+// ("1.66 GB" reads "1,66 GB" in Portuguese, German, French...). Edits s in place.
+void LocaleDecimal(char* s);
+// A text that starts with an ISO date ("yyyy-mm-dd", optionally with a time) with that date in the menu language's own order
+// and separators (dd/mm/yyyy in Portuguese, dd.mm.yyyy in German); English, Swedish and the CJK languages keep it.
+std::string LocaleDate(std::string_view text);
+// The shared control column's width for a row as wide as the space left here (pixels; 0 when too narrow): where
+// sliders, dropdowns and segmented choices start, for custom controls that should line up with them
+float ControlColumnWidth();
+// A search field across the space left (the menu header's look in a card): the search icon inside its left end, the hint
+// (translated), and a clear button inside its right end while it has text. True when the text changed.
+bool SearchField(const char* id, const char* hint, char* buf, size_t size);
 // The previous signature (label, value, range, format)
 bool SliderFloat(const char* label, float* v, float min, float max, const char* format = "%.2f");
 

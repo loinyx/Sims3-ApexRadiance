@@ -17,6 +17,7 @@
 #include "performance.h"
 #include "profile_package.h"
 #include "ui/i18n.h"
+#include "ui/violet_theme.h"
 #include <toml++/toml.hpp>
 #include <algorithm>
 #include <atomic>
@@ -368,6 +369,23 @@ void LoadDeveloperMode() {
     kPublicBuild.store(!(kDevToolsBuild && ui && (*ui)["developer_mode"].value_or(false)), std::memory_order_relaxed);
 }
 
+// Apex Launcher's colour theme in [ui]: "#RRGGBB" strings it works out from the theme the player chose there. A key that
+// is missing or not a colour leaves that one as it is (Amethyst).
+static void ReadThemeColours(const toml::table& ui) {
+    const auto read = [&](const char* key, unsigned& into) {
+        const std::string s = ui[key].value_or(std::string());
+        if (s.size() != 7 || s[0] != '#' || s.find_first_not_of("0123456789abcdefABCDEF", 1) != std::string::npos) return;
+        into = static_cast<unsigned>(std::stoul(s.substr(1), nullptr, 16));
+    };
+    read("theme_accent", VioletTheme::kAccent);
+    read("theme_accent_dark", VioletTheme::kAccentDark);
+    read("theme_accent_light", VioletTheme::kAccentLight);
+    read("theme_segment_on", VioletTheme::kSegmentOn);
+    read("theme_gradient_from", VioletTheme::kGradientFrom);
+    read("theme_gradient_to", VioletTheme::kGradientTo);
+    read("theme_ink", VioletTheme::kOnGradient);
+}
+
 void LoadSettings() {
     I18n::SetChoice(-1); // Windows' language until [ui] language says otherwise
     toml::table root;
@@ -415,6 +433,7 @@ void LoadSettings() {
         u.roomToSaveAsked = (*ui)["room_to_save_asked"].value_or(false);
         u.s3ppSpinAsked = (*ui)["s3pp_spin_asked"].value_or(false);
         u.restartHost = (*ui)["restart_host"].value_or(false);
+        ReadThemeColours(*ui);
         const std::string lang = (*ui)["language"].value_or(std::string("auto"));
         u.language = I18n::FromCode(lang); // "auto" or an unknown code = -1 (Windows' language)
         if (const toml::table* shortcuts = (*ui)["profile_shortcuts"].as_table()) {
@@ -531,6 +550,9 @@ bool Save(std::string* error) {
             profileShortcuts.insert_or_assign(shortcut.preset, std::move(keys));
         }
         if (!profileShortcuts.empty()) ui.insert("profile_shortcuts", std::move(profileShortcuts));
+        if (const toml::table* old = root["ui"].as_table())
+            for (const auto& [key, node] : *old)
+                if (const auto text = node.value<std::string>(); text && key.str().rfind("theme", 0) == 0) ui.insert_or_assign(key.str(), *text); // (Apex Launcher's colour theme)
         root.insert_or_assign("ui", std::move(ui));
 
 
@@ -824,8 +846,8 @@ unsigned ProfilePartsOf(const toml::table& state) {
 
 void KeepProfileParts(toml::table& state, unsigned parts) {
     if (toml::table* patches = state["patches"].as_table()) {
-        // The lamp lighting mode (Instant / Classic) is set on the Performance page but saved in Night Lights' table: it
-        // goes with the Performance part. A Performance-only preset keeps that one key of the table; a Lighting-only
+        // The lamp lighting mode (Instant / Classic) is set on Lighting > Overview and saved in Night Lights' table, but it
+        // is a performance choice: it goes with the Performance part (the Performance preset sets Classic). A Performance-only preset keeps that one key of the table; a Lighting-only
         // preset leaves the mode as it is.
         if (toml::table* ntr = (*patches)[kLampModeFeature].as_table()) {
             if (!(parts & kPartPerformance)) ntr->erase(kLampModeKey);

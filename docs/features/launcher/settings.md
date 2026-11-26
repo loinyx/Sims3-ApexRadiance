@@ -26,7 +26,9 @@ on its own, and the release notes of five projects live on five GitHub pages.
    A change is saved to `settings.json` at once.
 2. **Look.** The colour theme colours only what stands out (the main button, switches, the selected place, links);
    surfaces stay neutral ([design system](../../launcher-design.md)). *Light or dark* follows Windows or stays as
-   chosen, also while the launcher is open.
+   chosen, also while the launcher is open. The theme also colours Apex Radiance's menu in the game: the launcher
+   writes its colours to `[ui] theme_*` in `ApexRadiance.toml` when it starts, when the theme changes and before Play
+   ([menu palette](../../ui.md)).
 3. **General** rows: *Language* (*Change*, see [Languages](languages.md)), *Game folder* (*Change*), *Logs* (*Open log
    folder*), *Repair or remove* (*Open*, [Components](../installer.md)), *Apex Launcher on this PC* (move, install, or
    use without installing; [self-update](self-update.md)), *Credits and licences*, and *Uninstall Apex Launcher*
@@ -47,7 +49,6 @@ on its own, and the release notes of five projects live on five GitHub pages.
 | Light or dark | `settings.json` `Mode` | choice | Same as Windows (`system`) | Same as Windows, Dark, Light | The launcher's light or dark look |
 | Picture at the top of Home | `settings.json` `HomePicture` | choice | A picture from the gallery (`gallery`) | A picture from the gallery, The household's photo (`household`), No picture (`none`) | What shows behind the game's name on Home |
 | Gallery picture | `gallery.json` `HomePicture` | buttons | The newest picture | *Choose in the gallery*, *Use the newest* | The gallery picture on Home: the one marked *Use on Home*, else the newest |
-| Picture height | `settings.json` `HomePictureHeight` | choice | Medium (330 px) | Short (240 px), Medium, Tall (440 px) | How much of the page the picture takes |
 | Picture strength | `settings.json` `HomePictureStrength` | slider | 100% | 30 to 100%, step 5 | How strongly the picture shows |
 | Window background | `settings.json` `Backdrop` | choice | Mica (Windows default) (`mica`) | Mica (Windows default), Mica, stronger (`micaalt`), Acrylic (`acrylic`), Solid colour (`solid`) | Mica and Acrylic take a tint from the desktop wallpaper; Solid colour takes none |
 | Start with Windows | Windows' `HKCU\...\Run` value *Apex Launcher* | switch | Off | | Opens in the notification area at sign-in (`--tray`); only for an installed copy |
