@@ -63,6 +63,7 @@ player's when the administrator copy runs) or from `APEX_LAUNCHER_LOCALAPPDATA`.
 | `Documents\...\Merged (Apex Launcher)\` | The originals of each merge, with `merge.json` |
 | `Documents\...\Saves kept (Apex Launcher)\` | Saves kept out of the game |
 | `Documents\...\Saves backups (Apex Launcher)\` | Save backups (or a chosen folder) |
+| `Documents\...\Save companions (Apex Launcher)\` | Mods' declarations of the data they keep for each save ([Saves and backups](saves-and-backups.md#mods-data-beside-a-save)) |
 | `%ProgramData%\Apex Radiance Setup\` | Records that the launcher turned NVIDIA Smooth Motion or AMD Fluid Motion Frames on |
 | `%TEMP%\ApexLauncher-update\` | A launcher update while it downloads |
 

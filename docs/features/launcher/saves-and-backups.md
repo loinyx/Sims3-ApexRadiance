@@ -77,6 +77,33 @@ it does not know refuses the whole save. The plan is exact to the byte before an
 - **Folder.** A new folder receives a checked copy of every zip before they leave the old one; any failure rolls back. A
   folder inside Saves or Mods, or one another game uses, is refused.
 
+### Mods' data beside a save
+
+The game writes a save's folder anew on every save, so a mod that keeps data for each save keeps it elsewhere in the
+Documents folder. Such a mod declares it in `Documents\...\Save companions (Apex Launcher)\<mod>.json`
+(`SaveCompanions`):
+
+```json
+{ "paths": ["MyMod/{key}", "MyMod/{key}.dat"],
+  "key": { "allowed": "A-Za-z0-9._-", "replace": "_", "maxLength": 100 } }
+```
+
+- `paths`: folders or files relative to the Documents folder, each with `{key}`; one inside `Saves`, `Mods`, a launcher
+  folder or another of its paths makes the declaration unused (logged). `key`, optional: how the save's folder name
+  (`<name>.sims3`) becomes `{key}`: characters outside `allowed` (letters, digits, ranges such as `A-Z` and plain
+  punctuation; anything else makes the declaration unused) and a leading `.` become `replace`, then the key is cut to
+  `maxLength`. Without it the key is the folder name.
+- A backup holds the data under `apex-companions/<mod>/<path>` beside the save's folder. A mod's data that can't be read
+  (the game holds a file) or changes while it is copied is left out of that backup, which names the mod in its list
+  entry; the backup is still made. *Restore* over the save puts it back (what it replaces is in the *Before restoring*
+  backup); a backup made before the declaration leaves the data as it is. *Open as another save* and *Import* write it
+  under the new save's key, never over data already there.
+- *Rename* moves the data, *Duplicate* copies it, *Move to the Recycle Bin* recycles it, and *Export* of the save as it
+  is includes it. Data that another save's name maps to as well is never moved, replaced or removed. A backup holds up
+  to 100,000 files of mods' data beside the save's own 10,000. What a replace cut short set aside
+  (`<place>.apex-old-<id>`) goes back at the next start, or to the Recycle Bin when the new data is in place. Two mods
+  that declare the same place are logged at start; on a restore the later one's data stays.
+
 ### Automatic backups
 
 When chosen, a backup is made of each save that changed since its newest zip: 10 s after the game closes, before Play
