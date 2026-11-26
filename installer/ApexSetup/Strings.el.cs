@@ -1548,7 +1548,6 @@ public static partial class Strings
         ["Online"] = "Online",
         ["When store pictures or online features don't load"] = "Όταν οι εικόνες του καταστήματος ή οι λειτουργίες online δεν φορτώνουν",
         ["Old error logs"] = "Παλιές καταγραφές σφαλμάτων",
-        ["Script errors that Health has already read"] = "Σφάλματα script που έχει ήδη διαβάσει η Υγεία",
         ["The game rebuilds its caches the next time it starts."] = "Το παιχνίδι ξαναφτιάχνει τις cache του την επόμενη φορά που ξεκινά.",
         ["Nothing to clear"] = "Τίποτα για καθαρισμό",
         ["{0} to clear"] = "{0} για καθαρισμό",
@@ -2155,5 +2154,12 @@ public static partial class Strings
         ["{0} levels down"] = "{0} επίπεδα πιο κάτω",
         ["The game already reads this file."] = "Το παιχνίδι διαβάζει ήδη αυτό το αρχείο.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Το Resource.cfg δεν μπορεί να ορίσει φάκελο με κενά στο όνομα: μετονόμασε τον φάκελο ή μετακίνησε το mod σε έναν που διαβάζει το παιχνίδι.",
+        ["Downloads index"] = "Ευρετήριο λήψεων",
+        ["When downloaded content or Sims don't show up"] = "Όταν δεν εμφανίζεται κατεβασμένο περιεχόμενο ή Sims",
+        ["Unfinished content files"] = "Μισοτελειωμένα αρχεία περιεχομένου",
+        ["Left half written when the game closed; the game never reads them"] = "Έμειναν μισογραμμένα όταν έκλεισε το παιχνίδι· το παιχνίδι δεν τα διαβάζει ποτέ",
+        ["Backups of installed content"] = "Αντίγραφα εγκατεστημένου περιεχομένου",
+        ["Copies the content installer keeps; the game plays without them"] = "Αντίγραφα που κρατά ο εγκαταστάτης περιεχομένου· το παιχνίδι παίζει χωρίς αυτά",
+        ["Script errors Health has already read, and the game's own logs"] = "Σφάλματα script που έχει ήδη διαβάσει η Υγεία, και τα αρχεία καταγραφής του παιχνιδιού",
     };
 }

@@ -1539,7 +1539,6 @@ public static partial class Strings
         ["Online"] = "オンライン",
         ["When store pictures or online features don't load"] = "ストアの画像やオンライン機能が読み込まれないとき",
         ["Old error logs"] = "古いエラーログ",
-        ["Script errors that Health has already read"] = "ヘルスがすでに読み取ったスクリプトエラー",
         ["The game rebuilds its caches the next time it starts."] = "次回の起動時に、ゲームがキャッシュを再作成します。",
         ["Nothing to clear"] = "クリアするものなし",
         ["{0} to clear"] = "クリア可能: {0}",
@@ -2146,5 +2145,12 @@ public static partial class Strings
         ["{0} levels down"] = "{0} 階層下",
         ["The game already reads this file."] = "ゲームはすでにこのファイルを読み込んでいます。",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg では名前にスペースを含むフォルダーを指定できません。フォルダー名を変更するか、ゲームが読み込むフォルダーに Mod を移動してください。",
+        ["Downloads index"] = "ダウンロードの索引",
+        ["When downloaded content or Sims don't show up"] = "ダウンロードしたコンテンツやシムが表示されないとき",
+        ["Unfinished content files"] = "書きかけのコンテンツファイル",
+        ["Left half written when the game closed; the game never reads them"] = "ゲーム終了時に書きかけで残ったもの。ゲームは読み込みません",
+        ["Backups of installed content"] = "インストール済みコンテンツのバックアップ",
+        ["Copies the content installer keeps; the game plays without them"] = "コンテンツインストーラーが保持するコピー。なくてもゲームは動きます",
+        ["Script errors Health has already read, and the game's own logs"] = "ヘルスが読み込み済みのスクリプトエラーと、ゲーム自体のログ",
     };
 }

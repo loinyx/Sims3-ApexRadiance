@@ -64,10 +64,21 @@ round.
 
 ### Clear game caches
 
-`GameCaches.Clean` never deletes: it moves the chosen groups (the `CASPartCache`, `compositorCache`, `scriptCache`,
-`simCompositorCache` and `socialCache` packages, `WorldCaches`, `Thumbnails`, `FeaturedItems`, `IGACache`, and the error
-logs when chosen) to `cache-backup\<time>` in the data folder. The copy is dropped after the next game session that
-ends normally; *Put the caches back* restores it. `DCCache` (content from the game's own launcher) is never touched.
+`GameCaches.Clean` never deletes: it moves the chosen groups to `cache-backup\<time>` in the data folder. The copy is
+dropped after the next game session that ends normally; *Put the caches back* restores it. The groups, each shown only
+when it holds a file where noted:
+
+| Group | Files | Chosen at first |
+|---|---|---|
+| Create a Sim, Scripts | `CASPartCache`, `compositorCache`, `simCompositorCache`, `scriptCache` packages | yes |
+| Worlds, Thumbnails | `WorldCaches\*.package`, `Thumbnails\*.package` | Worlds yes, Thumbnails no |
+| Online (when not empty) | `socialCache.package`, `FeaturedItems\*`, `IGACache\*` | no |
+| Downloads index | `DCCache\dcc.ent`, `DCCache\missingdeps.idx`, `SavedSims\Downloadedsims.index` | yes |
+| Unfinished content files (when not empty) | `DCCache\*.dbc.tmp`: a content database the game wrote half way; `TS3W.exe` reads only `dcdb*.*bc` | yes |
+| Backups of installed content (when not empty) | `DCBackup\*.package` except `ccmerged.package` | no |
+| Old error logs | script error logs Health has read, and the game's `*.log` except `DeviceConfig.log` (Health reads the graphics card from it) | yes |
+
+The content database itself (`DCCache\dcdb*.dbc`) and `DCBackup\ccmerged.package` are never touched.
 Health suggests it when the caches pass 2 GB or after a session that did not end normally.
 
 ## Settings

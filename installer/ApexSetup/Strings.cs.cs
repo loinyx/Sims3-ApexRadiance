@@ -1540,7 +1540,6 @@ public static partial class Strings
         ["Online"] = "Online",
         ["When store pictures or online features don't load"] = "Když se nenačítají obrázky z obchodu nebo online funkce",
         ["Old error logs"] = "Staré protokoly chyb",
-        ["Script errors that Health has already read"] = "Chyby skriptů, které Stav hry už přečetl",
         ["The game rebuilds its caches the next time it starts."] = "Hra mezipaměti znovu vytvoří při příštím spuštění.",
         ["Nothing to clear"] = "Není co mazat",
         ["{0} to clear"] = "K vymazání: {0}",
@@ -2147,5 +2146,12 @@ public static partial class Strings
         ["{0} levels down"] = "Úrovně níž: {0}",
         ["The game already reads this file."] = "Hra už tento soubor čte.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg nemůže uvést složku s mezerami v názvu: přejmenujte složku, nebo přesuňte mod do složky, kterou hra čte.",
+        ["Downloads index"] = "Rejstřík stažených",
+        ["When downloaded content or Sims don't show up"] = "Když se stažený obsah nebo simíci nezobrazují",
+        ["Unfinished content files"] = "Nedokončené soubory obsahu",
+        ["Left half written when the game closed; the game never reads them"] = "Zůstaly napůl zapsané při zavření hry; hra je nikdy nečte",
+        ["Backups of installed content"] = "Zálohy nainstalovaného obsahu",
+        ["Copies the content installer keeps; the game plays without them"] = "Kopie, které si drží instalátor obsahu; hra funguje bez nich",
+        ["Script errors Health has already read, and the game's own logs"] = "Chyby skriptů, které Stav hry už přečetl, a protokoly hry",
     };
 }

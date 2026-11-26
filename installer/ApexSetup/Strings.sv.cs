@@ -1545,7 +1545,6 @@ public static partial class Strings
         ["Online"] = "Online",
         ["When store pictures or online features don't load"] = "När butiksbilder eller onlinefunktioner inte laddas",
         ["Old error logs"] = "Gamla felloggar",
-        ["Script errors that Health has already read"] = "Skriptfel som Hälsa redan har läst",
         ["The game rebuilds its caches the next time it starts."] = "Spelet bygger upp cacheminnena igen nästa gång det startar.",
         ["Nothing to clear"] = "Inget att rensa",
         ["{0} to clear"] = "{0} att rensa",
@@ -2152,5 +2151,12 @@ public static partial class Strings
         ["{0} levels down"] = "{0} nivåer ner",
         ["The game already reads this file."] = "Spelet läser redan den här filen.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg kan inte ange en mapp med mellanslag i namnet: byt namn på mappen eller flytta modden till en mapp som spelet läser.",
+        ["Downloads index"] = "Nedladdningsindex",
+        ["When downloaded content or Sims don't show up"] = "När nedladdat innehåll eller simmar inte syns",
+        ["Unfinished content files"] = "Ofärdiga innehållsfiler",
+        ["Left half written when the game closed; the game never reads them"] = "Halvskrivna när spelet stängdes; spelet läser dem aldrig",
+        ["Backups of installed content"] = "Säkerhetskopior av installerat innehåll",
+        ["Copies the content installer keeps; the game plays without them"] = "Kopior som innehållsinstallationen sparar; spelet fungerar utan dem",
+        ["Script errors Health has already read, and the game's own logs"] = "Skriptfel som Hälsa redan har läst, och spelets egna loggar",
     };
 }

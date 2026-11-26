@@ -1,6 +1,6 @@
 namespace ApexSetup;
 
-public enum CacheGroup { CreateASim, Scripts, Worlds, Thumbnails, Online, ErrorLogs }
+public enum CacheGroup { CreateASim, Scripts, Worlds, Thumbnails, Online, ErrorLogs, Downloads, Leftovers, ContentBackups }
 public sealed record CacheFile(string Path, string Rel, long Size, CacheGroup Group);
 
 // The cache files The Sims 3 rebuilds by itself in Documents. Clearing them is the community's first answer to CAS or
@@ -9,7 +9,8 @@ public sealed record CacheFile(string Path, string Rel, long Size, CacheGroup Gr
 public static class GameCaches
 {
     // Each was seen in a real Documents folder; the list is the one Mod The Sims' and NRaas' "delete your caches" guides give.
-    // DCCache is left out on purpose: its .dbc files hold the game's installed store content, not a cache.
+    // DCCache's .dbc files are left out on purpose: they hold the game's installed store content, not a cache. TS3W.exe reads
+    // only dcdb*.*bc there, beside dcc.ent and missingdeps.idx, which it builds again.
     static readonly (string Name, CacheGroup Group)[] RootFiles =
     [
         ("CASPartCache.package", CacheGroup.CreateASim),       // CAS parts index, rebuilt at start
@@ -17,6 +18,9 @@ public static class GameCaches
         ("scriptCache.package", CacheGroup.Scripts),           // compiled script cache
         ("simCompositorCache.package", CacheGroup.CreateASim), // composited Sim textures
         ("socialCache.package", CacheGroup.Online),            // social network cache
+        ("DCCache/dcc.ent", CacheGroup.Downloads),             // the downloaded content's entitlement list, read again from the .dbc files
+        ("DCCache/missingdeps.idx", CacheGroup.Downloads),     // content whose dependencies are missing, worked out again at start
+        ("SavedSims/Downloadedsims.index", CacheGroup.Downloads), // the downloaded Sims' index of Create a Sim
     ];
     // (folder, pattern): every file in them is rebuilt or downloaded again
     static readonly (string Dir, string Pattern, CacheGroup Group)[] Folders =
@@ -25,9 +29,15 @@ public static class GameCaches
         ("Thumbnails", "*.package", CacheGroup.Thumbnails), // CAS, object and downloads thumbnails
         ("FeaturedItems", "*", CacheGroup.Online),          // store thumbnails the game downloads again (some guides only; unverified that it matters)
         ("IGACache", "*", CacheGroup.Online),               // in-game advertising cache (empty on most installs)
+        ("DCCache", "*.dbc.tmp", CacheGroup.Leftovers),     // a content database written half way when the game closed; never read (it reads dcdb*.*bc)
+        ("DCBackup", "*.package", CacheGroup.ContentBackups), // the content installer's copies; ccmerged.package is kept (NeverCleared)
+        ("", "*.log", CacheGroup.ErrorLogs),                // the game's and its launcher's logs, written again
     ];
+    // never cleared: the merged store content the game reads, and the log Health reads the graphics card from
+    static readonly string[] NeverCleared = ["ccmerged.package", "DeviceConfig.log"];
     // what one click clears: every cache the game rebuilds. The error logs are cleared only when chosen.
-    static readonly CacheGroup[] OneClick = [CacheGroup.CreateASim, CacheGroup.Scripts, CacheGroup.Worlds, CacheGroup.Thumbnails, CacheGroup.Online];
+    static readonly CacheGroup[] OneClick = [CacheGroup.CreateASim, CacheGroup.Scripts, CacheGroup.Worlds, CacheGroup.Thumbnails, CacheGroup.Online,
+        CacheGroup.Downloads, CacheGroup.Leftovers];
 
     public static string BackupRoot => Path.Combine(Paths.Data, "cache-backup");
 
@@ -41,7 +51,7 @@ public static class GameCaches
             if (Path.Combine(docs, name) is var f && File.Exists(f)) Add(f, g);
         foreach (var (dir, pattern, g) in Folders.Where(x => groups.Contains(x.Group)))
             if (Path.Combine(docs, dir) is var d && Directory.Exists(d))
-                try { foreach (var f in Directory.EnumerateFiles(d, pattern)) Add(f, g); }
+                try { foreach (var f in Directory.EnumerateFiles(d, pattern)) if (!NeverCleared.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)) Add(f, g); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         // (only the logs Health is done with: it would lose the errors of the ones it still counts)
         if (groups.Contains(CacheGroup.ErrorLogs)) foreach (var f in ScriptErrors.OldLogs(docs)) Add(f, CacheGroup.ErrorLogs);

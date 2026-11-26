@@ -1537,7 +1537,6 @@ public static partial class Strings
         ["Online"] = "Verkko",
         ["When store pictures or online features don't load"] = "Kun kaupan kuvat tai verkko-ominaisuudet eivät lataudu",
         ["Old error logs"] = "Vanhat virhelokit",
-        ["Script errors that Health has already read"] = "Skriptivirheet, jotka Kunto on jo lukenut",
         ["The game rebuilds its caches the next time it starts."] = "Peli rakentaa välimuistit uudelleen seuraavalla käynnistyskerralla.",
         ["Nothing to clear"] = "Ei tyhjennettävää",
         ["{0} to clear"] = "{0} tyhjennettävää",
@@ -2144,5 +2143,12 @@ public static partial class Strings
         ["{0} levels down"] = "{0} tasoa alemmas",
         ["The game already reads this file."] = "Peli lukee jo tämän tiedoston.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg ei voi nimetä kansiota, jonka nimessä on välilyöntejä: nimeä kansio uudelleen tai siirrä modi kansioon, jota peli lukee.",
+        ["Downloads index"] = "Latausten hakemisto",
+        ["When downloaded content or Sims don't show up"] = "Kun ladattu sisältö tai simit eivät näy",
+        ["Unfinished content files"] = "Keskeneräiset sisältötiedostot",
+        ["Left half written when the game closed; the game never reads them"] = "Jäivät puolikirjoitetuiksi pelin sulkeutuessa; peli ei lue niitä koskaan",
+        ["Backups of installed content"] = "Asennetun sisällön varmuuskopiot",
+        ["Copies the content installer keeps; the game plays without them"] = "Sisällön asennusohjelman säilyttämät kopiot; peli toimii ilman niitä",
+        ["Script errors Health has already read, and the game's own logs"] = "Komentosarjavirheet, jotka Kunto on jo lukenut, ja pelin omat lokit",
     };
 }

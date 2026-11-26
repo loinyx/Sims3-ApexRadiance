@@ -475,7 +475,10 @@ public sealed partial class MainWindow
             (CacheGroup.Worlds, T("Worlds"), T("When a world takes long to load"), true),
             (CacheGroup.Thumbnails, T("Thumbnails"), T("When Buy or Build mode shows wrong pictures"), false),
             (CacheGroup.Online, T("Online"), T("When store pictures or online features don't load"), false),
-            (CacheGroup.ErrorLogs, T("Old error logs"), T("Script errors that Health has already read"), true),
+            (CacheGroup.Downloads, T("Downloads index"), T("When downloaded content or Sims don't show up"), true),
+            (CacheGroup.Leftovers, T("Unfinished content files"), T("Left half written when the game closed; the game never reads them"), true),
+            (CacheGroup.ContentBackups, T("Backups of installed content"), T("Copies the content installer keeps; the game plays without them"), false),
+            (CacheGroup.ErrorLogs, T("Old error logs"), T("Script errors Health has already read, and the game's own logs"), true),
         };
         var body = new StackPanel { Spacing = 8, Width = Design.Dialogs.Medium };
         body.Children.Add(Muted(T("The game rebuilds its caches the next time it starts.")));
@@ -492,7 +495,7 @@ public sealed partial class MainWindow
         foreach (var (group, name, text, on) in groups)
         {
             var any = files.Any(f => f.Group == group);
-            if (!any && group == CacheGroup.Online) continue; // (most players have none)
+            if (!any && group is CacheGroup.Online or CacheGroup.Leftovers or CacheGroup.ContentBackups) continue; // (most players have none)
             var g = new Grid { ColumnSpacing = 12 };
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });

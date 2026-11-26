@@ -1515,7 +1515,6 @@ public static partial class Strings
         ["Online"] = "ออนไลน์",
         ["When store pictures or online features don't load"] = "เมื่อรูปในสโตร์หรือฟีเจอร์ออนไลน์โหลดไม่ขึ้น",
         ["Old error logs"] = "ล็อกข้อผิดพลาดเก่า",
-        ["Script errors that Health has already read"] = "ข้อผิดพลาดของสคริปต์ที่ สุขภาพเกม อ่านไปแล้ว",
         ["The game rebuilds its caches the next time it starts."] = "เกมจะสร้างแคชใหม่เมื่อเริ่มครั้งถัดไป",
         ["Nothing to clear"] = "ไม่มีอะไรให้ล้าง",
         ["{0} to clear"] = "ล้างได้ {0}",
@@ -2122,5 +2121,12 @@ public static partial class Strings
         ["{0} levels down"] = "ลงไป {0} ระดับ",
         ["The game already reads this file."] = "เกมอ่านไฟล์นี้อยู่แล้ว",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg ระบุโฟลเดอร์ที่มีช่องว่างในชื่อไม่ได้ ให้เปลี่ยนชื่อโฟลเดอร์ หรือย้ายม็อดไปยังโฟลเดอร์ที่เกมอ่าน",
+        ["Downloads index"] = "ดัชนีดาวน์โหลด",
+        ["When downloaded content or Sims don't show up"] = "เมื่อเนื้อหาที่ดาวน์โหลดหรือซิมไม่แสดง",
+        ["Unfinished content files"] = "ไฟล์เนื้อหาที่เขียนไม่เสร็จ",
+        ["Left half written when the game closed; the game never reads them"] = "ค้างอยู่ครึ่งทางตอนปิดเกม เกมไม่อ่านไฟล์เหล่านี้",
+        ["Backups of installed content"] = "สำเนาสำรองของเนื้อหาที่ติดตั้ง",
+        ["Copies the content installer keeps; the game plays without them"] = "สำเนาที่ตัวติดตั้งเนื้อหาเก็บไว้ เกมเล่นได้โดยไม่ต้องมี",
+        ["Script errors Health has already read, and the game's own logs"] = "ข้อผิดพลาดสคริปต์ที่สุขภาพเกมอ่านแล้ว และล็อกของเกมเอง",
     };
 }

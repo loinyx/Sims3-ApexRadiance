@@ -1545,7 +1545,6 @@ public static partial class Strings
         ["Online"] = "Online",
         ["When store pictures or online features don't load"] = "Quando le immagini dello store o le funzioni online non si caricano",
         ["Old error logs"] = "Vecchi registri di errori",
-        ["Script errors that Health has already read"] = "Errori di script già letti da Salute",
         ["The game rebuilds its caches the next time it starts."] = "Il gioco ricrea le sue cache al prossimo avvio.",
         ["Nothing to clear"] = "Niente da cancellare",
         ["{0} to clear"] = "{0} da cancellare",
@@ -2152,5 +2151,12 @@ public static partial class Strings
         ["{0} levels down"] = "{0} livelli più giù",
         ["The game already reads this file."] = "Il gioco legge già questo file.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg non può indicare una cartella con spazi nel nome: rinomina la cartella o sposta la mod in una che il gioco legge.",
+        ["Downloads index"] = "Indice dei download",
+        ["When downloaded content or Sims don't show up"] = "Quando contenuti scaricati o Sim non compaiono",
+        ["Unfinished content files"] = "File di contenuto incompleti",
+        ["Left half written when the game closed; the game never reads them"] = "Rimasti scritti a metà alla chiusura del gioco; il gioco non li legge mai",
+        ["Backups of installed content"] = "Backup dei contenuti installati",
+        ["Copies the content installer keeps; the game plays without them"] = "Copie conservate dall'installer dei contenuti; il gioco funziona senza",
+        ["Script errors Health has already read, and the game's own logs"] = "Errori di script già letti da Salute e i log del gioco",
     };
 }

@@ -1535,7 +1535,6 @@ public static partial class Strings
         ["Online"] = "Онлайн",
         ["When store pictures or online features don't load"] = "Когда не загружаются картинки магазина или онлайн-функции",
         ["Old error logs"] = "Старые журналы ошибок",
-        ["Script errors that Health has already read"] = "Ошибки скриптов, которые «Состояние» уже прочитало",
         ["The game rebuilds its caches the next time it starts."] = "Игра создаст кэши заново при следующем запуске.",
         ["Nothing to clear"] = "Нечего очищать",
         ["{0} to clear"] = "К очистке: {0}",
@@ -2142,5 +2141,12 @@ public static partial class Strings
         ["{0} levels down"] = "Уровней ниже: {0}",
         ["The game already reads this file."] = "Игра уже читает этот файл.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg не может указать папку с пробелами в имени: переименуйте папку или переместите мод в папку, которую читает игра.",
+        ["Downloads index"] = "Индекс загрузок",
+        ["When downloaded content or Sims don't show up"] = "Когда загруженный контент или симы не появляются",
+        ["Unfinished content files"] = "Недописанные файлы контента",
+        ["Left half written when the game closed; the game never reads them"] = "Остались недописанными при закрытии игры; игра их никогда не читает",
+        ["Backups of installed content"] = "Резервные копии установленного контента",
+        ["Copies the content installer keeps; the game plays without them"] = "Копии, которые хранит установщик контента; игра работает без них",
+        ["Script errors Health has already read, and the game's own logs"] = "Ошибки скриптов, уже прочитанные Состоянием, и журналы самой игры",
     };
 }

@@ -1549,7 +1549,6 @@ public static partial class Strings
         ["Online"] = "Online",
         ["When store pictures or online features don't load"] = "Ha az áruház képei vagy az online funkciók nem töltődnek be",
         ["Old error logs"] = "Régi hibanaplók",
-        ["Script errors that Health has already read"] = "Szkripthibák, amelyeket az Állapot már beolvasott",
         ["The game rebuilds its caches the next time it starts."] = "A játék a következő induláskor újraépíti a gyorsítótárait.",
         ["Nothing to clear"] = "Nincs mit törölni",
         ["{0} to clear"] = "{0} törölhető",
@@ -2156,5 +2155,12 @@ public static partial class Strings
         ["{0} levels down"] = "{0} szinttel lejjebb",
         ["The game already reads this file."] = "A játék már beolvassa ezt a fájlt.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "A Resource.cfg nem adhat meg szóközt tartalmazó nevű mappát: nevezd át a mappát, vagy helyezd át a modot egy olyanba, amelyet a játék beolvas.",
+        ["Downloads index"] = "Letöltések indexe",
+        ["When downloaded content or Sims don't show up"] = "Ha a letöltött tartalom vagy Simek nem jelennek meg",
+        ["Unfinished content files"] = "Félbemaradt tartalomfájlok",
+        ["Left half written when the game closed; the game never reads them"] = "Félig írva maradtak, amikor a játék bezárult; a játék soha nem olvassa őket",
+        ["Backups of installed content"] = "A telepített tartalom mentései",
+        ["Copies the content installer keeps; the game plays without them"] = "A tartalomtelepítő által megőrzött másolatok; a játék nélkülük is fut",
+        ["Script errors Health has already read, and the game's own logs"] = "Szkripthibák, amelyeket az Állapot már beolvasott, és a játék saját naplói",
     };
 }

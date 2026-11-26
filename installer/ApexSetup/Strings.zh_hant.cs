@@ -1515,7 +1515,6 @@ public static partial class Strings
         ["Online"] = "線上",
         ["When store pictures or online features don't load"] = "商店圖片或線上功能無法載入時",
         ["Old error logs"] = "舊錯誤記錄",
-        ["Script errors that Health has already read"] = "「健康」已讀取過的腳本錯誤",
         ["The game rebuilds its caches the next time it starts."] = "遊戲下次啟動時會重新產生快取。",
         ["Nothing to clear"] = "沒有可清除的內容",
         ["{0} to clear"] = "可清除 {0}",
@@ -2122,5 +2121,12 @@ public static partial class Strings
         ["{0} levels down"] = "下 {0} 層",
         ["The game already reads this file."] = "遊戲已在讀取此檔案。",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg 無法指定名稱含空格的資料夾：請重新命名資料夾，或將模組移到遊戲會讀取的資料夾。",
+        ["Downloads index"] = "下載索引",
+        ["When downloaded content or Sims don't show up"] = "下載的內容或模擬市民不顯示時",
+        ["Unfinished content files"] = "未寫完的內容檔案",
+        ["Left half written when the game closed; the game never reads them"] = "遊戲關閉時只寫了一半，遊戲從不讀取它們",
+        ["Backups of installed content"] = "已安裝內容的備份",
+        ["Copies the content installer keeps; the game plays without them"] = "內容安裝程式保留的副本，沒有它們遊戲也能執行",
+        ["Script errors Health has already read, and the game's own logs"] = "健康已讀取的指令碼錯誤，以及遊戲本身的記錄",
     };
 }

@@ -1543,7 +1543,6 @@ public static partial class Strings
         ["Online"] = "Nett",
         ["When store pictures or online features don't load"] = "Når butikkbilder eller nettfunksjoner ikke laster",
         ["Old error logs"] = "Gamle feillogger",
-        ["Script errors that Health has already read"] = "Skriptfeil som Helse allerede har lest",
         ["The game rebuilds its caches the next time it starts."] = "Spillet bygger opp hurtigbufferne igjen neste gang det starter.",
         ["Nothing to clear"] = "Ingenting å tømme",
         ["{0} to clear"] = "{0} å tømme",
@@ -2150,5 +2149,12 @@ public static partial class Strings
         ["{0} levels down"] = "{0} nivåer ned",
         ["The game already reads this file."] = "Spillet leser allerede denne filen.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg kan ikke angi en mappe med mellomrom i navnet: gi mappen nytt navn, eller flytt modden til en mappe spillet leser.",
+        ["Downloads index"] = "Nedlastingsindeks",
+        ["When downloaded content or Sims don't show up"] = "Når nedlastet innhold eller Sims ikke vises",
+        ["Unfinished content files"] = "Uferdige innholdsfiler",
+        ["Left half written when the game closed; the game never reads them"] = "Halvt skrevet da spillet lukket seg; spillet leser dem aldri",
+        ["Backups of installed content"] = "Sikkerhetskopier av installert innhold",
+        ["Copies the content installer keeps; the game plays without them"] = "Kopier innholdsinstallasjonen beholder; spillet kjører uten dem",
+        ["Script errors Health has already read, and the game's own logs"] = "Skriptfeil Helse allerede har lest, og spillets egne logger",
     };
 }

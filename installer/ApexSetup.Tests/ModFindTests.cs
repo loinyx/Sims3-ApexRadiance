@@ -255,8 +255,9 @@ static class ModFindTests
     {
         void Make()
         {
-            foreach (var n in new[] { "CASPartCache.package", "compositorCache.package", "scriptCache.package", @"WorldCaches\Riverview_objects.package", @"Thumbnails\CASThumbnails.package", "socialCache.package" })
+            foreach (var n in new[] { @"DCCache\dcc.ent", @"DCCache\dcdb0.dbc.tmp", @"DCBackup\0xabc.package", "CASPartCache.package", "compositorCache.package", "scriptCache.package", @"WorldCaches\Riverview_objects.package", @"Thumbnails\CASThumbnails.package", "socialCache.package" })
                 Write(Path.Combine(docs, n), "cache " + n);
+            foreach (var n in new[] { @"DCCache\dcdb0.dbc", @"DCBackup\ccmerged.package", "DeviceConfig.log" }) Write(Path.Combine(docs, n), "keep " + n);
         }
         Make();
         const string error = "-- Script Errors --\n\n System.NullReferenceException: x\n#0: 0x0001d callvirt   in Fixture.Fixture.Entry:Init () ()\n";
@@ -266,8 +267,14 @@ static class ModFindTests
         var last = Log("ScriptError_PC__last.xml", DateTime.Now.AddHours(-1));
         var crash = Log("xcpt PC 26-01-01 10.00.00.txt", DateTime.Now.AddDays(-9));
         var all = Enum.GetValues<CacheGroup>();
-        check(GameCaches.List(docs).All(c => c.Group != CacheGroup.ErrorLogs) && GameCaches.List(docs).Count == 6 && GameCaches.List(docs, all).Select(c => c.Group).Distinct().Count() == all.Length,
+        check(GameCaches.List(docs).All(c => c.Group != CacheGroup.ErrorLogs) && GameCaches.List(docs).Count == 8 && GameCaches.List(docs, all).Select(c => c.Group).Distinct().Count() == all.Length,
             "caches: one click lists every cache and no error log; each group lists its own");
+        check(!GameCaches.List(docs, all).Any(c => Path.GetFileName(c.Path) is "dcdb0.dbc" or "ccmerged.package" or "DeviceConfig.log")
+              && GameCaches.List(docs).All(c => c.Group != CacheGroup.ContentBackups),
+            "caches: the store content, the merged content and the log Health reads are never cleared; content backups only when chosen");
+        var launcherLog = Write(Path.Combine(docs, "Sims3LauncherLogFile.log"), "log");
+        check(GameCaches.List(docs, [CacheGroup.ErrorLogs]).Any(c => c.Path == launcherLog), "caches: the game's own logs go with the old error logs");
+        File.Delete(launcherLog);
         check(GameCaches.List(docs, [CacheGroup.ErrorLogs]).Select(c => c.Path).SequenceEqual([old]), "caches: without a recorded game, only error logs over a week old are old");
         SessionHistory.Add(new(DateTime.Now.AddDays(-1), TimeSpan.FromMinutes(5), 1L << 30, SessionEnd.Crash, -1));
         check(GameCaches.List(docs, [CacheGroup.ErrorLogs]).Select(c => c.Path).Order().SequenceEqual(new[] { old, before }.Order()), "caches: the error logs before the last game are old; a crash log never is");
@@ -301,7 +308,7 @@ static class ModFindTests
         using (new FileStream(Path.Combine(docs, "compositorCache.package"), FileMode.Open, FileAccess.Read, FileShare.None))
             try { GameCaches.Clean(docs); } catch (IOException) { failed = true; }
         Fs.RetryDelay = delay;
-        check(failed && GameCaches.List(docs).Count == 6 && GameCaches.Backup is null, "caches: a cache in use leaves every cache where it was");
+        check(failed && GameCaches.List(docs).Count == 8 && GameCaches.Backup is null, "caches: a cache in use leaves every cache where it was");
         GameCaches.Clean(docs, all);
         SessionHistory.Add(new(DateTime.Now, TimeSpan.FromMinutes(5), 1L << 30, SessionEnd.Normal, 0));
         check(GameCaches.Backup is null, "caches: the copy is dropped after a game that closed normally");

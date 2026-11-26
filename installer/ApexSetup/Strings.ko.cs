@@ -1537,7 +1537,6 @@ public static partial class Strings
         ["Online"] = "온라인",
         ["When store pictures or online features don't load"] = "스토어 사진이나 온라인 기능이 불러와지지 않을 때",
         ["Old error logs"] = "오래된 오류 로그",
-        ["Script errors that Health has already read"] = "상태 검사가 이미 읽은 스크립트 오류",
         ["The game rebuilds its caches the next time it starts."] = "게임이 다음에 시작할 때 캐시를 다시 만들어요.",
         ["Nothing to clear"] = "지울 것 없음",
         ["{0} to clear"] = "지울 수 있는 용량: {0}",
@@ -2144,5 +2143,12 @@ public static partial class Strings
         ["{0} levels down"] = "{0}단계 아래",
         ["The game already reads this file."] = "게임이 이미 이 파일을 읽고 있어요.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg에는 이름에 공백이 있는 폴더를 넣을 수 없어요. 폴더 이름을 바꾸거나 게임이 읽는 폴더로 모드를 옮기세요.",
+        ["Downloads index"] = "다운로드 색인",
+        ["When downloaded content or Sims don't show up"] = "다운로드한 콘텐츠나 심이 보이지 않을 때",
+        ["Unfinished content files"] = "덜 쓰인 콘텐츠 파일",
+        ["Left half written when the game closed; the game never reads them"] = "게임이 종료될 때 반쯤 쓰인 채 남은 파일. 게임은 읽지 않습니다",
+        ["Backups of installed content"] = "설치된 콘텐츠 백업",
+        ["Copies the content installer keeps; the game plays without them"] = "콘텐츠 설치 프로그램이 보관하는 사본. 없어도 게임이 실행됩니다",
+        ["Script errors Health has already read, and the game's own logs"] = "상태가 이미 읽은 스크립트 오류와 게임 자체 로그",
     };
 }

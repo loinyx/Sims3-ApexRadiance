@@ -1536,7 +1536,6 @@ public static partial class Strings
         ["Online"] = "Online",
         ["When store pictures or online features don't load"] = "Als winkelafbeeldingen of online functies niet laden",
         ["Old error logs"] = "Oude foutenlogboeken",
-        ["Script errors that Health has already read"] = "Scriptfouten die Gezondheid al heeft gelezen",
         ["The game rebuilds its caches the next time it starts."] = "Het spel bouwt zijn caches de volgende keer dat het start opnieuw op.",
         ["Nothing to clear"] = "Niets te wissen",
         ["{0} to clear"] = "{0} te wissen",
@@ -2143,5 +2142,12 @@ public static partial class Strings
         ["{0} levels down"] = "{0} niveaus dieper",
         ["The game already reads this file."] = "Het spel leest dit bestand al.",
         ["Resource.cfg cannot name a folder with spaces in its name: rename the folder, or move the mod to one the game reads."] = "Resource.cfg kan geen map met spaties in de naam noemen: geef de map een andere naam of verplaats de mod naar een map die het spel leest.",
+        ["Downloads index"] = "Downloadindex",
+        ["When downloaded content or Sims don't show up"] = "Als gedownloade inhoud of Sims niet verschijnen",
+        ["Unfinished content files"] = "Onvoltooide inhoudsbestanden",
+        ["Left half written when the game closed; the game never reads them"] = "Half geschreven toen het spel sloot; het spel leest ze nooit",
+        ["Backups of installed content"] = "Back-ups van geïnstalleerde inhoud",
+        ["Copies the content installer keeps; the game plays without them"] = "Kopieën die de inhoudsinstaller bewaart; het spel werkt zonder",
+        ["Script errors Health has already read, and the game's own logs"] = "Scriptfouten die Gezondheid al las, en de logboeken van het spel",
     };
 }
