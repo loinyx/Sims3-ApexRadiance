@@ -45,13 +45,15 @@ Something in a corner of a card stands as far from the top as from the side.
 
 ## Parts
 
-A new screen is made of the pieces in `Design/Parts.cs`. A shape drawn twice becomes one of them.
+A new screen is made of the pieces in `Design/Parts.cs`. A shape drawn twice becomes one of them. The `apex-launcher-ds`
+skill (`.claude/skills`, `.agents/skills`) is the checklist for designing and reviewing a screen with them.
 
 | Part | For |
 |---|---|
 | `Parts.Icon`, `IconBoxed`, `Ghost` | an icon alone (32), the bin of a footer (40), any button with no fill of its own |
 | `Parts.OverPicture` | a round button in a picture's corner |
 | `Segmented` | two or more choices of one thing, one of them on; `Paint` gives it the ink of a board |
+| `ChoiceList` | one choice out of a few, each with a sentence, as rows in one card with the round mark on the right |
 | `Parts.SidePanel`, `PanelOf`, `FillFoot` | the rounded panel at a screen's side: mod details, picture, Customise |
 | `Parts.Card`, `Title`, `TitleText`, `Heading` | a card in a panel, its title and line, a section's heading |
 | `Parts.Chip` | what something is; amber only for what has to be seen |

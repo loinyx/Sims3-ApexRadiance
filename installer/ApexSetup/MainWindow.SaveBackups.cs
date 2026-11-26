@@ -190,40 +190,23 @@ public sealed partial class MainWindow
         rows.Children.Add(Toggle("play", T("Before playing"), "", play, on => play = on));
         rows.Children.Add(Toggle("calendar-clock", T("Once a day"), "", day, on => day = on));
         rows.Children.Add(Row("layers", T("Backups to keep"), "", keep));
-        // the two ways, as cards to choose from (the one chosen in the accent, as in Restore)
-        RadioButton Choice(string title, string sub, bool on)
-        {
-            var b = new RadioButton { Content = new StackPanel { Spacing = 2, Children = { SaveText(title, 14, strong: true), SaveText(sub, 12, "ApexMutedBrush") } }, IsChecked = on, GroupName = "auto", MinHeight = 0, VerticalContentAlignment = VerticalAlignment.Center };
-            AutomationProperties.SetName(b, title + ". " + sub);
-            return b;
-        }
         var every = choices.OnClose || choices.BeforePlay || choices.Daily
             ? string.Join(", ", new[] { choices.OnClose ? T("When the game closes") : null, choices.BeforePlay ? T("Before playing") : null, choices.Daily ? T("Once a day") : null }.OfType<string>().Select((w, k) => k == 0 ? w : Lower(w)))
               + " · " + (choices.Keep == 1 ? T("keeps the newest one") : T("keeps the newest {0}", choices.Keep))
             : T("Off");
-        var same = Choice(T("Same as every save"), every, !own);
-        var mine = Choice(T("Only for this save"), T("Its own times and how many to keep"), own);
-        var body = new StackPanel { Spacing = 12, Width = Design.Dialogs.Small };
-        foreach (var b in new[] { same, mine })
-        {
-            var card = new Border { Child = b, CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), Padding = new Thickness(16, 12, 16, 12) };
-            void Paint() => (card.Background, card.BorderBrush) = (Res(b.IsChecked == true ? "ApexAccentSoftBrush" : "ApexCardBrush"), Res(b.IsChecked == true ? "ApexAccentLineBrush" : "ApexCardBorderBrush"));
-            b.Checked += (_, _) => Paint();
-            b.Unchecked += (_, _) => Paint();
-            Paint();
-            body.Children.Add(card);
-        }
+        // the two ways, as the install's choice list; the save's own rows under it, as Settings' rows, only when it has its own
+        void Say() => rows.Visibility = own ? Visibility.Visible : Visibility.Collapsed;
+        var body = new StackPanel { Spacing = Design.Space.SectionToBody, Width = Design.Dialogs.Medium };
+        body.Children.Add(ChoiceList([("copy", T("Same as every save"), every), ("save", T("Only for this save"), T("Its own times and how many to keep"))], own ? 1 : 0,
+            k => { own = k == 1; Say(); }));
         body.Children.Add(rows);
-        void Say() => rows.Visibility = mine.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        same.Checked += (_, _) => Say();
-        mine.Checked += (_, _) => Say();
         Say();
         var d = new ContentDialog { Tag = "shield-check", Title = T("Automatic backups of {0}", e.Name), Content = body, PrimaryButtonText = T("Save"), CloseButtonText = T("Cancel"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;
         ChangeBackups(c =>
         {
-            if (same.IsChecked == true) c.Saves.Remove(e.Save);
+            if (!own) c.Saves.Remove(e.Save);
             else c.Saves[e.Save] = new() { OnClose = close, BeforePlay = play, Daily = day, Keep = (int)((ComboBoxItem)keep.SelectedItem).Tag };
         });
     }
