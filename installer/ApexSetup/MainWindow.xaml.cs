@@ -1000,6 +1000,7 @@ public sealed partial class MainWindow : Window
         NavIcons();
         // (the folder pane and the rows hold brushes of the old theme; RefreshAll builds the screen in use, the Gallery too)
         _folderSig = "";
+        LicenceList.Children.Clear(); // (built once: made again in the colours of now)
         foreach (var r in _modRows) r.Refresh();
         RefreshAll();
         if (UpgradeRun.Visibility == Visibility.Visible) UpgradeShow(_upgradeStage);

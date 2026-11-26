@@ -268,65 +268,80 @@ public sealed partial class MainWindow
 
     // ---------- health: a small note in the picture's corner ----------
 
-    // The game's health over the picture: frosted glass tinted with the crystal's colour, the crystal in its own light (a slow
-    // breath while something waits), what the state is and, below it, the first thing to look at.
+    // The game's health over the picture: a card of dark glass in the corner, the crystal floating in its own light on the
+    // left (a slow bob, still when Windows' animations are off), what the state is and the first thing to look at, and the
+    // way into Health. The light is the state's colour; the glass stays neutral.
     FrameworkElement HealthChip()
     {
-        var crystal = new Crystal(30);
-        crystal.SetLevel(HealthLevel, animate: false);
         var calm = _healthState == HealthState.Ready;
-        // (what to look at first, in a few words: the first sentence of the first thing that is not only a note)
         // (as Health's own list: a finding first, else the mods that clash, by their title)
         var first = _health.FirstOrDefault(h => h.Finding.Severity == Severity.Error && !h.Conflict) ?? _health.FirstOrDefault(h => h.Finding.Severity != Severity.Info && !h.Conflict);
         var clashes = ConflictsNow().Where(c => c.Level != ConflictLevel.Small).ToList();
-        var note = calm ? T("Open Health") : first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1.TrimEnd('.')
+        var note = calm ? T("Every check passed") : first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1.TrimEnd('.')
             : clashes.Count == 1 ? T(clashes[0].Title) : clashes.Count > 1 ? T("{0} conflicts between mods", clashes.Count) : "";
         var tint = StateTint(255);
         var white = new SolidColorBrush(Microsoft.UI.Colors.White);
-        var soft = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0xC8));
-        var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(10, 10, 18, 10), MaxWidth = 380 };
+        var soft = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0xBE));
+
+        var g = new Grid { Width = 300, Padding = new Thickness(Design.Space.X4, Design.Space.X4, Design.Space.X4, 14), ColumnSpacing = 14, RowSpacing = Design.Space.X3 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        // the crystal on a round tile of its colour, a soft light round it
-        var glow = new SoftGlow(tint, calm ? 0.35 : 0.6, 0.5) { Width = 84, Height = 84, Margin = new Thickness(-20), IsHitTestVisible = false };
-        var tile = new Grid { Width = 44, Height = 44 };
-        tile.Children.Add(glow);
-        tile.Children.Add(new Border { CornerRadius = new CornerRadius(22), Background = new SolidColorBrush(Alpha(tint, 0x38)),
-            BorderBrush = new SolidColorBrush(Alpha(tint, 0x66)), BorderThickness = new Thickness(1) });
+        g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        // the light, from the card's top corner, under everything
+        var glow = new SoftGlow(tint, calm ? 0.45 : 0.7, 0.5) { Width = 170, Height = 170, Margin = new Thickness(-56, -56, 0, 0), HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false };
+        Grid.SetRowSpan(glow, 2);
+        Grid.SetColumnSpan(glow, 2);
+        g.Children.Add(glow);
+        // the crystal, a little larger than the words, floating
+        var crystal = new Crystal(46);
+        crystal.SetLevel(HealthLevel, animate: false);
+        var bob = new CompositeTransform();
+        var holder = new Grid { Width = 46, Height = 60, VerticalAlignment = VerticalAlignment.Center, RenderTransform = bob };
         (crystal.HorizontalAlignment, crystal.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center);
-        tile.Children.Add(crystal);
-        g.Children.Add(tile);
-        if (!calm && new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
+        holder.Children.Add(crystal);
+        Grid.SetRowSpan(holder, 2);
+        g.Children.Add(holder);
+        if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
         {
-            var breathe = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
-            var fade = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0.45, To = 1, Duration = TimeSpan.FromMilliseconds(1600), EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
-            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(fade, glow);
-            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(fade, "Opacity");
-            breathe.Children.Add(fade);
-            tile.Loaded += (_, _) => breathe.Begin();
-            tile.Unloaded += (_, _) => breathe.Stop();
+            var float_ = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
+            var up = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0, To = -3, Duration = TimeSpan.FromMilliseconds(1800),
+                EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(up, bob);
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(up, "TranslateY");
+            float_.Children.Add(up);
+            holder.Loaded += (_, _) => float_.Begin();
+            holder.Unloaded += (_, _) => float_.Stop();
         }
-        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
-        words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = white, TextTrimming = TextTrimming.CharacterEllipsis });
-        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
+        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 16, FontWeight = FontWeights.SemiBold, Foreground = white, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = 13, Foreground = soft, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(words, 1);
         g.Children.Add(words);
-        var chev = Lucide.Icon("chevron-right", 14, soft);
-        chev.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(chev, 2);
-        g.Children.Add(chev);
+        // the way in, as a small glass button
+        var go = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X1 };
+        go.Children.Add(new TextBlock { Text = T("Open Health"), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = white, VerticalAlignment = VerticalAlignment.Center });
+        go.Children.Add(Lucide.Icon("chevron-right", 14, soft));
+        var pill = new Border { Child = go, Padding = new Thickness(12, 5, 10, 6), CornerRadius = new CornerRadius(Design.Radius.Control), HorizontalAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x1F)), BorderBrush = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x24)), BorderThickness = new Thickness(1) };
+        Grid.SetColumn(pill, 1);
+        Grid.SetRow(pill, 1);
+        g.Children.Add(pill);
+
+        var neutral = Windows.UI.Color.FromArgb(255, 0, 0, 0);
         var b = new Button
         {
-            Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(32), BorderThickness = new Thickness(1),
-            Background = Glass(0.42, tint), BorderBrush = new SolidColorBrush(Alpha(tint, calm ? (byte)0x3A : (byte)0x80)),
+            Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1),
+            Background = Glass(0.5, neutral), BorderBrush = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x24)),
         };
-        // (frosted glass that blurs the picture behind it, a little lighter under the pointer)
-        b.Resources["ButtonBackgroundPointerOver"] = Glass(0.3, tint);
-        b.Resources["ButtonBackgroundPressed"] = Glass(0.55, tint);
-        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Alpha(tint, 0xA0));
+        // (the card clips the light to its corners)
+        g.CornerRadius = new CornerRadius(17);
+        b.Resources["ButtonBackgroundPointerOver"] = Glass(0.38, neutral);
+        b.Resources["ButtonBackgroundPressed"] = Glass(0.62, neutral);
+        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x3A));
         b.Click += (_, _) => Show(HealthScreen);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, HealthTitle() + ". " + T("Open Health"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, HealthTitle() + (note.Length > 0 ? ". " + note : "") + ". " + T("Open Health"));
         HandCursor.On(b);
         return b;
     }

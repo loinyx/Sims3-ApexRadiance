@@ -175,30 +175,56 @@ public sealed partial class MainWindow
     }
 
     // when this save gets one by itself and how many stay; as every save, or its own
+    // a save's automatic backups: the same as every save, or its own times, as Settings' rows
     async Task AutoOfSave(SaveEntry e)
     {
         var choices = BackupChoices.Load();
         var of = choices.Of(e.Save);
         var own = choices.Saves.ContainsKey(e.Save);
-        var boxes = new StackPanel { Spacing = 4, Margin = new Thickness(0, 4, 0, 0) };
-        CheckBox Box(string text, bool on) { var b = new CheckBox { Content = text, IsChecked = on }; boxes.Children.Add(b); return b; }
-        var (close, play, day) = (Box(T("When the game closes"), of.OnClose), Box(T("Before playing"), of.BeforePlay), Box(T("Once a day"), of.Daily));
+        var (close, play, day) = (of.OnClose, of.BeforePlay, of.Daily);
         var keep = KeepBox(of.Keep);
-        keep.Header = T("Backups to keep");
-        (keep.HorizontalAlignment, keep.Margin) = (HorizontalAlignment.Stretch, new Thickness(0, 12, 0, 0));
-        boxes.Children.Add(keep);
-        var (same, mine) = (new RadioButton { Content = T("Same as every save"), IsChecked = !own }, new RadioButton { Content = T("Only for this save"), IsChecked = own });
-        void Say() => boxes.Visibility = mine.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        keep.MinWidth = 96;
+        AutomationProperties.SetName(keep, T("Backups to keep"));
+        var rows = new StackPanel { Spacing = 0 };
+        rows.Children.Add(Toggle("log-out", T("When the game closes"), "", close, on => close = on));
+        rows.Children.Add(Toggle("play", T("Before playing"), "", play, on => play = on));
+        rows.Children.Add(Toggle("calendar-clock", T("Once a day"), "", day, on => day = on));
+        rows.Children.Add(Row("layers", T("Backups to keep"), "", keep));
+        // the two ways, as cards to choose from (the one chosen in the accent, as in Restore)
+        RadioButton Choice(string title, string sub, bool on)
+        {
+            var b = new RadioButton { Content = new StackPanel { Spacing = 2, Children = { SaveText(title, 14, strong: true), SaveText(sub, 12, "ApexMutedBrush") } }, IsChecked = on, GroupName = "auto", MinHeight = 0, VerticalContentAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(b, title + ". " + sub);
+            return b;
+        }
+        var every = choices.OnClose || choices.BeforePlay || choices.Daily
+            ? string.Join(", ", new[] { choices.OnClose ? T("When the game closes") : null, choices.BeforePlay ? T("Before playing") : null, choices.Daily ? T("Once a day") : null }.OfType<string>().Select((w, k) => k == 0 ? w : Lower(w)))
+              + " · " + (choices.Keep == 1 ? T("keeps the newest one") : T("keeps the newest {0}", choices.Keep))
+            : T("Off");
+        var same = Choice(T("Same as every save"), every, !own);
+        var mine = Choice(T("Only for this save"), T("Its own times and how many to keep"), own);
+        var body = new StackPanel { Spacing = 12, Width = Design.Dialogs.Small };
+        foreach (var b in new[] { same, mine })
+        {
+            var card = new Border { Child = b, CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), Padding = new Thickness(16, 12, 16, 12) };
+            void Paint() => (card.Background, card.BorderBrush) = (Res(b.IsChecked == true ? "ApexAccentSoftBrush" : "ApexCardBrush"), Res(b.IsChecked == true ? "ApexAccentLineBrush" : "ApexCardBorderBrush"));
+            b.Checked += (_, _) => Paint();
+            b.Unchecked += (_, _) => Paint();
+            Paint();
+            body.Children.Add(card);
+        }
+        body.Children.Add(rows);
+        void Say() => rows.Visibility = mine.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         same.Checked += (_, _) => Say();
         mine.Checked += (_, _) => Say();
         Say();
-        boxes.Margin = new Thickness(28, 0, 0, 0);
-        var d = new ContentDialog { Tag = "shield-check", Title = T("Automatic backups of {0}", e.Name), Content = new StackPanel { Spacing = 8, Width = Design.Dialogs.Small, Children = { same, mine, boxes } }, PrimaryButtonText = T("Save"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "shield-check", Title = T("Automatic backups of {0}", e.Name), Content = body, PrimaryButtonText = T("Save"), CloseButtonText = T("Cancel"),
+            DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;
         ChangeBackups(c =>
         {
             if (same.IsChecked == true) c.Saves.Remove(e.Save);
-            else c.Saves[e.Save] = new() { OnClose = close.IsChecked, BeforePlay = play.IsChecked, Daily = day.IsChecked, Keep = (int)((ComboBoxItem)keep.SelectedItem).Tag };
+            else c.Saves[e.Save] = new() { OnClose = close, BeforePlay = play, Daily = day, Keep = (int)((ComboBoxItem)keep.SelectedItem).Tag };
         });
     }
 
