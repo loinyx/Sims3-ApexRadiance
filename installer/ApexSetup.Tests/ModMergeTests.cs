@@ -181,6 +181,12 @@ static class ModMergeTests
             && ModMerge.Info(m)!.Originals[2].Note is { Notes: "about e3", Creator: "Ana" } && File.ReadAllText(Path.Combine(rec.Dir, "merge.json")).Contains("about e3") && ModMerge.Info(m)!.Originals[0].Note?.Notes == "n1",
             "inside: notes, creator and tags of a mod inside a merge are kept in the merge's record; a bad value changes nothing");
 
+        string[] many = [Rel("t1"), Rel("t2")];
+        ModNotes.SetTag(many, "Fav", true);
+        var tagged = many.All(x => ModNotes.TagsOf(x).Contains("Fav"));
+        ModNotes.SetTag(many, "Fav", false);
+        check(tagged && many.All(x => ModNotes.Get(x) is null), "tags: many mods tagged and untagged at once, nothing left behind");
+
         // ---- a change in one go: out (off, Recycle Bin), in, a file replaced from outside Mods, a new order, a new name ----
         ModNotes.SetNotes(m.Rel, "merged note");
         ModNotes.SetTag(m.Rel, "Fav", true);

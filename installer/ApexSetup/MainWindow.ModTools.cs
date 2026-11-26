@@ -261,7 +261,18 @@ public sealed partial class MainWindow
             if (found is not null && _modRows.FirstOrDefault(r => r.File.Rel.Equals(found, StringComparison.OrdinalIgnoreCase)) is { } row)
             {
                 acts.Children.Add(Button(T("Turn it off"), () => { if (ModsBusy()) return; SetMods([row], false); ModHunt.Forget(); HuntBanner(); }, accent: true));
-                acts.Children.Add(Button(T("Show it"), () => { ModHunt.Forget(); _modPlace = AllMods; ModSearch.Text = row.Name; HuntBanner(); }));
+                acts.Children.Add(Button(T("Show it"), () =>
+                {
+                    // (filters or Show in Mods could hide it)
+                    ModHunt.Forget();
+                    ClearFilters();
+                    _modPlace = AllMods;
+                    SaveViewPrefs();
+                    ModSearch.Text = row.Name;
+                    HuntBanner();
+                    _folderSig = "";
+                    FillMods();
+                }));
             }
             acts.Children.Add(Button(T("Close"), () => { ModHunt.Forget(); HuntBanner(); }));
             host.Children.Add(acts);

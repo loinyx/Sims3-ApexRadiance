@@ -59,12 +59,12 @@ public sealed partial class MainWindow
         s.Children.Add(fold);
         head.Content = s;
         AutomationProperties.SetName(head, label);
+        AutomationProperties.SetItemStatus(head, _collapsed.Contains(key) ? T("Collapsed") : T("Expanded"));
         head.Click += (_, _) => { if (!_collapsed.Remove(key)) _collapsed.Add(key); SaveViewPrefs(); changed(); };
         g.Children.Add(head);
         if (add is { } a)
         {
             var plus = IconButton("plus", a.Tip);
-            plus.Width = plus.Height = 26;
             plus.HorizontalAlignment = HorizontalAlignment.Right;
             plus.Margin = new Thickness(0, 0, 6, 0);
             plus.Click += (_, _) => a.Run();

@@ -565,7 +565,7 @@ public sealed partial class MainWindow
         var g = new Grid { ColumnSpacing = 8 };
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition());
-        var no = new Button { Content = T("Discard"), HorizontalAlignment = HorizontalAlignment.Stretch, Height = 36 };
+        var no = new Button { Content = T("Discard"), HorizontalAlignment = HorizontalAlignment.Stretch, Height = Design.Size.ControlLarge };
         no.Click += (_, _) => Discard();
         g.Children.Add(no);
         var yes = MainButton(T("Save"), () => Safe(SaveMergeAsync()));
@@ -804,8 +804,8 @@ public sealed partial class MainWindow
             var color = ModNotes.ColorOf(name);
             var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             chip.Children.Add(new TextBlock { Text = name, FontSize = 12, Foreground = TagDot.BrushOf(color), VerticalAlignment = VerticalAlignment.Center });
-            var x = new Button { Content = Lucide.Icon("x", 10, TagDot.BrushOf(color)), Padding = new Thickness(3), MinWidth = 0, MinHeight = 0, Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0) };
-            AutomationProperties.SetName(x, T("Remove tag {0}", name));
+            var x = Design.Parts.Icon("x", T("Remove tag {0}", name), 24, TagDot.BrushOf(color));
+            (x.MinWidth, x.MinHeight) = (0, 0);
             x.Click += (_, _) => Tag(name, false);
             chip.Children.Add(x);
             wrap.Children.Add(new Border { Child = chip, Height = 32, Padding = new Thickness(12, 0, 6, 0), CornerRadius = new CornerRadius(8), Background = TagDot.BrushOf(color, 0x26) });
@@ -847,15 +847,14 @@ public sealed partial class MainWindow
         var f = ModDetailsFoot;
         f.Visibility = Visibility.Visible;
         foreach (var w in new[] { new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star), GridLength.Auto }) f.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        var swap = new Button { Content = T("Replace file"), HorizontalAlignment = HorizontalAlignment.Stretch, Height = 36, Padding = new Thickness(8, 0, 8, 0) };
+        var swap = new Button { Content = T("Replace file"), HorizontalAlignment = HorizontalAlignment.Stretch, Height = Design.Size.ControlLarge, Padding = new Thickness(8, 0, 8, 0) };
         swap.Click += (_, _) => Safe(ReplaceInsideAsync(r, o.Rel));
         f.Children.Add(swap);
-        var take = new Button { Content = T("Take out"), HorizontalAlignment = HorizontalAlignment.Stretch, Height = 36, Padding = new Thickness(8, 0, 8, 0) };
+        var take = new Button { Content = T("Take out"), HorizontalAlignment = HorizontalAlignment.Stretch, Height = Design.Size.ControlLarge, Padding = new Thickness(8, 0, 8, 0) };
         take.Click += (_, _) => TakeOutMenu(r, o.Rel).ShowAt(take);
         Grid.SetColumn(take, 1);
         f.Children.Add(take);
-        var bin = IconButton("trash-2", T("Take it out and move it to the Recycle Bin"), "ApexErrorBrush");
-        (bin.Width, bin.Height, bin.BorderThickness, bin.BorderBrush) = (36, 36, new Thickness(1), Res("ApexCardBorderBrush"));
+        var bin = Dims(Design.Parts.IconBoxed("trash-2", T("Take it out and move it to the Recycle Bin"), ink: Res("ApexErrorBrush")));
         bin.Click += (_, _) => TakeOut(o.Rel, TakeOutTo.Bin);
         Grid.SetColumn(bin, 2);
         f.Children.Add(bin);

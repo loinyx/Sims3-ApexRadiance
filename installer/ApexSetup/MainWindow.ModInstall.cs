@@ -44,14 +44,14 @@ public sealed partial class MainWindow
         return files;
     }
 
-    // a task started from a click or a menu: awaited here, so a failure is logged and said on the Mods bar
-    async void Safe(Task t)
+    // a task started from a click or a menu: awaited here, so a failure is logged and said on the Mods bar (or the caller's)
+    async void Safe(Task t, InfoBar? bar = null)
     {
         try { await t; }
         catch (Exception e)
         {
             App.Log(e);
-            try { SetInfo(ModsInfo, InfoBarSeverity.Error, T("The mods were not added"), ErrorText(e)); } catch (Exception e2) { App.Log(e2); }
+            try { SetInfo(bar ?? ModsInfo, InfoBarSeverity.Error, T("The launcher could not finish"), ErrorText(e)); } catch (Exception e2) { App.Log(e2); }
         }
     }
 
@@ -81,7 +81,7 @@ public sealed partial class MainWindow
             while (_addNext.Count > 0)
             {
                 // (an install or other work under way keeps its screen: the files are shown once it ends)
-                while (_busy) await Task.Delay(200);
+                while (_busy || _dialog is not null) await Task.Delay(200); // (a dialog open now, as a merge's, would be closed by this one's)
                 var now = _addNext.ToList();
                 _addNext.Clear();
                 await InstallFilesCoreAsync(now);
@@ -223,7 +223,7 @@ public sealed partial class MainWindow
         Grid.SetColumn(to, narrow ? 2 : 3);
         Grid.SetRow(to, narrow ? 1 : 0);
         g.Children.Add(to);
-        return new Border { Child = g, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = new SolidColorBrush(Pick(0x0AFFFFFF, 0x06000000)) };
+        return new Border { Child = g, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = Res("ApexRaisedBrush") };
     }
 
     static StackPanel AddLeftOut(string title, List<(string Name, string Why)> out_)

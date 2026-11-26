@@ -478,7 +478,7 @@ public sealed partial class MainWindow
         };
         var body = new StackPanel { Spacing = 8, Width = Design.Dialogs.Medium };
         body.Children.Add(Muted(T("The game rebuilds its caches the next time it starts.")));
-        var d = new ContentDialog { Tag = "brush", Title = T("Clear caches"), PrimaryButtonText = T("Clear"), CloseButtonText = T("Cancel"), SecondaryButtonText = kept ? T("Put the caches back") : "", DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "brush", Title = T("Clear game caches"), PrimaryButtonText = T("Clear"), CloseButtonText = T("Cancel"), SecondaryButtonText = kept ? T("Put the caches back") : "", DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         var total = new TextBlock { FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 6, 0, 0) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(total, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         var boxes = new List<(CacheGroup Group, CheckBox Box)>();
@@ -505,7 +505,7 @@ public sealed partial class MainWindow
             g.Children.Add(size);
             var box = new CheckBox { Content = g, IsChecked = on && any, IsEnabled = any, MinHeight = 56, Padding = new Thickness(12, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, $"{name}, {text}, {sizeText}");
-            var card = new Border { Child = box, Padding = new Thickness(14, 0, 14, 0), CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), Background = new SolidColorBrush(Pick(0x0AFFFFFF, 0x06000000)), Opacity = any ? 1 : 0.5 };
+            var card = new Border { Child = box, Padding = new Thickness(14, 0, 14, 0), CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), Background = Res("ApexRaisedBrush"), Opacity = any ? 1 : 0.5 };
             void Changed() { card.BorderBrush = Res(box.IsChecked == true ? "ApexAccentLineBrush" : "ApexCardBorderBrush"); Total(); }
             boxes.Add((group, box));
             Changed();

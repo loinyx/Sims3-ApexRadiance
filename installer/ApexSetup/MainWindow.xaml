@@ -892,7 +892,7 @@
                         </Grid>
                     </Grid>
                     <!-- the chosen mod (or several) -->
-                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="368" Margin="0,16,16,16" HorizontalAlignment="Right" Visibility="Collapsed" CornerRadius="16" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1" Background="{ThemeResource ApexCardBrush}">
+                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="368" Margin="0,16,16,16" HorizontalAlignment="Right" Visibility="Collapsed" CornerRadius="12" BorderBrush="{ThemeResource ApexCardBorderBrush}" BorderThickness="1" Background="{ThemeResource ApexCardBrush}">
                         <Grid>
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                             <StackPanel x:Name="ModDetailsHead" />

@@ -552,7 +552,7 @@ public sealed partial class MainWindow
         if (_fillingMods) return;
         if (ModFolders.SelectedItem is not FrameworkElement { Tag: string key } || key == "-") { DispatcherQueue.TryEnqueue(SelectPlace); return; }
         if (key == NewTag) { DispatcherQueue.TryEnqueue(() => { SelectPlace(); Safe(NewTagAsync(null)); }); return; }
-        if (key == _modPlace && _fOnly is null) return;
+        if (key == _modPlace) return; // (the side pane filled again, folded or searched, picks the same place: "Show in Mods" and the selection stay)
         (_modPlace, _fOnly) = (key, null);
         ModList.SelectedItems.Clear();
         ModGrid.SelectedItems.Clear();
@@ -748,26 +748,35 @@ public sealed partial class MainWindow
         return true;
     }
 
-    void MoveMods(List<ModRow> rows, string dir)
+    async void MoveMods(List<ModRow> rows, string dir)
     {
         if (ModsBusy()) return;
+        var todo = rows.Where(Mine).ToList();
+        _dragRows = null;
+        // (the moves off the UI thread and inside the busy mark, as SetMods: then the rows on this thread)
+        var docs = Docs;
+        var done = await ModWork(() =>
+        {
+            var list = new List<(ModRow Row, string From, ModFile? Moved, Exception? Error)>();
+            foreach (var r in todo)
+                try { list.Add((r, DirOf(r.File), ModLibrary.Move(r.File, docs, dir), null)); }
+                catch (Exception e) { list.Add((r, "", null, e)); }
+            return list;
+        });
         var back = new List<(ModRow Row, string Dir)>();
         string? error = null;
-        foreach (var r in rows.Where(Mine))
+        foreach (var (r, from, moved, e) in done)
         {
-            var from = DirOf(r.File);
-            try { var moved = ModLibrary.Move(r.File, Docs, dir); if (!ReferenceEquals(moved, r.File)) { Replace(r, moved); back.Add((r, from)); } }
-            catch (Exception e) { App.Log(e); error ??= ErrorText(e); }
+            if (moved is null) { App.Log(e!); error ??= ErrorText(e!); continue; }
+            if (!ReferenceEquals(moved, r.File)) { Replace(r, moved); back.Add((r, from)); }
         }
-        _dragRows = null;
         var where = Path.GetFileName(dir) is { Length: > 0 } f ? f : "Mods";
         void Undo()
         {
             string? failed = null;
             foreach (var (r, d) in back) try { Replace(r, ModLibrary.Move(r.File, Docs, d)); } catch (Exception e) { App.Log(e); failed ??= ErrorText(e); }
             if (failed is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), failed);
-            _folderSig = "";
-            FillMods();
+            Safe(ModsAgain()); // (the list may have been read again since: its rows are new ones)
         }
         // (some moved, some not: the ones that moved can still be undone)
         if (error is not null && back.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), error);
@@ -807,7 +816,7 @@ public sealed partial class MainWindow
         }
     }
 
-    async void SetMods(List<ModRow> rows, bool on)
+    async void SetMods(List<ModRow> rows, bool on, bool undo = false)
     {
         if (ModsBusy()) return;
         var todo = rows.Where(r => !r.File.Locked && r.File.Enabled != on).ToList();
@@ -836,11 +845,11 @@ public sealed partial class MainWindow
             changed.Add(r);
         }
         _folderSig = "";
-        FillMods();
+        if (undo) Safe(ModsAgain()); else FillMods(); // (an undo's rows may be old ones: the list may have been read again since)
         // (some moved, some not: the ones that moved can still be undone)
         if (error is not null && changed.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), ErrorText(error));
-        else if (error is not null) ModsResult(on ? T("{0} of {1} mods turned on", changed.Count, todo.Count) : T("{0} of {1} mods turned off", changed.Count, todo.Count), () => SetMods(changed, !on), ErrorText(error), InfoBarSeverity.Warning);
-        else if (changed.Count > 1) ModsResult(on ? T("{0} mods turned on", changed.Count) : T("{0} mods turned off", changed.Count), () => SetMods(changed, !on));
+        else if (error is not null) ModsResult(on ? T("{0} of {1} mods turned on", changed.Count, todo.Count) : T("{0} of {1} mods turned off", changed.Count, todo.Count), () => SetMods(changed, !on, true), ErrorText(error), InfoBarSeverity.Warning);
+        else if (changed.Count > 1) ModsResult(on ? T("{0} mods turned on", changed.Count) : T("{0} mods turned off", changed.Count), () => SetMods(changed, !on, true));
     }
 
     async void OnModsAdd(object sender, RoutedEventArgs e)
@@ -1405,8 +1414,8 @@ public sealed partial class MainWindow
         Act(allOn ? "power-off" : "power", turn, () => SetMods(mine, !allOn), mine.Count > 0, label: turn);
         var mv = Act("folder-input", T("Move to…"), null, mine.Count > 0, label: T("Move to…"));
         mv.Click += (_, _) => MoveMenu(mine).ShowAt(mv);
-        var tg = Act("tag", T("Tag"), null, label: T("Tag"));
-        tg.Click += (_, _) => TagMenu(picked).ShowAt(tg);
+        var tg = Act("tag", T("Tag"), null, mine.Count > 0, label: T("Tag"));
+        tg.Click += (_, _) => TagMenu(mine).ShowAt(tg);
         Act("merge", T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null)), mine.Count > 1, label: T("Merge"));
         Line();
         Act("trash-2", T("Move to the Recycle Bin"), () => RemoveMods(mine), mine.Count > 0, "ApexErrorBrush");
@@ -1428,15 +1437,15 @@ public sealed partial class MainWindow
         if (picked.Count == 1 && mine.Count == 1) menu.Items.Add(MenuItem(T("Rename"), () => Safe(RenameModAsync(mine[0])), "pencil", Windows.System.VirtualKey.F2));
         if (mine.Count > 0)
         {
-            var move = new MenuFlyoutSubItem { Text = T("Move to"), Icon = MenuIcon("folder-input") };
+            var move = new MenuFlyoutSubItem { Text = T("Move to…"), Icon = MenuIcon("folder-input") };
             foreach (var i in MoveMenu(mine).Items.ToList()) move.Items.Add(i);
             menu.Items.Add(move);
+            var tag = new MenuFlyoutSubItem { Text = T("Tag"), Icon = MenuIcon("tag") };
+            foreach (var i in TagMenu(mine).Items.ToList()) tag.Items.Add(i);
+            menu.Items.Add(tag);
         }
-        var tag = new MenuFlyoutSubItem { Text = T("Tag"), Icon = MenuIcon("tag") };
-        foreach (var i in TagMenu(picked).Items.ToList()) tag.Items.Add(i);
-        menu.Items.Add(tag);
         if (mine.Count > 1) menu.Items.Add(MenuItem(T("Merge into one package…"), () => Safe(MergeAsync(mine, null, null)), "merge"));
-        if (picked.Count == 1 && ModMerge.IsMerged(picked[0].File)) menu.Items.Add(MenuItem(T("Split into mods…"), () => Safe(SplitAsync(picked[0])), "merge"));
+        if (picked.Count == 1 && ModMerge.IsMerged(picked[0].File)) menu.Items.Add(MenuItem(T("Split into mods"), () => Safe(SplitAsync(picked[0])), "scissors"));
         if (picked.Count == 1) menu.Items.Add(MenuItem(T("Show in Explorer"), () => ShowFile(picked[0].File.Path), "folder-search"));
         if (picked.Count == 1 && CanOpenInS3pe(picked[0])) menu.Items.Add(MenuItem(T("Open in s3pe"), () => Safe(OpenInS3peAsync(picked[0])), "package"));
         menu.Items.Add(MenuItem(picked.Count == 1 ? T("Copy name") : T("Copy names"), () => CopyText(string.Join(Environment.NewLine, picked.Select(r => r.File.Name))), "copy"));
@@ -1522,8 +1531,7 @@ public sealed partial class MainWindow
             // (the rows are made again so their columns take the new widths)
             _fillingMods = true;
             var (keep, picked) = (_modShown.ToList(), Picked());
-            _modShown.Clear();
-            foreach (var r in keep) _modShown.Add(r);
+            _modShown.Reset(keep);
             var list = _modsGrid ? (ListViewBase)ModGrid : ModList;
             foreach (var r in picked) list.SelectedItems.Add(r);
             _fillingMods = false;
@@ -1676,17 +1684,6 @@ public sealed partial class MainWindow
         return Dims(b);
     }
 
-    static Button SmallButton(string text, string icon, Action click)
-    {
-        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        s.Children.Add(Lucide.Icon(icon, 13));
-        s.Children.Add(new TextBlock { Text = text, FontSize = 12 });
-        var b = new Button { Content = s, Padding = new Thickness(10, 4, 10, 5), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(210, 0x14, 0x14, 0x14)) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
-        b.Click += (_, _) => click();
-        return Dims(b);
-    }
-
     static Border Warn(string title, string? text, string? action = null, Action? run = null)
     {
         var s = new StackPanel { Spacing = 4 };
@@ -1734,7 +1731,7 @@ public sealed partial class MainWindow
             {
                 try { Replace(r, ModLibrary.Rename(r.File, old)); }
                 catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
-                FillMods();
+                Safe(ModsAgain()); // (the list may have been read again since: its rows are new ones)
             });
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
@@ -1912,7 +1909,7 @@ public sealed partial class MainWindow
         top.Children.Add(search);
         Grid.SetColumn(count, 1);
         top.Children.Add(count);
-        var body = new StackPanel { Spacing = 12, Width = 860 };
+        var body = new StackPanel { Spacing = 12, Width = Design.Dialogs.Large };
         body.Children.Add(top);
         body.Children.Add(grid);
         var d = new ContentDialog { Tag = "replace", Title = T("What {0} replaces", r.Name), Content = body, CloseButtonText = T("Close"), XamlRoot = Content.XamlRoot };
@@ -1951,8 +1948,8 @@ public sealed partial class MainWindow
             var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             chip.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 7, Height = 7, Fill = TagDot.BrushOf(t.Color), VerticalAlignment = VerticalAlignment.Center });
             chip.Children.Add(new TextBlock { Text = t.Name, FontSize = 12, Foreground = TagDot.BrushOf(t.Color), VerticalAlignment = VerticalAlignment.Center });
-            var x = new Button { Content = Lucide.Icon("x", 10, TagDot.BrushOf(t.Color)), Padding = new Thickness(3), MinWidth = 0, MinHeight = 0, Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0) };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(x, T("Remove tag {0}", t.Name));
+            var x = Design.Parts.Icon("x", T("Remove tag {0}", t.Name), 24, TagDot.BrushOf(t.Color));
+            (x.MinWidth, x.MinHeight) = (0, 0);
             var name = t.Name;
             x.Click += (_, _) => TagMods(rows, name, false);
             chip.Children.Add(x);
@@ -1990,7 +1987,8 @@ public sealed partial class MainWindow
         var added = rows.Where(r => !ModNotes.TagsOf(r.File.Rel).Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
         try
         {
-            foreach (var r in rows) { ModNotes.SetTag(r.File.Rel, tag, on); r.Refresh(); }
+            ModNotes.SetTag(rows.Select(r => r.File.Rel), tag, on);
+            foreach (var r in rows) r.Refresh();
             if (rows.Count > 1 && on) ModsResult(T("{0} mods tagged {1}", rows.Count, tag), () => TagMods(added, tag, false));
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
@@ -2013,12 +2011,21 @@ public sealed partial class MainWindow
             var dot = new Button { Width = 22, Height = 22, CornerRadius = new CornerRadius(11), Padding = new Thickness(0), MinWidth = 0, MinHeight = 0, Background = TagDot.BrushOf(c), BorderThickness = new Thickness(0) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(dot, T("Colour {0}", Array.IndexOf(ModNotes.Colors, c) + 1));
             var cc = c;
-            dot.Click += (_, _) => { chosen = cc; foreach (var x in rings) x.BorderBrush = (string)x.Tag == chosen ? Res("ApexSoftTextBrush") : null; };
+            dot.Click += (_, _) => { chosen = cc; Mark(); };
             ring.Child = dot;
-            ring.BorderBrush = c == chosen ? Res("ApexSoftTextBrush") : null;
             rings.Add(ring);
             colors.Children.Add(ring);
         }
+        // (the ring shows the chosen one; the screen reader hears it)
+        void Mark()
+        {
+            foreach (var x in rings)
+            {
+                x.BorderBrush = (string)x.Tag == chosen ? Res("ApexSoftTextBrush") : null;
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(x.Child, (string)x.Tag == chosen ? T("Selected") : "");
+            }
+        }
+        Mark();
         var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
         body.Children.Add(box);
         body.Children.Add(new StackPanel { Spacing = 8, Children = { Design.Parts.Label(T("Colour")), colors } });

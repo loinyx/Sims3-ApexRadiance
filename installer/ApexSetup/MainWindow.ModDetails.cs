@@ -224,7 +224,7 @@ public sealed partial class MainWindow
         place.Children.Add(where);
         if (mine)
         {
-            var move = new HyperlinkButton { Content = T("Move…"), FontSize = 13, Padding = new Thickness(0) };
+            var move = new HyperlinkButton { Content = T("Move to…"), FontSize = 13, Padding = new Thickness(0) };
             move.Click += (_, _) => MoveMenu([r]).ShowAt(move);
             Grid.SetColumn(move, 1);
             place.Children.Add(move);
@@ -396,23 +396,19 @@ public sealed partial class MainWindow
         f.Children.Add(main);
         void Icon(Button b)
         {
-            b.Width = Design.Size.ControlLarge;
-            b.Height = Design.Size.ControlLarge;
-            b.BorderThickness = new Thickness(1);
-            b.BorderBrush = Res("ApexCardBorderBrush");
             f.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             Grid.SetColumn(b, f.ColumnDefinitions.Count - 1);
             f.Children.Add(b);
         }
         if (merge is not null && mine)
         {
-            var power = IconButton("power", m.Enabled ? T("Turn off") : T("Turn on"));
+            var power = Dims(Design.Parts.IconBoxed("power", m.Enabled ? T("Turn off") : T("Turn on")));
             power.Click += (_, _) => SetMods([r], !r.File.Enabled);
             Icon(power);
         }
         if (mine)
         {
-            var remove = IconButton("trash-2", T("Move to the Recycle Bin"), "ApexErrorBrush");
+            var remove = Dims(Design.Parts.IconBoxed("trash-2", T("Move to the Recycle Bin"), ink: Res("ApexErrorBrush")));
             remove.Click += (_, _) => RemoveMods([r]);
             Icon(remove);
         }

@@ -32,7 +32,7 @@ public sealed partial class MainWindow
             var left = mods.Count - done.Sum(r => r.Mods);
             SetInfo(ModsInfo, error is null ? InfoBarSeverity.Success : InfoBarSeverity.Warning, T("{0} mods merged into {1}", done.Sum(r => r.Mods), string.Join(", ", done.Select(r => r.Merged.Name))),
                 (error is null ? "" : T("The rest was not merged.") + " ") + (left == 0 ? "" : left == 1 ? T("1 mod was left out.") + " " : T("{0} mods were left out.", left) + " ")
-                + T("Something missing in the game? Clear its caches."), T("Clear the game caches"), async () => await ClearCachesAfterMerge());
+                + T("Something missing in the game? Clear its caches."), T("Clear game caches"), async () => await ClearCachesAfterMerge());
         }
         await ModsAgain();
     }
@@ -90,7 +90,7 @@ public sealed partial class MainWindow
         order.Children.Add(new TextBlock { Text = T("Order"), FontSize = 14, FontWeight = FontWeights.SemiBold });
         order.Children.Add(Muted(T("If two mods change the same thing, the game uses the one higher up. Drag to change the order, or use the arrows.")));
         order.Children.Add(quick);
-        order.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = new SolidColorBrush(Pick(0x0AFFFFFF, 0x06000000)) });
+        order.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = Res("ApexRaisedBrush") });
         var leftOut = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
         var scriptBox = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
         var scriptHost = new StackPanel { Spacing = 6, Visibility = Visibility.Collapsed };
@@ -480,7 +480,7 @@ public sealed partial class MainWindow
         if (done.Count > 0)
             SetInfo(ModsInfo, error is null ? InfoBarSeverity.Success : InfoBarSeverity.Warning, Title(done),
                 (error is null ? "" : T("The other merges were not updated.") + " ") + T("The old versions went to the Recycle Bin.") + " " + T("Something missing in the game? Clear its caches."),
-                T("Clear the game caches"), async () => await ClearCachesAfterMerge());
+                T("Clear game caches"), async () => await ClearCachesAfterMerge());
         await ModsAgain();
     }
 }

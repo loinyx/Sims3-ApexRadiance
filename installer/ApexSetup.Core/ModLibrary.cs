@@ -168,10 +168,20 @@ public static class ModNotes
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
-    public static void SetTag(string rel, string tag, bool on)
+    public static void SetTag(string rel, string tag, bool on) => SetTag([rel], tag, on);
+
+    // many mods at once: the file is written once
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
+    public static void SetTag(IEnumerable<string> rels, string tag, bool on)
     {
-        if (TagsOf(rel).Contains(tag, StringComparer.OrdinalIgnoreCase) == on) return;
-        Edit(rel, n => n.Tags = on ? [.. n.Tags ?? [], tag] : n.Tags!.Where(t => !t.Equals(tag, StringComparison.OrdinalIgnoreCase)).ToList());
+        var changed = false;
+        foreach (var rel in rels)
+        {
+            if (TagsOf(rel).Contains(tag, StringComparer.OrdinalIgnoreCase) == on) continue;
+            Edit(rel, n => n.Tags = on ? [.. n.Tags ?? [], tag] : n.Tags!.Where(t => !t.Equals(tag, StringComparison.OrdinalIgnoreCase)).ToList(), save: false);
+            changed = true;
+        }
+        if (changed) Save();
     }
 
     static string TagName(string name)
