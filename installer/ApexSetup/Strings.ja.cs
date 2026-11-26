@@ -1129,7 +1129,6 @@ public static partial class Strings
         ["Polaroid"] = "ポラロイド",
         ["Print"] = "プリント",
         ["Washi tape"] = "マスキングテープ",
-        ["Paper clip"] = "クリップ",
         ["Rounded"] = "丸み",
         ["Kraft"] = "クラフト",
         ["Vintage"] = "ビンテージ",

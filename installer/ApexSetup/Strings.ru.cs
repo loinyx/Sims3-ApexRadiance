@@ -1125,7 +1125,6 @@ public static partial class Strings
         ["Polaroid"] = "Polaroid",
         ["Print"] = "Отпечаток",
         ["Washi tape"] = "Лента васи",
-        ["Paper clip"] = "Скрепка",
         ["Rounded"] = "Скруглённая",
         ["Kraft"] = "Крафт",
         ["Vintage"] = "Винтаж",

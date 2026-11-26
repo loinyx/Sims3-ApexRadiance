@@ -1127,7 +1127,6 @@ public static partial class Strings
         ["Polaroid"] = "Polaroid",
         ["Print"] = "Print",
         ["Washi tape"] = "Washitape",
-        ["Paper clip"] = "Papirclips",
         ["Rounded"] = "Afrundet",
         ["Kraft"] = "Kraft",
         ["Vintage"] = "Vintage",

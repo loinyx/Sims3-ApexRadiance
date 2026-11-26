@@ -1127,7 +1127,6 @@ public static partial class Strings
         ["Polaroid"] = "폴라로이드",
         ["Print"] = "인화",
         ["Washi tape"] = "마스킹 테이프",
-        ["Paper clip"] = "클립",
         ["Rounded"] = "둥글게",
         ["Kraft"] = "크래프트",
         ["Vintage"] = "빈티지",

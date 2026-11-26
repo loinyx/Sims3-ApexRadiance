@@ -1124,7 +1124,6 @@ public static partial class Strings
         ["Polaroid"] = "拍立得",
         ["Print"] = "印刷",
         ["Washi tape"] = "和纸胶带",
-        ["Paper clip"] = "回形针",
         ["Rounded"] = "圆角",
         ["Kraft"] = "牛皮纸",
         ["Vintage"] = "复古",

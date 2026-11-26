@@ -33,6 +33,7 @@ public sealed class AlbumLook
 {
     public string Background { get; set; } = "desk";     // (the first boards had names; a colour now wins when set)
     public const string DefaultColor = "#0A0A09";
+    public const string OldDefaultColor = "#07070A";    // (the default up to 2.3.0, stored by every album opened then)
     public string? Color { get; set; } = DefaultColor;       // the board's one colour, "#RRGGBB", fading softly darker
     public string Frame { get; set; } = "rounded";       // polaroid, print, washi, clip, rounded, kraft, deckle, doodle, stamp, film
     public string Font { get; set; } = "Segoe UI Variable";

@@ -807,7 +807,7 @@ public sealed partial class MainWindow
     ScrollViewer? _boardScroll;
     readonly List<(Picture Pic, FrameworkElement Card, int Index)> _boardCards = [];
     static readonly (string Key, string Name)[] Frames =
-        [("polaroid", "Polaroid"), ("print", "Print"), ("washi", "Washi tape"), ("clip", "Paper clip"), ("rounded", "Rounded"), ("kraft", "Kraft"), ("deckle", "Vintage"), ("doodle", "Doodled"), ("stamp", "Stamp"), ("film", "Film"), ("walnut", "Walnut"), ("gallery", "Gallery"), ("neon", "Neon")];
+        [("polaroid", "Polaroid"), ("print", "Print"), ("washi", "Washi tape"), ("rounded", "Rounded"), ("kraft", "Kraft"), ("deckle", "Vintage"), ("doodle", "Doodled"), ("stamp", "Stamp"), ("film", "Film"), ("walnut", "Walnut"), ("gallery", "Gallery"), ("neon", "Neon")];
 
     static readonly (Windows.UI.Color A, Windows.UI.Color B)[] Washi =
         [(Rgb(0xF3, 0xA6, 0xC0), Rgb(0xFB, 0xD3, 0xE0)), (Rgb(0x9F, 0xD3, 0xC7), Rgb(0xD6, 0xF0, 0xEA)), (Rgb(0xF2, 0xC9, 0x6B), Rgb(0xFA, 0xE6, 0xB4)), (Rgb(0xB4, 0xAE, 0xF2), Rgb(0xDE, 0xDB, 0xFA))];
@@ -828,7 +828,7 @@ public sealed partial class MainWindow
 
     // the album's one colour: its own, else the colour of the board it had before colours
     // (the default board is near black on dark and white on light; a colour the player picked stays as picked)
-    static Windows.UI.Color BoardColor(AlbumLook look) => _light && string.Equals(look.Color, AlbumLook.DefaultColor, StringComparison.OrdinalIgnoreCase) ? Rgb(0xFF, 0xFF, 0xFF)
+    static Windows.UI.Color BoardColor(AlbumLook look) => _light && (string.Equals(look.Color, AlbumLook.DefaultColor, StringComparison.OrdinalIgnoreCase) || string.Equals(look.Color, AlbumLook.OldDefaultColor, StringComparison.OrdinalIgnoreCase)) ? Rgb(0xFF, 0xFF, 0xFF)
         : Hex(look.Color, Boards.FirstOrDefault(b => b.Key == look.Background) is { Key: not null } b ? b.From : Boards[0].From);
 
     // one hue, a touch lighter at the top, softly darker towards the bottom
@@ -1248,6 +1248,7 @@ public sealed partial class MainWindow
     {
         if (_custDrawer is null || _gal is null) return;
         var look = Gallery.Look(_gal, _galAlbum);
+        if (look.Frame == "clip") look.Frame = "rounded"; // (as Dress draws it: the paper clip frame was taken out)
         void Changed() { _custChanged = true; Keep(); RefreshBoard(); }
         var root = new Grid();
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -2485,7 +2486,7 @@ public sealed partial class MainWindow
             Brush Wash(byte a) => new SolidColorBrush(Windows.UI.Color.FromArgb(a, ink.R, ink.G, ink.B));
             const double pad = 6;
             var box = new TextBox { Text = info.Caption ?? "", FontFamily = caption.FontFamily, FontSize = caption.FontSize, PlaceholderText = T("write something"),
-                TextWrapping = TextWrapping.Wrap, AcceptsReturn = false, MaxLength = 120, Width = caption.MaxWidth + pad * 2, MinWidth = 0,
+                TextWrapping = TextWrapping.Wrap, AcceptsReturn = false, MaxLength = Math.Max(120, info.Caption?.Length ?? 0), Width = caption.MaxWidth + pad * 2, MinWidth = 0,
                 Foreground = caption.Foreground, Background = Wash(0x10), BorderThickness = new Thickness(0),
                 Padding = new Thickness(pad, pad - 2, pad, pad - 2), CornerRadius = new CornerRadius(Design.Radius.Tag), HorizontalAlignment = HorizontalAlignment.Left,
                 Margin = new Thickness(caption.Margin.Left - pad, caption.Margin.Top - (pad - 2), caption.Margin.Right, caption.Margin.Bottom - (pad - 2)) };
@@ -2531,7 +2532,6 @@ public sealed partial class MainWindow
             box.LostFocus += (_, _) => Done();
             box.KeyDown += (_, k) => { if (k.Key == Windows.System.VirtualKey.Enter) { k.Handled = true; Done(); } };
         }
-        caption.Tag = (Action)WriteCaption; // (what writing on it starts, for whatever reaches the caption)
         return outer;
     }
 

@@ -1138,7 +1138,6 @@ public static partial class Strings
         ["Polaroid"] = "Polaroid",
         ["Print"] = "Εκτύπωση",
         ["Washi tape"] = "Washi tape",
-        ["Paper clip"] = "Συνδετήρας",
         ["Rounded"] = "Στρογγυλεμένο",
         ["Kraft"] = "Κραφτ",
         ["Vintage"] = "Vintage",

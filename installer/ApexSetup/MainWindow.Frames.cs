@@ -27,6 +27,7 @@ public sealed partial class MainWindow
         var stack = new StackPanel();
         Brush S(Color c) => new SolidColorBrush(c);
         T Lift<T>(T e) where T : UIElement { if (shadows) e.Shadow = new ThemeShadow(); return e; }
+        if (frame == "clip") frame = "rounded"; // (the paper clip frame was taken out; its albums wear the default)
         switch (frame)
         {
             case "rounded":
@@ -81,28 +82,6 @@ public sealed partial class MainWindow
                 caption.Margin = new Thickness(4, 12, 0, 0);
                 stack.Children.Add(caption);
                 return new(stack, null, false, true);
-            }
-            case "clip":
-            {
-                // (a white print and a steel paper clip over its top edge: a wire with its shadow, its body and a highlight)
-                var card = new StackPanel { Background = PaperBrush(), Padding = new Thickness(9, 9, 9, 6) };
-                card.Children.Add(photo(w, h, 0));
-                caption.Foreground = S(Design.Scrap.Ink);
-                caption.Margin = new Thickness(3, 8, 0, 2);
-                card.Children.Add(caption);
-                var g = new Grid();
-                g.Children.Add(Lift(card));
-                var s = 1.5 * k;
-                const string Gem = "M4 60 L4 16 A6 6 0 0 1 16 16 L16 70 A8 8 0 0 1 0 70 L0 10 A10 10 0 0 1 20 10 L20 54";
-                Shape Wire(Brush b, double t, double dx, double dy) => new() { Data = Geo(Gem), Stroke = b, StrokeThickness = t, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
-                    RenderTransform = new TranslateTransform { X = dx, Y = dy } };
-                g.Children.Add(new Grid
-                {
-                    HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0.2 * w, -30 * s, 0, 0), IsHitTestVisible = false,
-                    RenderTransform = new CompositeTransform { ScaleX = s, ScaleY = s, Rotation = 8 },
-                    Children = { Wire(S(WireShadow), 3, 1.5, 2.5), Wire(Linear(new(0, 0), new(1, 0), (0, SteelDark), (0.45, SteelLight), (0.6, SteelMid), (1, SteelEdge)), 2.6, 0, 0), Wire(S(WireLight), 0.7, -0.5, -0.4) },
-                });
-                return new(g, null, false, false);
             }
             case "kraft":
             {

@@ -1105,7 +1105,6 @@ public static partial class Strings
         ["Polaroid"] = "โพลารอยด์",
         ["Print"] = "พิมพ์",
         ["Washi tape"] = "วาชิเทป",
-        ["Paper clip"] = "คลิปหนีบกระดาษ",
         ["Rounded"] = "มุมมน",
         ["Kraft"] = "คราฟต์",
         ["Vintage"] = "วินเทจ",

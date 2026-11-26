@@ -26,6 +26,13 @@ public sealed partial class MainWindow
     // (made with the page)
     TextBox _orderSearch = null!;
     ListView _orderList = null!;
+    string? _orderFilter;
+    static ScrollViewer? FirstScroller(DependencyObject o)
+    {
+        for (int k = 0; k < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(o); k++)
+            if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(o, k) is var c && (c as ScrollViewer ?? FirstScroller(c)) is { } s) return s;
+        return null;
+    }
     Border _orderBox = null!;
     ContentControl _orderEmpty = null!;
 
@@ -239,7 +246,12 @@ public sealed partial class MainWindow
             if (head is not null) { shown.Add(head); head = null; }
             shown.Add(r);
         }
+        // (filled again with the same search and filter, as when Health ends or Mods comes back, the list keeps its place)
+        var filter = q + "|" + _orderClashOnly;
+        var keep = filter == _orderFilter && FirstScroller(_orderList) is { } was ? was.VerticalOffset : (double?)null;
+        _orderFilter = filter;
         _orderList.ItemsSource = shown;
+        if (keep is { } at) _orderList.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FirstScroller(_orderList)?.ChangeView(null, at, null, true));
         _orderBox.Visibility = shown.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         _orderEmpty.Content = shown.Count > 0 ? null
             : q.Length > 0 ? EmptyPlace("search", T("Nothing here matches your search."))

@@ -13,7 +13,6 @@ public static class Scrap
         CreamTop = C(0xFFF4EAD3), CreamBottom = C(0xFFE2D2AE), AgeSpot = C(0xFFA9864A), Sepia = C(0x4D8A5A20), Vignette = C(0x732A1A08), SepiaInk = C(0xFF5E4C30),
         KraftTop = C(0xFFC79C6C), KraftBottom = C(0xFFA97F52), KraftFibre = C(0xFF6E4A27), KraftFleck = C(0xFFF1DAB8), KraftLine = C(0x597A5531), KraftInk = C(0xFF3D2B1A),
         Ink = C(0xFF2B2A26), PhotoEdge = C(0x38000000), Sheen = C(0x42FFFFFF), SheenFaint = C(0x0DFFFFFF), Clear = C(0x00FFFFFF),
-        WireShadow = C(0x40000000), WireLight = C(0x8CFFFFFF), SteelDark = C(0xFF7E848D), SteelLight = C(0xFFF4F6F8), SteelMid = C(0xFFC3C8CF), SteelEdge = C(0xFF8A9099),
         StampPaper = C(0xFFFBF8F1),
         FilmEdge = C(0xFF211D19), FilmBase = C(0xFF14110F), FilmPrint = C(0xFFE8A04A),
         IconShadowNear = C(0x2E000000), IconShadowFar = C(0x1A000000), IconSky = C(0xFF7FA9D6), IconHorizon = C(0xFFE9C9A4), IconField = C(0xFF6E8F6A), IconGround = C(0xFF3C5B43),

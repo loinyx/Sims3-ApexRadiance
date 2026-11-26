@@ -1130,7 +1130,6 @@ public static partial class Strings
         ["Polaroid"] = "Polaroid",
         ["Print"] = "Výtisk",
         ["Washi tape"] = "Washi páska",
-        ["Paper clip"] = "Sponka",
         ["Rounded"] = "Zaoblené",
         ["Kraft"] = "Kraft",
         ["Vintage"] = "Vintage",
