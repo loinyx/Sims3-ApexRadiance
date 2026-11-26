@@ -111,3 +111,17 @@ of an inner button, because the whole card opens Health.
   what was not.
 - During a round of tweaks, commit each change; run the tests (`ApexSetup.Tests`) once at the end. Every launcher change
   raises `<Version>` in `ApexSetup.csproj` once per release.
+
+## 8. Rule: no feature ships without its standard pass
+
+Every new feature, and every change to a screen or dialog, includes this before it is called done, without waiting to be
+asked:
+
+1. Audit the code of the whole screen or dialog it touches, not only the new lines: every size, space, corner and text
+   size is a token, every list is `Row`s joined into one card, every icon start is an `IconTile`, every dialog goes
+   through `Dialogs`. A literal number or a hand-made card found there is fixed in the same change.
+2. Capture every state the feature can show (dark and light, narrow, longest language, long names, warnings and
+   problems, empty, hover) and look at each one: alignment, spacing, weight, words.
+3. Only then commit, build and show it, with the captures.
+
+A feature that skipped this pass is not finished, however well it works.
