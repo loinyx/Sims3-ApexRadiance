@@ -164,13 +164,17 @@ public static class Parts
     // a section inside a panel
     public static TextBlock Heading(string text) => new() { Text = text, FontSize = TextSize.Body, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
 
-    // what something is, in a quiet chip; warn: it has to be seen
-    public static Border Chip(string icon, string text, bool warn = false)
+    // what something is, in a quiet chip; warn: it has to be seen. tone (Warning, Success, Accent): the chip in a tint of that
+    // colour, a state or a version; an icon is optional
+    public static Border Chip(string? icon, string text, bool warn = false, string? tone = null)
     {
+        tone ??= warn ? "Warning" : null;
         var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.X2 };
-        s.Children.Add(Lucide.Icon(icon, 14, B(warn ? "Warning" : "Muted")));
-        s.Children.Add(new TextBlock { Text = text, FontSize = TextSize.Small, Foreground = B(warn ? "WarningText" : "SoftText"), VerticalAlignment = VerticalAlignment.Center });
-        return new Border { Child = s, Height = Size.ControlSmall, Padding = new Thickness(Space.X3, 0, Space.X3, 0), CornerRadius = new CornerRadius(Radius.Control), Background = B(warn ? "WarningSoft" : "Tile") };
+        if (icon is not null) s.Children.Add(Lucide.Icon(icon, 14, B(tone ?? "Muted")));
+        var ink = tone switch { null => "SoftText", "Success" => "Success", _ => tone + "Text" };
+        s.Children.Add(new TextBlock { Text = text, FontSize = TextSize.Small, Foreground = B(ink), FontWeight = tone == "Accent" ? FontWeights.SemiBold : FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center });
+        return new Border { Child = s, Height = Size.ControlSmall, Padding = new Thickness(Space.X3, 0, Space.X3, 0), CornerRadius = new CornerRadius(Radius.Control), VerticalAlignment = VerticalAlignment.Center,
+            Background = B(tone is null ? "Tile" : tone + "Soft") };
     }
 
     // ---------- fields ----------

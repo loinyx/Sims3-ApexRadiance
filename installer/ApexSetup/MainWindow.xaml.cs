@@ -55,7 +55,8 @@ public sealed partial class MainWindow : Window
         ThemeChrome();
         NavIcons();
         Root.ActualThemeChanged += (_, _) => ThemeChanged();
-        _ui.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(() => { if (_settings.Theme == Design.Theme.Windows) Design.DesignSystem.Apply(_settings.Theme); ThemeChanged(); });
+        // (only the Windows theme follows the accent; light and dark come through ActualThemeChanged)
+        _ui.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(() => { if (_settings.Theme != Design.Theme.Windows) return; Design.DesignSystem.Apply(_settings.Theme); ThemeChanged(); });
         // status bars in a dark tint of their colour (the window's own resources: read before any bar draws), not the default
         // olive and brown
         // the log's context line: the game, its edition and version, the renderer and the loaders Setup found
@@ -146,12 +147,23 @@ public sealed partial class MainWindow : Window
         await CheckSetupUpdateAsync();
     }
 
+    Action? _setupOffer, _saySetupUpdate; // (the launcher update's card while it waits for a free moment; its notice, said again in a new language)
+
+    // the card, once nothing else is open or running (a dialog it replaced would read as cancelled)
+    void OfferSetupUpdate() => DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+    {
+        if (_setupOffer is not { } offer || _dialog is not null || _busy || _savesBusy || _running || _step == Welcome || UpgradeRun.Visibility == Visibility.Visible) return;
+        _setupOffer = null;
+        offer();
+    });
+
     // A newer Apex Radiance Setup in the latest Apex release is downloaded and checked, then offered on the start page;
     // Update Setup puts it in place of this exe and starts it. Any failure leaves this Setup working as it is.
     async Task CheckSetupUpdateAsync()
     {
-        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1" || Preview is not null || Environment.ProcessPath is not { } self
-            || _latest.GetValueOrDefault(Releases.Apex) is not { } apex) return;
+        // (not in the administrator window, nor in an uninstall from Installed apps)
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1" || Preview is not null || Maintenance || Environment.GetCommandLineArgs().Contains(LauncherInstall.UninstallArg)
+            || Environment.ProcessPath is not { } self || _latest.GetValueOrDefault(Releases.Apex) is not { } apex) return;
         try
         {
             // (APEX_LAUNCHER_FAKE_UPDATE: a newer exe on disk taken as the download, to see and run the offer without a release)
@@ -160,10 +172,10 @@ public sealed partial class MainWindow : Window
             var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(file).FileVersion is { } fv && Version.TryParse(fv, out var pv) ? pv.ToString(3) : "";
             void UpdateNow()
             {
-                if (_busy) // (an install in progress finishes first: said, with the button kept)
+                if (_busy || _savesBusy) // (an install or a change to a save in progress finishes first: said, with the button kept)
                 {
-                    SetInfo(SetupUpdateInfo, InfoBarSeverity.Informational, T("A new version of Apex Launcher is available"),
-                        T("Wait for the current change to finish, then update the launcher."), T("Update the launcher"), UpdateNow);
+                    (_saySetupUpdate = () => SetInfo(SetupUpdateInfo, InfoBarSeverity.Informational, T("A new version of Apex Launcher is available"),
+                        T("Wait for the current change to finish, then update the launcher."), T("Update the launcher"), UpdateNow))();
                     return;
                 }
                 try
@@ -181,16 +193,24 @@ public sealed partial class MainWindow : Window
                     _ = ShowDialog(new ContentDialog { Tag = "!circle-alert", Title = T("The launcher could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
                 }
             }
-            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new version of Apex Launcher is available"),
-                T("Apex Launcher {0} is ready to install. The launcher opens again after the update.", v), T("Update the launcher"), UpdateNow);
-            // (the notice above sits on the old start page: anywhere else, and when no game runs, the offer is a card of its own)
-            if (_step == Welcome || _running || _busy) return;
-            var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
-            body.Children.Add(Design.Dialogs.Words(T("Downloaded and checked. The launcher restarts in a moment and reopens where you were. Nothing in the game changes.")));
-            body.Children.Add(new TextBlock { Text = App.Version + " \u2192 " + v, FontSize = 13, Foreground = App.Brush("ApexMutedBrush") });
-            if (await ShowDialog(new ContentDialog { Tag = "download", Title = T("Apex Launcher {0} is ready", v), Content = body, PrimaryButtonText = T("Restart now"), CloseButtonText = T("Later"),
-                    DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Primary)
-                UpdateNow();
+            (_saySetupUpdate = () => SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new version of Apex Launcher is available"),
+                T("Apex Launcher {0} is ready to install. The launcher opens again after the update.", v), T("Update the launcher"), UpdateNow))();
+            // (the notice above sits on the old start page: anywhere else, and when no game runs, the offer is a card of its own,
+            // shown when nothing else is open; while something is, it waits for the next screen)
+            _setupOffer = async () =>
+            {
+                try
+                {
+                    var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
+                    body.Children.Add(Design.Dialogs.Words(T("Downloaded and checked. The launcher restarts in a moment and reopens where you were. Nothing in the game changes.")));
+                    body.Children.Add(new TextBlock { Text = App.Version + " \u2192 " + v, FontSize = 13, Foreground = App.Brush("ApexMutedBrush") });
+                    if (await ShowDialog(new ContentDialog { Tag = "download", Title = T("Apex Launcher {0} is ready", v), Content = body, PrimaryButtonText = T("Restart now"), CloseButtonText = T("Later"),
+                            DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Primary)
+                        UpdateNow();
+                }
+                catch (Exception e) { App.Log(e); }
+            };
+            OfferSetupUpdate();
         }
         catch (Exception e) { App.Log(e); }
     }
@@ -324,6 +344,7 @@ public sealed partial class MainWindow : Window
         RefreshAll();
         // (a game with Apex Radiance found only now, by its folder: where the launcher lives was not asked yet)
         if (step == Home && _started && !_upgradeAsked) StartUpgrade();
+        OfferSetupUpdate();
     }
 
     // the sidebar shows the screen that is open (also after a refused jump); Install and Done have no item
@@ -981,6 +1002,7 @@ public sealed partial class MainWindow : Window
         _folderSig = "";
         foreach (var r in _modRows) r.Refresh();
         RefreshAll();
+        if (UpgradeRun.Visibility == Visibility.Visible) UpgradeShow(_upgradeStage);
     }
 
     // the status bars in a tint of their colour and the window's caption buttons, for the theme in use
@@ -1996,7 +2018,11 @@ public sealed partial class MainWindow : Window
         if (_game is not { } g || _busy || _running) return;
         if (Preview is not null) { await Message(T("Preview"), T("This is a preview: nothing was installed.")); return; }
         var firstInstall = FirstInstall;
-        if (!await CanChangeHere(inline ? "welcome" : "components", drivers: !inline && SettingChanges(remove).Any(c => c.Kind is "nv" or "amd")))
+        // (drivers: a frame generation change, or a removal that turns off the frame generation the launcher turned on)
+        var drivers = !inline && SettingChanges(remove).Any(c => c.Kind is "nv" or "amd")
+            || remove?.Any(Engine.TurnsFrameGenOff) == true && (SmoothMotion.SetupTurnedOn || Afmf.SetupTurnedOn);
+        // (Update and play carries only its updates to the administrator window, not what Components shows)
+        if (!await CanChangeHere(inline ? "welcome" : "components", drivers, _updatingForPlay ? comps : null))
         {
             // (installed in the administrator window, which wrote the game folder's settings: the player's own files here)
             if (firstInstall && !FirstInstall) await ApplyWizardSettings(g, bin: false, docs: true);
@@ -2699,7 +2725,7 @@ public sealed partial class MainWindow : Window
             item.Click += (_, _) => SetLanguage(code);
             menu.Items.Add(item);
         }
-        menu.ShowAt(LangButton);
+        menu.ShowAt(sender as FrameworkElement ?? LangButton); // (under the button pressed: the title bar's, or Settings' Change)
     }
 
     // every screen at once: the static texts by Localize, the ones set in code by the refresh
@@ -2711,6 +2737,8 @@ public sealed partial class MainWindow : Window
         Localize();
         LicenceList.Children.Clear();
         RefreshAll();
+        if (UpgradeRun.Visibility == Visibility.Visible) UpgradeShow(_upgradeStage);
+        if (SetupUpdateInfo.IsOpen) _saySetupUpdate?.Invoke();
     }
 
     void Localize() => Strings.Localize(Root);

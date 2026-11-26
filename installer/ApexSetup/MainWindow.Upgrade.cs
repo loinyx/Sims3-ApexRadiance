@@ -47,6 +47,7 @@ public sealed partial class MainWindow
         else FillUpgradeReady(card, steps);
         UpgradeCard.Child = card;
         UpgradeRun.Visibility = Visibility.Visible;
+        Nav.IsEnabled = false; // (the card covers the screens: the keyboard stays out of them too)
         UpgradeAurora.Run(true);
         Animate(card);
     }
@@ -54,6 +55,7 @@ public sealed partial class MainWindow
     void UpgradeClose()
     {
         UpgradeRun.Visibility = Visibility.Collapsed;
+        Nav.IsEnabled = true;
         UpgradeAurora.Run(false);
         UpgradeCard.Child = null;
     }
@@ -156,7 +158,7 @@ public sealed partial class MainWindow
     {
         var (split, words) = SplitCard();
         words.Children.Add(SplitTitle(T("Apex Radiance Setup is now Apex Launcher")));
-        words.Children.Add(SplitText(T("It still installs and updates Apex Radiance, and now it does more.")));
+        words.Children.Add(SplitText(T("It still installs and updates Apex Radiance, and now it does more")));
         words.Children.Add(new StackPanel
         {
             Spacing = Design.Space.X5, Margin = new Thickness(0, 28, 0, 0),
@@ -180,7 +182,7 @@ public sealed partial class MainWindow
         var self = Environment.ProcessPath ?? "";
         var (split, words) = SplitCard();
         words.Children.Add(SplitTitle(T("Install Apex Launcher")));
-        words.Children.Add(SplitText(T("It opens from the Start menu and keeps itself up to date.")));
+        words.Children.Add(SplitText(T("It opens from the Start menu and keeps itself up to date")));
         words.Children.Add(new StackPanel
         {
             Margin = new Thickness(0, Design.Space.X6, 0, 0),
@@ -238,7 +240,7 @@ public sealed partial class MainWindow
     {
         var (split, words) = SplitCard(done: true);
         words.Children.Add(SplitTitle(T("Apex Launcher is installed")));
-        words.Children.Add(SplitText(T("Open it from the Start menu or the desktop. Your game is ready to play.")));
+        words.Children.Add(SplitText(T("Open it from the Start menu or the desktop and your game is ready to play")));
         // the copy it came from (Downloads, usually): deleted on Open, ticked by default
         // (only a launcher exe is offered for deleting, whatever the command line names)
         var old = _upgradeFrom is { } f && File.Exists(f) && !LauncherInstall.IsInstalledCopy(f) && f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)

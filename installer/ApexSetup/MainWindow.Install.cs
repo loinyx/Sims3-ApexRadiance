@@ -120,7 +120,7 @@ public sealed partial class MainWindow
             var b = new Button { Content = row, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0), Background = Res("ApexClearBrush"),
                 HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             b.Click += (_, _) => { _doneInstall = value; FillDoneChoice(); UpdateFooter(); };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title + (on ? ", " + T("selected") : "")); // (as the theme tiles say theirs)
             list.Children.Add(b);
         }
         DoneChoice.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"),

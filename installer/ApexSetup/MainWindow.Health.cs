@@ -102,8 +102,8 @@ public sealed partial class MainWindow
 
     static Button PillButton(UIElement content, string name, Action click)
     {
-        var b = new Button { Content = content, Height = 36, MinWidth = 36, Padding = new Thickness(14, 0, 14, 0), BorderThickness = new Thickness(1),
-            Background = new SolidColorBrush(Pick(0x12FFFFFF, 0x0A000000)), BorderBrush = new SolidColorBrush(Pick(0x1FFFFFFF, 0x1F000000)) };
+        var b = new Button { Content = content, Height = Design.Size.Control, MinWidth = Design.Size.Control, Padding = new Thickness(14, 0, 14, 0), BorderThickness = new Thickness(1),
+            Background = Res("ApexTileBrush"), BorderBrush = Res("ApexCardBorderBrush") };
         b.Click += (_, _) => click();
         AutomationProperties.SetName(b, name);
         return b;

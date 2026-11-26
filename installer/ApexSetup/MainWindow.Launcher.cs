@@ -96,7 +96,8 @@ public sealed partial class MainWindow
                     SetHealth(t.Result ?? _healthAll); // (a check that failed keeps the last findings: an empty list would read "Every check passed")
                     _checked = DateTime.Now;
                     // (only the screens that show health are built again: Mods and the Gallery keep what the player is doing)
-                    if (_step is Home or HealthScreen or WorldsScreen or SavesScreen or NewsScreen or SettingsScreen) RefreshLauncher();
+                    // (Worlds, What's new and Settings show none: rebuilt, they would close an open list or cut a slider's drag)
+                    if (_step is Home or HealthScreen or SavesScreen) RefreshLauncher();
                     else HealthBadge.Visibility = _game is not null && _healthState != HealthState.Ready ? Visibility.Visible : Visibility.Collapsed;
                 }
                 finally { done.TrySetResult(); }
@@ -309,7 +310,8 @@ public sealed partial class MainWindow
     // the same screen (Components: with the choices made here, applied there at once); this window waits, hidden, and reads
     // the game again when it closes. False when the change was not made here (the caller stops).
     // drivers: NVIDIA's and AMD's driver settings (Smooth Motion, AFMF) are machine-wide and always need it
-    async Task<bool> CanChangeHere(string screen, bool drivers = false)
+    // updates: Update and play's list, the only thing carried then (TakeChoices installs it alone)
+    async Task<bool> CanChangeHere(string screen, bool drivers = false, IReadOnlyList<string>? updates = null)
     {
         // (a dry run changes nothing and refuses in place: it never asks Windows for administrator)
         if (_game is not { } g || Elevation.IsElevated || DryRun || (!drivers && Elevation.CanWrite(g.Bin))) return true;
@@ -319,7 +321,7 @@ public sealed partial class MainWindow
                 ? T("Windows will ask for permission. Then your changes are applied in a separate window.")
                 : T("Windows will ask for permission. Then this screen opens in a separate window."), T("Continue"))) return false;
         string? choices = null;
-        try { if (carry) choices = Elevation.SaveChoices(ChoicesNow()); }
+        try { if (carry) choices = Elevation.SaveChoices(updates is null ? ChoicesNow() : new Dictionary<string, string> { ["updates"] = string.Join(",", updates) }); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
         _maintenance = Elevation.StartMaintenance(exe, g.Bin, screen, choices);
         if (_maintenance is null) { await Message(T("Nothing was changed"), T("Windows did not get your permission. Try again and choose Yes when it asks.")); return false; }
@@ -358,6 +360,12 @@ public sealed partial class MainWindow
     {
         var d = Elevation.Choices(Environment.GetCommandLineArgs());
         if (d.Count == 0 || _game is null || _step != ComponentsStep) return false;
+        // (Update and play: those updates alone, of components the launcher knows)
+        if (d.TryGetValue("updates", out var only))
+        {
+            if (only.Split(',').Where(Components.All.Contains).ToList() is { Count: > 0 } ups) _ = InstallAsync(ups);
+            return false;
+        }
         bool On(string k) => d.TryGetValue(k, out var v) && v == "1";
         if (d.TryGetValue("renderer", out var r) && r is RDxvk or RBridge or RNative or RKeep) _renderer = r;
         ModToggle.IsOn = On("mod");
@@ -448,7 +456,8 @@ public sealed partial class MainWindow
         var c = LangCulture();
         var ok = e.End == CrashTimeline.Ending.Normal;
         var gb = (e.Peak / (double)(1L << 30)).ToString("0.0", c);
-        string title, body = "", chip = "", chipBrush = "ApexWarningBrush";
+        string title, body = "", chip = "";
+        string? tone = "Warning"; // (the chip's colour: Warning, Success, or none for a quiet one)
         switch (e.End)
         {
             case CrashTimeline.Ending.Normal: title = T("Closed normally"); break;
@@ -460,11 +469,11 @@ public sealed partial class MainWindow
             case CrashTimeline.Ending.Froze:
                 title = T("Froze and was closed");
                 body = T("The game stopped responding and was closed. No crash report names a file, so there is no way to tell what caused it.");
-                chip = T("Froze"); chipBrush = "ApexMutedBrush"; break;
+                chip = T("Froze"); tone = null; break;
             case CrashTimeline.Ending.NoReport:
                 title = T("Closed without a crash report");
                 body = T("The game stopped without writing a crash report: it froze and was closed, or the graphics driver stopped. No mod shows up as the cause.");
-                chip = T("No report"); chipBrush = "ApexMutedBrush"; break;
+                chip = T("No report"); tone = null; break;
             default:
                 (title, body, chip) = e.Why switch
                 {
@@ -475,11 +484,11 @@ public sealed partial class MainWindow
                     _ when e.Renderer => (T("Crashed in {0}", e.Culprit), T("In the renderer's own code, while the game was drawing."), T("Renderer")),
                     _ => (T("Crashed in {0}", e.Culprit), T("The crash was in its own code."), T("Mod")),
                 };
-                if (e.Culprit is null && e.Why is null) chipBrush = "ApexMutedBrush";
+                if (e.Culprit is null && e.Why is null) tone = null;
                 if (e.Earlier)
                 {
                     body = e.Replaced is { } r ? T("That version was replaced on {0}, and there was no crash in it since.", MonthDay(r)) : T("That version has been replaced, and there was no crash in it since.");
-                    chip = T("Fixed by an update"); chipBrush = "ApexSuccessBrush";
+                    chip = T("Fixed by an update"); tone = "Success";
                 }
                 break;
         }
@@ -503,7 +512,7 @@ public sealed partial class MainWindow
             Foreground = ok ? Res("ApexSoftTextBrush") : Res("TextFillColorPrimaryBrush") };
         Grid.SetColumn(what, 2);
         row.Children.Add(what);
-        var right = ok ? (FrameworkElement)new TextBlock { Text = T("memory {0} of 4 GB", gb), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center } : Chip(chip, chipBrush);
+        var right = ok ? (FrameworkElement)new TextBlock { Text = T("memory {0} of 4 GB", gb), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center } : Design.Parts.Chip(null, chip, tone: tone);
         Grid.SetColumn(right, 3);
         row.Children.Add(right);
         var all = new StackPanel();
@@ -534,25 +543,23 @@ public sealed partial class MainWindow
             inner.Children.Add(clues);
         }
         all.Children.Add(inner);
-        var how = new Button { Content = T("Details"), MinWidth = 88, VerticalAlignment = VerticalAlignment.Center };
+        var how = new Button { MinWidth = 88, VerticalAlignment = VerticalAlignment.Center };
+        // (named with the row's title: a screen reader hears which one it opens)
+        void Say(bool open)
+        {
+            how.Content = open ? T("Hide details") : T("Show details");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(how, $"{how.Content}, {title}");
+        }
+        Say(false);
         how.Click += (_, _) =>
         {
             var show = inner.Visibility != Visibility.Visible;
             inner.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            how.Content = show ? T("Close") : T("Details");
+            Say(show);
         };
         Grid.SetColumn(how, 4);
         row.Children.Add(how);
         return all;
-    }
-
-    // a small rounded label in a tint of its colour
-    static FrameworkElement Chip(string text, string brush)
-    {
-        var col = ((SolidColorBrush)Res(brush)).Color;
-        return new Border { CornerRadius = new CornerRadius(Design.Radius.Tag), Padding = new Thickness(8, 4, 8, 4), VerticalAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, col.R, col.G, col.B)),
-            Child = new TextBlock { Text = text, FontSize = 12, Foreground = new SolidColorBrush(col) } };
     }
 
     // a finding's first sentence, and the rest ("" when it is one sentence)
@@ -740,7 +747,14 @@ public sealed partial class MainWindow
         var mode = new ComboBox { Width = 232 };
         foreach (var label in new[] { T("Same as Windows"), T("Dark"), T("Light") }) mode.Items.Add(label);
         mode.SelectedIndex = Math.Max(0, Array.IndexOf(modes, _settings.Mode));
-        mode.SelectionChanged += (_, _) => { _settings.Mode = modes[Math.Max(0, mode.SelectedIndex)]; _settings.Save(); ApplyMode(); };
+        mode.SelectionChanged += (_, _) =>
+        {
+            _settings.Mode = modes[Math.Max(0, mode.SelectedIndex)];
+            _settings.Save();
+            _settingsFocus = "mode";
+            ApplyMode();
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => _settingsFocus = null); // (no rebuild came: the same light or dark)
+        };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(mode, T("Light or dark"));
         host.Children.Add(Row("contrast", T("Light or dark"), T("Can be different from Windows"), mode));
         var picture = new ComboBox { Width = 232 };
@@ -776,14 +790,28 @@ public sealed partial class MainWindow
         host.Children.Add(Section(T("General")));
         host.Children.Add(Toggle("power", T("Start with Windows"), T("Opens quietly in the notification area"), LauncherInstall.RunsAtStartup(),
             on => LauncherInstall.SetRunAtStartup(Paths.InstalledExe, on), enabled: installed));
-        host.Children.Add(Row("languages", T("Language"), Languages.First(l => l.Code == Lang).Name, Button(T("Change"), () => OnLanguage(LangButton, new RoutedEventArgs()))));
+        Button? change = null;
+        change = Button(T("Change"), () => OnLanguage(change!, new RoutedEventArgs()));
+        host.Children.Add(Row("languages", T("Language"), Languages.First(l => l.Code == Lang).Name, change));
         host.Children.Add(Row("folder", T("Game folder"), _game?.Root ?? T("No game chosen"), Id(Button(T("Change"), () => Show(GameStep)), "SettingsGame")));
         host.Children.Add(Row("file-down", T("Logs"), T("Attach them when you ask for help"), Button(T("Open log folder"), () => OpenFolder(App.LogDir))));
         host.Children.Add(Row("wrench", T("Repair or remove"), T("Repair the game, remove a component or go back to a restore point"), Id(Button(T("Open"), () => Show(Manage)), "SettingsManage")));
         host.Children.Add(InstallModeRow());
         host.Children.Add(Row("info", T("Credits and licences"), T("Apex Launcher {0}", App.Version), Id(Button(T("Open"), () => Show(About)), "SettingsAbout")));
-        host.Children.Add(Row("trash-2", T("Uninstall Apex Launcher"), T("Removes everything it installed. Your saves and mods stay."),
+        host.Children.Add(Row("trash-2", T("Uninstall Apex Launcher"), T("Removes everything it installed but keeps your saves and mods"),
             Id(Button(T("Uninstall"), async () => await UninstallAsync(), danger: true), "SettingsUninstall")));
+        // (a theme or light and dark rebuilt the page: the keyboard stays on what was chosen)
+        if ((_settingsFocus switch { "mode" => (Control)mode, "theme" => _themeInUse, _ => null }) is Control again) FocusOnLoad(again);
+        _settingsFocus = null;
+    }
+
+    string? _settingsFocus; // (what Settings focuses again once rebuilt: "theme" or "mode")
+    Button? _themeInUse;
+
+    static void FocusOnLoad(Control c)
+    {
+        void Go(object s, RoutedEventArgs e) { c.Loaded -= Go; c.Focus(FocusState.Programmatic); }
+        c.Loaded += Go;
     }
 
     // the colour themes, each as its own gradient; the one in use has a ring
@@ -819,7 +847,8 @@ public sealed partial class MainWindow
             }
             HandCursor.On(b);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T(t.Name) + (on ? ", " + T("in use") : ""));
-            b.Click += (_, _) => { _settings.Theme = t.Id; _settings.Save(); Design.DesignSystem.Apply(t.Id); ThemeChanged(); };
+            b.Click += (_, _) => { _settings.Theme = t.Id; _settings.Save(); Design.DesignSystem.Apply(t.Id); _settingsFocus = "theme"; ThemeChanged(); };
+            if (on) _themeInUse = b;
             grid.Children.Add(b);
         }
         var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = T("Theme"), FontSize = 14, FontWeight = FontWeights.SemiBold }, Muted(T("The colours of the launcher")) } };
@@ -855,7 +884,8 @@ public sealed partial class MainWindow
         try
         {
             var games = await Task.Run(Uninstall.Games);
-            var needAdmin = !Elevation.IsElevated && games.Any(g => !Elevation.CanWrite(g.Bin));
+            // (frame generation the launcher turned on is machine-wide: turning it off needs administrator too)
+            var needAdmin = !Elevation.IsElevated && (games.Any(g => !Elevation.CanWrite(g.Bin)) || SmoothMotion.SetupTurnedOn || Afmf.SetupTurnedOn);
             if (needAdmin && Environment.ProcessPath is { } exe)
             {
                 var p = Elevation.StartMaintenance(exe, "*", "uninstall");
@@ -957,8 +987,7 @@ public sealed partial class MainWindow
                     versions.Children.Add(new TextBlock { Text = from, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
                     versions.Children.Add(Lucide.Icon("arrow-right", 14, Res("ApexMutedBrush")));
                 }
-                versions.Children.Add(new Border { Padding = new Thickness(8, 2, 8, 3), CornerRadius = new CornerRadius(Design.Radius.Tag), Background = Res("ApexAccentSoftBrush"),
-                    Child = new TextBlock { Text = to, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Res("ApexAccentBrush") } });
+                versions.Children.Add(Design.Parts.Chip(null, to, tone: "Accent"));
                 Grid.SetColumn(versions, 2);
                 g.Children.Add(versions);
             }
@@ -1149,16 +1178,6 @@ public sealed partial class MainWindow
         Child = new TextBlock { Text = text, FontSize = 11, Foreground = Res(brush) },
     };
 
-    static Button Chip(string text, string dot, Action click)
-    {
-        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        s.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 6, Height = 6, Fill = Res(dot), VerticalAlignment = VerticalAlignment.Center });
-        s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexSoftTextBrush") });
-        var b = new Button { Content = s, CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 3, 10, 4), Background = Res("ApexPillBrush"), BorderThickness = new Thickness(0) };
-        b.Click += (_, _) => click();
-        return b;
-    }
-
     InfoBar Banner(InfoBarSeverity sev, string title, string text, string? action = null, Action? run = null)
     {
         var bar = new InfoBar { IsClosable = false };
@@ -1186,7 +1205,14 @@ public sealed partial class MainWindow
     {
         var t = new ToggleSwitch { IsOn = on, OnContent = "", OffContent = "", MinWidth = 0, Width = 40, IsEnabled = enabled };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(t, title);
-        t.Toggled += (_, _) => { try { set(t.IsOn); } catch (Exception e) { App.Log(e); } };
+        // (a change that failed puts the switch back, so it shows what is true)
+        var undoing = false;
+        t.Toggled += (_, _) =>
+        {
+            if (undoing) return;
+            try { set(t.IsOn); }
+            catch (Exception e) { App.Log(e); undoing = true; t.IsOn = !t.IsOn; undoing = false; }
+        };
         return Row(icon, title, detail, t);
     }
 
