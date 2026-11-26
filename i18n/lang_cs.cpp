@@ -3118,6 +3118,7 @@ const I18n::Pair kPairs[] = {
     {"Back to the look's list", "Zpět na seznam vzhledu"},
     {"No shader of this look can run here", "Žádný shader tohoto vzhledu tu nemůže běžet"},
     {"Choose a look to see its shaders", "Vyber vzhled a uvidíš jeho shadery"},
+    {"Turn on Shaders to see this look's shaders", "Zapni Shadery a uvidíš shadery tohoto vzhledu"},
     {"{} can't run here", "Tady nemůže běžet: {}"},
     {"No look chosen", "Není vybrán vzhled"},
     {"Reload", "Znovu načíst"},

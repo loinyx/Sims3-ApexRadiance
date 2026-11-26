@@ -3118,6 +3118,7 @@ const I18n::Pair kPairs[] = {
     {"Back to the look's list", "恢復畫面風格的清單"},
     {"No shader of this look can run here", "此畫面風格的著色器都無法在此執行"},
     {"Choose a look to see its shaders", "選擇畫面風格以查看其著色器"},
+    {"Turn on Shaders to see this look's shaders", "開啟著色器以檢視此外觀的著色器"},
     {"{} can't run here", "{} 個無法在此執行"},
     {"No look chosen", "未選擇畫面風格"},
     {"Reload", "重新載入"},

@@ -3735,8 +3735,13 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (ApexUi::BeginCard("##CollectLighting")) {
             ApexUi::CardHeader(IconId::Camera, "Collect lighting evidence", "Capture a state before changing the scene", nullptr, nullptr);
             ApexUi::CardDivider();
+        // (a button's status beside it, on the button's centre line)
+        const auto besideButton = [] {
+            ImGui::SameLine();
+            ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y - ImGui::GetTextLineHeight()) * 0.5f));
+        };
         if (ApexUi::TextButton("Save light diagnostics")) LightDiag::RequestDump();
-        ImGui::SameLine();
+        besideButton();
         ImGui::TextDisabled("(or %s)", ApexConfig::KeyChordText(Hotkeys::Key(Hotkeys::Action::Diagnostics)).c_str());
         bool storySamples = LevelLightShare::DiagArmed();
         if (ApexUi::Checkbox("Record story light samples for the diagnostics", &storySamples)) LevelLightShare::SetDiagArmed(storySamples);
@@ -3749,19 +3754,19 @@ class NightTerrainRelightPatch : public ApexPatch {
             bool falseColor = LotLightBridge::FalseColor();
             if (ApexUi::Checkbox("False colour: magenta = gets lamp light but no fix claimed it", &falseColor)) LotLightBridge::SetFalseColor(falseColor);
             if (ApexUi::TextButton("Census: write ApexRadiance_Censo.txt")) LotLightBridge::RequestCensus();
-            ImGui::SameLine();
+            besideButton();
             ImGui::TextDisabled("(%s)", LotLightBridge::CensusStatus().c_str());
             // idavidveiga's fork (04/10): which draw families Apex modifies by day / twilight / night, and the scene's bloom mask
             if (ApexUi::TextButton("Lighting + Bloom census")) LotLightBridge::RequestLightingBloomCensus();
-            ImGui::SameLine();
+            besideButton();
             ImGui::TextDisabled("(%s)", LotLightBridge::LightingBloomCensusStatus().c_str());
             ApexUi::Tooltip("Writes ApexRadiance_LightingBloomCensus.txt. Read-only: records which visible draw families Apex modifies in day, twilight and night and flags known or possible bloom-mask families");
             if (ApexUi::TextButton("Exterior surface capture")) LotLightBridge::RequestExteriorCapture();
-            ImGui::SameLine();
+            besideButton();
             ImGui::TextDisabled("(%s)", LotLightBridge::ExteriorCaptureStatus().c_str());
             ApexUi::Tooltip("Read-only. Writes ApexRadiance_ExteriorSurfaces.txt: for every visible outdoor wall, fence, stair, floor, ground and roof draw, its shaders, light maps, constants and the Apex fix that acted");
             if (ApexUi::TextButton("Capture bloom alpha mask")) BloomAlphaProbe::Request(g_level);
-            ImGui::SameLine();
+            besideButton();
             ImGui::TextDisabled("(%s)", BloomAlphaProbe::Status().c_str());
             ApexUi::Tooltip("Read-only. Captures the scene alpha before the game's bloom composite and writes ApexRadiance_BloomAlphaProbe_Day/Twilight/Night.png and .txt. One short hitch from the GPU readback");
         }

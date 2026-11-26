@@ -3117,6 +3117,7 @@ const I18n::Pair kPairs[] = {
     {"Back to the look's list", "ルックの一覧に戻す"},
     {"No shader of this look can run here", "このルックのシェーダーはここでは動作しません"},
     {"Choose a look to see its shaders", "ルックを選ぶとシェーダーが表示されます"},
+    {"Turn on Shaders to see this look's shaders", "このルックのシェーダーを見るにはシェーダーをオンにしてください"},
     {"{} can't run here", "{} 個はここでは動作しません"},
     {"No look chosen", "ルック未選択"},
     {"Reload", "再読み込み"},

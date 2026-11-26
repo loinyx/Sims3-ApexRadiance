@@ -3117,6 +3117,7 @@ const I18n::Pair kPairs[] = {
     {"Back to the look's list", "Vissza a look listájához"},
     {"No shader of this look can run here", "Ennek a looknak egyik shadere sem futhat itt"},
     {"Choose a look to see its shaders", "Válassz lookot a shaderei megtekintéséhez"},
+    {"Turn on Shaders to see this look's shaders", "Kapcsold be a Shadereket a megjelenés shadereinek megtekintéséhez"},
     {"{} can't run here", "{} nem futhat itt"},
     {"No look chosen", "Nincs kiválasztott look"},
     {"Reload", "Újratöltés"},

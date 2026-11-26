@@ -3807,7 +3807,8 @@ public:
             bool listed = false; // any shader in the list, runnable or not
             for (size_t i = 0; i < g.order.size(); ++i) listed |= !IsRemoved(i);
             if (total == 0 && !ApexUi::FilterActive())
-                ApexUi::MutedText(I18n::Tr(!g.loaded ? "Choose a look to see its shaders"
+                // (off, the chosen look isn't read: its list shows once Shaders is on)
+                ApexUi::MutedText(I18n::Tr(!g.loaded ? (!isEnabled && !g.preset.empty() ? "Turn on Shaders to see this look's shaders" : "Choose a look to see its shaders")
                                            : !listed  ? "No shaders yet: use Add shaders to build this look"
                                                       : "No shader of this look can run here"));
             std::vector<std::string> getPacks; // packs a Download of the missing rows would fetch (Download all)

@@ -3118,6 +3118,7 @@ const I18n::Pair kPairs[] = {
     {"Back to the look's list", "Takaisin lookin luetteloon"},
     {"No shader of this look can run here", "Mikään tämän lookin varjostin ei voi toimia tässä"},
     {"Choose a look to see its shaders", "Valitse look nähdäksesi sen varjostimet"},
+    {"Turn on Shaders to see this look's shaders", "Ota Varjostimet käyttöön nähdäksesi tämän ilmeen varjostimet"},
     {"{} can't run here", "{} ei voi toimia tässä"},
     {"No look chosen", "Lookia ei valittu"},
     {"Reload", "Lataa uudelleen"},

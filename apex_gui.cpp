@@ -2667,15 +2667,9 @@ void ProfilePartChecks(const char* id, unsigned* parts, unsigned available) {
             const char* label = I18n::Tr(ApexConfig::ProfilePartName(i));
             draw->AddText(ImVec2(p.x + iconSize + ApexUi::kSpace3 * u, p.y + (height - ImGui::GetTextLineHeight()) * 0.5f),
                           ImGui::GetColorU32(Col(VioletTheme::kText)), label);
-            const float box = std::max(VioletTheme::kCheckboxSize * u, ImGui::GetFontSize());
-            const ImVec2 check(std::round(p.x + width - box), std::round(p.y + (height - box) * 0.5f));
-            const ImU32 frameColor = ImGui::GetColorU32(ImGui::IsItemActive() && ImGui::IsItemHovered() ? ImGuiCol_FrameBgActive :
-                                                       ImGui::IsItemHovered() ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
-            ImGui::RenderFrame(check, ImVec2(check.x + box, check.y + box), frameColor, true, ImGui::GetStyle().FrameRounding);
-            if (checked) {
-                const float padding = std::max(1.0f, std::floor(box / 6.0f));
-                ImGui::RenderCheckMark(draw, ImVec2(check.x + padding, check.y + padding), ImGui::GetColorU32(ImGuiCol_CheckMark), box - 2.0f * padding);
-            }
+            // (the menu's checkbox, as every other)
+            const float box = VioletTheme::kCheckboxSize * u;
+            ApexUi::DrawCheckBox(draw, ImVec2(std::round(p.x + width - box), std::round(p.y + (height - box) * 0.5f)), box, checked, ImGui::IsItemHovered());
             ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
             if (shown / columns < (visibleParts - 1) / columns)
                 draw->AddLine(ImVec2(p.x, std::floor(p.y + height)), ImVec2(p.x + width, std::floor(p.y + height)), ImGui::GetColorU32(Col(VioletTheme::kCardBorder)));

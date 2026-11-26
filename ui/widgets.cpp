@@ -747,7 +747,9 @@ bool BeginModal(const char* id, float widthUnits, bool* open) {
     const float pad = (display.y < 800.0f ? kSpace3 : kSpace4) * u;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
     ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 16.0f * u);
-    const bool shown = ImGui::BeginPopupModal(id, open, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
+    // (no scrollbar of its own: it grew a stray one while fitting its content; a long body scrolls in its own list)
+    const bool shown = ImGui::BeginPopupModal(id, open, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                                        ImGuiWindowFlags_NoScrollbar);
     ImGui::PopStyleVar(2);
     return shown;
 }
@@ -1512,6 +1514,19 @@ ControlSizeScope::~ControlSizeScope() { ImGui::PopStyleVar(); }
 
 // The launcher's checkbox: a rounded square (6-unit corners), the accent filled with a white tick while on, a quiet
 // outline while off; the label after it, the whole line the click target
+void DrawCheckBox(ImDrawList* dl, ImVec2 a, float box, bool on, bool hovered) {
+    const float u = Unit(), r = 6.0f * u;
+    const ImVec2 b(a.x + box, a.y + box);
+    if (on) {
+        dl->AddRectFilled(a, b, U32(hovered ? VioletTheme::kAccentLight : VioletTheme::kAccent), r);
+        const ImVec2 pts[3] = {ImVec2(a.x + box * 0.27f, a.y + box * 0.52f), ImVec2(a.x + box * 0.43f, a.y + box * 0.68f), ImVec2(a.x + box * 0.74f, a.y + box * 0.34f)};
+        dl->AddPolyline(pts, 3, U32(0xFFFFFF), ImDrawFlags_None, 2.0f * u);
+    } else {
+        dl->AddRectFilled(a, b, U32(VioletTheme::kToggleOff, hovered ? 1.0f : 0.6f), r);
+        dl->AddRect(a, b, U32(hovered ? VioletTheme::kTextMuted : VioletTheme::kTextFaint), r, 0, 1.0f * u);
+    }
+}
+
 bool Checkbox(const char* label, bool* value) {
     const float u = Unit(), box = VioletTheme::kCheckboxSize * u, gap = kSpace2 * u;
     const char* end = ImGui::FindRenderedTextEnd(label);
@@ -1525,15 +1540,7 @@ bool Checkbox(const char* label, bool* value) {
     const bool hovered = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 a(p.x, p.y + (h - box) * 0.5f), b(a.x + box, a.y + box);
-    const float r = 6.0f * u;
-    if (*value) {
-        dl->AddRectFilled(a, b, U32(hovered ? VioletTheme::kAccentLight : VioletTheme::kAccent), r);
-        const ImVec2 pts[3] = {ImVec2(a.x + box * 0.27f, a.y + box * 0.52f), ImVec2(a.x + box * 0.43f, a.y + box * 0.68f), ImVec2(a.x + box * 0.74f, a.y + box * 0.34f)};
-        dl->AddPolyline(pts, 3, U32(0xFFFFFF), ImDrawFlags_None, 2.0f * u);
-    } else {
-        dl->AddRectFilled(a, b, U32(VioletTheme::kToggleOff, hovered ? 1.0f : 0.6f), r);
-        dl->AddRect(a, b, U32(hovered ? VioletTheme::kTextMuted : VioletTheme::kTextFaint), r, 0, 1.0f * u);
-    }
+    DrawCheckBox(dl, a, box, *value, hovered);
     if (ts.x > 0.0f) dl->AddText(ImVec2(b.x + gap, CenteredTextY(std::string_view(label, end - label), p.y + h * 0.5f)), ImGui::GetColorU32(ImGuiCol_Text), label, end);
     ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
     return clicked;

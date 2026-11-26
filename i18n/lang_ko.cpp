@@ -3118,6 +3118,7 @@ const I18n::Pair kPairs[] = {
     {"Back to the look's list", "룩의 목록으로 되돌리기"},
     {"No shader of this look can run here", "이 룩의 셰이더는 여기서 실행할 수 없어요"},
     {"Choose a look to see its shaders", "룩을 고르면 셰이더가 보여요"},
+    {"Turn on Shaders to see this look's shaders", "이 룩의 셰이더를 보려면 셰이더를 켜세요"},
     {"{} can't run here", "{}개는 여기서 실행할 수 없어요"},
     {"No look chosen", "선택한 룩 없음"},
     {"Reload", "다시 불러오기"},

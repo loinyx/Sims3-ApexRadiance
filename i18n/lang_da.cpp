@@ -3118,6 +3118,7 @@ const I18n::Pair kPairs[] = {
     {"Back to the look's list", "Tilbage til lookets liste"},
     {"No shader of this look can run here", "Ingen shader i dette look kan køre her"},
     {"Choose a look to see its shaders", "Vælg et look for at se dets shadere"},
+    {"Turn on Shaders to see this look's shaders", "Slå Shaders til for at se dette looks shaders"},
     {"{} can't run here", "{} kan ikke køre her"},
     {"No look chosen", "Intet look valgt"},
     {"Reload", "Genindlæs"},

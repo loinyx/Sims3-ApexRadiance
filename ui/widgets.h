@@ -181,8 +181,9 @@ public:
     ControlSizeScope& operator=(const ControlSizeScope&) = delete;
 };
 
-// Native-style diagnostic checkbox: a 20-unit box, independent of input frame heights.
+// The launcher's checkbox: a 20-unit rounded square, accent-filled with a white tick when on.
 // Labels are supplied by the caller (developer English or already translated).
+void DrawCheckBox(ImDrawList* dl, ImVec2 topLeft, float box, bool on, bool hovered); // the box alone, for a custom row
 bool Checkbox(const char* label, bool* value);
 // Diagnostic integers retain native integer behavior inside a measured, responsive control row.
 bool DiagnosticIntRow(const char* label, int* value, int min, int max, const char* description = nullptr, ImGuiSliderFlags flags = 0);

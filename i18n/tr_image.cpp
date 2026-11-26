@@ -912,6 +912,7 @@ const I18n::Entry kEntries[] = {
     {"Every value put back", "Todos os valores restaurados", "Todos los valores restablecidos", "Toutes les valeurs rétablies"},
     {"Back to the look's list", "Voltar à lista do visual", "Volver a la lista del estilo", "Revenir à la liste du rendu"},
     {"No shader of this look can run here", "Nenhum shader deste visual pode rodar aqui", "Ningún shader de este estilo puede ejecutarse aquí", "Aucun shader de ce rendu ne peut s'exécuter ici"},
+    {"Turn on Shaders to see this look's shaders", "Ligue os Shaders para ver os shaders deste visual", "Activa Shaders para ver los shaders de este estilo", "Activez Shaders pour voir les shaders de ce rendu"},
     {"Choose a look to see its shaders", "Escolha um visual para ver os shaders dele", "Elige un estilo para ver sus shaders", "Choisissez un rendu pour voir ses shaders"},
     {"{} can't run here", "{} não podem rodar aqui", "{} no pueden ejecutarse aquí", "{} ne peuvent pas s'exécuter ici"},
     {"No look chosen", "Nenhum visual escolhido", "Ningún estilo elegido", "Aucun rendu choisi"},
