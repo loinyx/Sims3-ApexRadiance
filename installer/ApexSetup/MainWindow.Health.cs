@@ -211,6 +211,8 @@ public sealed partial class MainWindow
         foreach (var (e, i) in new (FrameworkElement, int)[] { (icon, 0), (name, 1), (how, 2), (go, 3) }) { Grid.SetColumn(e, i); e.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(e); }
         var b = new Button { Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = new SolidColorBrush(Tone("Card", 0xE6)), BorderBrush = new SolidColorBrush(Pick(0x12FFFFFF, 0x14000000)) };
+        // (its own hover, as every row: the template's would flash the theme's lighter fill first)
+        b.Resources["ButtonBackgroundPointerOver"] = Res("ApexHoverBrush");
         b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Tone("Strip"));
         b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Pick(0x24FFFFFF, 0x24000000));
         b.Click += (_, _) => HealthGo(area.ToString());
