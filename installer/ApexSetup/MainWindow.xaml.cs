@@ -990,11 +990,15 @@ public sealed partial class MainWindow : Window
     void ThemeChrome()
     {
         // a message: a quiet card, its colour only in its mark
-        foreach (var key in new[] { "Success", "Warning", "Error", "Informational" }) Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = _over;
-        Root.Resources["InfoBarBorderBrush"] = _overEdge;
-        foreach (var note in new[] { SetupUpdateInfo, WelcomeInfo, GameRunningNotice, WizardNotice, GraphicsInfo, ManageInfo, SavesNote, ModsInfo }) note.CornerRadius = new CornerRadius(Design.Radius.Card);
-        // (over the screen: what came of something the player did)
-        foreach (var note in new[] { SavesNote, ModsInfo }) (note.Shadow, note.Translation) = (new ThemeShadow(), new System.Numerics.Vector3(note.Translation.X, 0, 32));
+        // (once: the brushes change colour in place, and a new shadow at every refresh adds up to a crash of the window's drawing)
+        if (!Root.Resources.ContainsKey("InfoBarBorderBrush"))
+        {
+            foreach (var key in new[] { "Success", "Warning", "Error", "Informational" }) Root.Resources[$"InfoBar{key}SeverityBackgroundBrush"] = _over;
+            Root.Resources["InfoBarBorderBrush"] = _overEdge;
+            foreach (var note in new[] { SetupUpdateInfo, WelcomeInfo, GameRunningNotice, WizardNotice, GraphicsInfo, ManageInfo, SavesNote, ModsInfo }) note.CornerRadius = new CornerRadius(Design.Radius.Card);
+            // (over the screen: what came of something the player did)
+            foreach (var note in new[] { SavesNote, ModsInfo }) (note.Shadow, note.Translation) = (new ThemeShadow(), new System.Numerics.Vector3(note.Translation.X, 0, 32));
+        }
         // (the boxes of the list: drawn to be found, not to be seen first)
         (QuietBox.Color, _over.Color, _overEdge.Color) = (Tone("InputBorderHover"), Tone("Raised"), Tone("InputBorder"));
         ModListHead.Resources["CheckBoxCheckBackgroundStrokeUnchecked"] = QuietBox;
@@ -1003,11 +1007,11 @@ public sealed partial class MainWindow : Window
         // does not reach these. A contrast theme keeps its own)
         if (!new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast)
         {
-            foreach (var key in new[] { "FlyoutPresenterBackground", "MenuFlyoutPresenterBackground", "ComboBoxDropDownBackground", "ToolTipBackground" }) Application.Current.Resources[key] = _over;
-            foreach (var key in new[] { "FlyoutBorderThemeBrush", "MenuFlyoutPresenterBorderBrush", "ComboBoxDropDownBorderBrush", "ToolTipBorderBrush" }) Application.Current.Resources[key] = _overEdge;
+            foreach (var key in new[] { "FlyoutPresenterBackground", "MenuFlyoutPresenterBackground", "ComboBoxDropDownBackground", "ToolTipBackground" }) if (!ReferenceEquals(Application.Current.Resources.TryGetValue(key, out var was) ? was : null, _over)) Application.Current.Resources[key] = _over;
+            foreach (var key in new[] { "FlyoutBorderThemeBrush", "MenuFlyoutPresenterBorderBrush", "ComboBoxDropDownBorderBrush", "ToolTipBorderBrush" }) if (!ReferenceEquals(Application.Current.Resources.TryGetValue(key, out var was) ? was : null, _overEdge)) Application.Current.Resources[key] = _overEdge;
         }
         (_content.Color, _contentEdge.Color) = (Tone("Content"), Tone("CardBorder"));
-        Nav.Resources["NavigationViewContentBackground"] = _content;
+        if (!ReferenceEquals(Nav.Resources.TryGetValue("NavigationViewContentBackground", out var navBack) ? navBack : null, _content)) Nav.Resources["NavigationViewContentBackground"] = _content;
         Nav.Resources["NavigationViewContentGridBorderBrush"] = _contentEdge;
         // Mods' two views, as the gallery's: the one in use on a quiet pill
         foreach (var view in new[] { ModsViewList, ModsViewGallery })
@@ -1204,11 +1208,16 @@ public sealed partial class MainWindow : Window
         return l;
     }
 
+    static readonly Dictionary<(string, Windows.UI.Color), ImageIconSource> BarMarks = [];
     static void SetInfo(InfoBar bar, InfoBarSeverity sev, string title, string msg, string? action = null, Action? onAction = null)
     {
         bar.Severity = sev; bar.Title = title; bar.Message = msg; bar.IsOpen = true; bar.Content = null;
         var (icon, tone) = sev switch { InfoBarSeverity.Success => ("circle-check", "Success"), InfoBarSeverity.Warning => ("triangle-alert", "Warning"), InfoBarSeverity.Error => ("circle-alert", "Error"), _ => ("info", "Accent") };
-        bar.IconSource = new ImageIconSource { ImageSource = Lucide.Picture(icon, Tone(tone), 2) };
+        // (one picture per mark and colour: a new one at every message adds up to a crash of the window's drawing)
+        var ink = Tone(tone);
+        var key = (icon, ink);
+        if (!BarMarks.TryGetValue(key, out var mark)) BarMarks[key] = mark = new ImageIconSource { ImageSource = Lucide.Picture(icon, ink, 2) };
+        if (!ReferenceEquals(bar.IconSource, mark)) bar.IconSource = mark;
         if (action is null) { bar.ActionButton = null; return; }
         var b = new Button { Content = action, Height = Design.Size.ControlSmall, Padding = new Thickness(12, 0, 12, 0) };
         b.Click += (_, _) => onAction?.Invoke();

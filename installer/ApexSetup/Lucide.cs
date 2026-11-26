@@ -207,9 +207,13 @@ public static class Lucide
     }
 
     // the icon as a picture in one colour, for the controls that take no shape of ours (the side pane)
+    // (one picture for each icon, colour and stroke, shared by every use: a new one at each refresh of the screens adds up to a crash
+    // of the window's drawing after a dozen changes of language)
+    static readonly Dictionary<(string, Windows.UI.Color, double, bool), Microsoft.UI.Xaml.Media.Imaging.SvgImageSource> Pictures = [];
     public static Microsoft.UI.Xaml.Media.Imaging.SvgImageSource Picture(string name, Windows.UI.Color ink, double stroke = 1.75, bool solid = false)
     {
-        var source = new Microsoft.UI.Xaml.Media.Imaging.SvgImageSource { RasterizePixelWidth = 60, RasterizePixelHeight = 60 };
+        if (Pictures.TryGetValue((name, ink, stroke, solid), out var made)) return made;
+        var source = Pictures[(name, ink, stroke, solid)] = new Microsoft.UI.Xaml.Media.Imaging.SvgImageSource { RasterizePixelWidth = 60, RasterizePixelHeight = 60 };
         var svg = FormattableString.Invariant($"<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='{Paths[name]}' fill='{(solid ? $"#{ink.R:X2}{ink.G:X2}{ink.B:X2}" : "none")}' stroke='#{ink.R:X2}{ink.G:X2}{ink.B:X2}' stroke-width='{stroke}' stroke-linecap='round' stroke-linejoin='round'/></svg>");
         var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
         _ = Fill();
