@@ -77,7 +77,7 @@ splits a merge, or moves it to the Recycle Bin.
 | `.package` holding an export, lot or household | `Documents\...\Library` |
 | `.sim` | `Documents\...\SavedSims` |
 | `.world` | `Documents\...\InstalledWorlds`, where the game's own launcher installs custom worlds (no administrator needed) |
-| `.zip`, `.rar`, `.7z`, a folder | Opened (one archive inside another at most, 20,000 files and 2 GB unpacked; an archive holding a `.world` may unpack up to the free space of the temporary folder's drive less 1 GB) and each file sorted as above |
+| `.zip`, `.rar`, `.7z`, a folder | Opened (one archive inside another at most, 20,000 files and 2 GB unpacked; an archive holding a `.world` may unpack up to 20 times its own size while the temporary folder's drive keeps 1 GB free; a `.rar` or `.7z` is measured while it is extracted and stopped past its cap) and each file sorted as above |
 
 - A package must be DBPF 2.0 with its index inside the file; protected packages and Sims 4 packages are refused. A
   package that looks damaged shows unticked with the reason and is added only when ticked; a script mod carries a

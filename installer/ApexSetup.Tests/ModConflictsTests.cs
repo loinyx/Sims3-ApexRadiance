@@ -424,6 +424,18 @@ static class ModConflictsTests
             {
                 var ev = ModConflicts.Extract(evil);
                 check(ev.Dir is null && ev.Unknown is { } u && u.Contains("unsafe entry \"../evil.package\""), "mod conflicts: an archive entry with '..' is refused before extraction");
+
+                // what comes out counts, not the sizes the listing states: past the cap the extraction stops and is refused
+                var big = Path.Combine(tmp, "big-src");
+                Directory.CreateDirectory(big);
+                File.WriteAllBytes(Path.Combine(big, "big.package"), new byte[3 << 20]);
+                var bigArc = Path.Combine(tmp, "big.7z");
+                var into = Path.Combine(tmp, "big-out");
+                Directory.CreateDirectory(into);
+                var stopped = false;
+                if (RunTar(tar, "--format", "7zip", "-cf", bigArc, "-C", big, "big.package"))
+                    try { ModConflicts.RunCapped(tar, into, 1 << 20, "-xf", bigArc, "-C", into); } catch (ModConflicts.UnpackCapException) { stopped = true; }
+                check(stopped, "mod conflicts: an extraction past the size cap is stopped and refused, whatever the listing said");
             }
         }
         finally { Directory.Delete(tmp, true); }
