@@ -14,6 +14,7 @@ namespace {
 
 constexpr uint64_t kLowBytes = 320ull << 20;  // Room to save's own "low" line (memory_guard.cpp)
 RestartChannel* g_chan = nullptr;
+wchar_t g_pending[MAX_PATH];  // the save folder of the save being written (NoteSave), empty: unknown; sim thread only
 
 // The game's start folder, read when the ASI loads (before the game runs): DXVK reads dxvk.conf from the working folder
 // (unless DXVK_CONFIG_FILE says otherwise), and the bridge server starts in it. ts3wrap.exe is started in this folder, so
@@ -67,14 +68,22 @@ void Start() {
     LOG_INFO("[RestartHost] ts3wrap.exe started: a normal quit after a save under 320 MB of largest free block offers a restart into that save");
 }
 
+void NoteSave(const wchar_t* nhd) {
+    if (g_chan && !RhSaveFromInfo(nhd, g_chan->savesDir, g_pending, MAX_PATH)) g_pending[0] = 0;
+}
+
 void AfterSave(bool ok, uint64_t largestBytes) {
     if (!g_chan || !ok) return;  // a failed save keeps the previous answer: the save on disk is the last good one
     const bool low = largestBytes < kLowBytes;
+    wcscpy_s(g_chan->save, g_pending);  // before `restart`: the host reads the block only after the game has ended
     g_chan->largestMB = static_cast<int32_t>(largestBytes >> 20);
     InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_chan->restart), low ? 1 : 0);
-    char line[128];
-    std::snprintf(line, sizeof line, "[RestartHost] World save: largest free block %llu MB, restart %s at quit", static_cast<unsigned long long>(largestBytes >> 20),
-                  low ? "offered" : "not offered");
+    char save[3 * MAX_PATH] = "unknown, the host takes the newest";
+    if (g_pending[0]) WideCharToMultiByte(CP_UTF8, 0, g_pending, -1, save, sizeof save, nullptr, nullptr);
+    g_pending[0] = 0;
+    char line[160 + sizeof save];
+    std::snprintf(line, sizeof line, "[RestartHost] World save: largest free block %llu MB, restart %s at quit, save %s", static_cast<unsigned long long>(largestBytes >> 20),
+                  low ? "offered" : "not offered", save);
     LOG_INFO(line);
 }
 

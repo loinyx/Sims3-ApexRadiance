@@ -2,7 +2,8 @@
 // #363). Apex starts it next to the game when [ui] restart_host = true:
 //   ts3wrap.exe <game pid>
 // It waits for the game to end. When the game's last world save left its 32-bit address space low (restart_channel.h)
-// and the game quit normally, it asks the player whether to start the game again with that save, then starts the same
+// and the game quit normally, it asks the player whether to start the game again with that save (the folder that save
+// wrote; the newest save only when the game did not name one), writes which one to ts3wrap_LOG.txt, then starts the same
 // executable from the same folder, with the same command line and environment, plus EA's -worldFile switch. It never
 // kills or hosts the game window, and it ends after that one decision; the relaunched game starts its own host. A relaunch
 // that ends within 15 s without a crash, and is not followed by the game starting again within 10 s, is retried once through
@@ -24,6 +25,27 @@ template <class F> static bool AnyProcess(F f) {
     for (BOOL ok = Process32FirstW(s, &e); ok && !hit; ok = Process32NextW(s, &e)) hit = f(e);
     CloseHandle(s);
     return hit;
+}
+
+// One line per decision, appended to ts3wrap_LOG.txt beside the Saves folder (the game's documents folder).
+static void HostLog(const RestartChannel& c, RhRule rule, const wchar_t* save) {
+    wchar_t path[MAX_PATH + 32], line[3 * MAX_PATH];
+    wcscpy_s(path, c.savesDir);
+    wchar_t* slash = wcsrchr(path, L'\\');
+    if (!slash) return;
+    wcscpy_s(slash + 1, _countof(path) - (slash + 1 - path), L"ts3wrap_LOG.txt");
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    static const wchar_t* const how[] = {L"none: no save folder found", L"the save the game wrote", L"the newest save (the game named none, or its folder is gone)"};
+    const int n = swprintf_s(line, L"%04u-%02u-%02u %02u:%02u:%02u restart offer: \"%s\", rule %s; named by the game: \"%s\"\r\n", t.wYear, t.wMonth, t.wDay,
+                             t.wHour, t.wMinute, t.wSecond, save, how[rule], c.save);
+    char utf8[4 * _countof(line)];
+    const int k = n > 0 ? WideCharToMultiByte(CP_UTF8, 0, line, n, utf8, sizeof utf8, nullptr, nullptr) : 0;
+    HANDLE h = k > 0 ? CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr) : INVALID_HANDLE_VALUE;
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD w;
+    WriteFile(h, utf8, static_cast<DWORD>(k), &w, nullptr);
+    CloseHandle(h);
 }
 
 static bool OldBridgeRunning(DWORD gamePid, const wchar_t* gameDir) {
@@ -54,10 +76,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR args, int) {
     CloseHandle(game);
     static RestartChannel c;  // a copy, terminated: the block is shared memory
     c = *chan;
-    c.exe[MAX_PATH - 1] = c.savesDir[MAX_PATH - 1] = c.cmd[_countof(c.cmd) - 1] = 0;
+    c.exe[MAX_PATH - 1] = c.savesDir[MAX_PATH - 1] = c.cmd[_countof(c.cmd) - 1] = c.save[MAX_PATH - 1] = 0;
     if (!RhShouldOffer(code, c)) return 0;
-    wchar_t save[MAX_PATH], text[512];
-    if (!RhNewestSave(c.savesDir, save, MAX_PATH)) return 0;
+    wchar_t save[MAX_PATH] = L"", text[512];
+    const RhRule rule = RhPickSave(c, save, MAX_PATH);
+    HostLog(c, rule, save);
+    if (rule == kRhNoSave) return 0;
     swprintf_s(text, L"The game was low on memory when you last saved (%ld MB left).\n\nStart The Sims 3 again with \"%s\"?", (long)c.largestMB, save);
     if (MessageBoxW(nullptr, text, kTitle, MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND) != IDYES) return 0;
     static wchar_t gameDir[MAX_PATH], cmd[_countof(c.cmd) + MAX_PATH + 16];
@@ -102,7 +126,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR args, int) {
         if (ShellExecuteExW(&sei)) return 0;
     }
     if (RhEaStart(env, c.exe)) {
-        swprintf_s(text, L"Your game was saved, but it could not be started again from here.\n\nStart The Sims 3 from the EA app and load \"%s\", your newest save.", save);
+        swprintf_s(text, L"Your game was saved, but it could not be started again from here.\n\nStart The Sims 3 from the EA app and load \"%s\".", save);
         MessageBoxW(nullptr, text, kTitle, MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
         return 5;
     }
