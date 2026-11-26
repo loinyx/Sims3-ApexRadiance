@@ -24,6 +24,11 @@ described in [features/installer.md](../features/installer.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-25 | `a3c94ef0` | `installer/ApexSetup.Tests` | All passed | none |
+| 2026-11-25 | `a3c94ef0` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `a3c94ef0` | `installer/ui-smoke/Run-UiSmoke.ps1` (full, dry run) | 81 steps passed; the language cycle again ended the launcher (0xC000027B) while UI Automation read it, as on `6a272a14` | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `5ea03f21` | Sixty changes of light and dark in a row on Settings, the gallery, Mods and Components (a test build that switches by itself) | Kept running; before `5ea03f21` the third change closed the launcher (a new Mica at every change) | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `f4c02666` to `a3c94ef0` | Three independent reviews (Mods; Home, Saves and the gallery; install, settings and Health) | 51 findings, all fixed in `709d78bd`, `829c4616` and `7196b72b`; none seen in the app yet | none |
 | 2026-11-25 | `43c2f8c2` | `installer/ApexSetup.Tests` | All passed | none |
 | 2026-11-25 | `43c2f8c2` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-25 | `43c2f8c2` | `installer/ui-smoke/Run-UiSmoke.ps1` (full, dry run) | Every screen and step passed up to the language cycle; there the launcher closed (0xC000027B in Microsoft.UI.Xaml) after 15 to 20 changes of language while UI Automation read the window. The same happens on `6a272a14`. Sixty changes of language in a row without UI Automation, on Home and on Components, left it running | Windows 11, RTX 4070 Ti SUPER |
