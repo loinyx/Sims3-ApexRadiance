@@ -195,6 +195,7 @@ public sealed partial class MainWindow
             Background = Res("ApexRaisedBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12),
         };
         AutomationProperties.SetName(list, T("Mods in this merge"));
+        Action? refilter = null; // the search over a long merge (below): the shown rows follow every change of the draft
         if (mine) AutomationProperties.SetHelpText(list, T("Alt with the up or down arrow moves a mod."));
         list.ItemClick += (_, e) => { if (e.ClickedItem is MergeDraft.Item { Added: null } i) OpenInner(i.Rel); };
         // (the list takes a drop of its own rows only: the side pane's folders must not take them as mods)
@@ -220,6 +221,7 @@ public sealed partial class MainWindow
         // what a row's buttons do
         void Move(MergeDraft.Item i, int by, string focus)
         {
+            if (_mergeQuery.Length > 0) return; // (a filtered list shows only some rows: the order moves with the search cleared)
             var at = d.Items.IndexOf(i);
             if (at < 0 || at + by < 0 || at + by >= d.Items.Count) return;
             d.Items.Move(at, at + by);
@@ -321,8 +323,8 @@ public sealed partial class MainWindow
                     options.Children.Add(b);
                     return b;
                 }
-                Option("up", T("Move up"), () => Move(i, -1, "up"), at > 0);
-                Option("down", T("Move down"), () => Move(i, 1, "down"), at < d.Items.Count - 1);
+                Option("up", T("Move up"), () => Move(i, -1, "up"), at > 0 && _mergeQuery.Length == 0);
+                Option("down", T("Move down"), () => Move(i, 1, "down"), at < d.Items.Count - 1 && _mergeQuery.Length == 0);
                 if (i.Added is null)
                 {
                     Option("file", T("Replace file"), () => Safe(ReplaceInsideAsync(r, i.Rel)));
@@ -345,6 +347,7 @@ public sealed partial class MainWindow
 
         void PaintAll()
         {
+            refilter?.Invoke(); // (an undo or an added mod changes the draft: the filtered rows follow it)
             news.Children.Clear();
             var found = mine ? d.Items.Where(i => NewerOf(d, i) is not null).ToList() : [];
             if (found.Count > 0)
@@ -383,7 +386,8 @@ public sealed partial class MainWindow
                 list.ItemsSource = q.Length == 0 ? d.Items
                     : d.Items.Where(i => i.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || i.Rel.Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
             }
-            search.TextChanged += (_, _) => { Filter(); PaintAll(); };
+            search.TextChanged += (_, _) => PaintAll();
+            refilter = Filter;
             s.Children.Insert(s.Children.IndexOf(news) + 1, Design.Parts.SearchField(search, T("Search mods")));
             Filter();
         }
@@ -608,7 +612,8 @@ public sealed partial class MainWindow
             else { foreach (var x in shown) chosen.Remove(x); list.SelectedItems.Clear(); }
             Counted();
         }
-        selectAll.Click += (_, _) => All(selectAll.IsChecked != false);
+        // (from some ticked, a click ticks all: the box's own third state would clear them)
+        selectAll.Click += (_, _) => All(!(shown.Count > 0 && shown.All(chosen.Contains)));
         // Ctrl+A takes every mod shown, also from the search field (where it would only select the words)
         var ctrlA = new KeyboardAccelerator { Key = Windows.System.VirtualKey.A, Modifiers = Windows.System.VirtualKeyModifiers.Control };
         ctrlA.Invoked += (_, e) => { All(true); e.Handled = true; };

@@ -1169,7 +1169,7 @@ class EdgeSmoothingPatch : public ApexPatch {
         changed |= ApexUi::SwitchRow("Edges from depth", &g.p.depthEdges, "Also smooths faint edges of objects, while textures stay sharp", kDefaults.depthEdges);
         if (g.p.depthEdges && g.ready && g.framesSmoothed > 60 && !g.depthUsed)
             ApexUi::IconNote(IconId::Info, "The scene depth is not available right now: edges use color only");
-        changed |= ApexUi::SliderPercent("Sharpen textures", &g.p.sharpen, 0.0f, 1.0f, "Crisper textures; the smoothed edges stay smooth. 0% is off", kDefaults.sharpen);
+        changed |= ApexUi::SliderPercent("Sharpen textures", &g.p.sharpen, 0.0f, 1.0f, "Crisper textures; the smoothed edges stay smooth; 0% is off", kDefaults.sharpen);
         // At 1080p the game still looks jagged with this on: at 1200 lines or fewer, the driver's
         // own supersampling (render at a higher resolution, shown on the same screen) smooths what no post-process AA can
         // (thin rails, wires, leaves)

@@ -1368,7 +1368,10 @@ std::string DownloadLabel(const std::vector<std::string>& folders)
 
 std::string SizeText(uint32_t kb)
 {
-    return kb < 1024 ? I18n::Trf("{} KB", std::max<uint32_t>(1, kb)) : I18n::Trf("{:.1f} MB", kb / 1024.0);
+    if (kb < 1024) return I18n::Trf("{} KB", std::max<uint32_t>(1, kb));
+    std::string s = I18n::Trf("{:.1f} MB", kb / 1024.0);
+    ApexUi::LocaleDecimal(s.data()); // "56,3 MB" where the language writes a comma
+    return s;
 }
 
 // Starts downloads; the player stays where they are (the download bar and the rows that wait show the progress)
@@ -4023,7 +4026,6 @@ public:
                 ApexUi::CardDivider();
                 // a check waits for Shaders to be on: say so instead of nothing happening; else the last import's or check's result
                 std::string msg = g_fxMessagePacks ? std::string() : g_fxMessage;
-                if (msg.empty() && !g.active && (!Looks::Fx::Scanned() || Looks::Fx::Scanning())) msg = I18n::Tr("Turn on Shaders to check what changed");
                 if (!msg.empty()) ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, msg.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
             }
             const std::vector<Looks::Fx::Listed> listed = files.empty() ? std::vector<Looks::Fx::Listed>() : Looks::Fx::List();

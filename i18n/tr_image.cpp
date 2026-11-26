@@ -450,7 +450,7 @@ const I18n::Entry kEntries[] = {
      "La profundidad de la escena no está disponible ahora: los bordes salen solo del color",
      "La profondeur de la scène n'est pas disponible pour l'instant : les bords viennent de la couleur seule"},
     {"Sharpen textures", "Texturas mais nítidas", "Texturas más nítidas", "Textures plus nettes"},
-    {"Crisper textures; the smoothed edges stay smooth. 0% is off", "Texturas mais definidas; as bordas suavizadas continuam suaves. 0% é desligado",
+    {"Crisper textures; the smoothed edges stay smooth; 0% is off", "Texturas mais definidas; as bordas suavizadas continuam suaves; 0% é desligado",
      "Texturas más definidas; los bordes suavizados siguen suaves. 0% es apagado", "Textures plus nettes ; les bords adoucis restent doux. 0 % = désactivé"},
     {"Fast", "Rápida", "Rápida", "Rapide"},
     {"Balanced", "Equilibrada", "Equilibrada", "Équilibrée"},

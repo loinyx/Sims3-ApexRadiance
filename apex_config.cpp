@@ -846,8 +846,8 @@ unsigned ProfilePartsOf(const toml::table& state) {
 
 void KeepProfileParts(toml::table& state, unsigned parts) {
     if (toml::table* patches = state["patches"].as_table()) {
-        // The lamp lighting mode (Instant / Classic) is set on the Performance page but saved in Night Lights' table: it
-        // goes with the Performance part. A Performance-only preset keeps that one key of the table; a Lighting-only
+        // The lamp lighting mode (Instant / Classic) is set on Lighting > Overview and saved in Night Lights' table, but it
+        // is a performance choice: it goes with the Performance part (the Performance preset sets Classic). A Performance-only preset keeps that one key of the table; a Lighting-only
         // preset leaves the mode as it is.
         if (toml::table* ntr = (*patches)[kLampModeFeature].as_table()) {
             if (!(parts & kPartPerformance)) ntr->erase(kLampModeKey);

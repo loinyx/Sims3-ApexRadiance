@@ -537,8 +537,8 @@ vignette_size = 0.5
 
 const Preset kPresets[kCount] = {
     {"Performance", "More FPS with lighter effects", "rocket", kPerformance},
-    {"Balanced", "A balance of looks and speed", "sun-medium", kDefaultPreset},
-    {"Quality", "The best look, for stronger PCs", "aperture", kQuality},
+    {"Balanced", "A balance of looks and speed", "sliders-horizontal", kDefaultPreset},
+    {"Quality", "The best look, for stronger PCs", "sparkles", kQuality},
 };
 
 } // namespace

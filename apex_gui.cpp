@@ -693,7 +693,7 @@ std::string ShadersLookDetail() {
 
 const OverviewTile* OverviewTiles(int& count) {
     // In the sidebar's order, each with its page's own subtitle. Display has no switch (set = nullptr): its row shows the
-    // window mode. Water & Snow and Lot streaming are tabs of Lighting and Performance.
+    // window mode. Water & Snow has no row (Night Lights' row covers it; Water Reflections keeps its own switch).
     static const OverviewTile kTiles[] = {
         {"Lighting", IconId::MoonStar, "Lighting", "Warm lamp light around your lots at night", PageLighting, &g_lightingTab, LightingLamps, LightsOn, LightsSet, LightsSwitchable, LightsDetail, true},
         {"Color", IconId::Palette, "Color", "How the game's picture looks", PageColor, nullptr, 0, ColorOn, ColorSet, AlwaysSwitchable, ColorDetail, true},
@@ -726,7 +726,7 @@ void SetAllOverviewEffects(bool on) {
     if (on) {
         const std::vector<std::string> remembered = OverviewRestore::Names(OverviewRestore::Scope::Effects);
         const bool all = !OverviewRestore::Has(OverviewRestore::Scope::Effects) || remembered.empty();
-        for (int i = 0; i < n; i++) { // Lighting before Water & Snow (reflections need Night Lights)
+        for (int i = 0; i < n; i++) {
             if (!tiles[i].inAllEffects || !(all || std::find(remembered.begin(), remembered.end(), tiles[i].id) != remembered.end())) continue;
             // Performance: Room to save stayed on, so the tile reads on; its other options come back through its own set
             const bool perf = std::string_view(tiles[i].id) == "Performance";
@@ -740,7 +740,7 @@ void SetAllOverviewEffects(bool on) {
                 wasOn.emplace_back(tiles[i].id);
         if (wasOn.empty()) return;
         OverviewRestore::Remember(OverviewRestore::Scope::Effects, wasOn);
-        for (int i = n - 1; i >= 0; i--) { // Water & Snow before Lighting
+        for (int i = n - 1; i >= 0; i--) {
             if (!tiles[i].inAllEffects || !tiles[i].isOn()) continue;
             if (std::string_view(tiles[i].id) == "Performance")
                 SetGroup(kOverviewPerformancePatches, OverviewRestore::Scope::Performance, false, Performance::kMemoryGuardName);
@@ -1197,6 +1197,7 @@ void BandingTabContent() {
         ApexUi::Gap(ApexUi::kSpace1); // with the item spacing, about the 12 a group label keeps below a row
         ApexUi::CardGroup("Grain");
         p->RenderCustomUI();
+        ApexUi::CardGroup("Precision");
         HighPrecisionSceneRows(p);
     });
 }
@@ -1285,32 +1286,30 @@ void ShadersLookContent() {
     ApexPatch* patch = Find(Looks::kPatchName);
     if (!patch) return;
     const bool search = ApexUi::FilterActive();
-    ApexUi::HeaderExtra extra;
+    // While Shaders is off the look and its shaders stay readable, greyed (the page header has the switch and the
+    // hold-to-compare eye)
+    ImGui::BeginDisabled(!patch->IsEnabled() && !search);
     ImGui::PushID(Looks::kPatchName);
     if (ApexUi::BeginCard("##Card")) {
         bool on = patch->IsEnabled();
-        char chip[24];
         const std::string name = Looks::LookName();
         const std::string status = Looks::StatusLine(nullptr); // (the cost is on the page header)
-        extra.holdIcon = IconId::Eye;
-        extra.holdTooltip = "Hold to see the game without the look";
-        extra.enabled = on;
         if (search) {
             if (ApexUi::CardHeader(IconId::WandSparkles, "Shaders", "ReShade looks and shaders on the game's picture", Description(patch), &on, Switchable(patch)))
                 SetPatch(patch, on);
         } else {
-            ApexUi::CardHeader(IconId::WandSparkles, name.empty() ? "ReShade look" : name.c_str(), status.c_str(), Description(patch), nullptr, true, &extra);
+            ApexUi::CardHeader(IconId::WandSparkles, name.empty() ? "ReShade look" : name.c_str(), status.c_str(), Description(patch), nullptr, true);
         }
-        if (patch->IsEnabled() || HasStateNotes(patch)) ApexUi::CardDivider();
+        ApexUi::CardDivider();
         StateNotes(patch);
         Looks::SetCardRows(LookLutRow);
-        if (patch->IsEnabled() || search) patch->RenderCustomUI();
+        patch->RenderCustomUI();
     }
     ApexUi::EndCard();
     ImGui::PopID();
-    if (extra.held) Looks::HoldBypass();
     Looks::SetTwinCheck(LookTwin); // a shader doubling an Apex effect: an amber line on its row in the list
-    if (patch->IsEnabled() || search) Looks::ShadersCard();
+    Looks::ShadersCard();
+    ImGui::EndDisabled();
 }
 
 // Tab Installed: Installed packs, Your shaders and Get more packs (ReShade's packs to download)
@@ -1351,8 +1350,13 @@ void ShadersPage() {
         bool on = patch->IsEnabled();
         char chipBuf[24];
         const char* chip = on ? CostChip(patch->GpuCostMs(), chipBuf) : nullptr;
-        if (ApexUi::PageHeader("Shaders", "ReShade looks and shaders on the game's picture", &on, Switchable(patch), Description(patch), nullptr, chip))
+        ApexUi::HeaderExtra extra;
+        extra.holdIcon = IconId::Eye;
+        extra.holdTooltip = "Hold to see the game without the look";
+        extra.enabled = on;
+        if (ApexUi::PageHeader("Shaders", "ReShade looks and shaders on the game's picture", &on, Switchable(patch), Description(patch), &extra, chip))
             SetPatch(patch, on);
+        if (extra.held) Looks::HoldBypass();
     } else ApexUi::PageTitle("Shaders", "ReShade looks and shaders on the game's picture");
     static const char* const kTabs[] = {"Look", "Installed shaders"};
     ApexUi::TabBar("##ShadersTabs", &g_shadersTab, kTabs, IM_COUNTOF(kTabs));
@@ -2920,7 +2924,7 @@ void PresetDialog() {
                     ApexUi::Gap(ApexUi::kSpace1);
                     {const ApexUi::ControlSizeScope grid(ApexUi::ControlSize::Compact); ProfilePartChecks("Parts",&s.saveParts,s.available);}
                     ApexUi::Gap(ApexUi::kSpace2);
-                    ApexUi::MutedText("Shortcuts are optional and start unchecked.");
+                    ApexUi::MutedText("Shortcuts, Capture and Developer are optional and start unchecked");
                     if(exporting) {
                         auto state=s.exportState; ApexConfig::KeepProfileParts(state,s.saveParts);
                         if(s.myShaderFiles<0) s.myShaderFiles=int(ApexConfig::ProfileShaderFiles(s.exportState).size());
@@ -5236,8 +5240,8 @@ const char* RowName(int row) {
     case RowCompare: return "Compare with the game";
     case RowRefresh: return "Refresh lights";
     case RowScreenshot: return "Take a filtered screenshot";
-    case RowRecorder: return "Recording";
-    case RowProbe: return "Light capture";
+    case RowRecorder: return "Record a few seconds"; // (the Report page's names)
+    case RowProbe: return "Capture the light at a spot";
     case RowDiagnostics: return "Lighting snapshot";
     case RowFrameCapture: return "Frame Capture";
     case RowSearch: return "Search the settings";
@@ -5476,7 +5480,7 @@ void ShortcutsTab() {
     ApexUi::EndCard();
 
     if (ApexUi::BeginCard("##ReportShortcuts")) {
-        ApexUi::CardHeader(IconId::ListChecks, "Report a problem", "Shortcuts for recording and lighting captures", nullptr, nullptr);
+        ApexUi::CardHeader(IconId::Bug, "Report a problem", "Shortcuts for recording and lighting captures", nullptr, nullptr);
         ApexUi::CardDivider();
         for (int row : {RowRecorder, RowProbe, RowDiagnostics}) {
             if (!ApexUi::BeginControlRow(RowName(row), RowText(row), KeyChipWidth(row))) continue;

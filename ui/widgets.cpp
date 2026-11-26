@@ -636,6 +636,7 @@ void BeginFilter(const char* query) {
 }
 
 void SetFilterCrumb(const char* crumb, int id) {
+    g_filter.card.clear(); // (a new part: the last part's card is not this one's)
     g_filter.crumb = crumb ? crumb : "";
     g_filter.crumbId = id;
 }
@@ -1152,7 +1153,10 @@ bool BeginControlRow(const char* label, const char* description, float controlsW
     const float top = RowTop();
     const float frameH = controlsHeight > 0.0f ? controlsHeight : ImGui::GetFrameHeight();
     const float minimumHeight = ImGui::GetFrameHeight();
-    const bool stacked = width - controlsWidth - kSpace3 * u < 120.0f * u;
+    // (controls wider than the shared control column go under the text, on the right: a row of three buttons squeezed
+    // its description into a narrow column)
+    const float column = InlineControlWidth(width);
+    const bool stacked = width - controlsWidth - kSpace3 * u < 120.0f * u || (column > 0.0f && controlsWidth > column + 1.0f);
     const float wrapX = stacked ? startX + width : startX + width - controlsWidth - kSpace3 * u;
     // Keep the divider and right cluster anchored to the full row; only the text is indented.
     const bool hasIcon = icon != IconId::None;
@@ -1879,8 +1883,11 @@ bool SegmentedRow(const char* label, const char* description, const char* id, in
                        (icons && icons[i] != IconId::None ? (VioletTheme::kControlIcon + VioletTheme::kControlIconGap) * u : 0.0f);
         const float column = InlineControlWidth(ImGui::GetContentRegionAvail().x);
         const bool iconChoices = icons && icons[0] != IconId::None;
-        if (column <= 0.0f || natural > column || (count >= 4 && !iconChoices))
-            return SelectRow(label, description, id, current, labels, count, 220.0f, defaultIndex);
+        const bool inRange = *current >= 0 && *current < count; // (-1: none of them, e.g. a fine-tuned value: no dropdown pick)
+        if (inRange && (column <= 0.0f || natural > column || (count >= 4 && !iconChoices))) {
+            const std::string comboId = std::string_view(id).find("##") == std::string_view::npos ? std::string("##") + id : std::string(id);
+            return SelectRow(label, description, comboId.c_str(), current, labels, count, 220.0f, defaultIndex);
+        }
     }
     RowDecor d = TakeDecor();
     const IconId action = g_nextAction;
@@ -2136,7 +2143,9 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
     // Wide rows: the track and its value on the right of the label (InlineControlWidth); narrow ones keep the track
     // under the label with the value on the label's line
     // alignWidth: the track in a select's column (SelectRow's combo width), the value left of it
-    const float alignW = o.alignWidth > 0.0f ? std::fmin(o.alignWidth * u, std::fmax(120.0f * u, width * 0.5f)) : 0.0f;
+    const float alignW = o.alignWidth <= 0.0f ? 0.0f
+                         : InlineControlWidth(width) > 0.0f ? InlineControlWidth(width) // (SelectRow's combo: the shared column)
+                                                            : std::fmin(o.alignWidth * u, std::fmax(120.0f * u, width * 0.5f));
     const float ctrlW = alignW > 0.0f && InlineControlWidth(width) > 0.0f ? alignW + slotW + swatchW + kSpace3 * u : InlineControlWidth(width);
     const bool inl = ctrlW > 0.0f;
     auto drawValue = [&](float y, float at) { // at: the value's right edge
@@ -2342,7 +2351,7 @@ bool BeginCard(const char* id, bool warning) {
 }
 
 void EndCard() {
-    if (Hidden()) return;
+    if (Hidden()) { g_filter.card.clear(); return; } // (rows after the card are not in it)
     ImGui::EndChild();
     // kSpace3 between cards (the spacing after the card and after this dummy make up the rest)
     ImGui::Dummy(ImVec2(0.0f, std::fmax(0.0f, kSpace3 * Unit() - 2.0f * Spacing())));

@@ -2372,7 +2372,8 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         // The Filters card: the group's switch and how many filters are on, the ones on as chips under it (one card: it was a
         // header card and an In use card)
         if (ApexUi::BeginCard("##InUse")) {
-            if (ApexUi::CardHeader(IconId::Library, "Filters", sub.c_str(), nullptr, &q.filtersEnabled, q.enabled)) changed = save = true;
+            bool groupOn = q.enabled && q.filtersEnabled; // (shown off while Color is off, as the other groups' switches)
+            if (ApexUi::CardHeader(IconId::Library, "Filters", sub.c_str(), nullptr, &groupOn, q.enabled)) { q.filtersEnabled = groupOn; changed = save = true; }
             if (onCount) {
                 ApexUi::CardDivider();
                 // The names as chips, flowing onto the next line when the card is full
@@ -2419,6 +2420,8 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         const ImVec2 switchSize=ApexUi::ToggleSwitchSize();
         // Right-aligned cluster: disclosure, switch; retained in narrow layouts.
         const float controlsW=24.0f*u+switchSize.x+gap;
+        if(!*on) ApexUi::SetNextRowIconColor(VioletTheme::kTextMuted); // (an off filter's icon is muted, as headers and overview rows)
+        ImGui::BeginDisabled(!q.enabled); // (the whole row greyed while Color is off, as on the other tabs)
         const bool visible=ApexUi::BeginControlRow(name,what,controlsW,icon,30.0f*u);
         if(visible) {
             bool expanded=ImGui::GetStateStorage()->GetBool(ImGui::GetID("Expanded"),lutOnly);
@@ -2441,6 +2444,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
                 ImGui::EndDisabled();
             }
         }
+        ImGui::EndDisabled();
         ImGui::PopID();
     };
     // "Reset this filter": the given settings of the card back to their defaults (its switch stays as it is)
