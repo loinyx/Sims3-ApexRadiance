@@ -24,6 +24,8 @@ described in [features/installer.md](../features/installer.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-25 | `af2b44ab` | `installer/ApexSetup.Tests` | All passed | none |
+| 2026-11-25 | `af2b44ab` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run, a data folder of its own) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-25 | `a3c94ef0` | `installer/ApexSetup.Tests` | All passed | none |
 | 2026-11-25 | `a3c94ef0` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-25 | `a3c94ef0` | `installer/ui-smoke/Run-UiSmoke.ps1` (full, dry run) | 81 steps passed; the language cycle again ended the launcher (0xC000027B) while UI Automation read it, as on `6a272a14` | Windows 11, RTX 4070 Ti SUPER |
