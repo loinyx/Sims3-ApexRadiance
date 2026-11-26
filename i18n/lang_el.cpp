@@ -181,6 +181,7 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Ο διακόπτης κάθε εφέ βρίσκεται δίπλα στον τίτλο της σελίδας του, και η σελίδα διαβάζεται και όταν είναι ανενεργό"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Ό,τι χρειάζεται προσοχή εκτός Apex εμφανίζεται στην Επισκόπηση, αντί για μια σελίδα που εμφανίζεται και χάνεται"},
     {"Shaders is out of beta", "Τα Shaders δεν είναι πια σε beta"},
+    {"The Performance preset updates lamps the Classic way, easier on the graphics card", "Η προρρύθμιση Απόδοση ενημερώνει τις λάμπες με τον κλασικό τρόπο, πιο ελαφριά για την κάρτα γραφικών"},
     {"Apex Launcher: add mods to a merge from its own folder, with Select all", "Apex Launcher: πρόσθεσε mods σε μια συγχώνευση από τον δικό της φάκελο, με Επιλογή όλων"},
     {"Apex Launcher: the Home picture keeps its own shape", "Apex Launcher: η εικόνα της Αρχικής κρατά το δικό της σχήμα"},
     {"The game no longer crashes on a rare vertex format with the RTX Remix bridge", "Το παιχνίδι δεν κλείνει πια σε μια σπάνια μορφή κορυφών με το RTX Remix bridge"},

@@ -181,6 +181,7 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Vypínač každého efektu je u názvu jeho stránky a stránka zůstává čitelná, i když je vypnutý"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Co potřebuje pozornost mimo Apex, se zobrazuje v Přehledu místo stránky, která se objevuje a mizí"},
     {"Shaders is out of beta", "Shadery už nejsou v betě"},
+    {"The Performance preset updates lamps the Classic way, easier on the graphics card", "Předvolba Výkon aktualizuje lampy klasicky, šetrněji ke grafické kartě"},
     {"Apex Launcher: add mods to a merge from its own folder, with Select all", "Apex Launcher: přidávejte mody do sloučení z jeho vlastní složky, s možností Vybrat vše"},
     {"Apex Launcher: the Home picture keeps its own shape", "Apex Launcher: obrázek na Domů si drží vlastní tvar"},
     {"The game no longer crashes on a rare vertex format with the RTX Remix bridge", "Hra už nepadá na vzácném formátu vrcholů s RTX Remix bridge"},

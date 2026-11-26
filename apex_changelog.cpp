@@ -32,6 +32,7 @@ constexpr const char* k413Improved[] = {
     "Each effect's switch sits beside its page title, and the page stays readable while it is off",
     "What needs a look outside Apex shows on Overview, instead of a page that comes and goes",
     "Shaders is out of beta",
+    "The Performance preset updates lamps the Classic way, easier on the graphics card",
     "Apex Launcher: add mods to a merge from its own folder, with Select all",
     "Apex Launcher: the Home picture keeps its own shape",
     nullptr};

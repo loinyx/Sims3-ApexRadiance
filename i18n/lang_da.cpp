@@ -181,6 +181,7 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Hver effekts kontakt sidder ved sidens titel, og siden kan stadig læses, når den er slået fra"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Det, der skal ses på uden for Apex, vises i Oversigt i stedet for en side, der kommer og går"},
     {"Shaders is out of beta", "Shaders er ikke længere i beta"},
+    {"The Performance preset updates lamps the Classic way, easier on the graphics card", "Forudindstillingen Ydeevne opdaterer lamper på den klassiske måde, nemmere for grafikkortet"},
     {"Apex Launcher: add mods to a merge from its own folder, with Select all", "Apex Launcher: tilføj mods til en fletning fra dens egen mappe, med Vælg alle"},
     {"Apex Launcher: the Home picture keeps its own shape", "Apex Launcher: billedet på Start beholder sin egen form"},
     {"The game no longer crashes on a rare vertex format with the RTX Remix bridge", "Spillet går ikke længere ned på et sjældent vertexformat med RTX Remix bridge"},

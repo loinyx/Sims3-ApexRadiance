@@ -181,6 +181,7 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "각 효과의 스위치가 페이지 제목 옆에 있고, 꺼져 있어도 페이지를 읽을 수 있습니다"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Apex 밖에서 확인이 필요한 항목은 나타났다 사라지는 페이지 대신 개요에 표시됩니다"},
     {"Shaders is out of beta", "셰이더가 베타를 벗어났습니다"},
+    {"The Performance preset updates lamps the Classic way, easier on the graphics card", "성능 프리셋은 램프를 클래식 방식으로 업데이트해 그래픽 카드 부담을 줄입니다"},
     {"Apex Launcher: add mods to a merge from its own folder, with Select all", "Apex Launcher: 병합의 폴더에서 모드를 추가하고 모두 선택할 수 있습니다"},
     {"Apex Launcher: the Home picture keeps its own shape", "Apex Launcher: 홈 사진이 원래 모양을 유지합니다"},
     {"The game no longer crashes on a rare vertex format with the RTX Remix bridge", "RTX Remix bridge에서 드문 버텍스 형식으로 게임이 더 이상 멈추지 않습니다"},

@@ -181,6 +181,7 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "每個效果的開關都在頁面標題旁，關閉時頁面仍可閱讀"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Apex 之外需要留意的事項顯示在概覽中，不再是時有時無的頁面"},
     {"Shaders is out of beta", "著色器已結束測試版"},
+    {"The Performance preset updates lamps the Classic way, easier on the graphics card", "效能預設以經典方式更新燈光，減輕顯示卡負擔"},
     {"Apex Launcher: add mods to a merge from its own folder, with Select all", "Apex Launcher：可從合併套件所在資料夾新增模組，並可全選"},
     {"Apex Launcher: the Home picture keeps its own shape", "Apex Launcher：首頁圖片保持自身形狀"},
     {"The game no longer crashes on a rare vertex format with the RTX Remix bridge", "使用 RTX Remix bridge 時，遊戲不再因罕見的頂點格式當機"},

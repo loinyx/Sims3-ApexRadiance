@@ -180,6 +180,7 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Minden effekt kapcsolója az oldala címe mellett van, és az oldal kikapcsolva is olvasható marad"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Ami az Apexen kívül figyelmet igényel, az Áttekintésben látszik egy megjelenő és eltűnő oldal helyett"},
     {"Shaders is out of beta", "A Shaderek már nem béták"},
+    {"The Performance preset updates lamps the Classic way, easier on the graphics card", "A Teljesítmény előbeállítás a klasszikus módon frissíti a lámpákat, kíméletesebben a videokártyával"},
     {"Apex Launcher: add mods to a merge from its own folder, with Select all", "Apex Launcher: modok hozzáadása egyesítéshez a saját mappájából, Összes kijelölése funkcióval"},
     {"Apex Launcher: the Home picture keeps its own shape", "Apex Launcher: a Kezdőlap képe megtartja saját alakját"},
     {"The game no longer crashes on a rare vertex format with the RTX Remix bridge", "A játék már nem omlik össze egy ritka csúcspontformátumon az RTX Remix bridge-dzsel"},
