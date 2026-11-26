@@ -1,9 +1,9 @@
 # Apex Launcher (Apex Radiance Setup)
 
-Apex Launcher 2.0.1 (`ApexLauncher.exe`; Apex Radiance Setup up to 1.2.x) is a Windows program (WinUI 3, one
+Apex Launcher (`ApexLauncher.exe`; Apex Radiance Setup up to 1.2.x) is a Windows program (WinUI 3, one
 self-contained exe) that installs Apex Radiance and the mods it works with and starts the game: Home and Play, Health,
 Mods, Worlds, Saves, a Gallery of pictures and videos, and What's new. The screens are described in
-[docs/features/installer.md](../docs/features/installer.md#the-launcher-200); this page covers the installing part
+[docs/features/launcher/README.md](../docs/features/launcher/README.md); this page covers the installing part
 (the *Components* screen) and the build.
 
 The installing part is the installer for Apex Radiance and the mods it works with. It finds The Sims 3
@@ -143,8 +143,9 @@ nothing. `APEX_SETUP_FAKE_AMD=<supported>|<on>` (for example `1|0`, or `none` fo
 
 The tests run the engine on a fake `Game\Bin` and Documents folder in `%TEMP%` with local files (no network, no game).
 For a manual run against a fake game: start the exe with the game folder as its argument and `APEX_SETUP_DOCUMENTS` set
-to a fake Documents folder. The exe asks for administrator rights (`Game\Bin` is usually under Program Files). Errors are
-logged to `%LOCALAPPDATA%\Apex Radiance Setup\ApexRadianceSetup.log`.
+to a fake Documents folder. The launcher runs without administrator rights and asks for them only when a change writes
+where it cannot ([elevation](../docs/features/launcher/elevation.md)). Errors are logged to
+`%LOCALAPPDATA%\Apex Launcher\ApexLauncher.log`.
 
 The UI smoke run drives the published exe through UI Automation in a dry run and checks after every step that Setup still
 runs and that its log has nothing new but the dry run's refusals: every switch, the renderer cards, the frame limit list
@@ -153,7 +154,7 @@ driver change and a component change), the Done screen, every action of Repair o
 folder, the licences, all 21 languages, a narrow and a wide window. It puts Setup's language choice back.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer\ui-smoke\Run-UiSmoke.ps1 -Exe installer\publish\ApexRadianceSetup.exe `
+powershell -ExecutionPolicy Bypass -File installer\ui-smoke\Run-UiSmoke.ps1 -Exe installer\publish\ApexLauncher.exe `
     -Game "C:\Program Files (x86)\Steam\steamapps\common\The Sims 3" -FakeNv "NVIDIA GeForce RTX 4070|62124|0|" -FakeAmd "0|0" -Runs 3
 ```
 

@@ -92,39 +92,11 @@ public sealed partial class MainWindow
         if (!ask) return;
         var self = Environment.ProcessPath!;
         // one list, as the install's own lists: keep it on this PC (recommended, in the launcher's own folder) or a single file
-        var list = new StackPanel();
-        foreach (var (value, icon, title, text) in new[]
-        {
-            (true, "hard-drive", T("Install on this PC"), T("Recommended: opens from the Start menu and the desktop")),
-            (false, "folder", T("Use as a single file"), T("Nothing is installed, and you can move it to any folder")),
-        })
-        {
-            var on = value == _doneInstall;
-            var g = new Grid { ColumnSpacing = Design.Space.IconToText };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(Design.IconTile.Of(icon));
-            var s = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            s.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
-            s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
-            Grid.SetColumn(s, 1);
-            g.Children.Add(s);
-            var check = OptionDot();
-            check.VerticalAlignment = VerticalAlignment.Center;
-            OptionOn(check, on);
-            Grid.SetColumn(check, 2);
-            g.Children.Add(check);
-            var row = new Border { Child = g, Padding = new Thickness(Design.Space.CardPad), Background = on ? Res("ApexAccentSoftBrush") : null,
-                BorderThickness = new Thickness(0, list.Children.Count > 0 ? 1 : 0, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
-            var b = new Button { Content = row, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0), Background = Res("ApexClearBrush"),
-                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-            b.Click += (_, _) => { _doneInstall = value; FillDoneChoice(); UpdateFooter(); };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title + (on ? ", " + T("selected") : "")); // (as the theme tiles say theirs)
-            list.Children.Add(b);
-        }
-        DoneChoice.Children.Add(new Border { Child = list, CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"),
-            Background = Res("ApexHairlineBrush"), Margin = new Thickness(0, 10, 0, 0) });
+        var choice = ChoiceList([("hard-drive", T("Install on this PC"), T("Recommended: opens from the Start menu and the desktop")),
+            ("folder", T("Use as a single file"), T("Nothing is installed, and you can move it to any folder"))], _doneInstall ? 0 : 1,
+            k => { _doneInstall = k == 0; FillDoneChoice(); UpdateFooter(); });
+        choice.Margin = new Thickness(0, 10, 0, 0);
+        DoneChoice.Children.Add(choice);
         if (_doneInstall) DoneChoice.Children.Add(FolderRow());
     }
 

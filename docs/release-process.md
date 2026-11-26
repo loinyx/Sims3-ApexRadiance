@@ -74,11 +74,11 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
    Every change to Apex Launcher (formerly Apex Radiance Setup) raises `<Version>` in `installer/ApexSetup/ApexSetup.csproj` in the same change (patch for fixes
    and texts, minor for features): Setup 1.1.0 and later offer a newer version of themselves from the latest release by
    that version, so a change without it never reaches players who already have Setup.
-   Build Apex Launcher from the same commit: `dotnet run --project installer/ApexSetup.Tests`, then
+   Build Apex Launcher from the same commit: `dotnet run --project installer/ApexSetup.Tests -c Release`, then
    `dotnet publish installer/ApexSetup -c Release -o installer/publish` (one self-contained exe,
-   [installer.md](features/installer.md)); `installer/publish/ApexLauncher.exe` is attached to the release twice, as
+   [workflow.md](workflow.md#apex-launcher), [Apex Launcher](features/launcher/README.md)); `installer/publish/ApexLauncher.exe` is attached to the release twice, as
    `ApexLauncher.exe` and as `ApexRadianceSetup.exe` (the same bytes): Setups before the launcher update themselves only
-   to an asset of that name whose product name is "Apex Radiance Setup", which the launcher keeps in 2.0.x.
+   to an asset of that name whose product name is "Apex Radiance Setup", which the launcher keeps (`<Product>` in `ApexSetup.csproj`).
 2. Test the build in game and record the results in the validation pages.
 3. The release PR is titled `release: X.Y.Z`; merging and publishing are maintainer actions.
 4. Publish to `loinyx/Sims3-ApexRadiance` as `Apex Radiance X.Y.Z` with these files, each labelled: `ApexLauncher.exe`

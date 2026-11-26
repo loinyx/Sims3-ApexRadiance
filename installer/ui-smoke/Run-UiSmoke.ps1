@@ -121,6 +121,8 @@ function Dialogs([switch]$Links) {
         foreach ($n in 'Remove', 'Restore', 'Uninstall', 'Undo these changes', 'Continue', 'OK') {
             if ($names -contains $n -and ($names -contains 'Cancel' -or $n -in 'OK', 'Undo these changes')) { $pick = $b | Where-Object { $_.Current.Name -eq $n } | Select-Object -First 1; break }
         }
+        # (a dialog that only asks, such as the updates before Play in a dry run, is closed with Cancel)
+        if (-not $pick -and $names -contains 'Cancel') { Invoke ($b | Where-Object { $_.Current.Name -eq 'Cancel' } | Select-Object -First 1); Start-Sleep -Milliseconds 500; return }
         if (-not $pick) { return }
         Invoke $pick
         Start-Sleep -Seconds 2

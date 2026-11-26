@@ -1000,6 +1000,7 @@ public sealed partial class MainWindow : Window
         NavIcons();
         // (the folder pane and the rows hold brushes of the old theme; RefreshAll builds the screen in use, the Gallery too)
         _folderSig = "";
+        LicenceList.Children.Clear(); // (built once: made again in the colours of now)
         foreach (var r in _modRows) r.Refresh();
         RefreshAll();
         if (UpgradeRun.Visibility == Visibility.Visible) UpgradeShow(_upgradeStage);
@@ -1791,6 +1792,47 @@ public sealed partial class MainWindow : Window
         dot.Background = on ? Design.DesignSystem.MainBrush : Res("ApexClearBrush");
         dot.BorderBrush = on ? Res("ApexClearBrush") : Res("ApexMutedBrush");
         ((Border)dot.Child).Background = on ? Res("ApexInkBrush") : null;
+    }
+    // choices one under another in one card, as the install's last step: icon, name and what it means, the round mark on the
+    // right, the chosen row lit; a click picks it
+    static Border ChoiceList(IReadOnlyList<(string Icon, string Title, string Text)> items, int chosen, Action<int> pick)
+    {
+        var list = new StackPanel();
+        var rows = new List<(Border Row, Border Dot, Button Button, string Title)>();
+        void Paint()
+        {
+            for (int k = 0; k < rows.Count; k++)
+            {
+                var on = k == chosen;
+                rows[k].Row.Background = on ? Res("ApexAccentSoftBrush") : null;
+                OptionOn(rows[k].Dot, on);
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(rows[k].Button, rows[k].Title + (on ? ", " + T("selected") : ""));
+            }
+        }
+        foreach (var (icon, title, text) in items)
+        {
+            var g = new Grid { ColumnSpacing = Design.Space.IconToText };
+            foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+            g.Children.Add(Design.IconTile.Of(icon));
+            var s = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            s.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+            if (text.Length > 0) s.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+            Grid.SetColumn(s, 1);
+            g.Children.Add(s);
+            var dot = OptionDot();
+            dot.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(dot, 2);
+            g.Children.Add(dot);
+            var row = new Border { Child = g, Padding = new Thickness(Design.Space.CardPad), BorderThickness = new Thickness(0, list.Children.Count > 0 ? 1 : 0, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
+            var b = new Button { Content = row, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0), Background = Res("ApexClearBrush"),
+                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            var at = rows.Count;
+            b.Click += (_, _) => { if (chosen == at) return; chosen = at; Paint(); pick(at); };
+            rows.Add((row, dot, b, title));
+            list.Children.Add(b);
+        }
+        Paint();
+        return new Border { Child = list, CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexHairlineBrush") };
     }
     // a choice's whole card: lit when chosen
     static void OptionLit(Border card, bool on)

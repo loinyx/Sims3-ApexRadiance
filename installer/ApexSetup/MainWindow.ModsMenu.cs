@@ -20,6 +20,7 @@ public sealed partial class MainWindow
         var chosen = Picked().Where(Mine).ToList();
         Tool("merge", T("Merge mods"), chosen.Count > 1 ? T("The {0} selected, into one package", chosen.Count) : T("Select two or more mods first"), () => Safe(MergeAsync(chosen, null, null)), chosen.Count > 1 && !_busy);
         Tool("scan-search", T("Find custom content"), T("See which mods a file uses and what is missing"), () => Safe(FindContentAsync()));
+        Tool("list-ordered", T("Load order"), T("Which mod the game reads first"), () => Safe(LoadOrderPageAsync()));
         Tool("bug", T("Find a problem mod"), T("Tests half of your mods at a time"), () => OnModsHunt(sender, e), _modsLoaded && !_busy && ModHunt.Current() is null);
         Tool("brush", T("Clear game caches"), T("For items that are missing or look wrong"), () => Safe(ChooseCachesAsync()));
         if (Picked() is [var one] && CanOpenInS3pe(one)) Tool("package", T("Open in s3pe"), one.Name, () => Safe(OpenInS3peAsync(one)));

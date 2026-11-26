@@ -19,6 +19,21 @@ constexpr const char* k407Improved[] = {
     "RTX Remix bridge: the game keeps its graphics settings on every start",
     nullptr};
 
+constexpr const char* k412Added[] = {
+    "Apex Launcher: a Load order page shows which mod the game reads first",
+    nullptr};
+
+constexpr const char* k412Improved[] = {
+    "Apex Launcher: a health card on Home, with the crystal and the first thing to look at",
+    "Apex Launcher: scrapbook frames drawn anew, and a white board on the light theme",
+    "Apex Launcher: captions on the scrapbook wrap and fit on the picture",
+    "Apex Launcher: a clearer choice of automatic backups for each save",
+    nullptr};
+
+constexpr const char* k412Fixed[] = {
+    "Apex Launcher: opening a picture no longer closes the launcher",
+    nullptr};
+
 constexpr const char* k411Added[] = {
     "Apex Launcher: a Game settings page for shadows, Sim textures, bloom and loading",
     "Apex Launcher: Add puts mods, Sims, lots, worlds and archives in their places",
@@ -831,6 +846,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.1.2", "2026-11-26", k412Added, k412Improved, k412Fixed, "Apex Launcher 2.3.1: load order, a health card on Home and new scrapbook frames"},
     {"4.1.1", "2026-11-25", k411Added, k411Improved, k411Fixed, "Apex Launcher 2.3: a new look, Game settings, backups of your saves and faster merges"},
     {"4.1.0", "2026-11-24", k410Added, nullptr, nullptr, "Apex Radiance Setup becomes Apex Launcher, your home for playing The Sims 3"},
     {"4.0.14", "2026-11-23", nullptr, k4014Improved, k4014Fixed},

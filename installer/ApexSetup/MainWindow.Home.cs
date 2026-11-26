@@ -268,65 +268,102 @@ public sealed partial class MainWindow
 
     // ---------- health: a small note in the picture's corner ----------
 
-    // The game's health over the picture: frosted glass tinted with the crystal's colour, the crystal in its own light (a slow
-    // breath while something waits), what the state is and, below it, the first thing to look at.
+    // The game's health over the picture: the crystal in its own round light, and beside it a low glass card with the state in
+    // words, the first thing to look at and a chevron: the whole thing opens Health. The glass is Play and More's (frosted on
+    // the picture, the theme's own on the plain card), its corners a card's.
     FrameworkElement HealthChip()
     {
-        var crystal = new Crystal(30);
-        crystal.SetLevel(HealthLevel, animate: false);
         var calm = _healthState == HealthState.Ready;
-        // (what to look at first, in a few words: the first sentence of the first thing that is not only a note)
         // (as Health's own list: a finding first, else the mods that clash, by their title)
         var first = _health.FirstOrDefault(h => h.Finding.Severity == Severity.Error && !h.Conflict) ?? _health.FirstOrDefault(h => h.Finding.Severity != Severity.Info && !h.Conflict);
         var clashes = ConflictsNow().Where(c => c.Level != ConflictLevel.Small).ToList();
-        var note = calm ? T("Open Health") : first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1.TrimEnd('.')
+        var note = calm ? T("Every check passed") : first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1.TrimEnd('.')
             : clashes.Count == 1 ? T(clashes[0].Title) : clashes.Count > 1 ? T("{0} conflicts between mods", clashes.Count) : "";
-        var tint = StateTint(255);
-        var white = new SolidColorBrush(Microsoft.UI.Colors.White);
-        var soft = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0xC8));
-        var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(10, 10, 18, 10), MaxWidth = 380 };
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        // (the card says the state in words; Health's own title counts the findings)
+        var title = _healthState == HealthState.NeedsYou ? T("Needs your attention") : HealthTitle();
+        var photo = _homeOnPhoto;
+        Brush ink = photo ? new SolidColorBrush(Microsoft.UI.Colors.White) : Res("TextFillColorPrimaryBrush");
+        Brush soft = photo ? new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0xCC)) : Res("ApexSoftTextBrush");
+
+        const double size = 56, light = 140;
+        // the crystal on the left, outside the glass; the card beside it
+        var root = new Grid { ColumnSpacing = Design.Space.X3 };
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(size) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var g = new Grid { Padding = new Thickness(Design.Space.X4, Design.Space.X3, Design.Space.X3, Design.Space.X3), ColumnSpacing = Design.Space.X3 };
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        // the crystal on a round tile of its colour, a soft light round it
-        var glow = new SoftGlow(tint, calm ? 0.35 : 0.6, 0.5) { Width = 84, Height = 84, Margin = new Thickness(-20), IsHitTestVisible = false };
-        var tile = new Grid { Width = 44, Height = 44 };
-        tile.Children.Add(glow);
-        tile.Children.Add(new Border { CornerRadius = new CornerRadius(22), Background = new SolidColorBrush(Alpha(tint, 0x38)),
-            BorderBrush = new SolidColorBrush(Alpha(tint, 0x66)), BorderThickness = new Thickness(1) });
-        (crystal.HorizontalAlignment, crystal.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center);
-        tile.Children.Add(crystal);
-        g.Children.Add(tile);
-        if (!calm && new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
-        {
-            var breathe = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
-            var fade = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0.45, To = 1, Duration = TimeSpan.FromMilliseconds(1600), EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
-            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(fade, glow);
-            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(fade, "Opacity");
-            breathe.Children.Add(fade);
-            tile.Loaded += (_, _) => breathe.Begin();
-            tile.Unloaded += (_, _) => breathe.Stop();
-        }
-        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
-        words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = white, TextTrimming = TextTrimming.CharacterEllipsis });
-        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
-        Grid.SetColumn(words, 1);
+        var black = Windows.UI.Color.FromArgb(255, 0, 0, 0);
+        Brush rest = photo ? Glass(0.42, black) : Res("ApexPillBrush"), hover = photo ? Glass(0.3, black) : Res("ApexHoverBrush");
+        var card = new Border { Child = g, CornerRadius = new CornerRadius(Design.Radius.Card), Background = rest, BorderThickness = new Thickness(1),
+            BorderBrush = photo ? new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x24)) : Res("ApexCardBorderBrush"), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(card, 1);
+        root.Children.Add(card);
+        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        words.Children.Add(new TextBlock { Text = title, FontSize = Design.TextSize.Body, FontWeight = FontWeights.SemiBold, Foreground = ink, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = Design.TextSize.Caption, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
         g.Children.Add(words);
-        var chev = Lucide.Icon("chevron-right", 14, soft);
-        chev.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(chev, 2);
-        g.Children.Add(chev);
-        var b = new Button
+        var go = Lucide.Icon("chevron-right", Design.Size.IconSmall, soft);
+        go.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(go, 1);
+        g.Children.Add(go);
+        // the light around the crystal, round, over the glass's edge rather than under it (glass would blur it into a block)
+        var tint = StateTint(255);
+        var fade = new Microsoft.UI.Xaml.Media.RadialGradientBrush();
+        foreach (var (at, share) in new[] { (0.0, 1.0), (0.25, 0.8), (0.45, 0.48), (0.65, 0.2), (0.82, 0.06), (1.0, 0.0) })
+            fade.GradientStops.Add(new GradientStop { Offset = at, Color = Alpha(tint, (byte)(share * (calm ? 0xC0 : 0xE8))) });
+        var pulse = new ScaleTransform();
+        var glow = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = light, Height = light, Fill = fade, RenderTransform = pulse, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
+        // (a canvas, so nothing cuts the light at a box's edge)
+        var halo = new Canvas { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+        Canvas.SetLeft(glow, -(light - size) / 2);
+        Canvas.SetTop(glow, -(light - size) / 2);
+        halo.Children.Add(glow);
+        Grid.SetColumnSpan(halo, 2);
+        halo.HorizontalAlignment = HorizontalAlignment.Left;
+        root.Children.Add(halo);
+        var bob = new CompositeTransform();
+        var holder = new Grid { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center, RenderTransform = bob, IsHitTestVisible = false };
+        var crystal = new Crystal(size) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        crystal.SetLevel(HealthLevel, animate: false);
+        holder.Children.Add(crystal);
+        root.Children.Add(holder);
+        if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
         {
-            Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(32), BorderThickness = new Thickness(1),
-            Background = Glass(0.42, tint), BorderBrush = new SolidColorBrush(Alpha(tint, calm ? (byte)0x3A : (byte)0x80)),
-        };
-        // (frosted glass that blurs the picture behind it, a little lighter under the pointer)
-        b.Resources["ButtonBackgroundPointerOver"] = Glass(0.3, tint);
-        b.Resources["ButtonBackgroundPressed"] = Glass(0.55, tint);
-        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Alpha(tint, 0xA0));
+            var float_ = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
+            var up = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0, To = -3, Duration = TimeSpan.FromMilliseconds(1800),
+                EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(up, bob);
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(up, "TranslateY");
+            float_.Children.Add(up);
+            // the light grows and settles slowly, out of step with the bob
+            var grow = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
+            foreach (var axis in new[] { "ScaleX", "ScaleY" })
+            {
+                var s = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0.88, To = 1.1, Duration = TimeSpan.FromMilliseconds(3400),
+                    EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(s, pulse);
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(s, axis);
+                grow.Children.Add(s);
+            }
+            var breathe = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0.75, To = 1, Duration = TimeSpan.FromMilliseconds(3400),
+                EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(breathe, glow);
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(breathe, "Opacity");
+            grow.Children.Add(breathe);
+            holder.Loaded += (_, _) => { float_.Begin(); grow.Begin(); };
+            holder.Unloaded += (_, _) => { float_.Stop(); grow.Stop(); };
+        }
+
+        // the whole thing is the button; only the glass answers the pointer
+        var b = new Button { Content = root, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush"), MaxWidth = 420, CornerRadius = new CornerRadius(0),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        foreach (var key in new[] { "ButtonBackgroundPointerOver", "ButtonBackgroundPressed" }) b.Resources[key] = Res("ApexClearBrush");
+        b.PointerEntered += (_, _) => card.Background = hover;
+        b.PointerExited += (_, _) => card.Background = rest;
+        b.PointerCanceled += (_, _) => card.Background = rest;
         b.Click += (_, _) => Show(HealthScreen);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, HealthTitle() + ". " + T("Open Health"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title + (note.Length > 0 ? ". " + note : "") + ". " + T("Open Health"));
         HandCursor.On(b);
         return b;
     }
