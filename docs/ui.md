@@ -100,7 +100,7 @@ the overlay scales the style by `0.9 * pow(h / 1080, 0.8)` and the text size). N
 
 | Token | Value |
 |---|---|
-| Palette (`violet_theme.h`) | Accent #7F77DD, accent dark #534AB7, accent light #CECBF6, window #0B0C0E, sidebar #08090A, card #131417, border #1B1C20, selected #1C1D22, hover #111215, switch off #303137, text #E8E8EC, muted #8B8C96, warning #E0A84F, error #E8716B, success #7DBE9A |
+| Palette (`violet_theme.h`) | The accent follows Apex Launcher's colour theme: the launcher writes accent, accent dark, accent light, the chosen segment and the main button's gradient and ink to `[ui] theme_*` (lightness 0.62, 0.47, 0.86 and 0.29 in OKLCH, the theme's hue and strength), read before the menu is made; without them Amethyst's #7F77DD, #534AB7, #CECBF6, #2A2650 and a plain #534AB7 main button. The main button is the theme's gradient left to right, its words and icon in the theme's ink, a step lighter under the pointer and darker while held. Surfaces are the launcher's neutral greys: window #050505, sidebar #040404, card #111111, border #1F1F1F, selected #1D1D1D, hover #0F0F0F, switch off #2A2A2A, text #FFFFFF, muted #959595; warning #E0A84F, error #E8716B, success #7DBE9A in every theme |
 | Disabled | Style alpha 0.5 on the whole row |
 | Focus ring | ImGui's nav cursor in accent light, 2 px, rounded like the frame; custom widgets use `InvisibleButton` with `ImGuiButtonFlags_EnableNav` and repaint the cursor above their fills |
 | Control heights | Compact 30 (`kControlCompact`), primary 36 (`kControlPrimary`) for profile saving, capture completion, session start/end and the developer confirmation |

@@ -21,8 +21,8 @@ using VioletTheme::Col;
 // The text in the menu's language (i18n.h): every text a widget draws goes through these
 inline const char* T(const char* s) { return I18n::Tr(s); }
 
-constexpr unsigned kFrameBg = 0x1A1B20;      // the style's FrameBg (segmented track)
-constexpr unsigned kButtonBorder = 0x212228; // secondary button border
+constexpr unsigned kFrameBg = 0x1B1B1B;      // the style's FrameBg (segmented track)
+constexpr unsigned kButtonBorder = 0x232323; // secondary button border
 
 ImU32 U32(unsigned rgb, float alpha = 1.0f) { return ImGui::GetColorU32(Col(rgb, alpha)); }
 
@@ -1246,12 +1246,17 @@ bool DrawButton(const char* label, IconId icon, const char* tooltip, ButtonKind 
         textCol = U32(0xFFFFFF);
         iconCol = U32(0xFFFFFF);
     } else if (kind == ButtonKind::Primary) {
-        const ImVec4 fill = held ? Mix(Col(VioletTheme::kAccentDark), Col(VioletTheme::kAccent), 0.5f) : hovered ? Col(VioletTheme::kAccent) : Col(VioletTheme::kAccentDark);
-        dl->AddRectFilled(p, q, ImGui::GetColorU32(fill), r);
-        textCol = U32(0xFFFFFF);
-        iconCol = U32(0xFFFFFF);
+        // the theme's gradient, left to right (the rounded rectangle's vertices shaded, so the corners stay round); a step
+        // lighter under the pointer, darker while held
+        const float k = held ? -0.14f : hovered ? 0.12f : 0.0f;
+        const auto shade = [&](unsigned rgb) { return ImGui::GetColorU32(k >= 0.0f ? Mix(Col(rgb), Col(0xFFFFFF), k) : Mix(Col(rgb), Col(0x000000), -k)); };
+        const int first = dl->VtxBuffer.Size;
+        dl->AddRectFilled(p, q, IM_COL32_WHITE, r);
+        ImGui::ShadeVertsLinearColorGradientKeepAlpha(dl, first, dl->VtxBuffer.Size, p, ImVec2(q.x, p.y), shade(VioletTheme::kGradientFrom), shade(VioletTheme::kGradientTo));
+        textCol = U32(VioletTheme::kOnGradient);
+        iconCol = U32(VioletTheme::kOnGradient);
     } else {
-        const ImVec4 fill = held ? Col(VioletTheme::kAccentDark, 0.35f) : hovered ? Col(0x222329) : Col(VioletTheme::kSelectedBg);
+        const ImVec4 fill = held ? Col(VioletTheme::kAccentDark, 0.35f) : hovered ? Col(0x242424) : Col(VioletTheme::kSelectedBg);
         dl->AddRectFilled(p, q, ImGui::GetColorU32(fill), r);
         dl->AddRect(p, q, hovered || held ? U32(VioletTheme::kAccent) : U32(kButtonBorder), r, 0, 1.0f);
         textCol = U32(VioletTheme::kText);

@@ -1,7 +1,10 @@
 #pragma once
 // ApexRadiance.toml: Apex Radiance's own configuration, in Documents\...\Apex Radiance\ (never S3SS.toml).
 //   [meta]               version, the build that wrote it, the one-time migration from S3SS.toml, lighting_defaults (apex_lighting_defaults.h)
-//   [ui]                 toggle_key, font_scale, shortcuts and screenshot capture settings, legacy welcome_done/key_chosen, start_profile_done, sidebar_collapsed, changelog_seen, profile_shortcuts
+//   [ui]                 toggle_key, font_scale, shortcuts and screenshot capture settings, legacy welcome_done/key_chosen, start_profile_done, sidebar_collapsed, changelog_seen, profile_shortcuts,
+//                        and Apex Launcher's colour theme for the menu: theme, theme_accent, theme_accent_dark, theme_accent_light, theme_segment_on,
+//                        theme_gradient_from, theme_gradient_to, theme_ink
+//                        (written by the launcher, read before the menu is made, kept as they are on save)
 //   [qol.picture]        Picture filters (same keys as the combined build)
 //   [qol.frame_profiler] Frame Profiler (development build)
 //   [patches.<Name>]     one table per feature: enabled + its settings (same keys as before the split)
