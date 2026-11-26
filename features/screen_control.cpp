@@ -27,6 +27,13 @@
 
 namespace Screen {
 namespace {
+// A figure with `decimals` digits after the menu language's decimal mark ("16,7" in Portuguese)
+std::string LocalNumber(double v, int decimals) {
+    std::string s = std::format("{:.{}f}", v, decimals);
+    ApexUi::LocaleDecimal(s.data());
+    return s;
+}
+
 
 // ---- settings ----
 std::mutex g_lock; // g_settings, the game's request and the device state below
@@ -1006,7 +1013,7 @@ void RenderUI() {
 
     // What the limiter measures: frames per second and how even the frames are
     if (const float fps = g_measuredFps.load(); fps > 0) {
-        const std::string value = I18n::Trf("{} fps, varies by {} ms", std::format("{:.1f}", fps), std::format("{:.2f}", g_measuredSpread.load()));
+        const std::string value = I18n::Trf("{} fps, varies by {} ms", LocalNumber(fps, 1), LocalNumber(g_measuredSpread.load(), 1));
         if (ApexUi::BeginControlRow("Measured", "Frames per second and how much the frame time varies", ImGui::CalcTextSize(value.c_str()).x)) {
             ImGui::AlignTextToFramePadding();
             ApexUi::MutedText(value.c_str());
@@ -1088,7 +1095,7 @@ bool RenderFpsTile() {
     }
     ApexUi::StatusBand(); // (empty here: Game memory draws its bar in it)
     const std::string footer = low > 0 ? I18n::Trf("1% low {} fps \xC2\xB7 varies {} ms \xC2\xB7 {} hitches in 4 min", std::format("{:.0f}", low),
-                                                   std::format("{:.2f}", g_measuredSpread.load()), g_hitches.size())
+                                                   LocalNumber(g_measuredSpread.load(), 1), g_hitches.size())
                                        : std::string();
     ApexUi::StatusFooter(footer);
     // The whole half: click to open the Display page (limit, window mode)

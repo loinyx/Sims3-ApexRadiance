@@ -2379,7 +2379,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
                 for (const auto& f : kFilters) {
                     if (!*f.on) continue;
                     if (!first && ImGui::GetItemRectMax().x + gap + ApexUi::ChipSize(f.name).x <= right) ImGui::SameLine(0.0f, gap);
-                    ApexUi::Chip(f.name, 0xCECBF6); // accent light (violet_theme.h)
+                    ApexUi::Chip(f.name, VioletTheme::kAccentLight); // (follows the theme)
                     first = false;
                 }
             }
@@ -2393,7 +2393,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         int on = 0;
         for (const auto& f : kFilters) on += f.family == index && *f.on ? 1 : 0;
         const std::string label = on ? I18n::Trf("{} ({} on)", I18n::Tr(kFamilies[index]), on) : std::string(I18n::Tr(kFamilies[index]));
-        ApexUi::SectionLabel(label.c_str());
+        ApexUi::GroupLabel(label.c_str());
         familyVisible=ApexUi::BeginCard(kFamilies[index]); familyOpen=true;
     };
     auto card = [&](const char* id, IconId icon, const char* name, const char* what, bool* on, auto&& controls) {
@@ -2607,7 +2607,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
                 ApexUi::EndAdvanced();
             }
         }
-        if (ApexUi::IconTextButton("Open the LUTs folder", IconId::ExternalLink, "Opens Apex Radiance\\LUTs in Explorer (created if needed)")) ShowLutFolder();
+        if (ApexUi::IconTextButton("Open the LUTs folder", IconId::FolderOpen, "Opens Apex Radiance\\LUTs in Explorer (created if needed)")) ShowLutFolder();
     });
 
     family(2);

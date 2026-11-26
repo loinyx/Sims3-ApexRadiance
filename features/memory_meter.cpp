@@ -66,7 +66,11 @@ void SampleNow() {
 // Every figure in whole MB (no decimal point to misread as a thousands separator); 4 GB shows as 4096
 std::string Mb(uint64_t bytes) { return std::to_string((bytes + (1ull << 19)) >> 20); }
 // GB with two decimals, as Sims3SettingsSetter shows it ("1.25"); 4 GB of address space reads "4.00"
-std::string Gb(double bytes) { return std::format("{:.2f}", bytes / 1073741824.0); }
+std::string Gb(double bytes) {
+    std::string s = std::format("{:.2f}", bytes / 1073741824.0);
+    ApexUi::LocaleDecimal(s.data()); // "1,25" where the menu's language writes a comma
+    return s;
+}
 
 } // namespace
 
@@ -126,14 +130,14 @@ bool RenderTile() {
     const float u = ApexUi::Unit();
 
     // What is shown glides to the new value (a sample every 4 s would otherwise jump), and the bar's colour follows the
-    // state: violet while healthy, amber while low, red when critical
+    // state: green while healthy (as its "Healthy" dot; the theme's accent can be a red), amber while low, red when critical
     static float s_used = -1.0f, s_reserved = 0.0f;
-    static ImVec4 s_colour = Col(VioletTheme::kAccent);
+    static ImVec4 s_colour = Col(VioletTheme::kSuccess);
     const float k = 1.0f - std::exp(-ImGui::GetIO().DeltaTime * 8.0f);
     if (s_used < 0.0f) s_used = static_cast<float>(used);
     s_used += (static_cast<float>(used) - s_used) * k;
     s_reserved += (static_cast<float>(reserved) - s_reserved) * k;
-    const ImVec4 target = Col(critical ? VioletTheme::kError : low ? VioletTheme::kWarning : VioletTheme::kAccent);
+    const ImVec4 target = Col(critical ? VioletTheme::kError : low ? VioletTheme::kWarning : VioletTheme::kSuccess);
     s_colour = ImVec4(s_colour.x + (target.x - s_colour.x) * k, s_colour.y + (target.y - s_colour.y) * k, s_colour.z + (target.z - s_colour.z) * k, 1.0f);
 
     const ImVec2 halfMin = ImGui::GetCursorScreenPos();

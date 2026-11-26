@@ -36,6 +36,7 @@ inline constexpr unsigned kCardBg = 0x111111;
 inline constexpr unsigned kCardBorder = 0x1F1F1F;
 inline constexpr unsigned kSelectedBg = 0x1D1D1D;  // selected sidebar item, neutral pills
 inline constexpr unsigned kHoverBg = 0x0F0F0F;
+inline constexpr unsigned kPopupBg = 0x161616; // dialogs, dropdowns, menus and tooltips: one step above a card, opaque
 inline constexpr unsigned kSidebarBg = 0x040404; // the sidebar, a step below the window
 inline constexpr unsigned kToggleOff = 0x2A2A2A;
 inline constexpr unsigned kText = 0xFFFFFF;

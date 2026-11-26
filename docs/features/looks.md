@@ -56,8 +56,7 @@ order with its values, and blends the result over the picture by *Strength*.
 ## Menu
 
 Page **Shaders**, subtitle "ReShade looks and shaders on the game's picture": the feature's switch sits at the right of
-the title line (the undo toast reads "Shaders turned on/off"); tabs *Look* and *Installed shaders*. The sidebar item
-carries a "Beta" chip ([ui.md](../ui.md#layout)). A look is built on the Look tab alone: shaders of packs not on this PC
+the title line (the undo toast reads "Shaders turned on/off"); tabs *Look* and *Installed shaders*. A look is built on the Look tab alone: shaders of packs not on this PC
 are added from *Add shaders* and download as they are added; a download shows its progress in the rows that wait for it,
 on the pack's group in Add shaders, and in the download bar.
 

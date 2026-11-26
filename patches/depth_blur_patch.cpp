@@ -1265,8 +1265,10 @@ class DepthBlurPatch : public ApexPatch {
         changed |= ApexUi::SwitchRow("Glowing lights", &g.p.glowLights, "Lamps stay bright in the blur", kDefaults.glowLights);
 
         ApexUi::CardGroup("Map view");
+        ImGui::BeginDisabled(!MapView::Available()); // (nothing to fade on a game version where map view can't be seen)
         changed |= ApexUi::SwitchRow("Sharp in map view", &g.p.offInMapView, "Fades the blur out in map view so lots stay sharp", kDefaults.offInMapView);
-        if (g.p.offInMapView && !MapView::Available()) ApexUi::IconNote(IconId::Info, "Map view can't be detected on this game version");
+        ImGui::EndDisabled();
+        if (!MapView::Available()) ApexUi::IconNote(IconId::Info, "Map view can't be detected on this game version");
 
         // The rare knob: Strength scales what Blur amount already sets (Quality, the sky, the lamps and the focus speed
         // were here too; they change the look or the cost, so they sit in their groups above)

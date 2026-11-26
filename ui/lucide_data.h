@@ -806,6 +806,13 @@ inline constexpr Element kSettings2[] = {
 inline constexpr Element kPlus[] = {{Kind::Path, "M5 12h14", {}, false}, {Kind::Path, "M12 5v14", {}, false}};
 // minus.svg (Lucide, ISC)
 inline constexpr Element kMinus[] = {{Kind::Path, "M5 12h14", {}, false}};
+// refresh-cw.svg (Lucide, ISC)
+inline constexpr Element kRefreshCw[] = {
+    {Kind::Path, "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", {}, false},
+    {Kind::Path, "M21 3v5h-5", {}, false},
+    {Kind::Path, "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", {}, false},
+    {Kind::Path, "M8 16H3v5", {}, false},
+};
 // package.svg (Lucide, ISC)
 inline constexpr Element kPackage[] = {
     {Kind::Path, "M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z", {}, false},
@@ -962,6 +969,7 @@ inline constexpr IconData kIcons[] = {
     {"grip-vertical", kGripVertical, static_cast<int>(sizeof(kGripVertical) / sizeof(kGripVertical[0]))},
     {"pencil", kPencil, static_cast<int>(sizeof(kPencil) / sizeof(kPencil[0]))},
     {"minus", kMinus, static_cast<int>(sizeof(kMinus) / sizeof(kMinus[0]))},
+    {"refresh-cw", kRefreshCw, static_cast<int>(sizeof(kRefreshCw) / sizeof(kRefreshCw[0]))},
 };
 
 } // namespace ApexUi::LucideData

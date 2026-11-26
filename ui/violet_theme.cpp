@@ -173,7 +173,7 @@ void ApplyStyle(ImGuiStyle& style) {
     style.IndentSpacing = 14.0f;
     style.ScrollbarSize = 8.0f; // thin
     style.GrabMinSize = 12.0f;  // the slider grab (ui/widgets.cpp draws a circle of this diameter)
-    style.DisabledAlpha = 0.5f; // disabled rows dim as a whole
+    style.DisabledAlpha = 0.65f; // disabled rows dim as a whole, still readable (a feature that is off greys its page)
     style.WindowBorderSize = 1.0f;
     style.ChildBorderSize = 1.0f;
     style.PopupBorderSize = 1.0f;
@@ -193,7 +193,7 @@ void ApplyStyle(ImGuiStyle& style) {
     c[ImGuiCol_TextDisabled] = Col(kTextMuted);
     c[ImGuiCol_WindowBg] = Col(kWindowBg);
     c[ImGuiCol_ChildBg] = Col(0, 0.0f); // the sidebar and content areas show the window; cards push their own colour
-    c[ImGuiCol_PopupBg] = Col(kHoverBg, 0.98f);
+    c[ImGuiCol_PopupBg] = Col(kPopupBg); // opaque: the menu behind never shows through
     c[ImGuiCol_Border] = Col(kCardBorder);
     c[ImGuiCol_BorderShadow] = Col(0, 0.0f);
     c[ImGuiCol_FrameBg] = Col(0x1B1B1B);
