@@ -34,10 +34,10 @@ static class InstallTests
         }
         void Data()
         {
-            new LauncherSettings { FixSafeAutomatically = false }.Save();
+            new LauncherSettings { FixWithoutAsking = true }.Save();
             File.WriteAllText(Path.Combine(Paths.Data, "mod-notes.json"), "{\"notes\":1}");
         }
-        bool DataKept() => LauncherSettings.Load().FixSafeAutomatically == false && File.Exists(Path.Combine(Paths.Data, "mod-notes.json"));
+        bool DataKept() => LauncherSettings.Load().FixWithoutAsking && File.Exists(Path.Combine(Paths.Data, "mod-notes.json"));
         bool Gone(params string[] paths)
         {
             for (var i = 0; i < 100 && paths.Any(p => File.Exists(p) || Directory.Exists(p)); i++) Thread.Sleep(200); // (DeleteAfterExit waits about 3 s)

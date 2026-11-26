@@ -227,10 +227,17 @@ public sealed partial class MainWindow
         var (docs, apex) = (Docs, _latest.GetValueOrDefault(Releases.Apex));
         Task<List<Health.Item>> BeforePlay() => _state is { } s ? Task.Run(() => Health.Gather(g, s, docs, apex, beforePlay: true).Where(i => !IsIgnored(i)).ToList()) : Task.FromResult(new List<Health.Item>());
         var found = await BeforePlay();
-        // the fixes that are safe to make without asking (each keeps a copy of the file it changes). Never an administrator
-        // prompt from Play: where the game's folder needs one, they wait on Health. A fix that fails does not stop the start.
-        if (_settings.FixSafeAutomatically && found.Any(i => i.Finding.CanFix) && (Elevation.IsElevated || DryRun || Elevation.CanWrite(g.Bin))
-            && await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); },
+        // the safe fixes (each keeps a copy of the file it changes): offered before the start, made without asking only when
+        // the player chose that in Settings. Never an administrator prompt from Play: where the game's folder needs one, they
+        // wait on Health. A fix that fails does not stop the start.
+        var fix = false;
+        if (found.Where(i => i.Finding.CanFix).ToList() is { Count: > 0 } fixable && (Elevation.IsElevated || DryRun || Elevation.CanWrite(g.Bin)))
+        {
+            if (_settings.FixWithoutAsking) fix = true;
+            else if (await FixesFirst(fixable) is { } yes) fix = yes;
+            else return; // (Cancel)
+        }
+        if (fix && await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); },
                 T("Fixed"), null, "Fix incompatible settings"))
         {
             RefreshGame(); // (starts the full check too)
@@ -757,8 +764,8 @@ public sealed partial class MainWindow
         var installed = Environment.ProcessPath is { } exe && LauncherInstall.IsInstalledCopy(exe);
         host.Children.Add(Toggle("eye-off", T("Hide while playing"), T("The launcher comes back when the game closes"), _settings.HideWhilePlaying,
             on => { _settings.HideWhilePlaying = on; _settings.Save(); }));
-        host.Children.Add(Toggle("shield-check", T("Apply safe fixes without asking"), T("You can undo them in Repair or remove"), _settings.FixSafeAutomatically,
-            on => { _settings.FixSafeAutomatically = on; _settings.Save(); }));
+        host.Children.Add(Toggle("shield-check", T("Apply safe fixes without asking"), T("You can undo them in Repair or remove"), _settings.FixWithoutAsking,
+            on => { _settings.FixWithoutAsking = on; _settings.Save(); }));
         host.Children.Add(Section(T("Updates")));
         host.Children.Add(Toggle("wand-sparkles", T("Install updates when I press Play"), T("The game starts once they are installed"), _settings.InstallUpdatesOnPlay,
             on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
@@ -959,6 +966,23 @@ public sealed partial class MainWindow
     // nothing (true, false, null)
     // Play with updates waiting: each one in a row (its icon, what it is, the version it goes from and to), and the choice of
     // updating first, playing as it is or staying
+    // Play's question when the game's files have safe fixes: true fixes them first, false plays as is, null is Cancel
+    async Task<bool?> FixesFirst(List<Health.Item> fixable)
+    {
+        var body = new StackPanel { Spacing = Design.Space.X4, Width = Design.Dialogs.Medium };
+        body.Children.Add(Design.Dialogs.Words(T("Apex Launcher can fix these before the game starts. Each file keeps a copy you can put back in Repair or remove.")));
+        var list = new StackPanel { Spacing = Design.Space.X2 };
+        foreach (var i in fixable) list.Children.Add(Design.Dialogs.Words("• " + T(i.Finding.Text, i.Finding.Args)));
+        body.Children.Add(list);
+        var r = await ShowDialog(new ContentDialog
+        {
+            Tag = "wrench", Title = T("Fix the game's files first?"), Content = body,
+            PrimaryButtonText = T("Fix and play"), SecondaryButtonText = T("Play without fixing"), CloseButtonText = T("Cancel"),
+            DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
+        });
+        return r == ContentDialogResult.Primary ? true : r == ContentDialogResult.Secondary ? false : null;
+    }
+
     async Task<bool?> UpdatesFirst(List<string> ups)
     {
         var body = new StackPanel { Spacing = Design.Space.X4, Width = Design.Dialogs.Medium };

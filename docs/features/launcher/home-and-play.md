@@ -42,8 +42,9 @@ menus after the main menu has loaded.
    - Updates waiting and *Install updates when I press Play* on: a dialog *N updates install first* with *Update and
      play*, *Play without updating* and *Cancel*. The updates run in the install card, then the game starts.
    - Health runs its before-play checks only (installed files and compatibility, `Health.Gather(beforePlay: true)`).
-     With *Apply safe fixes without asking* on and a game folder the player can write to, the fixable compatibility
-     findings are fixed first. Play never shows an administrator prompt.
+     With a game folder the player can write to, the fixable compatibility findings are offered first (*Fix the game's
+     files first?*: *Fix and play*, *Play without fixing*, *Cancel*), or fixed without the question when *Apply safe
+     fixes without asking* is on. Play never shows an administrator prompt.
    - Still Blocked: *One thing before you play* with *Open Health*, *Play anyway* and *Cancel*.
    - Automatic backups set to *Before playing* run ([Saves and backups](saves-and-backups.md#automatic-backups)), Game
      settings choices waiting for the game's `Options.ini` are applied, and the game starts.

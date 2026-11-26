@@ -1513,9 +1513,9 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Paths.MigrateOldData();
         Check(File.ReadAllText(Path.Combine(Paths.Data, "games.txt")) == lbin && !Directory.Exists(Path.Combine(Paths.LocalAppData, "Apex Radiance Setup")),
             "Setup's remembered games move to the launcher's folder, once");
-        var st = new LauncherSettings { FixSafeAutomatically = false, WelcomedBack = true };
+        var st = new LauncherSettings { FixWithoutAsking = true, WelcomedBack = true };
         st.Save();
-        Check(LauncherSettings.Load() is { FixSafeAutomatically: false, WelcomedBack: true, InstallUpdatesOnPlay: true }, "the launcher's settings read back");
+        Check(LauncherSettings.Load() is { FixWithoutAsking: true, WelcomedBack: true, InstallUpdatesOnPlay: true }, "the launcher's settings read back");
 
         // its own install: shortcuts, the Installed apps entry and the Run value, all removed again
         LauncherInstall.RegistryBase = @"Software\ApexLauncherTest";
