@@ -635,7 +635,7 @@ To remove everything: Windows *Settings › Apps › Installed apps › Apex Lau
 For a first installation, the launcher selects the **RTX Remix Bridge** when the graphics driver supports it; otherwise it selects **DXVK**. Existing installations keep their renderer when updated.
 
 <div align="right">
-  <a href="docs/features/installer.md"><strong>Read the Apex Launcher documentation →</strong></a>
+  <a href="docs/features/launcher/README.md"><strong>Read the Apex Launcher documentation →</strong></a>
 </div>
 
 ### Manual installation
@@ -712,7 +712,7 @@ The [documentation index](docs/README.md) covers feature settings, compatibility
 
 - [Feature documentation](docs/README.md)
 - [Release notes](docs/releases/README.md)
-- [Installation guide](docs/features/installer.md)
+- [Apex Launcher](docs/features/launcher/README.md) and its [components and install](docs/features/installer.md)
 - [RTX Remix Bridge](docs/features/rtx-remix-bridge.md)
 - [Looks and Shaders](docs/features/looks.md)
 - [Screenshots and Video](docs/features/screenshots-and-video.md)

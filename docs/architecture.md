@@ -25,6 +25,7 @@ This page describes the framework as it is in the code. The frozen combined buil
 | Loaded-world gate (menu, start note, screen effects) | [features/world_session.h](../features/world_session.h) | [12](#12-loaded-world-gate-and-start-note) |
 | Report storage | [features/captures.cpp](../features/captures.cpp) | [13](#13-report-storage) |
 | Adding a feature | | [14](#14-how-to-add-a-new-feature) |
+| Apex Launcher (separate program) | [installer/](../installer/) | [16](#16-apex-launcher) |
 
 Game addresses are for `TS3W.exe` Steam 1.67.2.024037 (PE `TimeDateStamp` `0x52DEC247`, image base `0x00400000`, no
 ASLR) unless stated. Other builds are resolved by signature ([engine/game-versions.md](engine/game-versions.md)).
@@ -1081,6 +1082,23 @@ thread and adds no game-memory hook or light polling.
 - The conflict guard is an interface only (section 11.4).
 - The loaded-world gate's behaviour across every loading transition (travel, save load, main menu return) needs in-game
   validation; the mock checks and compilation do not show loading screens.
+
+## 16. Apex Launcher
+
+Apex Launcher is a separate Windows program (C#, WinUI 3, .NET 8) under [installer/](../installer/), not part of the
+ASI. It never hooks the game; it meets Apex Radiance only through files:
+
+- It installs `ApexRadiance.asi`, the ASI loader, the renderer and `ts3wrap.exe` into `Game\Bin`, recording them in
+  `Game\Bin\Apex Radiance backup\setup.json` ([components](features/installer.md)).
+- It reads `ApexRadiance.toml` in the Documents folder the installed ASI uses (section 5.3) for the capture folders
+  ([Gallery](features/launcher/gallery.md)) and writes only `[ui] restart_host` and `[screen] fps_limit`, each in a
+  restore point.
+- It reads Apex Radiance's log and crash report for Health's stability timeline ([Health](features/launcher/health.md)).
+- It starts the game's exe itself, optionally with `-worldFile`; the ASI's [Save name fix](features/save-name-fix.md)
+  keeps such a save's name.
+
+Its own structure (screens, Core logic, data folder, elevation) is described in
+[features/launcher/](features/launcher/README.md); build and tests in [workflow.md](workflow.md#apex-launcher).
 
 ## See also
 

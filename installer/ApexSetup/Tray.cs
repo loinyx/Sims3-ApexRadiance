@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace ApexSetup;
 
 // The launcher's icon in the notification area while the game runs (and when started with Windows): a click opens the
-// window, the menu has Open, Play and Quit. A message-only window of its own receives the icon's clicks.
+// window, the menu has Open Apex Launcher and Quit. A message-only window of its own receives the icon's clicks.
 public sealed partial class Tray : IDisposable
 {
     const int WmApp = 0x8000, WmTray = WmApp + 1, WmLButtonUp = 0x0202, WmRButtonUp = 0x0205, WmCommand = 0x0111;

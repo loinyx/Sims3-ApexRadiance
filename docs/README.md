@@ -30,8 +30,9 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | Document | Covers |
 |---|---|
 | [architecture.md](architecture.md) | Loading, D3D9 hooks, hook registry, post-scene chain, INTZ depth share, patch system, configuration, logger, threads |
-| [workflow.md](workflow.md) | Build, install, testing harnesses, diagnosis with captures, release process, repository skills |
+| [workflow.md](workflow.md) | Build (the ASI and [Apex Launcher](workflow.md#apex-launcher)), install, testing harnesses, diagnosis with captures, release process, repository skills |
 | [ui.md](ui.md) | The Violet menu: pages, cards, widgets, shortcuts, profiles, notices, languages |
+| [features/launcher/](features/launcher/README.md), [launcher-design.md](launcher-design.md) | Apex Launcher, the separate Windows program: its screens, data files, elevation and updates; its design system |
 | [DOCUMENTATION-STANDARD.md](DOCUMENTATION-STANDARD.md) | How to write and update these documents ([templates](templates/)) |
 
 ## Features
@@ -103,7 +104,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 
 | Feature | Status |
 |---|---|
-| [Apex Launcher](features/installer.md) ([design system](launcher-design.md)) (Apex Radiance Setup up to 1.2.x): an optional Windows program that installs, updates, checks, repairs and removes Apex Radiance and the mods it works with, and starts the game with its mods, saves and pictures | Released in 3.1.1; Released in 3.1.2: a welcome for first installs, updates in their own card, renderer cards, the RTX Remix bridge labelled experimental and offered only with Vulkan 1.3; Released in 3.2.1: DXVK and the bridge offered only when the graphics driver has what DXVK needs |; Released in 4.1.0: Apex Launcher 2.0, with Home and Play, Health, Mods, Saves, a Gallery and What's new; Released in 4.1.1: Apex Launcher 2.3, with Game settings, adding files, profiles, merges that stay responsive and Saves cleaning |
+| [Apex Launcher](features/launcher/README.md) (Apex Radiance Setup up to 1.2.x): an optional Windows program that installs, updates, checks, repairs and removes Apex Radiance and the mods it works with, and starts the game with its mods, saves and pictures. Pages: [Home and Play](features/launcher/home-and-play.md), [Components, install and update](features/installer.md), [Game settings](features/launcher/game-settings.md), [Mods](features/launcher/mods.md), [Mod tools](features/launcher/mod-tools.md), [Load order and conflicts](features/launcher/load-order-and-conflicts.md), [Saves and backups](features/launcher/saves-and-backups.md), [Gallery](features/launcher/gallery.md), [Health](features/launcher/health.md), [Settings and What's new](features/launcher/settings.md), [Languages](features/launcher/languages.md), [Uninstall](features/launcher/uninstall.md), [Data folders and files](features/launcher/data-and-files.md), [Elevation](features/launcher/elevation.md), [Self-update](features/launcher/self-update.md), [design system](launcher-design.md) | Released in 3.1.1 (Setup); Released in 4.1.0: Apex Launcher 2.0, with Home and Play, Health, Mods, Saves, a Gallery and What's new; Released in 4.1.1: Apex Launcher 2.3, with Game settings, adding files, profiles, merges edited in one go, save cleaning and backups; In development (branch `release/4.1.2`): Apex Launcher 2.3.1, a Load order page and a health card on Home |
 
 ### Removed
 

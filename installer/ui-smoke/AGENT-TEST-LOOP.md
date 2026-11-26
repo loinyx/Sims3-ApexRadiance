@@ -24,7 +24,7 @@ asks.
 ## 2. Get the build
 
 Either the test build attached to the draft release the maintainer shared (`ApexLauncher.exe`), or build it from the
-pull request branch (`release/4.1.0`):
+pull request branch of the version under test (for example `release/4.1.2`):
 
 ```
 dotnet publish installer/ApexSetup -c Release -o <out>

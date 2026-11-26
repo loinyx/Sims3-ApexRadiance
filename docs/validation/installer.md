@@ -1,24 +1,33 @@
 # Apex Launcher: validation
 
-What Apex Launcher (Apex Radiance Setup up to 1.2.x) must do, stated as checkable properties. The program itself is
-described in [features/installer.md](../features/installer.md).
+What Apex Launcher (Apex Radiance Setup up to 1.2.x) must do, stated as checkable properties. The program is described
+in [features/launcher/](../features/launcher/README.md); its Components screen in
+[features/installer.md](../features/installer.md).
 
 - It changes only what differs from the player's choice, keeps a restore point before every change, and never touches
   saves, mods put in by hand or `Resource.cfg` on removal.
 - It runs as the signed-in user and asks for administrator rights only for a change to a folder or a driver setting the
   user cannot write.
 - Mods turned off, moved, merged, split or renamed keep their files, their notes and a unique place; no file of the
-  player's is lost on a name clash.
+  player's is lost on a name clash. An interrupted merge, save clean or restore is undone or finished at the next start.
+- A save is changed (cleaned, restored, renamed) only after a checked backup or with Undo; backups are removed only by
+  the launcher's own retention rules or by the player, to the Recycle Bin.
 - The Gallery only reads the player's pictures and videos; it writes its own `gallery.json`, and a picture is deleted
   only to the Recycle Bin when the player asks.
+- Game settings write only the values the player changed and can put every file back.
 
 ## Automated tests
 
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
-| `installer/ApexSetup.Tests` | Engine, compatibility checks, restore points, elevation plans, uninstall, self-update, mods (on/off, merge, split, take out, hunt, conflicts, notes), saves, worlds, health, gallery data and folders, translations | `dotnet run --project installer/ApexSetup.Tests` | none |
-| `installer/ui-smoke/Run-UiSmoke.ps1` | Every screen opens in a portable dry run, no launcher left running | `Run-UiSmoke.ps1` | the published exe |
-| `installer/ui-smoke/Run-ModsHarness.ps1` | Mods screen actions against a fake Documents folder | `Run-ModsHarness.ps1` | the published exe |
+| `installer/ApexSetup.Tests` | `Program.cs`: the install engine on a fake `Game\Bin` and Documents in `%TEMP%` (scan, components, renderer choice, check installation, compatibility fixes, restore points, elevation plans, uninstall, self-update, frame generation, translations). Then one file per area: `ModConflictsTests`, `ModInspectTests`, `DefaultReplacementsTests`, `ModKindsTests` (packages and conflicts), `ModMergeTests`, `MergeDraftTests` (merge, split, take out, recovery), `ModAddTests`, `ModToolsTests` (adding files, folders, duplicates, the problem-mod hunt), `ModProfilesTests`, `ModFindTests` (Find custom content, caches), `HealthTests`, `GameSettingsTests`, `SavesTests` (saves, cleaning, backups), `GalleryTests`, `InstallTests` (installed and portable modes in a temporary profile), `DesignTests` (design system rules read from the source) | `dotnet run --project installer/ApexSetup.Tests -c Release`; prints `ok` or `FAIL` per check and exits non-zero on a failure | .NET 8 SDK; no game, no network |
+| `installer/ui-smoke/Run-UiSmoke.ps1` | Starts the published exe in a dry run (`APEX_SETUP_DRY_RUN=1`, portable, nothing written to the game or drivers) and drives every screen's controls through UI Automation: switches, renderer and frame limit lists, Apply, Done, Repair or remove, the licences, all 21 languages, a narrow and a wide window. After each step it checks the launcher still runs and its log has no new error but the dry run's refusals. Puts `language.txt` back | `powershell -ExecutionPolicy Bypass -File installer\ui-smoke\Run-UiSmoke.ps1 -Exe installer\publish\ApexLauncher.exe -Game "<game folder>" [-FakeNv ...] [-FakeAmd ...] [-Runs 3] [-Quick] [-Shots <folder>]`; `-Quick` skips the language cycle; exit code = failed steps | The published exe, a game folder (read only), Windows UI Automation |
+| `installer/ui-smoke/Run-ModsHarness.ps1` | Mods screen actions against a sandbox (a temporary Documents folder with copies of a few packages and its own data folder), each checked on disk and captured: turn off and on, a tag, notes, rename and undo, merge and split, start and stop a problem-mod hunt, a new folder, *Open with* from a second launcher, removal to the Recycle Bin | `powershell -File installer\ui-smoke\Run-ModsHarness.ps1 -Exe <ApexLauncher.exe> -Game "<game folder>" -Packages <folder of at least four .package files> [-Out <folder>]`; prints steps, failures and captures | The published exe; the game closed |
+
+Optional read-only runs over real files: `APEX_HEALTH_REAL=1` with `APEX_HEALTH_GAME=<game folder>` (Health and Game
+settings), `APEX_FIND_GAME=<game folder>` (Find custom content), `APEX_SAVES_REAL=<a copy of a Saves folder>` (saves,
+copied before use). The layout tour (`APEX_LAUNCHER_AUDIT` with `APEX_LAUNCHER_AUDIT_TOUR`) records texts cut short and
+controls past the window's edge at several window sizes. Build commands are in [workflow.md](../workflow.md#apex-launcher).
 
 ## Latest results
 
@@ -62,7 +71,7 @@ described in [features/installer.md](../features/installer.md).
 2. A game under `C:\Program Files`: install, update and remove a component. **Expected:** one administrator prompt
    per change; the change and its restore point as with Setup.
 3. Play from Home with *Hide while playing* on. **Expected:** the game starts, the launcher waits in the notification
-   area and comes back when the game closes; a crash offers *Start again into this save*.
+   area and comes back when the game closes; a crash offers *Open this save again*.
 4. *Uninstall* from Windows' *Installed apps*. **Expected:** Apex's files leave every known game; saves, mods put in by
    hand and `Resource.cfg` stay; the launcher's shortcuts, data and exe are gone.
 5. Change Windows between light and dark with the launcher open. **Expected:** the launcher follows at once.
@@ -82,8 +91,8 @@ described in [features/installer.md](../features/installer.md).
 - The merge, split and cache tests fail now and then on this PC and pass on a rerun.
 - Dragging a picture onto another to make or join an album, with a real mouse.
 - The texts new in 4.1.0 in the 19 languages other than English and Portuguese.
-- Home (2.0.10): *Continue* opening the game into the save shown (`-worldFile`), a save picked from *Another save* with a
-  real click, and the crash or low-memory state with *Start again into this save*.
+- Home: a save's Play opening the game into that save (`-worldFile`) with a real click, and the crash or low-memory
+  state with *Open this save again*.
 - The Acrylic and stronger Mica window backgrounds.
 - In game: a save restored from a backup, a cleaned save, a package merged by 2.3, the Game settings values, and which of two packages of one folder is in
   use.
