@@ -58,6 +58,7 @@ skill (`.claude/skills`, `.agents/skills`) is the checklist for designing and re
 | `Parts.Card`, `Title`, `TitleText`, `Heading` | a card in a panel, its title and line, a section's heading |
 | `Parts.Chip` | what something is; amber only for what has to be seen |
 | `Parts.QuietField` | a value that can be typed over |
+| `Parts.SearchField` | a search in a dialog or panel: the search icon inside, one border that takes the accent on focus (as the Mods page's search) |
 
 What is pressed takes `Fill`, `FillOver` and `FillDown`, and `Clear` at rest with no fill: one ink at four strengths, so a fade never
 flashes. `DesignSystem.Into` gives them to every button, box and field; a screen does not set them.

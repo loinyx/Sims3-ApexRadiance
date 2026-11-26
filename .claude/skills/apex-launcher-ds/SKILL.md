@@ -62,6 +62,7 @@ to before designing. This skill is the checklist on top of it: the rules that ke
 | A card, its title, a heading | `Parts.Card`, `Parts.Title`, `Parts.Heading` |
 | A tag of what something is | `Parts.Chip`; chips in a row are the same height |
 | A value typed over in place | `Parts.QuietField` |
+| A search field in a dialog or panel | `Parts.SearchField` |
 | A menu or popup | `Parts.Pop`, `Parts.PopCard`, `Parts.Sideways` |
 | An empty page or list | `Empty`, `EmptyPlace` (icon and one line) |
 | A message after an action | `SetInfo` / the floating result in Mods and Saves; offer Undo when possible |

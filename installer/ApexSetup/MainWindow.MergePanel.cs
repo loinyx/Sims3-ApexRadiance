@@ -494,56 +494,111 @@ public sealed partial class MainWindow
         ToMergeList();
     }
 
-    // other mods that can go in: packages of the player's that are on, found by name or folder
+    // other mods that can go in: packages of the player's that are on. The list starts with the merge's own folder (the
+    // mods it was made from sit there), with All mods one click away; search by name or folder; Select all or Ctrl+A
+    // takes every mod shown
     async Task AddToMergeAsync(ModRow r)
     {
         if (_draft is not { } draft) return;
         var all = _modRows.Where(x => Mine(x) && x.File.Enabled && !ReferenceEquals(x, r) && !draft.Items.Any(i => Same(i.With ?? i.Added, x.File)))
             .OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var folder = r.File.Folder;
+        bool Here(ModRow x) => x.File.Folder.Equals(folder, StringComparison.OrdinalIgnoreCase);
+        var scoped = all.Any(Here) && all.Any(x => !Here(x)); // (the switch only when it changes what is listed)
+        var onlyHere = all.Any(Here);
         var chosen = new HashSet<ModRow>();
         var search = new TextBox { PlaceholderText = T("Search mods") };
-        AutomationProperties.SetName(search, T("Search mods"));
-        var list = new ListView { ItemTemplate = EmptyCell(), SelectionMode = ListViewSelectionMode.Multiple, Height = 340, Padding = new Thickness(0) };
+        var list = new ListView { ItemTemplate = EmptyCell(), SelectionMode = ListViewSelectionMode.Multiple, Height = 320, Padding = new Thickness(0, Design.Space.X1, 0, Design.Space.X1) };
         AutomationProperties.SetName(list, T("Add mods to this merge"));
         list.ContainerContentChanging += (_, a) =>
         {
             if (a.InRecycleQueue || a.Item is not ModRow x || a.ItemContainer.ContentTemplateRoot is not Grid g) return;
             a.ItemContainer.HorizontalContentAlignment = HorizontalAlignment.Stretch;
             g.Children.Clear();
-            g.ColumnSpacing = 10;
-            if (g.ColumnDefinitions.Count == 0) foreach (var w in new[] { new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-            var words = new StackPanel { Spacing = 1, Padding = new Thickness(0, 6, 0, 6) };
-            words.Children.Add(new TextBlock { Text = x.Name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
-            words.Children.Add(new TextBlock { Text = ModRow.Place(x.File), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+            g.ColumnSpacing = Design.Space.X3;
+            if (g.ColumnDefinitions.Count == 0) foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+            var tile = Design.IconTile.Of(x.KindIcon, Design.Size.ControlSmall);
+            tile.VerticalAlignment = VerticalAlignment.Center;
+            g.Children.Add(tile);
+            var words = new StackPanel { Spacing = 2, Padding = new Thickness(0, Design.Space.X2, 0, Design.Space.X2), VerticalAlignment = VerticalAlignment.Center };
+            words.Children.Add(new TextBlock { Text = x.Name, FontSize = Design.TextSize.Body, TextTrimming = TextTrimming.CharacterEllipsis });
+            // (in the folder's own list every row would repeat the folder: what the mod is instead)
+            words.Children.Add(new TextBlock { Text = onlyHere ? x.Kind : ModRow.Place(x.File), FontSize = Design.TextSize.Caption, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+            Grid.SetColumn(words, 1);
             g.Children.Add(words);
-            var size = new TextBlock { Text = x.Size, FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(size, 1);
+            var size = new TextBlock { Text = x.Size, FontSize = Design.TextSize.Caption, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(size, 2);
             g.Children.Add(size);
             AutomationProperties.SetName(a.ItemContainer, $"{x.Name}, {ModRow.Place(x.File)}, {x.Size}");
+            HandCursor.On(a.ItemContainer);
             a.Handled = true;
         };
-        var none = Muted(T("No mod can be added to this merge."));
-        var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
-        body.Children.Add(search);
-        body.Children.Add(list);
+        // the list in a card, as every list of the launcher; Select all and the count above it
+        var listCard = Design.Parts.Card(list);
+        var selectAll = new CheckBox { Content = T("Select all"), MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
+        var count = new TextBlock { FontSize = Design.TextSize.Small, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
+        var bar = new Grid { Margin = new Thickness(Design.Space.X4, 0, Design.Space.X3, 0) }; // (its box over the rows' boxes, the count over their sizes)
+        bar.ColumnDefinitions.Add(new ColumnDefinition());
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bar.Children.Add(selectAll);
+        Grid.SetColumn(count, 1);
+        bar.Children.Add(count);
+        var none = EmptyPlace("search", T("No mod can be added to this merge."));
+        var body = new StackPanel { Spacing = Design.Space.X3, Width = Design.Dialogs.Medium };
+        body.Children.Add(Design.Parts.SearchField(search, T("Search mods")));
+        body.Children.Add(bar);
+        body.Children.Add(listCard);
         body.Children.Add(none);
         var dlg = new ContentDialog { Tag = "plus", Title = T("Add mods to this merge"), Content = body, PrimaryButtonText = T("Add"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, IsPrimaryButtonEnabled = false, XamlRoot = Content.XamlRoot };
+        if (scoped)
+            body.Children.Insert(1, new Design.Segmented([("folder", ModRow.Place(r.File)), ("layers", T("All mods"))], 0, n => { onlyHere = n == 0; Fill(); }, fill: true));
         List<ModRow> shown = [];
+        var filling = false;
+        void Counted()
+        {
+            count.Text = chosen.Count == 0 ? "" : chosen.Count == 1 ? T("1 selected") : T("{0} selected", chosen.Count);
+            dlg.IsPrimaryButtonEnabled = chosen.Count > 0;
+            filling = true;
+            selectAll.IsChecked = shown.Count > 0 && shown.All(chosen.Contains) ? true : shown.Any(chosen.Contains) ? null : false;
+            filling = false;
+        }
         list.SelectionChanged += (_, e) =>
         {
+            if (filling) return;
             foreach (var x in e.AddedItems.OfType<ModRow>()) chosen.Add(x);
             foreach (var x in e.RemovedItems.OfType<ModRow>().Where(shown.Contains)) chosen.Remove(x); // (one a search took away stays chosen)
-            dlg.IsPrimaryButtonEnabled = chosen.Count > 0;
+            Counted();
         };
         void Fill()
         {
             var q = search.Text.Trim();
-            shown = all.Where(x => q.Length == 0 || (x.Name + " " + ModRow.Place(x.File)).Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
-            var keep = shown.Where(chosen.Contains).ToList();
+            shown = all.Where(x => (!onlyHere || Here(x)) && (q.Length == 0 || (x.Name + " " + ModRow.Place(x.File)).Contains(q, StringComparison.CurrentCultureIgnoreCase))).ToList();
+            filling = true;
             list.ItemsSource = shown;
-            foreach (var x in keep) list.SelectedItems.Add(x);
-            none.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var x in shown.Where(chosen.Contains)) list.SelectedItems.Add(x);
+            filling = false;
+            (listCard.Visibility, none.Visibility) = shown.Count == 0 ? (Visibility.Collapsed, Visibility.Visible) : (Visibility.Visible, Visibility.Collapsed);
+            bar.Visibility = listCard.Visibility;
+            Counted();
         }
+        void All(bool on)
+        {
+            if (on) { foreach (var x in shown) chosen.Add(x); list.SelectAll(); }
+            else { foreach (var x in shown) chosen.Remove(x); list.SelectedItems.Clear(); }
+            Counted();
+        }
+        selectAll.Click += (_, _) => All(selectAll.IsChecked != false);
+        // Ctrl+A takes every mod shown, also from the search field (where it would only select the words)
+        var ctrlA = new KeyboardAccelerator { Key = Windows.System.VirtualKey.A, Modifiers = Windows.System.VirtualKeyModifiers.Control };
+        ctrlA.Invoked += (_, e) => { All(true); e.Handled = true; };
+        body.KeyboardAccelerators.Add(ctrlA);
+        body.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
+        search.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != Windows.System.VirtualKey.A || !Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) return;
+            All(true);
+            e.Handled = true;
+        };
         search.TextChanged += (_, _) => Fill();
         Fill();
         if (await ShowDialog(dlg) != ContentDialogResult.Primary || !ReferenceEquals(draft, _draft)) return;

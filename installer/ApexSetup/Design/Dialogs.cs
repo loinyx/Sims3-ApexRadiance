@@ -26,7 +26,10 @@ public static class Dialogs
             body.Width = width = Math.Clamp(Math.Max(body.MinWidth, double.IsInfinity(body.MaxWidth) ? Small : body.MaxWidth), Small, Small);
             if (body.MaxWidth < Small) body.MaxWidth = Small;
         }
-        (d.Resources["ContentDialogMinWidth"], d.Resources["ContentDialogMaxWidth"], d.Resources["ContentDialogMaxHeight"]) = (Math.Min(width + 50, 320), width + 50, 900.0);
+        // (the body's width, its padding on both sides, the dialog's 1-unit border on both sides and 2 units the template's scroller
+        // keeps: with less, a field's or card's right border at the body's edge was cut)
+        var outer = width + 2 * Space.X6 + 4;
+        (d.Resources["ContentDialogMinWidth"], d.Resources["ContentDialogMaxWidth"], d.Resources["ContentDialogMaxHeight"]) = (Math.Min(outer, 320), outer, 900.0);
         (d.Resources["ContentDialogPadding"], d.Resources["ContentDialogTitleMargin"]) = (new Thickness(Space.X6), new Thickness(0, 0, 0, Space.X4));
         Title(d, icon);
         // (some change their title while they are open)
