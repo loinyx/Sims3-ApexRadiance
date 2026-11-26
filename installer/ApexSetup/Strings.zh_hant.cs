@@ -1363,7 +1363,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "壓縮檔內的檔案無法拖放到這裡。請加入壓縮檔，或先解壓縮。",
         ["From {0}."] = "來自 {0}。",
         ["Game worlds"] = "遊戲世界",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "請用 The Sims 3 內建的啟動器安裝：按兩下該檔案。",
         ["There is no mod, Sim, lot or world in it."] = "其中沒有模組、模擬市民、地段或世界。",
         ["Keep both"] = "都保留",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "不是模組檔案。請加入套件、模擬市民、地段、世界或它們的壓縮檔。",
@@ -2140,5 +2139,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "存檔檔案中的殘留",
         ["Always"] = "一律",
         ["Disk space"] = "磁碟空間",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "地段、世界和模擬市民需透過遊戲內建的啟動器安裝：按兩下該檔案。",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "無法開啟此 Sims3Pack。它可能已損毀或未下載完整。",
+        ["From a Sims3Pack"] = "來自 Sims3Pack",
     };
 }

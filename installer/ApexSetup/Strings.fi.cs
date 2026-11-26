@@ -1385,7 +1385,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "Arkiston sisällä olevia tiedostoja ei voi pudottaa tähän. Lisää arkisto tai pura se ensin.",
         ["From {0}."] = "Lähde: {0}.",
         ["Game worlds"] = "Pelin maailmat",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "Asenna se The Sims 3:n omalla käynnistimellä: kaksoisnapsauta tiedostoa.",
         ["There is no mod, Sim, lot or world in it."] = "Siinä ei ole modia, simiä, tonttia eikä maailmaa.",
         ["Keep both"] = "Pidä molemmat",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "Ei modi-tiedosto. Lisää paketteja, simejä, tontteja, maailmoja tai niiden arkistoja.",
@@ -2162,5 +2161,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "Jäänteet tallennuksen tiedostoissa",
         ["Always"] = "Aina",
         ["Disk space"] = "Levytila",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "Tontit, maailmat ja Simit asennetaan pelin omalla launcherilla: kaksoisnapsauta tiedostoa.",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "Sims3Packia ei voi avata. Se voi olla vioittunut tai ladattu vain osittain.",
+        ["From a Sims3Pack"] = "Sims3Packista",
     };
 }

@@ -1387,7 +1387,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "アーカイブ内のファイルはここにドロップできません。アーカイブを追加するか、先に展開してください。",
         ["From {0}."] = "{0} から。",
         ["Game worlds"] = "ゲームのワールド",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "The Sims 3 本体のランチャーでインストールしてください。ファイルをダブルクリックします。",
         ["There is no mod, Sim, lot or world in it."] = "Mod、シム、区画、ワールドが含まれていません。",
         ["Keep both"] = "両方残す",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "Mod のファイルではありません。パッケージ、シム、区画、ワールド、またはそれらのアーカイブを追加してください。",
@@ -2164,5 +2163,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "セーブのファイル内の残りもの",
         ["Always"] = "常に",
         ["Disk space"] = "ディスク容量",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "区画、ワールド、シムはゲーム付属のランチャーで入れます。ファイルをダブルクリックしてください。",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "Sims3Pack を開けません。壊れているか、ダウンロードが途中までの可能性があります。",
+        ["From a Sims3Pack"] = "Sims3Pack から",
     };
 }

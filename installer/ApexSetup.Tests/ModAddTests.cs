@@ -161,10 +161,27 @@ static class ModAddTests
             {
                 string P(string n) => add.Items.SingleOrDefault(i => i.Name == n) is { } i ? i.Problem ?? "ok" : "gone";
                 check(P("readme.txt") == "gone" && P("pic.png") == "gone" && P("._x.package") == "gone" && P("setup.exe").StartsWith("This is a program") && P("plug.asi").StartsWith("This is a program")
-                    && P("house.Sims3Pack").StartsWith("Install it with") && P("in.package") == "ok" && P("two.package") == "ok" && P("three.zip").Contains("too many others") && P("out.sim") == "ok"
+                    && P("house.Sims3Pack").StartsWith("The Sims3Pack can't be opened") && P("in.package") == "ok" && P("two.package") == "ok" && P("three.zip").Contains("too many others") && P("out.sim") == "ok"
                     && add.Items.Where(i => i.Ok).All(i => i.Archive == "pack.zip" && Path.GetFileName(Path.GetDirectoryName(i.File)!).StartsWith("apex-add-")),
                     "add: a zip in a zip is opened and no deeper, programs and the game's packs are told, the rest is passed over | " + string.Join(" | ", add.Items.Select(i => i.Name + "=" + (i.Problem ?? "ok"))));
             }
+            // a Sims3Pack: its custom content comes out as packages named after their items, a store item's protected package
+            // readable; a lot inside is told to go through the game's launcher, and the same pack in a zip is opened too
+            var hair = Pkg((Xml, 71, "hair"), (0x73E93EEB, 72, "<?xml version=\"1.0\"?><manifest><PackageTitle>Long Wavy: Hair</PackageTitle></manifest>"));
+            var store = Pkg((Xml, 73, "store chair"), (Xml, 74, "store chair 2"));
+            var storeWas = (byte[])store.Clone();
+            "DBPP"u8.CopyTo(store); Array.Fill(store, (byte)0x5A, 4, 92);
+            var pack = Put("Set.Sims3Pack", Sims3PackOf("My Set", ("0xaa.package", "caspart", hair), ("0xbb.package", "object", store), ("0xcc.package", "lot", Pkg((Lot, 75, "lot"))), ("x.png", "unknown", [1, 2])));
+            using (var add = Open(pack, Zip("packs.zip", ("in/Set.Sims3Pack", File.ReadAllBytes(pack)))))
+            {
+                string P(string n) => string.Join(",", add.Items.Where(i => i.Name == n).Select(i => i.Problem ?? (i.FromPack ? "pack" : "ok")));
+                var chair = add.Items.First(i => i.Name == "My Set.package" && i.Ok);
+                check(P("Long Wavy Hair.package") == "pack,pack" && P("My Set.package") == "pack,pack" && P("My Set").StartsWith("Lots, worlds and Sims")
+                    && add.Items.Count(i => i.Ok) == 4 && add.Items.Where(i => i.Ok).All(i => i.Archive == "Set.Sims3Pack")
+                    && File.ReadAllBytes(chair.File).AsSpan(96).SequenceEqual(storeWas.AsSpan(96)) && Dbpf.Index(chair.File).Count == 2,
+                    "add: a Sims3Pack's custom content comes out as named packages, a protected one readable, its lot is told | " + string.Join(" | ", add.Items.Select(i => i.Name + "=" + (i.Problem ?? "ok"))));
+            }
+
             // what comes out of one archive is limited, nested ones together, and none of a refused archive goes in
             ModAdd.MaxBytes = 100_000;
             var big = new byte[90_000];
@@ -274,6 +291,20 @@ static class ModAddTests
         using var p = System.Diagnostics.Process.Start(psi)!;
         p.WaitForExit(60_000);
         return p.HasExited && p.ExitCode == 0;
+    }
+
+    // a Sims3Pack as the game exports one: "TS3Pack", its XML list, then the files one after another
+    static byte[] Sims3PackOf(string title, params (string Name, string Type, byte[] Data)[] files)
+    {
+        var xml = new StringBuilder($"<?xml version=\"1.0\" encoding=\"utf-8\"?><Sims3Package Type=\"lot\"><DisplayName>{title}</DisplayName>");
+        long at = 0;
+        foreach (var f in files) { xml.Append($"<PackagedFile><Name>{f.Name}</Name><Length>{f.Data.Length}</Length><Offset>{at}</Offset><ContentType>{f.Type}</ContentType></PackagedFile>"); at += f.Data.Length; }
+        var head = Encoding.UTF8.GetBytes(xml.Append("</Sims3Package>").ToString());
+        using var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        w.Write(7); w.Write("TS3Pack"u8.ToArray()); w.Write((ushort)0x0101); w.Write(head.Length); w.Write(head);
+        foreach (var f in files) w.Write(f.Data);
+        return ms.ToArray();
     }
 
     // a small DBPF 2.0 package, as the game writes it (header, data, index with no constant fields)

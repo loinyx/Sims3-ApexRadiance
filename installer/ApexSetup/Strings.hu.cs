@@ -1397,7 +1397,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "Az archívumon belüli fájlok nem ejthetők ide. Add hozzá az archívumot, vagy előbb csomagold ki.",
         ["From {0}."] = "Innen: {0}.",
         ["Game worlds"] = "Játékvilágok",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "Telepítsd a The Sims 3 saját indítójával: kattints duplán a fájlra.",
         ["There is no mod, Sim, lot or world in it."] = "Nincs benne mod, Sim, telek vagy világ.",
         ["Keep both"] = "Mindkettő megtartása",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "Nem modfájl. Csomagokat, Simeket, telkeket, világokat vagy ezek archívumait add hozzá.",
@@ -2174,5 +2173,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "Maradékok a mentés fájljaiban",
         ["Always"] = "Mindig",
         ["Disk space"] = "Lemezterület",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "A telkek, világok és simek a játék saját launcherével kerülnek a játékba: kattints duplán a fájlra.",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "A Sims3Pack nem nyitható meg. Lehet, hogy sérült, vagy csak részben töltődött le.",
+        ["From a Sims3Pack"] = "Sims3Packból",
     };
 }

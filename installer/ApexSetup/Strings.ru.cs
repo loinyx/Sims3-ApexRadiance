@@ -1383,7 +1383,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "Файлы из архива сюда не перетащить. Добавьте архив или сначала распакуйте его.",
         ["From {0}."] = "Из {0}.",
         ["Game worlds"] = "Миры игры",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "Установите его через лаунчер The Sims 3: дважды нажмите файл.",
         ["There is no mod, Sim, lot or world in it."] = "В нём нет ни мода, ни сима, ни участка, ни мира.",
         ["Keep both"] = "Оставить оба",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "Это не файл мода. Добавляйте пакеты, симов, участки, миры или их архивы.",
@@ -2160,5 +2159,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "Остатки в файлах сохранения",
         ["Always"] = "Всегда",
         ["Disk space"] = "Место на диске",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "Участки, миры и симы попадают в игру через её собственный лаунчер: дважды щёлкните файл.",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "Не удаётся открыть Sims3Pack. Возможно, он повреждён или скачан не полностью.",
+        ["From a Sims3Pack"] = "Из Sims3Pack",
     };
 }

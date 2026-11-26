@@ -1363,7 +1363,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "วางไฟล์ในไฟล์บีบอัดที่นี่ไม่ได้ เพิ่มไฟล์บีบอัด หรือแตกไฟล์ก่อน",
         ["From {0}."] = "จาก {0}",
         ["Game worlds"] = "โลกของเกม",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "ติดตั้งด้วยลอนเชอร์ของ The Sims 3 เอง: ดับเบิลคลิกที่ไฟล์",
         ["There is no mod, Sim, lot or world in it."] = "ไม่มีม็อด ซิม ล็อต หรือโลกอยู่ข้างใน",
         ["Keep both"] = "เก็บทั้งสอง",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "ไม่ใช่ไฟล์ม็อด เพิ่มแพ็กเกจ ซิม ล็อต โลก หรือไฟล์บีบอัดของสิ่งเหล่านี้",
@@ -2140,5 +2139,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "ส่วนที่เหลือค้างในไฟล์ของเซฟ",
         ["Always"] = "เสมอ",
         ["Disk space"] = "พื้นที่ดิสก์",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "ที่ดิน โลก และซิมส์ต้องติดตั้งผ่านตัวเปิดของเกมเอง: ดับเบิลคลิกที่ไฟล์",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "เปิด Sims3Pack ไม่ได้ ไฟล์อาจเสียหายหรือดาวน์โหลดมาไม่ครบ",
+        ["From a Sims3Pack"] = "จาก Sims3Pack",
     };
 }

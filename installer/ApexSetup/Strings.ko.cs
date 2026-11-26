@@ -1385,7 +1385,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "압축 파일 안의 파일은 여기에 놓을 수 없어요. 압축 파일을 추가하거나 먼저 압축을 푸세요.",
         ["From {0}."] = "{0}에서 가져옴.",
         ["Game worlds"] = "게임 월드",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "The Sims 3 자체 런처로 설치하세요. 파일을 더블클릭하면 돼요.",
         ["There is no mod, Sim, lot or world in it."] = "모드, 심, 부지, 월드가 하나도 없어요.",
         ["Keep both"] = "둘 다 유지",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "모드 파일이 아니에요. 패키지, 심, 부지, 월드 또는 그 압축 파일을 추가하세요.",
@@ -2162,5 +2161,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "저장 파일 안에 남은 데이터",
         ["Always"] = "항상",
         ["Disk space"] = "디스크 공간",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "부지, 월드, 심은 게임 자체 런처로 설치합니다. 파일을 두 번 클릭하세요.",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "Sims3Pack을 열 수 없습니다. 손상되었거나 일부만 다운로드되었을 수 있습니다.",
+        ["From a Sims3Pack"] = "Sims3Pack에서",
     };
 }

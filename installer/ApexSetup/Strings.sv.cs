@@ -1393,7 +1393,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "Filer inuti ett arkiv kan inte släppas här. Lägg till arkivet eller packa upp det först.",
         ["From {0}."] = "Från {0}.",
         ["Game worlds"] = "Spelvärldar",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "Installera med The Sims 3:s eget startprogram: dubbelklicka på filen.",
         ["There is no mod, Sim, lot or world in it."] = "Det finns ingen mod, sim, tomt eller värld i den.",
         ["Keep both"] = "Behåll båda",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "Inte en modfil. Lägg till paket, simmar, tomter, världar eller arkiv med dem.",
@@ -2170,5 +2169,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "Rester i sparfilens filer",
         ["Always"] = "Alltid",
         ["Disk space"] = "Diskutrymme",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "Tomter, världar och simmar kommer in i spelet via spelets egen launcher: dubbelklicka på filen.",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "Sims3Pack-filen går inte att öppna. Den kan vara skadad eller bara delvis nedladdad.",
+        ["From a Sims3Pack"] = "Från en Sims3Pack",
     };
 }

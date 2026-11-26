@@ -178,7 +178,7 @@ public sealed partial class MainWindow
             AddPlace.Worlds => T("World"),
             _ => ModRow.KindName(i.Kind),
         };
-        return kind + " · " + (i.Place == AddPlace.Worlds && ModAdd.WorldsNeedAdmin(_game!) ? T("Windows asks for permission") : ModRow.SizeText(i.Size));
+        return kind + " · " + (i.Place == AddPlace.Worlds && ModAdd.WorldsNeedAdmin(_game!) ? T("Windows asks for permission") : ModRow.SizeText(i.Size)) + (i.FromPack ? " · " + T("From a Sims3Pack") : "");
     }
 
     FrameworkElement AddRow(AddItem i, ModAdd add, bool narrow, Action changed)

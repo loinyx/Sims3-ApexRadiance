@@ -1396,7 +1396,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "Αρχεία μέσα σε αρχείο συμπίεσης δεν μπορούν να αφεθούν εδώ. Πρόσθεσε το αρχείο συμπίεσης ή κάνε πρώτα αποσυμπίεση.",
         ["From {0}."] = "Από {0}.",
         ["Game worlds"] = "Κόσμοι του παιχνιδιού",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "Εγκατάστησέ το με το δικό του launcher του The Sims 3: κάνε διπλό κλικ στο αρχείο.",
         ["There is no mod, Sim, lot or world in it."] = "Δεν υπάρχει mod, Sim, οικόπεδο ή κόσμος μέσα του.",
         ["Keep both"] = "Κράτα και τα δύο",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "Δεν είναι αρχείο mod. Πρόσθεσε πακέτα, Sims, οικόπεδα, κόσμους ή αρχεία συμπίεσης με αυτά.",
@@ -2173,5 +2172,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "Υπολείμματα μέσα στα αρχεία της αποθήκευσης",
         ["Always"] = "Πάντα",
         ["Disk space"] = "Χώρος στον δίσκο",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "Οικόπεδα, κόσμοι και Sims μπαίνουν στο παιχνίδι από τον δικό του launcher: κάντε διπλό κλικ στο αρχείο.",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "Το Sims3Pack δεν ανοίγει. Ίσως είναι κατεστραμμένο ή κατέβηκε μόνο εν μέρει.",
+        ["From a Sims3Pack"] = "Από Sims3Pack",
     };
 }

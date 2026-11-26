@@ -19,12 +19,12 @@ public static partial class LauncherInstall
     const string Key = "ApexLauncher", Name = "Apex Launcher";
     static string UninstallKey => RegistryBase + @"\Uninstall\" + Key;
     static string RunKey => RegistryBase + @"\Run";
-    // "Open with" for mods: the launcher is offered for .package files, never made their default. Settable for tests.
+    // "Open with" for mods: the launcher is offered for .package and .sims3pack files, never made their default. Settable for tests.
     public static string ClassesBase = @"Software\Classes";
     const string ProgId = "ApexLauncher.Mod";
-    static readonly string[] OpenTypes = [".package"];
+    static readonly string[] OpenTypes = [".package", ".sims3pack"];
     // (offered by earlier builds: taken back on the next registration and on uninstall)
-    static readonly string[] DroppedTypes = [".sims3pack"];
+    static readonly string[] DroppedTypes = [];
     static string AppKey => ClassesBase + @"\Applications\ApexLauncher.exe";
     public static string StartMenuLink => Path.Combine(StartMenuDir, Name + ".lnk");
     public static string DesktopLink => Path.Combine(DesktopDir, Name + ".lnk");

@@ -1393,7 +1393,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "Arquivos de dentro de um arquivo compactado não podem ser soltos aqui. Adicione o arquivo compactado ou extraia antes.",
         ["From {0}."] = "De {0}.",
         ["Game worlds"] = "Mundos do jogo",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "Instale com o launcher do próprio The Sims 3: clique duas vezes no arquivo.",
         ["There is no mod, Sim, lot or world in it."] = "Não há nenhum mod, Sim, lote ou mundo dentro dele.",
         ["Keep both"] = "Manter os dois",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "Não é um arquivo de mod. Adicione pacotes, Sims, lotes, mundos ou arquivos compactados com eles.",
@@ -2185,5 +2184,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "Sobras dentro dos arquivos do save",
         ["Always"] = "Sempre",
         ["Disk space"] = "Espaço em disco",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "Lotes, mundos e Sims entram no jogo pelo launcher do próprio jogo: clique duas vezes no arquivo.",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "Não dá para abrir o Sims3Pack. Ele pode estar danificado ou ter baixado só em parte.",
+        ["From a Sims3Pack"] = "De um Sims3Pack",
     };
 }

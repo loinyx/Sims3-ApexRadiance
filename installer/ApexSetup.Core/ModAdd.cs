@@ -21,6 +21,7 @@ public sealed class AddItem
     public string? Also { get; set; }               // a warning besides it
     public bool Doubt { get; set; }                 // Warning says it looks damaged: added only when the player ticks it
     public string? SameAs { get; set; }             // the same bytes are already there: that file's name, or the merge's (SameInMerge)
+    public bool FromPack { get; set; }              // taken out of a Sims3Pack (Archive)
     public bool SameInMerge { get; set; }
     public bool SameInList { get; set; }            // ... or another file of this list
     public string? Other { get; set; }              // another version: a file of the same name with other bytes
@@ -48,7 +49,8 @@ public sealed class ModAdd : IDisposable
     static readonly string[] ArchiveTypes = [".zip", ".rar", ".7z"],
         Programs = [".exe", ".dll", ".asi", ".msi", ".com", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".jar", ".lnk"];
     public static readonly string[] Packs = [".sims3pack", ".ts3pack"];
-    const string PackText = "Install it with The Sims 3's own launcher: double-click the file.";
+    const string PackText = "Lots, worlds and Sims go into the game through its own launcher: double-click the file.";
+    const string PackBad = "The Sims3Pack can't be opened. It may be damaged or only partly downloaded.";
     const string ProgramText = "This is a program or plugin. The launcher does not add these.";
     const string NothingText = "There is no mod, Sim, lot or world in it.";
     const string NotOpened = "The archive can't be opened. It may be damaged or need a password. Extract it, then add the folder.";
@@ -109,7 +111,7 @@ public sealed class ModAdd : IDisposable
         var ext = Path.GetExtension(name).ToLowerInvariant();
         if (ArchiveTypes.Contains(ext)) OpenArchive(path, name, archive, depth);
         else if (Extensions.Contains(ext)) Items.Add(Check(path, name, archive, ext));
-        else if (Packs.Contains(ext)) Refuse(name, archive, PackText);
+        else if (Packs.Contains(ext)) TakePack(path, name, archive, depth);
         else if (Programs.Contains(ext)) Refuse(name, archive, ProgramText);
         else if (given) Refuse(name, archive, "Not a mod file. Add packages, Sims, lots, worlds, or archives of them.");
     }
@@ -149,6 +151,39 @@ public sealed class ModAdd : IDisposable
     const uint ExportType = 0x05ED1226, LotType = 0x04F66BCC, FamilyType = 0x062853A8;
     public static bool IsLibrary(IReadOnlyCollection<Dbpf.Entry> index) =>
         index.Count(e => e.Type == ExportType) == 1 && index.Any(e => e.Type is LotType or FamilyType) && index.All(e => e.Type != ModKinds.S3sa);
+
+    // ---------- Sims3Packs ----------
+
+    // Its custom content taken out as packages, each named after its item and added like any mod; what only the game's own
+    // installer can add (a lot, a world, a Sim) is said so. A Sims3Pack met in a zip counts against the archive's limits.
+    void TakePack(string path, string name, string? archive, int depth)
+    {
+        if (path.Length == 0) { Refuse(name, archive, PackText); return; } // (only named, in a zip: see Unzip)
+        if (Sims3Pack.Read(path) is not { } pack) { Refuse(name, archive, PackBad); return; }
+        var mods = pack.Files.Where(Sims3Pack.IsMod).ToList();
+        if (depth > 0 && (_bytesLeft -= mods.Sum(m => m.Length)) < 0) throw new TooBigException();
+        var title = Sims3Pack.FileName(pack.Title) ?? Path.GetFileNameWithoutExtension(name);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in mods)
+        {
+            _ct.ThrowIfCancellationRequested();
+            var to = Path.Combine(_temp, Guid.NewGuid().ToString("N") + ".package");
+            bool ok;
+            try { ok = Sims3Pack.Take(path, pack.Data, m, to); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or EndOfStreamException) { Engine.Log(e); ok = false; }
+            if (!ok) { Refuse(m.Name, name, PackBad); continue; }
+            // (its item's own name, else the Sims3Pack's; the file inside is named by a number nobody knows)
+            var own = Sims3Pack.Title(to) ?? title;
+            var file = own + ".package";
+            for (var n = 2; !names.Add(file); n++) file = $"{own} ({n}).package";
+            var i = Check(to, file, name, ".package");
+            i.FromPack = true;
+            Items.Add(i);
+        }
+        if (pack.Files.Any(f => f.Name.EndsWith(".package", StringComparison.OrdinalIgnoreCase) && !Sims3Pack.IsMod(f)))
+            Refuse(mods.Count > 0 ? title : name, mods.Count > 0 ? name : archive, PackText);
+        else if (mods.Count == 0) Refuse(name, archive, NothingText);
+    }
 
     // ---------- archives ----------
 
@@ -190,7 +225,7 @@ public sealed class ModAdd : IDisposable
             _ct.ThrowIfCancellationRequested();
             if (EntryName(e.FullName) is not { } name) continue;
             var ext = Path.GetExtension(name).ToLowerInvariant();
-            if (!Extensions.Contains(ext)) { Take("", name, archive, depth + 1, given: false); continue; } // (named, never taken out)
+            if (!Extensions.Contains(ext) && !Packs.Contains(ext)) { Take("", name, archive, depth + 1, given: false); continue; } // (named, never taken out)
             if (e.IsEncrypted) throw new InvalidDataException("encrypted entry");
             var to = Path.Combine(_temp, Guid.NewGuid().ToString("N") + ext);
             using (var from = e.Open())

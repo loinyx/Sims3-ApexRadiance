@@ -1384,7 +1384,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "Bestanden in een archief kunnen hier niet worden neergezet. Voeg het archief toe, of pak het eerst uit.",
         ["From {0}."] = "Van {0}.",
         ["Game worlds"] = "Spelwerelden",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "Installeer het met de eigen launcher van The Sims 3: dubbelklik op het bestand.",
         ["There is no mod, Sim, lot or world in it."] = "Er zit geen mod, Sim, kavel of wereld in.",
         ["Keep both"] = "Beide houden",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "Geen modbestand. Voeg pakketten, Sims, kavels, werelden of archieven daarvan toe.",
@@ -2161,5 +2160,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "Restjes in de bestanden van de save",
         ["Always"] = "Altijd",
         ["Disk space"] = "Schijfruimte",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "Kavels, werelden en Sims gaan via de eigen launcher van het spel: dubbelklik op het bestand.",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "Het Sims3Pack kan niet worden geopend. Het is misschien beschadigd of maar deels gedownload.",
+        ["From a Sims3Pack"] = "Uit een Sims3Pack",
     };
 }

@@ -1388,7 +1388,6 @@ public static partial class Strings
         ["Files inside an archive can't be dropped here. Add the archive, or extract it first."] = "Soubory z archivu sem nelze přetáhnout. Přidejte archiv, nebo ho nejdřív rozbalte.",
         ["From {0}."] = "Z {0}.",
         ["Game worlds"] = "Světy hry",
-        ["Install it with The Sims 3's own launcher: double-click the file."] = "Nainstalujte ho vlastním spouštěčem The Sims 3: dvakrát klikněte na soubor.",
         ["There is no mod, Sim, lot or world in it."] = "Není v něm žádný mod, simík, pozemek ani svět.",
         ["Keep both"] = "Ponechat obojí",
         ["Not a mod file. Add packages, Sims, lots, worlds, or archives of them."] = "Nejde o soubor modu. Přidejte balíčky, simíky, pozemky, světy nebo jejich archivy.",
@@ -2165,5 +2164,8 @@ public static partial class Strings
         ["Leftovers inside the save's files"] = "Zbytky v souborech uložené hry",
         ["Always"] = "Vždy",
         ["Disk space"] = "Místo na disku",
+        ["Lots, worlds and Sims go into the game through its own launcher: double-click the file."] = "Pozemky, světy a Simíci se do hry dostanou přes její vlastní launcher: dvakrát klikněte na soubor.",
+        ["The Sims3Pack can't be opened. It may be damaged or only partly downloaded."] = "Sims3Pack nejde otevřít. Může být poškozený nebo stažený jen zčásti.",
+        ["From a Sims3Pack"] = "Ze Sims3Packu",
     };
 }
