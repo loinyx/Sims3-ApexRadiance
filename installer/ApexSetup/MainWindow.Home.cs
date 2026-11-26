@@ -268,43 +268,75 @@ public sealed partial class MainWindow
 
     // ---------- health: a small note in the picture's corner ----------
 
+    // The game's health over the picture: frosted glass tinted with the crystal's colour, the crystal in its own light (a slow
+    // breath while something waits), what the state is and, below it, the first thing to look at.
     FrameworkElement HealthChip()
     {
-        var crystal = new Crystal(24);
+        var crystal = new Crystal(30);
         crystal.SetLevel(HealthLevel, animate: false);
-        // (only what stops Apex gets its own words here; the rest waits calmly in Health)
-        var first = _healthState == HealthState.Blocked ? _health.FirstOrDefault(h => h.Finding.Severity == Severity.Error) : null;
-        var note = first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1
-            : "";
+        var calm = _healthState == HealthState.Ready;
+        // (what to look at first, in a few words: the first sentence of the first thing that is not only a note)
+        // (as Health's own list: a finding first, else the mods that clash, by their title)
+        var first = _health.FirstOrDefault(h => h.Finding.Severity == Severity.Error && !h.Conflict) ?? _health.FirstOrDefault(h => h.Finding.Severity != Severity.Info && !h.Conflict);
+        var clashes = ConflictsNow().Where(c => c.Level != ConflictLevel.Small).ToList();
+        var note = calm ? T("Open Health") : first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1.TrimEnd('.')
+            : clashes.Count == 1 ? T(clashes[0].Title) : clashes.Count > 1 ? T("{0} conflicts between mods", clashes.Count) : "";
+        var tint = StateTint(255);
         var white = new SolidColorBrush(Microsoft.UI.Colors.White);
-        var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 10, 18, 10), MaxWidth = 360 };
+        var soft = new SolidColorBrush(Windows.UI.Color.FromArgb(0xC8, 255, 255, 255));
+        var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(10, 10, 18, 10), MaxWidth = 380 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        crystal.VerticalAlignment = VerticalAlignment.Center;
-        g.Children.Add(crystal);
-        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = _healthState == HealthState.Blocked ? Res("ApexErrorBrush") : white, TextTrimming = TextTrimming.CharacterEllipsis });
-        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xBF, 255, 255, 255)), TextTrimming = TextTrimming.CharacterEllipsis });
+        // the crystal on a round tile of its colour, a soft light round it
+        var glow = new SoftGlow(tint, calm ? 0.35 : 0.6, 0.5) { Width = 84, Height = 84, Margin = new Thickness(-20), IsHitTestVisible = false };
+        var tile = new Grid { Width = 44, Height = 44 };
+        tile.Children.Add(glow);
+        tile.Children.Add(new Border { CornerRadius = new CornerRadius(22), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x38, tint.R, tint.G, tint.B)),
+            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x66, tint.R, tint.G, tint.B)), BorderThickness = new Thickness(1) });
+        (crystal.HorizontalAlignment, crystal.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center);
+        tile.Children.Add(crystal);
+        g.Children.Add(tile);
+        if (!calm && new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
+        {
+            var breathe = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
+            var fade = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0.45, To = 1, Duration = TimeSpan.FromMilliseconds(1600), EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(fade, glow);
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(fade, "Opacity");
+            breathe.Children.Add(fade);
+            tile.Loaded += (_, _) => breathe.Begin();
+            tile.Unloaded += (_, _) => breathe.Stop();
+        }
+        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+        words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = white, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(words, 1);
         g.Children.Add(words);
-        var chev = Lucide.Icon("chevron-right", 12, new SolidColorBrush(Windows.UI.Color.FromArgb(0xBF, 255, 255, 255)));
+        var chev = Lucide.Icon("chevron-right", 14, soft);
         chev.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(chev, 2);
         g.Children.Add(chev);
         var b = new Button
         {
-            Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(1),
-            Background = Glass(0.28), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x2E, 255, 255, 255)),
+            Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(32), BorderThickness = new Thickness(1),
+            Background = Glass(0.42, tint), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(calm ? (byte)0x3A : (byte)0x80, tint.R, tint.G, tint.B)),
         };
         // (frosted glass that blurs the picture behind it, a little lighter under the pointer)
-        b.Resources["ButtonBackgroundPointerOver"] = Glass(0.16);
-        b.Resources["ButtonBackgroundPressed"] = Glass(0.4);
-        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x47, 255, 255, 255));
+        b.Resources["ButtonBackgroundPointerOver"] = Glass(0.3, tint);
+        b.Resources["ButtonBackgroundPressed"] = Glass(0.55, tint);
+        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0xA0, tint.R, tint.G, tint.B));
         b.Click += (_, _) => Show(HealthScreen);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("Open Health"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, HealthTitle() + ". " + T("Open Health"));
+        HandCursor.On(b);
         return b;
     }
+
+    // the dark glass, with a breath of the state's colour in it
+    static Microsoft.UI.Xaml.Media.AcrylicBrush Glass(double tint, Windows.UI.Color hue) => new()
+    {
+        TintColor = Windows.UI.Color.FromArgb(255, (byte)(20 + hue.R * 0.12), (byte)(20 + hue.G * 0.12), (byte)(20 + hue.B * 0.12)), TintOpacity = tint, TintLuminosityOpacity = 0.3,
+        FallbackColor = Windows.UI.Color.FromArgb(0xD0, 20, 20, 20),
+    };
 
     static Microsoft.UI.Xaml.Media.AcrylicBrush Glass(double tint) => new()
     {

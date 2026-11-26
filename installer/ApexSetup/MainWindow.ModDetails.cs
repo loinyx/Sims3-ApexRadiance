@@ -77,7 +77,7 @@ public sealed partial class MainWindow
         bar.SelectionChanged += (s, _) => { if (s.SelectedItem?.Tag is string k && k != _detailsTab) { _detailsTab = k; DispatcherQueue.TryEnqueue(FillModDetails); } }; // (later: the fill removes this bar)
         // (more tabs than fit in a long language: the row scrolls to the open one)
         bar.Loaded += (_, _) => bar.SelectedItem?.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
-        ModDetailsHead.Children.Add(new ScrollViewer { Content = bar, Margin = new Thickness(20 - side, 0, 20 - side, 0), HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        ModDetailsHead.Children.Add(Design.Parts.Sideways(new ScrollViewer { Content = bar, Margin = new Thickness(20 - side, 0, 20 - side, 0), HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled }));
         ModDetailsHead.Children.Add(new Border { Height = 1, Background = Res("ApexCardBorderBrush") });
     }
 

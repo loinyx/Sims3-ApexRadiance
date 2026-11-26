@@ -86,6 +86,11 @@ public partial class App : Application
 
     Mutex? _single;
     EventWaitHandle? _show, _replace;
+    // the one-at-a-time lock: a copy with a data folder of its own (APEX_LAUNCHER_LOCALAPPDATA, the UI tests) is a launcher of
+    // its own, so a test never brings up or closes the player's launcher
+    public static readonly string Instance = Environment.GetEnvironmentVariable("APEX_LAUNCHER_LOCALAPPDATA") is { Length: > 0 } own
+        ? @"Local\ApexLauncher." + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(own.ToUpperInvariant())))[..12]
+        : @"Local\ApexLauncher";
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
@@ -140,9 +145,9 @@ public partial class App : Application
         // one launcher at a time: a second start brings the first one's window up
         if (maintain is null && !uninstall)
         {
-            _single = new Mutex(true, @"Local\ApexLauncher", out var first);
-            _show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ApexLauncher.Show");
-            _replace = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ApexLauncher.Replace");
+            _single = new Mutex(true, Instance, out var first);
+            _show = new EventWaitHandle(false, EventResetMode.AutoReset, Instance + ".Show");
+            _replace = new EventWaitHandle(false, EventResetMode.AutoReset, Instance + ".Replace");
             if (!first && argv.Contains(LauncherInstall.ReplaceArg)) _replace.Set();
             // (started by Install, MakePortable or an update while the copy before it still closes: waits for it)
             if (!first && argv.Contains(LauncherInstall.HandoverArg))

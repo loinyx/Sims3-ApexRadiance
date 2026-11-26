@@ -905,7 +905,7 @@ public sealed partial class MainWindow
 
     static void CloseOtherCopies()
     {
-        try { if (EventWaitHandle.TryOpenExisting(@"Local\ApexLauncher.Replace", out var close)) using (close) close.Set(); }
+        try { if (EventWaitHandle.TryOpenExisting(App.Instance + ".Replace", out var close)) using (close) close.Set(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
         foreach (var p in System.Diagnostics.Process.GetProcessesByName("ApexLauncher").Where(p => p.Id != Environment.ProcessId))
             try { using (p) p.WaitForExit(10000); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }

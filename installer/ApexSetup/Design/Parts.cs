@@ -33,6 +33,22 @@ public static class Parts
         Background = (Brush)Application.Current.Resources["FlyoutPresenterBackground"], BorderBrush = (Brush)Application.Current.Resources["FlyoutBorderThemeBrush"],
     };
 
+    // ---------- rows that scroll sideways ----------
+
+    // a row wider than its place: the mouse wheel moves it sideways (a mouse has no other way), a touchpad as it always does
+    public static ScrollViewer Sideways(ScrollViewer sv)
+    {
+        sv.AddHandler(UIElement.PointerWheelChangedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
+        {
+            if (sv.ScrollableWidth <= 0) return;
+            var w = e.GetCurrentPoint(sv).Properties;
+            var d = w.IsHorizontalMouseWheel ? -w.MouseWheelDelta : w.MouseWheelDelta;
+            sv.ChangeView(Math.Clamp(sv.HorizontalOffset - d, 0, sv.ScrollableWidth), null, null, false);
+            e.Handled = true;
+        }), true);
+        return sv;
+    }
+
     // ---------- buttons ----------
 
     // the way back from a page to the screen it opened from: a button as the page's others (Check now), an arrow and the

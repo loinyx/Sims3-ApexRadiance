@@ -3273,8 +3273,9 @@ public sealed partial class MainWindow
             if (wide) Wide(false);
             zoomer.ChangeView(0, 0, 1, true);
             var away = new Storyboard();
-            var home = pics[at].Path == first ? from
-                : (from?.Parent as Panel)?.Children.OfType<FrameworkElement>().FirstOrDefault(c => CardPaths.TryGetValue(c, out var cp) && string.Equals(cp, pics[at].Path, StringComparison.OrdinalIgnoreCase) && c.Visibility == Visibility.Visible);
+            var current = at < pics.Count ? pics[at].Path : null;
+            var home = current is null ? null : current == first ? from
+                : (from?.Parent as Panel)?.Children.OfType<FrameworkElement>().FirstOrDefault(c => CardPaths.TryGetValue(c, out var cp) && string.Equals(cp, current, StringComparison.OrdinalIgnoreCase) && c.Visibility == Visibility.Visible);
             if (home != from && from is not null) from.Opacity = 1;
             if (home is not null && home != from) home.Opacity = 0;
             var back = home is { ActualWidth: > 0 } && shown is { ActualWidth: > 0 } ? Bounds(home) : (Windows.Foundation.Rect?)null;
@@ -3304,6 +3305,8 @@ public sealed partial class MainWindow
                 _viewing = false;
                 // (leaving for an album, or a picture gone, always lays the gallery again)
                 if (stay && !removed && _gal is not null && opened == System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData)) return;
+                // (opened from Home: Home shows the change, the gallery is laid when it is opened)
+                if (_step != GalleryScreen) { if (_step == Home) BuildHome(); return; }
                 // (an album open over the board stays open: the board is laid again when it closes; with a picture gone it
                 // closes, for its card would still be there)
                 if (stay && !removed && _spotlightOpen) _boardStale = true;
@@ -3643,7 +3646,7 @@ public sealed partial class MainWindow
             var bin = Design.Parts.IconBoxed("trash-2", T("Move to the Recycle Bin"), ink: Res("ApexErrorBrush"));
             bin.Click += async (_, _) =>
             {
-                if (!await Confirm(T("Move this picture to the Recycle Bin?"), T("You can restore it from the Recycle Bin."), T("Move it"))) return;
+                if (!await Confirm(T("Move this picture to the Recycle Bin?"), T("You can restore it from the Recycle Bin."), T("Move to the Recycle Bin"), danger: true)) return;
                 try { Gallery.Remove(_gal!, p.Path); removed = true; pics.RemoveAt(at); if (pics.Count == 0) { Close(); return; } at = Math.Min(at, pics.Count - 1); Fill(); }
                 catch (Exception e) { App.Log(e); await Message(T("The picture was not moved"), ErrorText(e)); }
             };

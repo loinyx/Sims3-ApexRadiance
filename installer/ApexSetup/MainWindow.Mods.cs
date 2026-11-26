@@ -972,6 +972,9 @@ public sealed partial class MainWindow
             ModTypesScroll.ViewChanged += (_, _) => TypesMore();
             ModTypesScroll.SizeChanged += (_, _) => TypesMore();
             ModTypes.SizeChanged += (_, _) => TypesMore();
+            Design.Parts.Sideways(ModTypesScroll);
+            Design.Parts.Sideways(ModChipsScroll);
+            Design.Parts.Sideways(ModSelectionScroll);
             // (an arrow at each end, round as the pills and as high: the one back only once the row has moved)
             var row = (Grid)ModTypesScroll.Parent;
             _typesLess = new Border { Width = 72, Margin = new Thickness(0, 0, 0, 12), HorizontalAlignment = HorizontalAlignment.Left, IsHitTestVisible = false, Visibility = Visibility.Collapsed };

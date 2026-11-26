@@ -878,7 +878,7 @@
                                 CornerRadius="12" Background="{ThemeResource ApexRaisedBrush}" BorderBrush="{ThemeResource ApexInputBorderBrush}" BorderThickness="1" Visibility="Collapsed" Translation="0,0,24">
                             <Border.Shadow><ThemeShadow /></Border.Shadow>
                             <Border.TranslationTransition><Vector3Transition Duration="0:0:0.25" /></Border.TranslationTransition>
-                            <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                            <ScrollViewer x:Name="ModSelectionScroll" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
                                 <StackPanel x:Name="ModSelectionActions" Tag="dyn" Orientation="Horizontal" Spacing="2" />
                             </ScrollViewer>
                         </Border>
