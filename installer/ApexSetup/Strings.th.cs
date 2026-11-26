@@ -818,6 +818,8 @@ public static partial class Strings
         ["The launcher can't find The Sims 3. Choose the folder where it is installed."] = "ลอนเชอร์ไม่พบ The Sims 3 เลือกโฟลเดอร์ที่ติดตั้งไว้",
         ["Windows did not get your permission. Try again and choose Yes when it asks."] = "Windows ไม่ได้รับอนุญาตจากคุณ ลองอีกครั้งแล้วเลือก “ใช่” เมื่อมีข้อความถาม",
         ["Windows did not start the game. Press Play to try again."] = "Windows ไม่ได้เปิดเกม กดเล่นเพื่อลองอีกครั้ง",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "เกมชุดนี้ต้องใช้แอป EA ในการเปิด ติดตั้งหรือเปิดแอป EA แล้วกดเล่นอีกครั้ง",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "แอป EA ไม่ได้เปิดเกม ตรวจสอบว่าคุณลงชื่อเข้าใช้แอป EA แล้ว จากนั้นกดเล่นอีกครั้ง",
         ["The notes didn't load. You can read them on GitHub."] = "บันทึกการเปลี่ยนแปลงโหลดไม่ขึ้น อ่านได้บน GitHub",
         ["The Sims 3 is open, and the uninstall changes its files."] = "The Sims 3 เปิดอยู่ และการถอนการติดตั้งจะเปลี่ยนไฟล์ของเกม",
         ["some files that could not be restored (the log has the details)"] = "ไฟล์บางไฟล์ที่คืนไม่ได้ (ดูรายละเอียดในล็อก)",

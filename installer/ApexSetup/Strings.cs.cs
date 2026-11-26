@@ -843,6 +843,8 @@ public static partial class Strings
         ["The launcher can't find The Sims 3. Choose the folder where it is installed."] = "Spouštěč nemůže najít The Sims 3. Vyberte složku, kam je nainstalována.",
         ["Windows did not get your permission. Try again and choose Yes when it asks."] = "Windows nezískal vaše oprávnění. Zkuste to znovu a na dotaz zvolte Ano.",
         ["Windows did not start the game. Press Play to try again."] = "Windows hru nespustil. Zkuste to znovu tlačítkem Hrát.",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "Tato kopie hry potřebuje ke spuštění aplikaci EA. Nainstaluj nebo otevři aplikaci EA a pak znovu stiskni Hrát.",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "Aplikace EA hru nespustila. Zkontroluj, že jsi v aplikaci EA přihlášený, a pak znovu stiskni Hrát.",
         ["The notes didn't load. You can read them on GitHub."] = "Poznámky se nenačetly. Můžete si je přečíst na GitHubu.",
         ["The Sims 3 is open, and the uninstall changes its files."] = "The Sims 3 je spuštěná a odinstalace mění její soubory.",
         ["some files that could not be restored (the log has the details)"] = "některé soubory se nepodařilo obnovit (podrobnosti jsou v protokolu)",

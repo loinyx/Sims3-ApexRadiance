@@ -837,6 +837,8 @@ public static partial class Strings
         ["The launcher can't find The Sims 3. Choose the folder where it is installed."] = "启动器找不到 The Sims 3。请选择它的安装文件夹。",
         ["Windows did not get your permission. Try again and choose Yes when it asks."] = "Windows 没有获得你的许可。请重试，并在提示时选择“是”。",
         ["Windows did not start the game. Press Play to try again."] = "Windows 未能启动游戏。请再按一次“开始游戏”。",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "此游戏副本需要 EA app 才能启动。请安装或打开 EA app，然后再次点击“开始游戏”。",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "EA app 没有启动游戏。请确认你已登录 EA app，然后再次点击“开始游戏”。",
         ["The notes didn't load. You can read them on GitHub."] = "发行说明未能加载。你可以在 GitHub 上查看。",
         ["The Sims 3 is open, and the uninstall changes its files."] = "The Sims 3 正在运行，而卸载会更改它的文件。",
         ["some files that could not be restored (the log has the details)"] = "部分无法还原的文件（详情见日志）",

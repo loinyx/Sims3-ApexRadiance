@@ -353,6 +353,8 @@ public static partial class Strings
         ["This window can't start the game. Close it and press Play in Apex Launcher."] = "Esta janela não abre o jogo. Feche-a e clique em Jogar no Apex Launcher.",
         ["The Sims 3 is already running."] = "O The Sims 3 já está aberto.",
         ["Windows did not start the game. Press Play to try again."] = "O Windows não abriu o jogo. Clique em Jogar para tentar de novo.",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "Esta cópia do jogo precisa do EA app para abrir. Instale ou abra o EA app e pressione Jogar de novo.",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "O EA app não abriu o jogo. Confira se você entrou na sua conta no EA app e pressione Jogar de novo.",
 
         // Apex Launcher: Mods
         ["Mods"] = "Mods",

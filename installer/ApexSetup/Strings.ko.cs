@@ -840,6 +840,8 @@ public static partial class Strings
         ["The launcher can't find The Sims 3. Choose the folder where it is installed."] = "런처가 The Sims 3를 찾지 못했어요. 설치된 폴더를 선택하세요.",
         ["Windows did not get your permission. Try again and choose Yes when it asks."] = "Windows에서 권한을 받지 못했어요. 다시 시도하고 묻는 창이 뜨면 [예]를 선택하세요.",
         ["Windows did not start the game. Press Play to try again."] = "Windows가 게임을 시작하지 못했어요. 플레이를 눌러 다시 시도하세요.",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "이 게임은 EA 앱으로 시작해야 합니다. EA 앱을 설치하거나 연 다음 플레이를 다시 누르세요.",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "EA 앱이 게임을 시작하지 않았습니다. EA 앱에 로그인했는지 확인한 다음 플레이를 다시 누르세요.",
         ["The notes didn't load. You can read them on GitHub."] = "노트를 불러오지 못했어요. GitHub에서 읽을 수 있어요.",
         ["The Sims 3 is open, and the uninstall changes its files."] = "The Sims 3가 열려 있는데, 제거하면 게임 파일이 바뀌어요.",
         ["some files that could not be restored (the log has the details)"] = "되돌리지 못한 일부 파일(자세한 내용은 로그에 있어요)",

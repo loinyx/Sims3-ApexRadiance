@@ -848,6 +848,8 @@ public static partial class Strings
         ["The launcher can't find The Sims 3. Choose the folder where it is installed."] = "Launchern hittar inte The Sims 3. Välj mappen där det är installerat.",
         ["Windows did not get your permission. Try again and choose Yes when it asks."] = "Windows fick inte din behörighet. Försök igen och välj Ja när det frågar.",
         ["Windows did not start the game. Press Play to try again."] = "Windows startade inte spelet. Tryck på Spela för att försöka igen.",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "Den här kopian av spelet behöver EA-appen för att starta. Installera eller öppna EA-appen och tryck sedan på Spela igen.",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "EA-appen startade inte spelet. Kontrollera att du är inloggad i EA-appen och tryck sedan på Spela igen.",
         ["The notes didn't load. You can read them on GitHub."] = "Anteckningarna laddades inte. Du kan läsa dem på GitHub.",
         ["The Sims 3 is open, and the uninstall changes its files."] = "The Sims 3 är öppet, och avinstallationen ändrar dess filer.",
         ["some files that could not be restored (the log has the details)"] = "vissa filer som inte kunde återställas (loggen har detaljerna)",

@@ -840,6 +840,8 @@ public static partial class Strings
         ["The launcher can't find The Sims 3. Choose the folder where it is installed."] = "Käynnistin ei löydä The Sims 3 -peliä. Valitse kansio, johon se on asennettu.",
         ["Windows did not get your permission. Try again and choose Yes when it asks."] = "Windows ei saanut lupaasi. Yritä uudelleen ja valitse Kyllä, kun se kysyy.",
         ["Windows did not start the game. Press Play to try again."] = "Windows ei käynnistänyt peliä. Yritä uudelleen painamalla Pelaa.",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "Tämä pelin kopio tarvitsee EA-sovelluksen käynnistyäkseen. Asenna tai avaa EA-sovellus ja paina sitten Pelaa uudelleen.",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "EA-sovellus ei käynnistänyt peliä. Tarkista, että olet kirjautunut EA-sovellukseen, ja paina sitten Pelaa uudelleen.",
         ["The notes didn't load. You can read them on GitHub."] = "Tietoja ei voitu ladata. Voit lukea ne GitHubissa.",
         ["The Sims 3 is open, and the uninstall changes its files."] = "The Sims 3 on auki, ja asennuksen poisto muuttaa sen tiedostoja.",
         ["some files that could not be restored (the log has the details)"] = "joitakin tiedostoja, joita ei voitu palauttaa (lokissa on tiedot)",

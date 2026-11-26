@@ -851,6 +851,8 @@ public static partial class Strings
         ["The launcher can't find The Sims 3. Choose the folder where it is installed."] = "Ο launcher δεν βρίσκει το The Sims 3. Διάλεξε τον φάκελο όπου είναι εγκατεστημένο.",
         ["Windows did not get your permission. Try again and choose Yes when it asks."] = "Τα Windows δεν πήραν την άδειά σου. Δοκίμασε ξανά και διάλεξε Ναι όταν ρωτήσουν.",
         ["Windows did not start the game. Press Play to try again."] = "Τα Windows δεν ξεκίνησαν το παιχνίδι. Πάτησε Παίξε για να δοκιμάσεις ξανά.",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "Αυτό το αντίγραφο του παιχνιδιού χρειάζεται την εφαρμογή EA για να ξεκινήσει. Εγκατάστησε ή άνοιξε την εφαρμογή EA και πάτησε ξανά Παίξε.",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "Η εφαρμογή EA δεν ξεκίνησε το παιχνίδι. Έλεγξε ότι έχεις συνδεθεί στην εφαρμογή EA και πάτησε ξανά Παίξε.",
         ["The notes didn't load. You can read them on GitHub."] = "Οι σημειώσεις δεν φορτώθηκαν. Μπορείς να τις διαβάσεις στο GitHub.",
         ["The Sims 3 is open, and the uninstall changes its files."] = "Το The Sims 3 είναι ανοιχτό και η απεγκατάσταση αλλάζει τα αρχεία του.",
         ["some files that could not be restored (the log has the details)"] = "κάποια αρχεία που δεν ήταν δυνατό να επαναφερθούν (οι λεπτομέρειες είναι στην καταγραφή)",

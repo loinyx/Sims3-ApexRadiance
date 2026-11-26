@@ -1397,6 +1397,15 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         var quoted = false;
         try { Launch.Args("a\"b"); } catch (ArgumentException) { quoted = true; }
         Check(quoted, "a save name with a quote is refused");
+        Check(Launch.EaParams(null) == "-editInGameMode:true" && Launch.EaParams("West Arbor") == "-worldFile:West Arbor.sims3\" -editInGameMode:true",
+            "the EA app copy skips the Sims 3 launcher, the save first and closed by a quote for the EA app's own");
+        var eaRoot = Path.Combine(Path.GetTempPath(), "apex-ea-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(eaRoot, "__Installer"));
+        File.WriteAllText(Path.Combine(eaRoot, "__Installer", "installerdata.xml"), "<game><contentIDs><contentID>sims3_dd</contentID><contentID>1002441</contentID></contentIDs></game>");
+        var eaGame = new Game(eaRoot, Path.Combine(eaRoot, "Game", "Bin"), "TS3.exe", Edition.EA, "1.69.47");
+        Check(Launch.EaContentId(eaGame) == "sims3_dd" && Launch.EaContentId(eaGame with { Root = Path.Combine(eaRoot, "none") }) is null,
+            "the EA app's id is the first content id of the installer data; none without it");
+        Directory.Delete(eaRoot, true);
         var zip = Saves.Backup(saves[0], ldocs);
         bool inZip;
         using (var z = System.IO.Compression.ZipFile.OpenRead(zip)) inZip = z.Entries.Any(e => e.Name == "Sunset.nhd");

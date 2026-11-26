@@ -842,6 +842,8 @@ public static partial class Strings
         ["The launcher can't find The Sims 3. Choose the folder where it is installed."] = "ランチャーが The Sims 3 を見つけられません。インストールされているフォルダーを選んでください。",
         ["Windows did not get your permission. Try again and choose Yes when it asks."] = "Windows が許可を得られませんでした。もう一度試し、確認が表示されたら「はい」を選んでください。",
         ["Windows did not start the game. Press Play to try again."] = "Windows がゲームを起動しませんでした。「プレイ」を押してもう一度お試しください。",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "このゲームを起動するには EA アプリが必要です。EA アプリをインストールするか開いてから、もう一度プレイを押してください。",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "EA アプリがゲームを起動しませんでした。EA アプリにサインインしているか確認してから、もう一度プレイを押してください。",
         ["The notes didn't load. You can read them on GitHub."] = "ノートを読み込めませんでした。GitHub で読めます。",
         ["The Sims 3 is open, and the uninstall changes its files."] = "The Sims 3 が起動中で、アンインストールするとそのファイルが変更されます。",
         ["some files that could not be restored (the log has the details)"] = "元に戻せなかった一部のファイル（詳細はログにあります）",

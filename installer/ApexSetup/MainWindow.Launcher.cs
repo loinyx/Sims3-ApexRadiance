@@ -263,7 +263,7 @@ public sealed partial class MainWindow
         await BackupsBeforePlay();
         PlayPendingOptions(g);
         MenuTheme(g);
-        try { p = Launch.Start(g, save); }
+        try { p = await Task.Run(() => Launch.Start(g, save)); } // (the EA app copy waits for the EA app to start it)
         catch (Exception e) { App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
         var session = _session = new Session(p, Docs);
         _running = true;

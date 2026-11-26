@@ -51,6 +51,12 @@ menus after the main menu has loaded.
    the player, with `Game\Bin` as the working folder. A save's Play adds `-worldFile:"<name>.sims3"`. For the Steam
    edition it sets `SteamAppId=47890`. When the exe asks for administrator rights (Win32 error 740), it starts through
    the shell instead.
+   The EA app edition goes through the EA app instead: its `TS3.exe` started by anyone else asks the EA app to start the
+   game, and the EA app starts its own target, `Sims3Launcher.exe -test` (`__Installer\installerdata.xml`), so the Sims 3
+   launcher would open. Play opens `origin2://game/launch?offerIds=<id>&cmdParams=<params>` with the first content id
+   of `installerdata.xml` (`sims3_dd`) and `-editInGameMode:true`: with it the Sims 3 launcher starts `TS3.exe` at once,
+   passing every argument on, without its window. A save goes first as `-worldFile:<name>.sims3"` (the EA app adds the
+   opening quote itself and lowercases the switch). The launcher then waits up to 2 minutes for `TS3.exe`.
 7. **The session** (`Session` in `Launch.cs`). Every 5 s the launcher reads the game's private memory and keeps the
    peak; it follows a restart of the game (by the restart host or within about 20 s). The end is classed as a crash
    (an exit code of `0xC0000000` or more, or a crash file written since the start: the game's `xcpt *.txt`,
@@ -87,8 +93,8 @@ safe fixes without asking*, *Install updates when I press Play*, *Picture at the
   by hand counts as a crash only when the exit code says so.
 - The memory meter shows the game's private memory against 3.3 GB, a rule of thumb for the 32-bit game, not the exact
   point where it fails.
-- Unverified on a real install: Play and the session with the EA app edition, and the notification-area icon. A save
-  opened from Home and the crash state on Home are listed as open checks on the
+- Unverified on a real install: the session with the EA app edition, a save opened through the EA app, and the
+  notification-area icon. A save opened from Home and the crash state on Home are listed as open checks on the
   [validation page](../../validation/installer.md#open-checks).
 
 ## Technical reference

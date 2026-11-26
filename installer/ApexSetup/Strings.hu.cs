@@ -852,6 +852,8 @@ public static partial class Strings
         ["The launcher can't find The Sims 3. Choose the folder where it is installed."] = "A launcher nem találja a The Sims 3-at. Válaszd ki azt a mappát, ahová telepítve van.",
         ["Windows did not get your permission. Try again and choose Yes when it asks."] = "A Windows nem kapott engedélyt tőled. Próbáld újra, és válaszd az Igen lehetőséget, ha rákérdez.",
         ["Windows did not start the game. Press Play to try again."] = "A Windows nem indította el a játékot. A Játék gombbal próbáld újra.",
+        ["The EA app is needed to start this copy of the game. Install or open the EA app, then press Play again."] = "A játék ezen példányának indításához az EA alkalmazás kell. Telepítsd vagy nyisd meg az EA alkalmazást, majd nyomd meg újra a Játék gombot.",
+        ["The EA app did not start the game. Check that you are signed in to the EA app, then press Play again."] = "Az EA alkalmazás nem indította el a játékot. Ellenőrizd, hogy be vagy-e jelentkezve az EA alkalmazásba, majd nyomd meg újra a Játék gombot.",
         ["The notes didn't load. You can read them on GitHub."] = "A jegyzetek nem töltődtek be. Elolvashatod őket a GitHubon.",
         ["The Sims 3 is open, and the uninstall changes its files."] = "A The Sims 3 meg van nyitva, az eltávolítás pedig módosítja a fájljait.",
         ["some files that could not be restored (the log has the details)"] = "néhány fájl, amelyet nem sikerült visszaállítani (a naplóban vannak a részletek)",
