@@ -194,6 +194,16 @@ public sealed partial class MainWindow
         finally { _starting = false; }
     }
 
+    // Home's update button: the ready updates in the install card, then the done screen; the game is not started
+    async Task UpdateOnlyAsync()
+    {
+        if (_game is null || _busy || _starting || WelcomeUpdates() is not { Count: > 0 } ups) return;
+        if (_running || _session is not null || Games.IsRunning()) { await Message(T("The Sims 3 is already running"), T("Close the game, then install the updates.")); return; }
+        _wizardFlow = _updatingOnly = true;
+        try { await InstallAsync(ups); }
+        finally { _wizardFlow = _updatingOnly = false; }
+    }
+
     async Task StartChecked(Game g, string? save, bool update)
     {
         if (update && WelcomeUpdates() is { Count: > 0 } pending && await UpdatesFirst(pending) is var go && go != true)

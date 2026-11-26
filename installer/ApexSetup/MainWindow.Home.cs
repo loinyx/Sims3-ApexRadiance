@@ -217,6 +217,21 @@ public sealed partial class MainWindow
         var update = WelcomeUpdates().Count > 0 && _settings.InstallUpdatesOnPlay;
         var blocked = _healthState == HealthState.Blocked;
         row.Children.Add(PlayButton(null));
+        // the ready updates, installed now without starting the game: the same square as More, beside Play
+        if (WelcomeUpdates() is { Count: > 0 } ready)
+        {
+            var install = new Button
+            {
+                Width = 56, Height = 56, Padding = new Thickness(0), CornerRadius = new CornerRadius(Design.Radius.Control), Background = glass, BorderThickness = new Thickness(0),
+                IsEnabled = !_busy && !Maintenance, Content = new LucideIcon { Kind = "download", Size = Design.Size.IconSmall, Stroke = ink, StrokeWidth = 1.75 },
+            };
+            var what = ready.Count == 1 ? T("Install 1 update") : T("Install {0} updates", ready.Count);
+            ToolTipService.SetToolTip(install, what + "\n" + string.Join("\n", ready.Select(c => Name(c) + " " + (ReleaseOf(c)?.Version ?? ""))));
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(install, what);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(install, "HomeUpdateButton");
+            install.Click += async (_, _) => await UpdateOnlyAsync();
+            row.Children.Add(install);
+        }
 
         var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft };
         if (update && !blocked)
@@ -231,7 +246,7 @@ public sealed partial class MainWindow
         menu.Items.Add(all);
         var more = new Button
         {
-            Width = 56, Height = 56, Padding = new Thickness(0), CornerRadius = new CornerRadius(8), Background = glass, BorderThickness = new Thickness(0), Flyout = menu,
+            Width = 56, Height = 56, Padding = new Thickness(0), CornerRadius = new CornerRadius(Design.Radius.Control), Background = glass, BorderThickness = new Thickness(0), Flyout = menu,
             Content = new LucideIcon { Kind = "ellipsis", Size = 16, Stroke = ink, StrokeWidth = 1.75 },
         };
         ToolTipService.SetToolTip(more, T("More options"));
