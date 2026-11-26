@@ -861,7 +861,7 @@ public sealed partial class MainWindow
     {
         var c = BoardColor(look);
         return new LinearGradientBrush { StartPoint = new(0.2, 0), EndPoint = new(0.8, 1), GradientStops =
-            { new GradientStop { Color = Shade(c, 0.08), Offset = 0 }, new GradientStop { Color = c, Offset = 0.45 }, new GradientStop { Color = Shade(c, IsLight(c) ? -0.1 : -0.42), Offset = 1 } } }; // (a light board only greys a little)
+            { new GradientStop { Color = Shade(c, 0.08), Offset = 0 }, new GradientStop { Color = c, Offset = 0.45 }, new GradientStop { Color = Shade(c, -0.42), Offset = 1 } } };
     }
     // (the one of the two that reads better on it)
     static Windows.UI.Color BoardInk(AlbumLook look)
@@ -1962,7 +1962,7 @@ public sealed partial class MainWindow
         {
             new GradientStop { Color = look.Light == "spot" ? Windows.UI.Color.FromArgb(0x1C, 255, 255, 255) : Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0 },
             new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0.55 },
-            new GradientStop { Color = Windows.UI.Color.FromArgb((byte)((look.Light == "spot" ? 0x8C : 0x40) / (IsLight(BoardColor(look)) ? 2 : 1)), 0, 0, 0), Offset = 1 }, // (half the shade on a light board)
+            new GradientStop { Color = Windows.UI.Color.FromArgb((byte)(look.Light == "spot" ? 0x8C : 0x40), 0, 0, 0), Offset = 1 },
         },
     };
 
