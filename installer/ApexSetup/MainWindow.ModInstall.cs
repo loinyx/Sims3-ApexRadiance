@@ -178,7 +178,7 @@ public sealed partial class MainWindow
             AddPlace.Worlds => T("World"),
             _ => ModRow.KindName(i.Kind),
         };
-        return kind + " · " + (i.Place == AddPlace.Worlds && ModAdd.WorldsNeedAdmin(_game!) ? T("Windows asks for permission") : ModRow.SizeText(i.Size));
+        return kind + " · " + ModRow.SizeText(i.Size);
     }
 
     FrameworkElement AddRow(AddItem i, ModAdd add, bool narrow, Action changed)
@@ -341,7 +341,7 @@ public sealed partial class MainWindow
         d.CloseButtonText = T("Close");
         await shown;
 
-        // (a replaced file comes back from the Recycle Bin, and a world only with an administrator: no Undo that does half)
+        // (a replaced file comes back from the Recycle Bin, and a world set only whole: no Undo that does half)
         var undo = added.Count == 0 || replaced > 0 || added.Any(i => i.Place == AddPlace.Worlds) ? (Action?)null : () => Safe(UndoAddAsync(added));
         if (added.Count > 0) ModsResult(title, undo, failed.Count == 0 ? "" : T("{0} left out", failed.Count), failed.Count == 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
         else SetInfo(ModsInfo, InfoBarSeverity.Warning, T("The files were not added"), failed.Values.FirstOrDefault() ?? "");
@@ -378,45 +378,10 @@ public sealed partial class MainWindow
 
     // ---------- worlds ----------
 
-    const string WorldsPlan = "add-worlds";
-
-    // into the game's folder: here when this copy may write there, else in a copy run as administrator, without a window
+    // into Documents\...\InstalledWorlds (ModAdd.AddWorlds), no administrator needed
     async Task AddWorldsAsync(ModAdd add, List<AddItem> worlds, TextBlock now)
     {
-        var game = _game!;
-        var plan = add.WorldPlan(worlds);
-        var admin = ModAdd.WorldsNeedAdmin(game);
-        now.Text = admin ? T("Windows asks for permission") : worlds[0].Name;
-        try
-        {
-            await ModWork(() =>
-            {
-                if (!admin) { ModAdd.AddWorlds(game, plan); return 0; }
-                var file = Elevation.SaveChoices(plan);
-                try
-                {
-                    using var p = Elevation.StartMaintenance(Environment.ProcessPath ?? "", game.Bin, WorldsPlan, file) ?? throw new SetupException("Windows did not get your permission. Try again and choose Yes when it asks.");
-                    p.WaitForExit();
-                }
-                finally { File.Delete(file); } // (still there when Windows was told no)
-                return 0;
-            });
-        }
-        finally { await Task.Run(() => add.WorldsDone(worlds, plan)); }
-        // (the administrator copy writes why in its log)
-        if (worlds.Any(w => w.Added is null)) throw new SetupException("The world could not be added. See the log for details.");
-    }
-
-    // the administrator copy: the plan is checked again there, as any program could have changed it
-    public static int? WorldsElevated(string? bin, string? screen, IReadOnlyList<string> args)
-    {
-        if (screen != WorldsPlan || bin is null || !Elevation.IsElevated) return null;
-        try
-        {
-            if (Games.FromFolder(bin) is not { } g) return 1;
-            ModAdd.AddWorlds(g, Elevation.Choices(args));
-            return 0;
-        }
-        catch (Exception e) { App.Log(e); return 1; }
+        now.Text = worlds[0].Name;
+        await ModWork(() => { add.AddWorlds(worlds); return 0; });
     }
 }

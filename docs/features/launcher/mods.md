@@ -76,8 +76,8 @@ splits a merge, or moves it to the Recycle Bin.
 | `.package` (a mod) | The chosen Mods folder, else `Mods\Packages`; `Resource.cfg` is created when missing |
 | `.package` holding an export, lot or household | `Documents\...\Library` |
 | `.sim` | `Documents\...\SavedSims` |
-| `.world` | `Game\GameData\Shared\NonPackaged\Worlds` (through the [administrator copy](elevation.md) when needed) |
-| `.zip`, `.rar`, `.7z`, a folder | Opened (one archive inside another at most, 20,000 files and 2 GB unpacked) and each file sorted as above |
+| `.world` | `Documents\...\InstalledWorlds`, where the game's own launcher installs custom worlds (no administrator needed) |
+| `.zip`, `.rar`, `.7z`, a folder | Opened (one archive inside another at most, 20,000 files and 2 GB unpacked; an archive holding a `.world` may unpack up to the free space of the temporary folder's drive less 1 GB) and each file sorted as above |
 
 - A package must be DBPF 2.0 with its index inside the file; protected packages and Sims 4 packages are refused. A
   package that looks damaged shows unticked with the reason and is added only when ticked; a script mod carries a
@@ -85,8 +85,15 @@ splits a merge, or moves it to the Recycle Bin.
 - A file with the same bytes as an installed one (also inside a merge) is *already there*. A file with the same name and
   other bytes is offered as a replacement, ticked when the two share resource keys. A world, a locked file and a
   merged file are never replaced.
+- A world whose name is taken in `InstalledWorlds` or the game's `Worlds` folder is added as `<name> (2).world`, so saves
+  made in the other one keep using it.
+- **World sets.** An archive with a `*.worldset.json` holds a world made of several files: its worlds go in as one unit
+  with their names unchanged and the `.worldset.json` beside them. A name another world already has, or a world of the
+  set that can't be added, refuses the whole set; a failure while copying removes what of it was added. A world of the
+  set already there with the same bytes stays as it is.
 - Each file is copied under a temporary name, checked against the hash that was inspected, and renamed into place,
-  never over a file; a replaced file goes to the Recycle Bin. Undo sends the added files to the Recycle Bin.
+  never over a file; a replaced file goes to the Recycle Bin. Undo sends the added files to the Recycle Bin, worlds
+  excepted.
 - `.sims3pack` and `.ts3pack` files are refused with a pointer to the game's own launcher; programs (`.exe`, `.dll`,
   `.asi`, scripts) are refused.
 

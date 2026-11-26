@@ -111,12 +111,6 @@ public partial class App : Application
             Environment.Exit(code);
             return;
         }
-        // the same for the worlds added on the Mods screen
-        if (MainWindow.WorldsElevated(maintain, screen, argv) is { } worlds)
-        {
-            Environment.Exit(worlds);
-            return;
-        }
         var uninstall = argv.Contains(LauncherInstall.UninstallArg);
         // (a test or a dry run never installs: APEX_LAUNCHER_PORTABLE=1 runs the exe where it is)
         var portable = Environment.GetEnvironmentVariable(LauncherInstall.PortableVar) == "1" || Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1";

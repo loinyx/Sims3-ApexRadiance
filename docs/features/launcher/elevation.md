@@ -31,7 +31,7 @@ the administrator's folders instead of the player's.
 3. **The administrator copy** reads and deletes the plan, makes the change (with its restore point), and exits. Its
    window title says *Apex Launcher (administrator)*. The player's window hides while it runs, waits for it to exit, and
    reads the game again.
-4. **Other plans.** Game settings (`GameSettingsPlan`), worlds (`WorldsPlan`) and the uninstall's game-folder part
+4. **Other plans.** Game settings (`GameSettingsPlan`) and the uninstall's game-folder part
    (`--maintain * --open uninstall` or `uninstall-keep`) run without a window and report back through their exit code.
    Turning NVIDIA Smooth Motion or AMD Fluid Motion Frames on or off always needs administrator rights.
 5. **Play** skips safe fixes that would need a prompt, and refuses to start the game from a window that runs elevated
