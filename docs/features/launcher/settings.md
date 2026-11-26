@@ -47,7 +47,6 @@ on its own, and the release notes of five projects live on five GitHub pages.
 | Light or dark | `settings.json` `Mode` | choice | Same as Windows (`system`) | Same as Windows, Dark, Light | The launcher's light or dark look |
 | Picture at the top of Home | `settings.json` `HomePicture` | choice | A picture from the gallery (`gallery`) | A picture from the gallery, The household's photo (`household`), No picture (`none`) | What shows behind the game's name on Home |
 | Gallery picture | `gallery.json` `HomePicture` | buttons | The newest picture | *Choose in the gallery*, *Use the newest* | The gallery picture on Home: the one marked *Use on Home*, else the newest |
-| Picture height | `settings.json` `HomePictureHeight` | choice | Medium (330 px) | Short (240 px), Medium, Tall (440 px) | How much of the page the picture takes |
 | Picture strength | `settings.json` `HomePictureStrength` | slider | 100% | 30 to 100%, step 5 | How strongly the picture shows |
 | Window background | `settings.json` `Backdrop` | choice | Mica (Windows default) (`mica`) | Mica (Windows default), Mica, stronger (`micaalt`), Acrylic (`acrylic`), Solid colour (`solid`) | Mica and Acrylic take a tint from the desktop wallpaper; Solid colour takes none |
 | Start with Windows | Windows' `HKCU\...\Run` value *Apex Launcher* | switch | Off | | Opens in the notification area at sign-in (`--tray`); only for an installed copy |

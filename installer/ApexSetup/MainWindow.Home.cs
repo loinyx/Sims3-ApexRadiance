@@ -106,15 +106,11 @@ public sealed partial class MainWindow
         {
             // the picture as a rounded card inside the page's margins, at full strength unless Settings softens it, with a soft
             // shade in the corner where the words sit so they read on any picture without a box over it
-            // The picture is never cut: the top takes its own shape once it is read; when Settings' picture height or the window
-            // keeps it lower, the whole picture stands in the middle over a blurred copy of itself that fills the sides.
+            // The picture is never cut: the top takes its own shape once it is read.
             var source = Thumb(shot, 2000);
             source.ImageOpened += (_, _) => { if (source.PixelWidth > 0) { _homeRatio = (double)source.PixelHeight / source.PixelWidth; FitHome(); } };
             var strength = Math.Clamp(_settings.HomePictureStrength, 30, 100) / 100.0;
             pic.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Center, Opacity = strength });
-            pic.Children.Add(new Border { IsHitTestVisible = false, Background = new Microsoft.UI.Xaml.Media.AcrylicBrush
-                { TintColor = Windows.UI.Color.FromArgb(255, 8, 8, 8), TintOpacity = 0.35, TintLuminosityOpacity = 0.3, FallbackColor = Windows.UI.Color.FromArgb(255, 8, 8, 8) } });
-            pic.Children.Add(new Image { Source = source, Stretch = Stretch.Uniform, Opacity = strength });
             var black = Windows.UI.Color.FromArgb(255, 8, 8, 8);
             pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0xC8), (0.3, 0x66), (0.6, 0)]) });
             pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(black, [(0, 0x8C), (0.35, 0x26), (0.55, 0)], across: true) });
@@ -173,9 +169,8 @@ public sealed partial class MainWindow
     {
         double w = Scroller.ActualWidth, h = Scroller.ActualHeight;
         if (_homeHero is null || w <= 0 || h <= 0) return;
-        var share = Math.Clamp(_settings.HomePictureHeight / 480.0 * 0.9, 0.42, 0.88);
-        // (the picture inside the page margins at its own shape, plus the margin above it; no taller than the window allows)
-        if (_homeOnPhoto) _homeHero.Height = Math.Clamp((w - 2 * Design.Space.Page) * _homeRatio + Design.Space.X6, 360, Math.Max(360, h * share));
+        // (the picture inside the page margins at its own shape, plus the margin above it)
+        if (_homeOnPhoto) _homeHero.Height = Math.Max(360, (w - 2 * Design.Space.Page) * _homeRatio + Design.Space.X6);
         if (_homeName is not null) { _homeName.FontSize = Math.Clamp(w / 32, 40, 64); _homeName.LineHeight = _homeName.FontSize * 1.08; }
         if (_homeWords is not null) _homeWords.MaxWidth = Math.Max(560, w * 0.42);
     }

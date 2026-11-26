@@ -24,7 +24,8 @@ menus after the main menu has loaded.
 ## How Apex Radiance solves it
 
 1. **The top.** The picture chosen in [Settings](settings.md#settings) (a gallery picture, the household's photo of the
-   newest save, or none), the game's name, Play and a *More options* menu (*Play without updating*, *All saves*). Over the
+   newest save, or none) at its own width-to-height, so nothing of it is cut, the game's name, Play and a *More options*
+   menu (*Play without updating*, *All saves*). Over the
    picture, a card of dark glass holds the health crystal, the state (*Ready to play*, *Needs your attention*,
    *Apex Radiance can't start*), the first thing to look at, and a way into [Health](health.md).
 2. **Banners.** *Apex Radiance can't start* when Health is Blocked (Play becomes *Play anyway*, "The game starts without
@@ -66,7 +67,7 @@ When no game is found, Home asks for the game folder (*Choose the game*).
 
 The settings that change Home and Play are on the [Settings](settings.md#settings) page: *Hide while playing*, *Apply
 safe fixes without asking*, *Install updates when I press Play*, *Picture at the top of Home*, *Gallery picture*,
-*Picture height*, *Picture strength*.
+*Picture strength*.
 
 ## Compatibility and interactions
 

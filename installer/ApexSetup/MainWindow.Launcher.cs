@@ -770,13 +770,6 @@ public sealed partial class MainWindow
         choose.Children.Add(Button(T("Choose in the gallery"), () => Show(GalleryScreen)));
         if (chosen) choose.Children.Add(Button(T("Use the newest"), () => { _gal!.HomePicture = null; Gallery.Save(_gal); BuildSettings(); }));
         host.Children.Add(Row("image-plus", T("Gallery picture"), chosen ? T("The one you chose in the gallery") : T("The newest one you took"), choose));
-        int[] heights = [240, 330, 440];
-        var height = new ComboBox { Width = 232 };
-        foreach (var label in new[] { T("Short"), T("Medium"), T("Tall") }) height.Items.Add(label);
-        height.SelectedIndex = Math.Max(0, Array.IndexOf(heights, _settings.HomePictureHeight) is var hi && hi >= 0 ? hi : 1);
-        height.SelectionChanged += (_, _) => { _settings.HomePictureHeight = heights[Math.Max(0, height.SelectedIndex)]; _settings.Save(); };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(height, T("Picture height"));
-        host.Children.Add(Row("arrow-up-down", T("Picture height"), T("How much of the page the picture takes"), height));
         var strength = new Slider { Minimum = 30, Maximum = 100, StepFrequency = 5, Width = 232, Value = Math.Clamp(_settings.HomePictureStrength, 30, 100) };
         strength.ValueChanged += (_, e) => { _settings.HomePictureStrength = (int)e.NewValue; _settings.Save(); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(strength, T("Picture strength"));
