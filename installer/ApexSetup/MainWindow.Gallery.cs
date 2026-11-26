@@ -41,7 +41,6 @@ public sealed partial class MainWindow
         ["Ink Free", "Segoe Print", "Segoe Script", "MV Boli", "Gabriola", "Comic Sans MS", "Sitka Banner", "Georgia", "Constantia", "Candara", "Trebuchet MS", "Bahnschrift", "Courier New", "Cascadia Code", "Impact", "Segoe UI Variable Display"];
     static readonly (string Key, Windows.UI.Color Color)[] NoteColors =
         [("yellow", Rgb(0xFF, 0xE5, 0x8A)), ("pink", Rgb(0xFF, 0xB8, 0xD2)), ("green", Rgb(0xBF, 0xF0, 0xB8)), ("blue", Rgb(0xB8, 0xDC, 0xFF)), ("lilac", Rgb(0xD9, 0xCC, 0xFF))];
-    static readonly Windows.UI.Color[] Tapes = [Windows.UI.Color.FromArgb(0x8C, 0x7F, 0x77, 0xDD), Windows.UI.Color.FromArgb(0x99, 0xE0, 0xA8, 0x4F), Windows.UI.Color.FromArgb(0x8C, 0x7D, 0xBE, 0x9A), Windows.UI.Color.FromArgb(0x80, 0xE8, 0x6F, 0xB8)];
 
     // the picture Home opens on: the one chosen in the Gallery, else the newest
     GalleryData LoadGallery()
@@ -565,7 +564,7 @@ public sealed partial class MainWindow
     static async Task<Windows.Storage.FileProperties.StorageItemThumbnail?> VideoFrame(string path, int px)
     {
         var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(Path.GetFullPath(path));
-        var thumb = await file.GetThumbnailAsync(Windows.Storage.FileProperties.ThumbnailMode.SingleItem, (uint)px, Windows.Storage.FileProperties.ThumbnailOptions.ResizeThumbnail);
+        var thumb = await file.GetThumbnailAsync(Windows.Storage.FileProperties.ThumbnailMode.SingleItem, (uint)Math.Clamp(px, 1, 1600), Windows.Storage.FileProperties.ThumbnailOptions.ResizeThumbnail);
         if (thumb is { Type: Windows.Storage.FileProperties.ThumbnailType.Image }) return thumb;
         thumb?.Dispose();
         return null;
@@ -789,11 +788,11 @@ public sealed partial class MainWindow
         Play(sb);
     }
 
-    // the tape's colour: bright, or the board's own hue made paler
+    // the tape's colour: the board's own hue made paler (an album's older Tape choice no longer matters)
     Brush TapeBrush(AlbumLook look, int order)
     {
-        if (look.Tape == "match") { var c = Shade(BoardColor(look), 0.45); return new SolidColorBrush(Windows.UI.Color.FromArgb(0xB8, c.R, c.G, c.B)); }
-        return new SolidColorBrush(Tapes[order % Tapes.Length]);
+        var c = Shade(BoardColor(look), 0.45);
+        return new SolidColorBrush(Windows.UI.Color.FromArgb(0xB8, c.R, c.G, c.B));
     }
 
     // ---------- Scrapbook ----------
@@ -808,36 +807,12 @@ public sealed partial class MainWindow
     ScrollViewer? _boardScroll;
     readonly List<(Picture Pic, FrameworkElement Card, int Index)> _boardCards = [];
     static readonly (string Key, string Name)[] Frames =
-        [("polaroid", "Polaroid"), ("print", "Print"), ("washi", "Washi tape"), ("clip", "Paper clip"), ("rounded", "Rounded"), ("kraft", "Kraft"), ("deckle", "Vintage"), ("doodle", "Doodled"), ("stamp", "Stamp"), ("film", "Film")];
+        [("polaroid", "Polaroid"), ("print", "Print"), ("washi", "Washi tape"), ("clip", "Paper clip"), ("rounded", "Rounded"), ("kraft", "Kraft"), ("deckle", "Vintage"), ("doodle", "Doodled"), ("stamp", "Stamp"), ("film", "Film"), ("walnut", "Walnut"), ("gallery", "Gallery"), ("neon", "Neon")];
 
-    // diagonal stripes, as on washi tape
-    static Brush Stripes(Windows.UI.Color a, Windows.UI.Color b, double size) => new LinearGradientBrush
-    {
-        MappingMode = BrushMappingMode.Absolute, SpreadMethod = GradientSpreadMethod.Repeat, StartPoint = new(0, 0), EndPoint = new(size, size),
-        GradientStops = { new GradientStop { Color = a, Offset = 0 }, new GradientStop { Color = a, Offset = 0.5 }, new GradientStop { Color = b, Offset = 0.5 }, new GradientStop { Color = b, Offset = 1 } },
-    };
     static readonly (Windows.UI.Color A, Windows.UI.Color B)[] Washi =
         [(Rgb(0xF3, 0xA6, 0xC0), Rgb(0xFB, 0xD3, 0xE0)), (Rgb(0x9F, 0xD3, 0xC7), Rgb(0xD6, 0xF0, 0xEA)), (Rgb(0xF2, 0xC9, 0x6B), Rgb(0xFA, 0xE6, 0xB4)), (Rgb(0xB4, 0xAE, 0xF2), Rgb(0xDE, 0xDB, 0xFA))];
 
-    // a strip of washi tape over one corner of a picture
-    static Border WashiStrip(int corner, int order, double k)
-    {
-        var (a, b) = Washi[(order + (corner is 0 or 3 ? 0 : 1)) % Washi.Length];
-        var left = corner % 2 == 0;
-        var top = corner < 2;
-        return new Border
-        {
-            Width = 58 * k, Height = 18 * k, Opacity = 0.9, Background = Stripes(a, b, 12 * k),
-            HorizontalAlignment = left ? HorizontalAlignment.Left : HorizontalAlignment.Right, VerticalAlignment = top ? VerticalAlignment.Top : VerticalAlignment.Bottom,
-            Margin = new Thickness(left ? -18 * k : 0, top ? -4 * k : 0, left ? 0 : -18 * k, top ? 0 : -4 * k),
-            RenderTransform = new RotateTransform { Angle = left == top ? -38 : 38 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
-        };
-    }
-
     static Geometry Geo(string d) => (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), d);
-    const string DoodleA = "M6 8 Q60 3 120 7 T224 6 Q226 70 222 150 Q160 156 110 152 T4 154 Q2 90 6 8";
-    const string DoodleB = "M10 4 Q90 9 218 3 Q221 80 226 148 Q120 158 8 150 Q6 70 10 4";
-    const string Star = "M7 0 L9 5 L14 5.5 L10 9 L11 14 L7 11.5 L3 14 L4 9 L0 5.5 L5 5 Z";
 
     static Windows.UI.Color Hex(string? hex, Windows.UI.Color fallback)
     {
@@ -1222,7 +1197,7 @@ public sealed partial class MainWindow
         Grid.SetRow(label, 1);
         g.Children.Add(label);
         var b = new Button { Content = g, Height = height, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(8, 10, 8, 8), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(on ? 2 : 1),
+            Padding = new Thickness(8, 10, 8, 8), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(on ? 2 : 1), BackgroundSizing = BackgroundSizing.OuterBorderEdge,
             BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush"), Background = Res(on ? "ApexAccentSoftBrush" : "ApexFillBrush") };
         if (on) b.Resources["ButtonBackgroundPointerOver"] = b.Resources["ButtonBackgroundPressed"] = Res("ApexAccentSoftBrush");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
@@ -1443,27 +1418,10 @@ public sealed partial class MainWindow
             for (int i = 0; i < Frames.Length; i++)
             {
                 var key = Frames[i].Key;
-                PutAt(frames, Choice(FrameIcon(key), T(Frames[i].Name), look.Frame == key, () => { look.Frame = key; Changed(); FillCustomize(); }), i, 2);
+                PutAt(frames, Choice(FrameIcon(key, look), T(Frames[i].Name), look.Frame == key, () => { look.Frame = key; Changed(); FillCustomize(); }, 116), i, 2);
             }
             body.Children.Add(frames);
 
-            body.Children.Add(Caption(T("TAPE")));
-            var tapes = Columns(3);
-            (string Key, string Name)[] kinds = [("colour", T("Colourful")), ("match", T("Matching")), ("none", T("None"))];
-            for (int i = 0; i < kinds.Length; i++)
-            {
-                var key = kinds[i].Key;
-                var art = new Grid { Width = 70, Height = 40 };
-                if (key != "none")
-                {
-                    var probe = new AlbumLook { Tape = key, Color = look.Color, Background = look.Background };
-                    art.Children.Add(new Border { Width = 46, Height = 14, Background = TapeBrush(probe, 1), Rotation = -6, CenterPoint = new Vector3(23, 7, 0), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 0, 0) });
-                    art.Children.Add(new Border { Width = 40, Height = 12, Background = TapeBrush(probe, 3), Rotation = 5, CenterPoint = new Vector3(20, 6, 0), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 6) });
-                }
-                else art.Children.Add(new LucideIcon { Kind = "x", Size = 20, Opacity = 0.5, Follow = true, StrokeWidth = 1.75 });
-                PutAt(tapes, Choice(art, kinds[i].Name, look.Tape == key, () => { look.Tape = key; Changed(); FillCustomize(); }, 80), i, 3);
-            }
-            body.Children.Add(tapes);
 
             Grid Range(string name, string left, string right, double min, double max, double value, Action<double> set, Action? live = null)
             {
@@ -1549,71 +1507,6 @@ public sealed partial class MainWindow
             Show(_fontQuery);
         }
         _custDrawer.Child = root;
-    }
-
-    // a small drawing of each frame for its card
-    static UIElement FrameIcon(string key)
-    {
-        var paper = new SolidColorBrush(Rgb(0xF2, 0xEF, 0xE8));
-        Border Photo(double w, double h, double r = 0) => new() { Width = w, Height = h, CornerRadius = new CornerRadius(r),
-            Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(1, 1), GradientStops = { new GradientStop { Color = Rgb(0x8F, 0xB4, 0xD8), Offset = 0 }, new GradientStop { Color = Rgb(0x4E, 0x7A, 0x5E), Offset = 1 } } } };
-        switch (key)
-        {
-            case "rounded": return Photo(52, 38, 10);
-            case "stamp":
-                return new Grid { Width = 46, Height = 50, Children = { new Microsoft.UI.Xaml.Shapes.Rectangle { Fill = new SolidColorBrush(Rgb(0xFB, 0xF8, 0xF1)), Stroke = new SolidColorBrush(Rgb(0x9A, 0x90, 0x7E)), StrokeDashArray = [1.4, 1.2], StrokeThickness = 3 },
-                    new Border { Margin = new Thickness(7, 7, 7, 13), Child = Photo(32, 30) } } };
-            case "film":
-            {
-                var f = new StackPanel { Background = new SolidColorBrush(Rgb(0x14, 0x14, 0x14)), Padding = new Thickness(4, 3, 4, 3), Spacing = 3 };
-                StackPanel Holes() { var r = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 }; for (int i = 0; i < 6; i++) r.Children.Add(new Border { Width = 5, Height = 3, Background = new SolidColorBrush(Rgb(0x55, 0x55, 0x55)) }); return r; }
-                f.Children.Add(Holes()); f.Children.Add(Photo(50, 30)); f.Children.Add(Holes());
-                return f;
-            }
-            case "kraft":
-                return new Border { Background = new SolidColorBrush(Rgb(0xC4, 0xA2, 0x7A)), Padding = new Thickness(4, 4, 4, 12), Child = Photo(40, 32) };
-            case "washi":
-            {
-                var g = new Grid { Width = 58, Height = 46 };
-                g.Children.Add(new Border { Background = new SolidColorBrush(Microsoft.UI.Colors.White), Padding = new Thickness(3), Margin = new Thickness(4), Child = Photo(44, 32) });
-                for (int c = 0; c < 4; c++) g.Children.Add(WashiStrip(c, 0, 0.32));
-                return g;
-            }
-            case "clip":
-            {
-                var g = new Grid();
-                g.Children.Add(new Border { Background = paper, Padding = new Thickness(3, 3, 3, 9), Margin = new Thickness(0, 6, 0, 0), Child = Photo(42, 30) });
-                var silver = new SolidColorBrush(Rgb(0xB9, 0xBC, 0xC4));
-                g.Children.Add(new Border { Width = 7, Height = 20, BorderBrush = silver, BorderThickness = new Thickness(1.5), CornerRadius = new CornerRadius(4), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(8, 0, 0, 0) });
-                return g;
-            }
-            case "deckle":
-            {
-                var cream = new SolidColorBrush(Rgb(0xEF, 0xE6, 0xD0));
-                var g = new Grid();
-                g.Children.Add(new Border { Background = cream, Padding = new Thickness(5, 5, 5, 9), Child = Photo(40, 30) });
-                for (int t = 0; t < 2; t++)
-                {
-                    var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = t == 0 ? VerticalAlignment.Top : VerticalAlignment.Bottom, Margin = new Thickness(0, t == 0 ? -2.5 : 0, 0, t == 0 ? 0 : -2.5) };
-                    for (int c = 0; c < 10; c++) row.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 5, Height = 5, Fill = cream });
-                    g.Children.Add(row);
-                }
-                return g;
-            }
-            case "doodle":
-            {
-                var ink = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4));
-                var g = new Grid { Padding = new Thickness(5), Width = 54, Height = 42 };
-                g.Children.Add(Photo(44, 32));
-                g.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(DoodleA), Stroke = ink, StrokeThickness = 1.4, Stretch = Stretch.Fill, Margin = new Thickness(-5) });
-                g.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(Star), Fill = ink, Width = 8, Height = 8, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -9, -9) });
-                return g;
-            }
-            case "print":
-                return new Border { BorderBrush = paper, BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(5), Child = Photo(48, 34, 2) };
-            default:
-                return new Border { Background = paper, Padding = new Thickness(4, 4, 4, 12), Child = Photo(40, 34) };
-        }
     }
 
     // ---------- the paper and the stickers ----------
@@ -2495,150 +2388,15 @@ public sealed partial class MainWindow
         var style = kind ?? order;
         double w = (big ? 290 : 230) * _boardScale * look.Size, h = (big ? 194 : 154) * _boardScale * look.Size;
         var source = photo ?? Thumb(p.Path, read ?? w);
-        var dark = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
         var caption = new TextBlock { FontFamily = new FontFamily(look.Font), FontSize = Math.Min(captionMax, (big ? 24 : 20) * Math.Max(0.85, _boardScale)), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.Wrap, MaxLines = 2, MaxWidth = w + 8, MinHeight = 28, HorizontalAlignment = HorizontalAlignment.Left };
         if (info.Caption is { Length: > 40 } longText) ToolTipService.SetToolTip(caption, longText);
-        var stack = new StackPanel();
-        FrameworkElement body;
-        FrameworkElement? capBox = null;   // the tag a caption sits on, when the frame gives it one
-        var tape = false;
-        switch (look.Frame)
-        {
-            case "rounded":
-                stack.Children.Add(new Border { Width = w, Height = h, CornerRadius = new CornerRadius(20), Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill } });
-                caption.Foreground = dark;
-                stack.Children.Add(capBox = new Border { Child = caption, Margin = new Thickness(10, -18, 0, 0), Padding = new Thickness(12, 2, 12, 2), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Left,
-                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xEB, 0xF6, 0xF2, 0xEA)) });
-                body = stack;
-                break;
-            case "stamp":
-                var stamp = new Grid { Padding = new Thickness(12) };
-                stamp.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle { Fill = new SolidColorBrush(Rgb(0xFB, 0xF8, 0xF1)), Stroke = new SolidColorBrush(Rgb(0xB9, 0xAF, 0x9C)), StrokeDashArray = [1.2, 1.6], StrokeThickness = 5, Margin = new Thickness(-12) });
-                var inner = new StackPanel();
-                inner.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
-                caption.Foreground = dark;
-                caption.Margin = new Thickness(2, 6, 2, 0);
-                inner.Children.Add(caption);
-                stamp.Children.Add(inner);
-                // (a postmark over the corner, with the day)
-                var mark = new Grid { Width = 70, Height = 70, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -40, -44, 0), Rotation = -14, CenterPoint = new Vector3(35, 35, 0) };
-                mark.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB0, 0x6A, 0x4E, 0x8C)), StrokeThickness = 2 });
-                mark.Children.Add(new TextBlock { Text = p.Taken.ToString("dd MMM\nyyyy", LangCulture()).ToUpperInvariant(), FontSize = 11, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xC0, 0x6A, 0x4E, 0x8C)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
-                stamp.Children.Add(mark);
-                body = stamp;
-                break;
-            case "film":
-                var film = new StackPanel { Background = new SolidColorBrush(Rgb(0x14, 0x14, 0x14)), Padding = new Thickness(10, 6, 10, 8) };
-                StackPanel Holes() { var r = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 9, Margin = new Thickness(2, 3, 0, 3) }; for (int k = 0; k < (int)(w / 19); k++) r.Children.Add(new Border { Width = 10, Height = 7, CornerRadius = new CornerRadius(2), Background = new SolidColorBrush(Rgb(0x3A, 0x3A, 0x3A)) }); return r; }
-                film.Children.Add(Holes());
-                film.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
-                film.Children.Add(Holes());
-                caption.Foreground = new SolidColorBrush(Rgb(0xE6, 0xE0, 0xD2));
-                caption.FontSize = Math.Min(caption.FontSize, 16);
-                caption.Margin = new Thickness(2, 0, 2, 0);
-                film.Children.Add(caption);
-                body = film;
-                break;
-            case "print":
-                // (a print with a thin white border, the caption written on the board under it)
-                var print = new Border { BorderBrush = new SolidColorBrush(Rgb(0xF7, 0xF4, 0xEE)), BorderThickness = new Thickness(6), CornerRadius = new CornerRadius(8),
-                    Child = new Border { Width = w, Height = h, CornerRadius = new CornerRadius(3), Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill } } };
-                print.Shadow = new ThemeShadow();
-                stack.Children.Add(print);
-                caption.Foreground = ink;
-                caption.Margin = new Thickness(4, 10, 0, 0);
-                stack.Children.Add(caption);
-                body = stack;
-                break;
-            case "kraft":
-                // (brown paper, taped on)
-                stack.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
-                caption.Foreground = new SolidColorBrush(Rgb(0x3D, 0x2B, 0x1A));
-                caption.Margin = new Thickness(2, 8, 2, 0);
-                stack.Children.Add(caption);
-                body = new Border { Background = new SolidColorBrush(Rgb(0xC4, 0xA2, 0x7A)), Padding = new Thickness(12, 12, 12, 13), Child = stack };
-                tape = true;
-                break;
-            case "washi":
-                // (a white border held by four strips of patterned washi tape, the caption on the board under it)
-                var wash = new Grid();
-                var washPaper = new Border { Background = new SolidColorBrush(Microsoft.UI.Colors.White), Padding = new Thickness(8), Child = new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h } };
-                washPaper.Shadow = new ThemeShadow();
-                wash.Children.Add(washPaper);
-                if (!bare) for (int q = 0; q < 4; q++) wash.Children.Add(WashiStrip(q, style, _boardScale));
-                stack.Children.Add(wash);
-                caption.Foreground = ink;
-                caption.Margin = new Thickness(4, 12, 0, 0);
-                stack.Children.Add(caption);
-                body = stack;
-                break;
-            case "clip":
-                // (a white print with a silver paper clip over its top edge)
-                var clipped = new Grid();
-                var card = new StackPanel { Background = new SolidColorBrush(Rgb(0xFD, 0xFD, 0xFB)), Padding = new Thickness(9, 9, 9, 6) };
-                card.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
-                caption.Foreground = dark;
-                caption.Margin = new Thickness(3, 8, 0, 2);
-                card.Children.Add(caption);
-                clipped.Children.Add(card);
-                var silver = new SolidColorBrush(Rgb(0xB9, 0xBC, 0xC4));
-                var k = _boardScale;
-                clipped.Children.Add(new Border
-                {
-                    Width = 18 * k, Height = 56 * k, BorderBrush = silver, BorderThickness = new Thickness(2.5), CornerRadius = new CornerRadius(9 * k),
-                    HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(26 * k, -20 * k, 0, 0),
-                    RenderTransform = new RotateTransform { Angle = 6 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
-                    Child = new Border { Width = 8 * k, Height = 36 * k, BorderBrush = silver, BorderThickness = new Thickness(2.5), CornerRadius = new CornerRadius(6 * k), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(1.5, 5 * k, 0, 0) },
-                });
-                body = clipped;
-                break;
-            case "deckle":
-                // (an old print: a cream border with a scalloped edge all round, a touch of sepia, the caption on the border)
-                var cream = Rgb(0xEF, 0xE6, 0xD0);
-                var aged = new Grid();
-                // (round dots on the edge, each touching the next: the scallops)
-                aged.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle { Fill = new SolidColorBrush(cream), Stroke = new SolidColorBrush(cream), StrokeThickness = 10,
-                    StrokeDashArray = [0, 1.05], StrokeDashCap = PenLineCap.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
-                var print2 = new StackPanel { Padding = new Thickness(14, 14, 14, 10) };
-                var tinted = new Grid { Width = w, Height = h };
-                tinted.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
-                tinted.Children.Add(new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x38, 0x8A, 0x5A, 0x20)) });
-                print2.Children.Add(tinted);
-                caption.Foreground = new SolidColorBrush(Rgb(0x6B, 0x5A, 0x3A));
-                caption.Margin = new Thickness(2, 6, 0, 0);
-                print2.Children.Add(caption);
-                aged.Children.Add(print2);
-                body = aged;
-                break;
-            case "doodle":
-                // (no paper: a border drawn by hand round the picture, and a couple of stars, in the board's own ink)
-                var drawn = new Grid { Padding = new Thickness(14), Width = w + 28, Height = h + 28 };
-                drawn.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
-                drawn.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(DoodleA), Stroke = ink, StrokeThickness = 2, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Stretch = Stretch.Fill, Margin = new Thickness(-14) });
-                drawn.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(DoodleB), Stroke = ink, StrokeThickness = 1.2, Opacity = 0.6, Stretch = Stretch.Fill, Margin = new Thickness(-14) });
-                drawn.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(Star), Fill = ink, Width = 16, Height = 16, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -22, -26) });
-                drawn.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = Geo(Star), Fill = ink, Opacity = 0.7, Width = 11, Height = 11, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-20, 0, 0, -22) });
-                stack.Children.Add(drawn);
-                caption.Foreground = ink;
-                caption.HorizontalAlignment = HorizontalAlignment.Center;
-                caption.Margin = new Thickness(0, 4, 0, 0);
-                stack.Children.Add(caption);
-                body = stack;
-                break;
-            default:
-                stack.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
-                caption.Foreground = dark;
-                caption.Margin = new Thickness(2, 8, 2, 0);
-                stack.Children.Add(caption);
-                body = new Border { Background = new SolidColorBrush(Rgb(0xF2, 0xEF, 0xE8)), Padding = new Thickness(11, 11, 11, 12), Child = stack };
-                tape = true;
-                break;
-        }
+        var accent = (Res("ApexAccentBrush") as SolidColorBrush)?.Color ?? Design.Scrap.FilmPrint;
+        FrameworkElement Photo(double pw, double ph, double r) => new Border { Width = pw, Height = ph, CornerRadius = new CornerRadius(r), Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill } };
+        var (body, capBox, tape, _) = Dress(look.Frame, Photo, w, h, _boardScale, style, Seed(p.Path) ^ style, ink, accent, caption, bare);
         var holder = new Grid();
         holder.Children.Add(body);
-        if (look.Frame is not ("film" or "print" or "washi" or "doodle")) body.Shadow = new ThemeShadow();
         Border? strip = null;
-        if (tape && look.Tape != "none" && !bare)
+        if (tape && !bare)
         {
             strip = new Border { Width = 96, Height = 22, Background = TapeBrush(look, style), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -22, 0, 0),
                 RenderTransform = new CompositeTransform { Rotation = (style % 3 - 1) * 4, ScaleX = _boardCalm ? 1 : 0 }, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
@@ -2705,9 +2463,11 @@ public sealed partial class MainWindow
             };
         }
         HandCursor.On(caption);
-        caption.Tapped += (_, e) =>
+        caption.Tapped += (_, e) => { e.Handled = true; WriteCaption(); };
+        // (the keyboard's way in too: F2 on the picture)
+        outer.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.F2) { e.Handled = true; WriteCaption(); } };
+        void WriteCaption()
         {
-            e.Handled = true;
             if (shut || editing) return;
             void Put(UIElement was, UIElement now)
             {
@@ -2719,16 +2479,42 @@ public sealed partial class MainWindow
             }
             if (caption.Parent is not (Panel or Border)) return;
             editing = true;
-            var box = new TextBox { Text = info.Caption ?? "", FontFamily = caption.FontFamily, FontSize = caption.FontSize, Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0, 0, 0, 1),
-                Foreground = caption.Foreground, PlaceholderText = T("write something"), MinWidth = 160, Margin = caption.Margin };
+            // the caption written in place: as wide as the caption it replaces, wrapping into its two lines, on a soft wash of the
+            // ink with no border, so it still reads as handwriting on the paper
+            var ink = caption.Foreground is SolidColorBrush cf ? cf.Color : Microsoft.UI.Colors.Black;
+            Brush Wash(byte a) => new SolidColorBrush(Windows.UI.Color.FromArgb(a, ink.R, ink.G, ink.B));
+            const double pad = 6;
+            var box = new TextBox { Text = info.Caption ?? "", FontFamily = caption.FontFamily, FontSize = caption.FontSize, PlaceholderText = T("write something"),
+                TextWrapping = TextWrapping.Wrap, AcceptsReturn = false, MaxLength = 120, Width = caption.MaxWidth + pad * 2, MinWidth = 0,
+                Foreground = caption.Foreground, Background = Wash(0x10), BorderThickness = new Thickness(0),
+                Padding = new Thickness(pad, pad - 2, pad, pad - 2), CornerRadius = new CornerRadius(Design.Radius.Tag), HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(caption.Margin.Left - pad, caption.Margin.Top - (pad - 2), caption.Margin.Right, caption.Margin.Bottom - (pad - 2)) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Caption"));
-            box.Resources["TextControlBackgroundFocused"] = Res("ApexClearBrush");
-            box.Resources["TextControlForegroundFocused"] = caption.Foreground;
-            var line = caption.Foreground is SolidColorBrush cf ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x66, cf.Color.R, cf.Color.G, cf.Color.B)) : caption.Foreground;
-            foreach (var key in new[] { "TextControlBorderBrush", "TextControlBorderBrushPointerOver", "TextControlBorderBrushFocused" }) box.Resources[key] = line;
-            box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0, 0, 0, 1);
-            box.Resources["TextControlBackgroundPointerOver"] = Res("ApexClearBrush");
-            box.Padding = new Thickness(0, 0, 0, 2);
+            // (a longer caption writes smaller, down to six tenths, so it stays in the caption's two lines instead of scrolling)
+            var (size, room) = (caption.FontSize, caption.FontSize * 1.45 * 2 + pad * 2);
+            void Fit()
+            {
+                for (var f = size; ; f -= 1)
+                {
+                    box.FontSize = Math.Max(size * 0.6, f);
+                    box.Measure(new Windows.Foundation.Size(box.Width, double.PositiveInfinity));
+                    if (box.DesiredSize.Height <= room || f <= size * 0.6) break;
+                }
+            }
+            box.TextChanged += (_, _) => Fit();
+            box.Loaded += (_, _) => Fit();
+            foreach (var key in new[] { "TextControlBackgroundPointerOver", "TextControlBackgroundFocused" }) box.Resources[key] = Wash(0x18);
+            foreach (var key in new[] { "TextControlForegroundPointerOver", "TextControlForegroundFocused" }) box.Resources[key] = caption.Foreground;
+            box.PlaceholderForeground = Wash(0x8C);
+            foreach (var key in new[] { "TextControlBorderBrush", "TextControlBorderBrushPointerOver", "TextControlBorderBrushFocused" }) box.Resources[key] = Res("ApexClearBrush");
+            box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+            // (no clear button on the paper)
+            box.Resources["TextControlButtonForeground"] = Res("ApexClearBrush");
+            box.Loaded += (_, _) =>
+            {
+                void Hide(DependencyObject o) { for (int k = 0; k < VisualTreeHelper.GetChildrenCount(o); k++) { var c = VisualTreeHelper.GetChild(o, k); if (c is Button { Name: "DeleteButton" } d) { d.Visibility = Visibility.Collapsed; d.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => d.Visibility = Visibility.Collapsed); } else Hide(c); } }
+                Hide(box);
+            };
             Put(caption, box);
             box.Focus(FocusState.Programmatic);
             void Done()
@@ -2744,7 +2530,8 @@ public sealed partial class MainWindow
             }
             box.LostFocus += (_, _) => Done();
             box.KeyDown += (_, k) => { if (k.Key == Windows.System.VirtualKey.Enter) { k.Handled = true; Done(); } };
-        };
+        }
+        caption.Tag = (Action)WriteCaption; // (what writing on it starts, for whatever reaches the caption)
         return outer;
     }
 
@@ -3540,8 +3327,12 @@ public sealed partial class MainWindow
             grow = false;
             var src = Bounds(from!);
             var turn = CardTurn(from!);
+            var risen = false;
             void Rise()
             {
+                // (once: a second start while the first runs is refused by the compositor and would close the app)
+                if (risen) return;
+                risen = true;
                 card.UpdateLayout();
                 if (card.ActualWidth <= 0) { photo.Opacity = 1; return; }
                 var dst = Bounds(card);
@@ -3569,9 +3360,19 @@ public sealed partial class MainWindow
                 spin.InsertKeyFrame(1, 0, ease);
                 spin.Duration = time;
                 var batch = comp.CreateScopedBatch(Microsoft.UI.Composition.CompositionBatchTypes.Animation);
-                card.StartAnimation(scale);
-                card.StartAnimation(move);
-                card.StartAnimation(spin);
+                try
+                {
+                    foreach (var a in new Microsoft.UI.Composition.CompositionAnimation[] { scale, move, spin }) card.StopAnimation(a);
+                    card.StartAnimation(scale);
+                    card.StartAnimation(move);
+                    card.StartAnimation(spin);
+                }
+                catch (Exception e)
+                {
+                    // (the picture opens in place, unanimated, rather than the app closing)
+                    App.Log(e);
+                    (card.Scale, card.Translation, card.Rotation) = (Vector3.One, Vector3.Zero, 0);
+                }
                 batch.End();
                 batch.Completed += (_, _) => { if (pic.Video) PlayIn(); };
                 photo.Opacity = 1;
