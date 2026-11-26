@@ -268,9 +268,9 @@ public sealed partial class MainWindow
 
     // ---------- health: a small note in the picture's corner ----------
 
-    // The game's health over the picture: a low glass card with the crystal larger than it, over its left edge, in a light of
-    // the state's colour; the state in words, the first thing to look at, and a chevron: the whole card opens Health. The
-    // glass is Play and More's (frosted on the picture, the theme's own on the plain card), its corners a card's.
+    // The game's health over the picture: the crystal in its own round light, and beside it a low glass card with the state in
+    // words, the first thing to look at and a chevron: the whole thing opens Health. The glass is Play and More's (frosted on
+    // the picture, the theme's own on the plain card), its corners a card's.
     FrameworkElement HealthChip()
     {
         var calm = _healthState == HealthState.Ready;
@@ -285,18 +285,19 @@ public sealed partial class MainWindow
         Brush ink = photo ? new SolidColorBrush(Microsoft.UI.Colors.White) : Res("TextFillColorPrimaryBrush");
         Brush soft = photo ? new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0xCC)) : Res("ApexSoftTextBrush");
 
-        const double size = 64, light = 150, over = 26;
-        var root = new Grid();
-        // the card, starting under the crystal
-        var g = new Grid { Padding = new Thickness(size - over + Design.Space.X3, Design.Space.X3, Design.Space.X4, Design.Space.X3), ColumnSpacing = Design.Space.X3,
-            MinHeight = 56 };
+        const double size = 56, light = 140;
+        // the crystal on the left, outside the glass; the card beside it
+        var root = new Grid { ColumnSpacing = Design.Space.X3 };
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(size) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var g = new Grid { Padding = new Thickness(Design.Space.X4, Design.Space.X3, Design.Space.X3, Design.Space.X3), ColumnSpacing = Design.Space.X3 };
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var black = Windows.UI.Color.FromArgb(255, 0, 0, 0);
         Brush rest = photo ? Glass(0.42, black) : Res("ApexPillBrush"), hover = photo ? Glass(0.3, black) : Res("ApexHoverBrush");
-        var card = new Border { Child = g, Margin = new Thickness(over, 0, 0, 0), CornerRadius = new CornerRadius(Design.Radius.Card), Background = rest,
-            BorderThickness = new Thickness(1), BorderBrush = photo ? new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x24)) : Res("ApexCardBorderBrush"),
-            VerticalAlignment = VerticalAlignment.Center };
+        var card = new Border { Child = g, CornerRadius = new CornerRadius(Design.Radius.Card), Background = rest, BorderThickness = new Thickness(1),
+            BorderBrush = photo ? new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0x24)) : Res("ApexCardBorderBrush"), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(card, 1);
         root.Children.Add(card);
         var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         words.Children.Add(new TextBlock { Text = title, FontSize = Design.TextSize.Body, FontWeight = FontWeights.SemiBold, Foreground = ink, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -306,28 +307,27 @@ public sealed partial class MainWindow
         go.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(go, 1);
         g.Children.Add(go);
-        // the crystal over the card's edge, in its light (the light stays still and breathes; the crystal floats)
-        var pulse = new ScaleTransform();
-        // (a round light that fades the same way on every side: SoftGlow is made for a page's top edge)
+        // the light around the crystal, round, over the glass's edge rather than under it (glass would blur it into a block)
         var tint = StateTint(255);
         var fade = new Microsoft.UI.Xaml.Media.RadialGradientBrush();
         foreach (var (at, share) in new[] { (0.0, 1.0), (0.25, 0.8), (0.45, 0.48), (0.65, 0.2), (0.82, 0.06), (1.0, 0.0) })
-            fade.GradientStops.Add(new GradientStop { Offset = at, Color = Alpha(tint, (byte)(share * (calm ? 0xB0 : 0xD8))) });
+            fade.GradientStops.Add(new GradientStop { Offset = at, Color = Alpha(tint, (byte)(share * (calm ? 0xC0 : 0xE8))) });
+        var pulse = new ScaleTransform();
         var glow = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = light, Height = light, Fill = fade, RenderTransform = pulse, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
+        // (a canvas, so nothing cuts the light at a box's edge)
+        var halo = new Canvas { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+        Canvas.SetLeft(glow, -(light - size) / 2);
+        Canvas.SetTop(glow, -(light - size) / 2);
+        halo.Children.Add(glow);
+        Grid.SetColumnSpan(halo, 2);
+        halo.HorizontalAlignment = HorizontalAlignment.Left;
+        root.Children.Add(halo);
         var bob = new CompositeTransform();
-        var holder = new Grid { Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, RenderTransform = bob };
+        var holder = new Grid { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center, RenderTransform = bob, IsHitTestVisible = false };
         var crystal = new Crystal(size) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         crystal.SetLevel(HealthLevel, animate: false);
         holder.Children.Add(crystal);
-        var gem = new Grid { Width = size, Height = size + 8, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
-        gem.Children.Add(holder);
-        root.Children.Add(gem);
-        // (the light lies behind the button, so nothing clips it; the glass blurs what falls under it)
-        // (a canvas, as a grid would cut the light at its own edges)
-        var halo = new Canvas { Width = size, Height = size + 8, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
-        Canvas.SetLeft(glow, -(light - size) / 2);
-        Canvas.SetTop(glow, -(light - size - 8) / 2);
-        halo.Children.Add(glow);
+        root.Children.Add(holder);
         if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
         {
             var float_ = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
@@ -356,7 +356,7 @@ public sealed partial class MainWindow
         }
 
         // the whole thing is the button; only the glass answers the pointer
-        var b = new Button { Content = root, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush"), MaxWidth = 420,
+        var b = new Button { Content = root, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Res("ApexClearBrush"), MaxWidth = 420, CornerRadius = new CornerRadius(0),
             HorizontalContentAlignment = HorizontalAlignment.Stretch };
         foreach (var key in new[] { "ButtonBackgroundPointerOver", "ButtonBackgroundPressed" }) b.Resources[key] = Res("ApexClearBrush");
         b.PointerEntered += (_, _) => card.Background = hover;
@@ -365,10 +365,7 @@ public sealed partial class MainWindow
         b.Click += (_, _) => Show(HealthScreen);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, title + (note.Length > 0 ? ". " + note : "") + ". " + T("Open Health"));
         HandCursor.On(b);
-        var all = new Grid();
-        all.Children.Add(halo);
-        all.Children.Add(b);
-        return all;
+        return b;
     }
 
     static Windows.UI.Color Alpha(Windows.UI.Color c, byte a) => Windows.UI.Color.FromArgb(a, c.R, c.G, c.B);
