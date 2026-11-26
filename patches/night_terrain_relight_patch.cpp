@@ -3331,7 +3331,7 @@ class NightTerrainRelightPatch : public ApexPatch {
 
     void DrawLightingBalance() {
         // Its header: what the choice changes is the header's tooltip (no disclosure in the middle of the card)
-        ApexUi::CardHeader(ApexUi::IconId::Sunset, "Lighting balance", nullptr,
+        ApexUi::CardHeader(ApexUi::IconId::Sunset, "Lighting balance", "How bright lamps are at night",
                            "Changes lamp intensity on the Lighting page. Water settings, lamp colors and room background light stay as they are.",
                            nullptr);
         ApexUi::CardDivider();
@@ -3416,7 +3416,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         ApexUi::Gap(ApexUi::kSpace1);
         ImGui::PushID("NightGroundFixes");
         if (ApexUi::BeginCard("##Card")) {
-            ApexUi::CardHeader(IconId::LandPlot, "Ground & Lots", "Lamp light on grass, streets and lots", nullptr, nullptr);
+            ApexUi::CardHeader(IconId::LandPlot, "Ground & Lots", "Fixes for lamp light on grass, streets and lots", nullptr, nullptr);
             ApexUi::CardDivider();
             Edit([] {
                 bool changed = ApexUi::SwitchRow("Street lamps light lots", &g_bridge, "Street lamp light flows onto lots with no hard edge", true);
@@ -3448,7 +3448,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         // The game's fixes on stairs, doors, counters, fences and indoor furniture
         ImGui::PushID("NightObjectFixes");
         if (ApexUi::BeginCard("##Card")) {
-            ApexUi::CardHeader(IconId::Armchair, "Objects", "Lamp light on plants and outdoor furniture", nullptr, nullptr);
+            ApexUi::CardHeader(IconId::Armchair, "Objects", "Fixes for lamp light on objects, doors and windows", nullptr, nullptr);
             ApexUi::CardDivider();
             Edit([] {
                 ImGui::BeginDisabled(!g_objLamps);
@@ -3490,7 +3490,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         // Walls and light maps between floors: off with "Outdoor light between floors" (Inside & floors tab), as before
         ImGui::PushID("NightStoryFixes");
         if (ApexUi::BeginCard("##Card")) {
-            ApexUi::CardHeader(IconId::Layers, "Stories", "Lamp light between the floors of a house", nullptr, nullptr);
+            ApexUi::CardHeader(IconId::Layers, "Stories", "Fixes for lamp light between floors", nullptr, nullptr);
             ApexUi::CardDivider();
             if (!g_levelShare) ApexUi::IconNote(ApexUi::IconId::Info, "Needs \"Outdoor light between floors\"");
             ImGui::BeginDisabled(!g_levelShare);
@@ -3587,7 +3587,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             Edit([] {
                 static const char* const kLevels[] = {"Game", "High"};
                 static const char* const kTips[] = {"The game's own detail", "Twice the detail: rooms take longer to light and use more memory"};
-                const bool changed = ApexUi::SegmentedRow("Detail", "Sharper light pools and shadow edges on walls and floors", "##LightDetail", &g_lightDetail, kLevels, 2, kTips,
+                const bool changed = ApexUi::SegmentedRow("Sharpness", "Sharper light pools and shadow edges on walls and floors", "##LightDetail", &g_lightDetail, kLevels, 2, kTips,
                                                           nullptr, 0);
                 if (g_lightDetail != LightDetail::Active()) ApexUi::IconNote(ApexUi::IconId::Info, "Restart the game to apply");
                 return changed;
@@ -3686,7 +3686,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                     ApexUi::SliderOptions glow;
                     glow.format = "%.0f%%";
                     glow.displayScale = 250.0f;
-                    glow.tooltip = "Intensity of lamp glow and sparkles on ponds";
+                    glow.tooltip = "Lamp glow and sparkles on ponds";
                     glow.defaultValue = 0.4f;
                     changed |= ApexUi::Slider("Glow brightness", &g_waterStrengthSetting, 0.1f, 0.4f, glow);
                 }
@@ -3782,16 +3782,18 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (ApexUi::Checkbox("Smooth dusk (A/B: off = the game's night level in steps of 0.2)", &smoothDusk)) NightLevel::g_smoothDusk = smoothDusk;
         bool lowLamp = RtOutdoorLamps::LowLampLift();
         if (ApexUi::Checkbox("Lamps on the ground light the lawn from 40 cm (A/B: off = from their real 5 cm)", &lowLamp)) RtOutdoorLamps::SetLowLampLift(lowLamp);
-        ImGui::SameLine();
+        // (its counts on their own line: beside the long checkbox label they ran past the card's edge)
         ImGui::TextDisabled("%ld Instant draws, %ld terrain stamps lifted%s", RtOutdoorLamps::LowLampLifted(), g_bakeLowLifted.load(std::memory_order_relaxed),
                             g_bakePosInstalled ? "" : " (terrain bake: not installed)");
         if (g_moonLift) {
-            ImGui::SetNextItemWidth(220.0f);
-            if (ImGui::SliderFloat("Least moon height (degrees)##MoonHeight", &g_moonHeightDeg, 5.0f, 60.0f, "%.0f") && !ApexUi::SliderDragging())
+            // (the menu's slider row: the shared control column)
+            ApexUi::SliderOptions moon;
+            moon.format = "%.0f\xC2\xB0";
+            if (ApexUi::Slider("Least moon height##MoonHeight", &g_moonHeightDeg, 5.0f, 60.0f, moon) && !ApexUi::SliderDragging())
                 ObjectLightBridge::RequestRigRefresh();
         }
-        // Lamp lighting is chosen on the Performance page (Lamp lighting card); read-only here
-        ImGui::TextWrapped("Lamp lighting: %s (Performance > Lamp lighting)", g_lampMode == kLampInstant ? "Instant (Real-time outdoor lamps on Quick outdoor lamp edits' parts)" : "Classic");
+        // Lamp lighting is chosen on Lighting > Overview (Lamp lighting card); read-only here
+        ApexUi::IconNote(ApexUi::IconId::Lamp, g_lampMode == kLampInstant ? "Lamp lighting: Instant (Lighting > Overview)" : "Lamp lighting: Classic (Lighting > Overview)");
         if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Check quick lamp edits", &g_outdoorDeltaCheck,
                                                             "Solves those floors in full again later and logs the largest texel difference", false))
             NotifySettingChanged();
@@ -3978,18 +3980,27 @@ void NightLighting::DrawRefreshCard() {
         const float gap = ImGui::GetStyle().ItemSpacing.x;
         const float terrainW = ApexUi::ButtonWidth("Refresh terrain", true), lotW = ApexUi::ButtonWidth("Refresh lots", true), lightsW = ApexUi::ButtonWidth("Refresh lights", true);
         if (ApexUi::BeginControlRow("Terrain and lots", "Use when light on the ground or a lot looks incorrect or has not updated", terrainW + lotW + lightsW + 2.0f * gap)) {
-            ImGui::BeginDisabled(g_menuLevel.load() < 0.0f || !g_live || g_restart.active || g_restartRequested);
+            const bool waiting = g_menuLevel.load() < 0.0f || !g_live || g_restart.active || g_restartRequested;
+            // (greyed, a button says why on hover)
+            const auto why = [&] { if (waiting && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip)) ApexUi::ShowFullText(I18n::Tr("Available once a lot has loaded and its lighting is ready")); };
+            ImGui::BeginDisabled(waiting);
             if (ApexUi::IconTextButton("Refresh terrain", ApexUi::IconId::LandPlot)) g_kickRequested = true;
+            why();
             ImGui::SameLine();
             if (ApexUi::IconTextButton("Refresh lots", ApexUi::IconId::House)) g_relightLotsRequested = true;
+            why();
             ImGui::SameLine();
             if (ApexUi::IconTextButton("Refresh lights", ApexUi::IconId::Lightbulb)) NightLighting::RefreshAll("button");
+            why();
             ImGui::EndDisabled();
             ApexUi::EndControlRow();
         }
         if (ApexUi::BeginControlRow("All lighting", "Discard cached lighting and rebuild it without changing settings", ApexUi::ButtonWidth("Restart lighting", true))) {
-            ImGui::BeginDisabled(g_menuLevel.load() < 0.0f || !g_live || !WorldSession::InWorld() || g_restart.active || g_restartRequested);
+            const bool waiting = g_menuLevel.load() < 0.0f || !g_live || !WorldSession::InWorld() || g_restart.active || g_restartRequested;
+            ImGui::BeginDisabled(waiting);
             if (ApexUi::IconTextButton("Restart lighting", ApexUi::IconId::RefreshCw)) NightLighting::Restart();
+            if (waiting && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip))
+                ApexUi::ShowFullText(I18n::Tr("Available once a lot has loaded and its lighting is ready"));
             ImGui::EndDisabled();
             ApexUi::EndControlRow();
         }

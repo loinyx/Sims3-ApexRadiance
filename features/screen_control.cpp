@@ -1049,7 +1049,7 @@ void DrawFpsCounter() {
     dl->AddText(p, IM_COL32(255, 255, 255, 230), text);
 }
 
-bool RenderFpsTile() {
+bool RenderFpsTile(bool sideBySide) {
     using VioletTheme::Col;
     const float u = ApexUi::Unit();
     const ImVec2 halfMin = ImGui::GetCursorScreenPos();
@@ -1093,7 +1093,7 @@ bool RenderFpsTile() {
             dl->AddLine(ImVec2(X(i - 1), Y(a)), ImVec2(X(i), Y(b)), ImGui::GetColorU32(Col(VioletTheme::kAccent)), 1.6f * u);
         }
     }
-    ApexUi::StatusBand(); // (empty here: Game memory draws its bar in it)
+    if (sideBySide) ApexUi::StatusBand(); // (empty here: Game memory draws its bar in it; stacked, nothing to line up with)
     const std::string footer = low > 0 ? I18n::Trf("1% low {} fps \xC2\xB7 varies {} ms \xC2\xB7 {} hitches in 4 min", std::format("{:.0f}", low),
                                                    LocalNumber(g_measuredSpread.load(), 1), g_hitches.size())
                                        : std::string();

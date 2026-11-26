@@ -586,6 +586,28 @@ bool SearchField(const char* id, const char* hint, char* buf, size_t size) {
 
 float ControlColumnWidth() { return InlineControlWidth(ImGui::GetContentRegionAvail().x); }
 
+std::string LocaleDate(std::string_view text) {
+    const auto digits = [&](size_t at, size_t n) {
+        if (text.size() < at + n) return false;
+        for (size_t i = 0; i < n; i++) if (text[at + i] < '0' || text[at + i] > '9') return false;
+        return true;
+    };
+    if (!digits(0, 4) || text.size() < 10 || text[4] != '-' || !digits(5, 2) || text[7] != '-' || !digits(8, 2)) return std::string(text);
+    const std::string_view y = text.substr(0, 4), m = text.substr(5, 2), d = text.substr(8, 2), rest = text.substr(10);
+    using L = I18n::Lang;
+    std::string date;
+    switch (I18n::Current()) {
+    case L::English: case L::Swedish: case L::Japanese: case L::Korean: case L::ChineseSimplified: case L::ChineseTraditional:
+        return std::string(text);
+    case L::German: case L::Polish: case L::Russian: case L::Danish: case L::Norwegian: case L::Finnish: case L::Czech:
+        date = std::format("{}.{}.{}", d, m, y); break;
+    case L::Hungarian: date = std::format("{}. {}. {}.", y, m, d); break;
+    case L::Dutch: date = std::format("{}-{}-{}", d, m, y); break;
+    default: date = std::format("{}/{}/{}", d, m, y); break; // Portuguese, Spanish, French, Italian, Greek, Thai
+    }
+    return date + std::string(rest);
+}
+
 void LocaleDecimal(char* s) {
     using L = I18n::Lang;
     const L lang = I18n::Current();
@@ -716,7 +738,11 @@ bool BeginModal(const char* id, float widthUnits, bool* open) {
     // (only the height follows the content: full-width fields must not feed back into the next frame's width)
     ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, std::max(1.0f, display.y - 32.0f)));
     ImGui::SetNextWindowSize(ImVec2(width, 0.0f), ImGuiCond_Always);
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f)); // centred as it grows
+    // Centred on the menu (the menu's window, ###ApexWindow), as it grows; on the screen when the menu is not shown
+    ImVec2 centre = ImGui::GetMainViewport()->GetCenter();
+    if (const ImGuiWindow* menu = ImGui::FindWindowByName("###ApexWindow"); menu && menu->WasActive && !menu->Hidden)
+        centre = ImVec2(menu->Pos.x + menu->Size.x * 0.5f, menu->Pos.y + menu->Size.y * 0.5f);
+    ImGui::SetNextWindowPos(centre, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     // (a card's padding; a screen under 800 px high keeps the 12 of a row's spacing so a long dialog still fits)
     const float pad = (display.y < 800.0f ? kSpace3 : kSpace4) * u;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));

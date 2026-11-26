@@ -847,7 +847,7 @@ void OverviewStatusCard() {
         ImGui::PushStyleColor(ImGuiCol_TableBorderLight, Col(VioletTheme::kCardBorder));
         if (ImGui::BeginTable("##Halves", two ? 2 : 1, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX | (two ? ImGuiTableFlags_BordersInnerV : 0))) {
             ImGui::TableNextColumn();
-            if (Screen::RenderFpsTile()) Go(PageDisplay); // the limit and the window mode live there
+            if (Screen::RenderFpsTile(two)) Go(PageDisplay); // the limit and the window mode live there
             if (!two) { // stacked: a hairline between the two, like the vertical one side by side
                 ApexUi::Gap(ApexUi::kSpace4 * 0.5f);
                 ImGui::PushStyleColor(ImGuiCol_Separator, Col(VioletTheme::kCardBorder));
@@ -877,8 +877,9 @@ void OverviewActions(float titleTop, float titleBottom) {
     const float total = wRefresh + gap + wPower, avail = ImGui::GetContentRegionAvail().x;
     const float titleW = ImGui::CalcTextSize(I18n::Tr("How the game is running and what is in use")).x + ApexUi::kSpace4 * u;
     const float afterTitle = ImGui::GetCursorPosY();
-    if (titleW + total <= avail) // beside the title, bottom-aligned with the subtitle
-        ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + avail - total, std::max(titleTop, titleBottom - ImGui::GetFrameHeight())));
+    const bool beside = titleW + total <= avail;
+    if (beside) // beside the title, centred on the title and its subtitle
+        ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + avail - total, titleTop + std::max(0.0f, (titleBottom - titleTop - ImGui::GetFrameHeight()) * 0.5f)));
     ImGui::BeginDisabled(Loading() || off || !LightsOn());
     if (ApexUi::IconTextButton("Refresh lights", IconId::RefreshCw, "Recalculates the lighting of the lots around you")) NightLighting::RefreshAll(); // (one name for this action everywhere)
     ImGui::EndDisabled();
@@ -888,7 +889,8 @@ void OverviewActions(float titleTop, float titleBottom) {
                                off ? ButtonKind::Primary : ButtonKind::Secondary))
         SetApexOff(!off);
     ImGui::EndDisabled();
-    if (titleW + total <= avail) ImGui::SetCursorPosY(afterTitle);
+    if (beside) ImGui::SetCursorPosY(std::max(afterTitle, ImGui::GetItemRectMax().y - ImGui::GetWindowPos().y + ImGui::GetScrollY() +
+                                                          ApexUi::kSpace3 * u - ImGui::GetStyle().ItemSpacing.y));
 }
 
 void GameAaCompatibilityNotice(bool allEffects = false); // below
@@ -1575,7 +1577,7 @@ void LotStreamingCards() {
             char distanceValue[24];
             std::snprintf(distanceValue, sizeof distanceValue, "%d", Performance::LotDetailDistance());
             ApexUi::SliderOptions distanceOptions;
-            distanceOptions.tooltip = "How far lots stay in full detail; 70 is the game's, 300 the tested maximum";
+            distanceOptions.tooltip = "How far lots show in full detail"; // (the end labels say 70 is the game's and 300 the tested maximum);
             distanceOptions.valueText = distanceValue;
             distanceOptions.leftLabel = "70 (game)";
             distanceOptions.rightLabel = "300";
@@ -1765,7 +1767,7 @@ void ReportHowCard() {
         const std::string tip = I18n::Trf("Not sure it is Apex Radiance? Press {} (Compare with the game): if the problem goes away, it comes from the mod.",
                                           CaptureKey(Hotkeys::Action::Compare));
         ApexUi::IconNote(IconId::Lightbulb, tip.c_str());
-        const std::string crash = Captures::RecentCrash();
+        const std::string crash = ApexUi::LocaleDate(Captures::RecentCrash());
         if (!crash.empty()) {
             const std::string note = I18n::Trf("The game crashed on {}: \"Save a report\" includes the crash details.", crash);
             // (with its action inside: the report it points to is one click away)
@@ -1796,7 +1798,7 @@ void ReportCaptureCard() {
             ApexUi::EndControlRow();
             return clicked;
         };
-        if (row("Save a report", I18n::Tr("The log and your settings. Good for any problem, and after a crash."), "Save##Report", IconId::Save,
+        if (row("Save a report", I18n::Tr("The log and your settings. Good for any problem, and after a crash"), "Save##Report", IconId::Save,
                 ApexUi::ButtonKind::Secondary)) {
             Captures::SaveReport();
             g_report.scannedAt = 0;
@@ -1810,13 +1812,10 @@ void ReportCaptureCard() {
             g_report.scannedAt = 0;
         }
         const std::string probeKey = CaptureKey(Hotkeys::Action::Probe);
-        const std::string probeDesc = I18n::Trf("Close the menu, point at the problem and press {} to capture that spot and its textures.",
+        const std::string probeDesc = I18n::Trf("Close the menu, point at the problem and press {} to capture that spot and its textures",
                                                 probeKey);
-        const ImVec2 probeChipSize = ApexUi::ChipSize(probeKey.c_str());
-        if (ApexUi::BeginControlRow("Capture the light at a spot", probeDesc.c_str(), probeChipSize.x, IconId::None, probeChipSize.y)) {
-            ApexUi::Chip(probeKey.c_str(), VioletTheme::kAccentLight);
-            ApexUi::EndControlRow();
-        }
+        // (no button: it is aimed in the game with the menu closed; its key is in the description, as on the other rows)
+        if (ApexUi::BeginControlRow("Capture the light at a spot", probeDesc.c_str(), 0.0f)) ApexUi::EndControlRow();
         const std::string snapDesc = I18n::Trf("Saves the current lamps and rooms to investigate incorrect lighting. Key: {}",
                                                CaptureKey(Hotkeys::Action::Diagnostics));
         if (row("Lighting snapshot", snapDesc, "Save##Snapshot", IconId::Lightbulb, ApexUi::ButtonKind::Secondary)) {
@@ -1861,7 +1860,7 @@ void ReportListCard() {
             std::string kind = I18n::Tr(e.kind.c_str());
             if (e.kind.rfind("Session", 0) == 0) kind = (e.items == 1 ? std::string(I18n::Tr("Session (1 capture)")) : I18n::Trf("Session ({} captures)", e.items)) + (e.folder == openSession ? std::string(" \xC2\xB7 ") + I18n::Tr("open") : "");
             const std::string label = !e.title.empty() && e.title != e.folder ? e.title :
-                e.date.empty() ? kind : std::format("{} \xC2\xB7 {} \xC2\xB7 {}", e.date, e.time, kind);
+                e.date.empty() ? kind : std::format("{} \xC2\xB7 {} \xC2\xB7 {}", ApexUi::LocaleDate(e.date), e.time, kind);
             const std::string size = SizeText(e.bytes);
             const bool deleteArmed = g_report.confirmDelete == e.folder && now - g_report.confirmAt < 4000;
             const char* deleteLabel = deleteArmed ? "Click again to delete" : "Delete";
@@ -2025,21 +2024,23 @@ template <typename Body> void DevCard(const char* id, IconId icon, const char* t
 }
 
 void DevLightingTab() {
-    ApexUi::MutedText("Keep the camera fixed. Save the correct state, cause the problem and save again. Refresh only after capturing the incorrect state.");
+    ApexUi::IconNote(IconId::Info, "Keep the camera fixed. Save the correct state, cause the problem and save again. Refresh only after capturing the incorrect state.");
     ApexPatch* ntr = Find(kNightLighting);
     if (ntr && ntr->IsEnabled()) NightLighting::DrawDeveloper();
     else DevCard("DevNightLighting", IconId::Lightbulb, "Lighting diagnostics", "Turn on Night Lights to inspect lighting", false, [] {});
     if (ApexPatch* upper = Find(kUpperFloors)) {
-        if (ApexUi::BeginAdvanced("GroundProvider", "Technical reference from the current code")) {
+        if (ApexUi::BeginCard("##GroundProviderCard") && // (in a card, as every disclosure)
+            ApexUi::BeginAdvanced("GroundProvider", "Technical reference from the current code")) {
             const char* state = !upper->IsEnabled() ? "off" : NightLighting::SplitLevelProvidedByS3SS() ? "on, provided by Sims3SettingsSetter" : "on (GetLotID 0x6BC020 returns 0)";
             ImGui::TextDisabled("Every-Story Ground Light: %s", state);
             ApexUi::EndAdvanced();
         }
+        ApexUi::EndCard();
     }
 }
 
 void DevProfilerTab() {
-    ApexUi::MutedText("Clear old data, reproduce the pause, then stop and save the measurement.");
+    ApexUi::IconNote(IconId::Info, "Clear old data, reproduce the pause, then stop and save the measurement.");
     ImGui::PushID("FrameProfiler");
     if (ApexUi::BeginCard("##Card")) {
         bool on = FrameProfiler::IsEnabled();
@@ -2077,7 +2078,7 @@ void DevProfilerTab() {
 }
 
 void DevDebugViewsTab() {
-    ApexUi::MutedText("Inspect one effect at a time. Switch off its diagnostic view when finished.");
+    ApexUi::IconNote(IconId::Info, "Inspect one effect at a time. Switch off its diagnostic view when finished.");
     const auto inspect = [](const char* key, const char* title, const char* purpose) {
         ApexPatch* p = Find(key);
         DevCard(key, IconId::Eye, title, purpose, p && p->IsEnabled(), [p] { p->RenderDeveloperUI(); });
@@ -2126,7 +2127,7 @@ void TesterValueRow(const char* label, const std::string& value) {
 
 void DevTesterTab() {
     using TesterToggles::Effect;
-    ApexUi::MutedText("Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.");
+    ApexUi::IconNote(IconId::Info, "Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.");
     const bool night = Find(kNightLighting) && Find(kNightLighting)->IsEnabled();
     DevCard("TesterReadout", IconId::FlaskConical, "Frame time", "Drag the same lamp with a part on and off", true, [] {
         const float now = DragLite::FrameMs(), avg = DragLite::LastDragAvgMs(), worst = DragLite::LastDragMaxMs();
@@ -2220,12 +2221,11 @@ void DeveloperPage() {
     ApexUi::PageTitle("Developer", "Inspect a problem, collect evidence and compare the result");
     static int tab = 0;
     constexpr const char* labels[] = {"Lighting", "Performance", "Captures", "Visual effects", "Translations", "Tester"};
-    constexpr IconId icons[] = {IconId::Lightbulb, IconId::Activity, IconId::Camera, IconId::Eye, IconId::Type, IconId::FlaskConical};
-    ApexUi::TabBar("##DeveloperTabs", &tab, labels, 6, icons);
+    ApexUi::TabBar("##DeveloperTabs", &tab, labels, 6); // (no icons: as every other tab bar)
     if (tab == 0) DevLightingTab();
     else if (tab == 1) DevProfilerTab();
     else if (tab == 2) {
-        ApexUi::MutedText("A session groups related captures. Profiler measurements are saved separately.");
+        ApexUi::IconNote(IconId::Info, "A session groups related captures. Profiler measurements are saved separately.");
         SessionHeroCard();
         ReportCaptureCard();
         FeatureCard("FrameCapture", IconId::Camera, "Capture two drawn frames", "Save two frames of rendering operations for detailed investigation.");
@@ -2233,7 +2233,7 @@ void DeveloperPage() {
     } else if (tab == 3) DevDebugViewsTab();
     else if (tab == 5) DevTesterTab();
     else {
-        ApexUi::MutedText("Open the affected screens in the language you want to check. Save the missing-text list and placeholder errors to the log.");
+        ApexUi::IconNote(IconId::Info, "Open the affected screens in the language you want to check. Save the missing-text list and placeholder errors to the log.");
         DevCard("TranslationReview", IconId::Type, "Review translations", "Collect missing text while visiting menu screens", true, [] {
             LanguageRow();
             const std::string missing = std::to_string(I18n::MissingCount());
@@ -2292,7 +2292,9 @@ void TextSizeRow() {
         if (std::fabs(kSizes[i] - ui.fontScale) < std::fabs(kSizes[current] - ui.fontScale)) current = i;
     const float gap = ImGui::GetStyle().ItemSpacing.x;
     const float stepW = ApexUi::ButtonWidth("##TextSmaller", true); // (icon-only buttons, as wide as each other)
-    const float valueW = ImGui::CalcTextSize("200%").x + 2.0f * ApexUi::kSpace1 * ApexUi::Unit();
+    // (the stepper fills the shared control column: - at its start, + at its end, the size centred between)
+    const float column = ApexUi::ControlColumnWidth();
+    const float valueW = std::fmax(ImGui::CalcTextSize("200%").x + 2.0f * ApexUi::kSpace1 * ApexUi::Unit(), column - 2.0f * stepW - 2.0f * gap);
     // (back to 100% is the row's own Reset, as on every other row with a default)
     ImGui::PushID("TextSize");
     ApexUi::SetNextRowDefault(kSizes[current] != 1.0f);
@@ -2493,7 +2495,7 @@ void MenuTab() {
     }
     ApexUi::EndCard();
     if (ApexUi::BeginCard("##Maintenance")) {
-        ApexUi::CardHeader(IconId::Wrench, "Settings and maintenance", "Saving, reset and recovery", nullptr, nullptr);
+        ApexUi::CardHeader(IconId::Wrench, "Saving, reset and recovery", nullptr, nullptr, nullptr); // (not "Settings": the page's own name)
         ApexUi::CardDivider();
         SaveRow();
         DeveloperModeRow();
@@ -3232,6 +3234,7 @@ void UpdatePresetMatches(ProfilesState& s) {
     }
 }
 
+float g_presetsTitleTop = -1.0f, g_presetsTitleBottom = 0.0f; // the Presets page's title (its actions go beside it)
 void ProfilesTab() {
     auto& s=g_profiles;
     if(s.listDirty) {
@@ -3258,11 +3261,22 @@ void ProfilesTab() {
             if(inlineNext && ImGui::GetItemRectMax().x+ImGui::GetStyle().ItemSpacing.x+ApexUi::ButtonWidth(label,true)<=ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
             if(ApexUi::IconTextButton(label,icon,nullptr,kind)) StartPresetDialog(mode);
         };
+        // (on the title line, centred on the title and its subtitle, when the four fit beside it; else under it)
+        const float gapX=ImGui::GetStyle().ItemSpacing.x;
+        const float all=ApexUi::ButtonWidth("Save current",true)+ApexUi::ButtonWidth("Import",true)+ApexUi::ButtonWidth("Export",true)+
+                        ApexUi::ButtonWidth("Open the presets folder",true)+3.0f*gapX;
+        const float titleW=ImGui::CalcTextSize(I18n::Tr("Save your setup and switch between them")).x+ApexUi::kSpace4*ApexUi::Unit();
+        const float afterTitle=ImGui::GetCursorPosY();
+        const bool beside=g_presetsTitleTop>=0.0f && !ApexUi::FilterActive() && titleW+all<=ImGui::GetContentRegionAvail().x;
+        if(beside) ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX()+ImGui::GetContentRegionAvail().x-all,
+                                              g_presetsTitleTop+std::max(0.0f,(g_presetsTitleBottom-g_presetsTitleTop-ImGui::GetFrameHeight())*0.5f)));
         action("Save current",IconId::Save,ProfilesState::Save,ButtonKind::Primary,false);
         action("Import",IconId::Download,ProfilesState::Import,ButtonKind::Secondary,true);
         action("Export",IconId::ExternalLink,ProfilesState::Export,ButtonKind::Secondary,true);
         if(ImGui::GetItemRectMax().x+ImGui::GetStyle().ItemSpacing.x+ApexUi::ButtonWidth("Open the presets folder",true)<=ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
         if(ApexUi::IconTextButton("Open the presets folder",IconId::FolderOpen)) OpenProfilesFolder();
+        if(beside) ImGui::SetCursorPosY(std::max(afterTitle,ImGui::GetItemRectMax().y-ImGui::GetWindowPos().y+ImGui::GetScrollY()+
+                                                              ApexUi::kSpace3*ApexUi::Unit()-ImGui::GetStyle().ItemSpacing.y));
     }
     if(!s.message.empty() && s.dialog==ProfilesState::None) ApexUi::IconNote(s.messageError?IconId::TriangleAlert:IconId::CircleCheck,s.message.c_str());
     ApexUi::Gap(ApexUi::kSpace2);
@@ -3368,7 +3382,7 @@ void ProfilesTab() {
 void RecoveryRow() {
     const bool pending = ApexD3D::EffectsRestartPending();
     const char* label = pending ? "Restart pending" : "Restart Apex";
-    if (ApexUi::BeginControlRow("Restart Apex##Recovery", "Restarts graphics resources while keeping your settings. This does not uninstall Apex.",
+    if (ApexUi::BeginControlRow("Restart Apex##Recovery", "Restarts graphics resources while keeping your settings. This does not uninstall Apex",
                                 ApexUi::ButtonWidth(label, true))) { // the label shown, so the button stays right-aligned
         ImGui::BeginDisabled(Loading() || !ApexD3D::Device() || pending);
         if (ApexUi::IconTextButton(label, IconId::RefreshCw)) ApexD3D::RequestEffectsRestart();
@@ -4048,7 +4062,14 @@ void DrawPage() {
             ApexUi::SetChangeReporting(true);
         }
         break;
-    case PageProfiles: ApexUi::PageTitle("Presets", "Save your setup and switch between them"); ProfilesTab(); break;
+    case PageProfiles: {
+        g_presetsTitleTop = ImGui::GetCursorPosY();
+        ApexUi::PageTitle("Presets", "Save your setup and switch between them");
+        g_presetsTitleBottom = ImGui::GetCursorPosY() - ImGui::GetStyle().ItemSpacing.y;
+        ProfilesTab();
+        g_presetsTitleTop = -1.0f;
+        break;
+    }
     case PageSettings: SettingsPage(); break;
     case PageReport: ReportPage(); break;
     default: OverviewPage(); break;
@@ -4328,7 +4349,7 @@ void VersionButton(float x, float y, float h) {
         {
             // (the dialogs' header: icon, title, the installed version under it, a divider)
             const ApexChangelog::Release& now = ApexChangelog::Get(0);
-            const std::string sub = now.date[0] ? I18n::Trf("You have version {}, released {}", now.version, now.date) : I18n::Trf("You have version {}", now.version);
+            const std::string sub = now.date[0] ? I18n::Trf("You have version {}, released {}", now.version, ApexUi::LocaleDate(now.date)) : I18n::Trf("You have version {}", now.version);
             ApexUi::CardHeader(IconId::Gift, "What's new", sub.c_str(), nullptr, nullptr);
             ApexUi::CardDivider();
         }
@@ -4388,7 +4409,8 @@ void VersionButton(float x, float y, float h) {
                 ImGui::PopFont();
                 ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
                 const float sh = ImGui::GetTextLineHeight();
-                if (r.date[0]) dl->AddText(ImVec2(x, cy - sh * 0.5f), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), r.date);
+                const std::string shownDate = ApexUi::LocaleDate(r.date);
+                if (r.date[0]) dl->AddText(ImVec2(x, cy - sh * 0.5f), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), shownDate.c_str());
                 // Right: "Installed" on the newest; else a coloured dot and a count per kind ("2 fixed")
                 float rx = top.x + width - pad;
                 if (i == 0) {
@@ -4400,7 +4422,7 @@ void VersionButton(float x, float y, float h) {
                     ApexUi::Chip(inst, VioletTheme::kAccentLight);
                     ImGui::SetCursorScreenPos(after);
                 } else if (r.headline) { // the version's sentence, cut at the row's end
-                    const float hx = x + (r.date[0] ? ImGui::CalcTextSize(r.date).x + ApexUi::kSpace3 * u : 0.0f);
+                    const float hx = x + (r.date[0] ? ImGui::CalcTextSize(shownDate.c_str()).x + ApexUi::kSpace3 * u : 0.0f);
                     const char* text = I18n::Tr(r.headline);
                     const float room = rx - hx;
                     if (room > 24.0f * u) {
@@ -4496,6 +4518,8 @@ void VersionButton(float x, float y, float h) {
                                 }
                                 std::string t(text);
                                 if (!t.empty() && t[0] >= 'a' && t[0] <= 'z') t[0] = static_cast<char>(t[0] - 'a' + 'A'); // a sentence of its own
+                                // (a line with no area is about the mod: grouped under its name, as the launcher's are)
+                                if (area.empty()) area = APEX_PRODUCT_NAME;
                                 parsed.push_back({std::move(area), std::move(t), k});
                             }
                         static const char* const kTag[] = {"New", "Better", "Fix"}; // ("Fixed" is another key: a fixed position)
@@ -4576,9 +4600,13 @@ void VersionButton(float x, float y, float h) {
             const float hh = ImGui::GetTextLineHeight();
             pdl->AddText(ImVec2(f.x, f.y + (ImGui::GetFrameHeight() - hh) * 0.5f), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), hint.c_str());
             ImGui::PopFont();
-            ImGui::SetCursorScreenPos(ImVec2(f.x + fw - bw, f.y));
+            // (the dialogs' footer: the buttons on the right, Close last)
+            const float closeW = ApexUi::ButtonWidth("Close", false), sp = ImGui::GetStyle().ItemSpacing.x;
+            ImGui::SetCursorScreenPos(ImVec2(f.x + fw - bw - sp - closeW, f.y));
             if (ApexUi::IconTextButton(label, IconId::ExternalLink, "Opens the Apex Radiance releases page on GitHub in your browser", ButtonKind::Secondary))
                 OpenPage(kApexReleasesUrl);
+            ImGui::SameLine(0.0f, sp);
+            if (ApexUi::TextButton("Close")) ImGui::CloseCurrentPopup();
         }
         g_whatsNewFooterH = ImGui::GetItemRectMax().y - listBottom;
         ImGui::EndPopup();
@@ -4629,6 +4657,12 @@ void StatusBar(ImVec2 origin, float w, float h, bool collapsed) {
     const float is = ApexUi::kIconSmall * u, ig = 5.0f * u;
     const ImU32 muted = ImGui::GetColorU32(Col(VioletTheme::kTextMuted));
     const bool saving = ApexConfig::SavePending();
+    // (green for 2 s after a save, then muted: a success colour that never goes away stops meaning anything)
+    static bool wasSaving = false;
+    static double savedAt = -10.0;
+    if (wasSaving && !saving) savedAt = ImGui::GetTime();
+    wasSaving = saving;
+    const bool justSaved = ImGui::GetTime() - savedAt < 2.0;
     const char* left = I18n::Tr(saving ? "Saving\xE2\x80\xA6" : "All changes saved");
     const float leftW = is + ig + ImGui::CalcTextSize(left).x;
     const std::string right = I18n::Trf("Hold {} to hide the menu", ApexConfig::KeyChordText(ApexConfig::GetUi().peekKey));
@@ -4637,8 +4671,8 @@ void StatusBar(ImVec2 origin, float w, float h, bool collapsed) {
     const float gap = ApexUi::kSpace4 * u;
     if (leftX + leftW + gap <= vx) {
         ApexUi::DrawIcon(dl, saving ? IconId::Save : IconId::CircleCheck, ImVec2(leftX, std::floor(cy - is * 0.5f)), is,
-                         saving ? muted : ImGui::GetColorU32(Col(VioletTheme::kSuccess)));
-        dl->AddText(ImVec2(leftX + is + ig, textY), saving ? muted : ImGui::GetColorU32(Col(VioletTheme::kSuccess, 0.85f)), left);
+                         justSaved ? ImGui::GetColorU32(Col(VioletTheme::kSuccess)) : muted);
+        dl->AddText(ImVec2(leftX + is + ig, textY), justSaved ? ImGui::GetColorU32(Col(VioletTheme::kSuccess, 0.85f)) : muted, left);
     }
     if (vx + vw + gap <= rightX) dl->AddText(ImVec2(rightX, textY), muted, right.c_str());
     ImGui::PopFont();
