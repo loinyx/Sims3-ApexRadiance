@@ -10,7 +10,7 @@ picture to the Recycle Bin. Ctrl+Z and Ctrl+Y undo and redo.
 
 | | |
 |---|---|
-| Availability | Released in 4.1.0 |
+| Availability | Released in 4.1.0; frames drawn anew, the light theme's white board and captions written in place: Released in 4.1.2 |
 | Default | Always available |
 | Menu | Gallery |
 | Configuration | `gallery.json`, `thumbs\` ([data files](data-and-files.md)); the capture folders from `ApexRadiance.toml` |
@@ -33,10 +33,13 @@ places with file names that say only the time, and nothing ties them to the hous
    the save written soonest after it, and can be set by hand. The album view groups *By day* or *By household*, 60
    pictures at a time, with a search over captions, households, file names, dates and album names.
 3. **Scrapbook.** A horizontal timeline, newest first. *Customise* has tabs Board (colour, light, paper pattern and
-   strength), Frames (polaroid, print, washi, clip, rounded, kraft, deckle, doodle, stamp, film; tape), Writing (any
-   installed font) and Stickers (emoji groups; right-click for *Bigger*, *Smaller*, *Take it off*). Sticky notes come in
+   strength), Frames (polaroid, print, washi, rounded, kraft, vintage, doodled, stamp, film, walnut, gallery, neon; each shown on a
+   piece of the album's own board), Writing (any installed font) and Stickers (emoji groups; right-click for *Bigger*, *Smaller*, *Take it off*). Sticky notes come in
    five colours. Dropping a picture on another makes or joins an album shown as a pile (*Open album*, *Rename*,
    *Ungroup*); an album opened from its pile keeps its picture sizes and rows and scrolls sideways in a narrow window.
+   Tape takes the board's own hue. A picture's caption is written in place (click it, or F2): as wide as the caption,
+   two lines, writing smaller when longer. The default board colour is near black on dark and white on light; a
+   colour the player picks stays as picked. An album that had the paper clip frame shows *rounded*.
 4. **Viewer.** Zoom 1x to 6x (wheel, buttons, double-click for 2x), previous and next with the arrow keys, a slideshow
    every 4 s, full screen, *Open in Photos*, videos in the window. The side panel holds the household, the caption,
    *Add to favourites*, *Add to an album*, *Use on Home*, *Show in Explorer* and *Move to the Recycle Bin* (after a
@@ -49,7 +52,7 @@ places with file names that say only the time, and nothing ties them to the hous
 | Menu label | Key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Use on Home (viewer) | `gallery.json` `HomePicture` | button | None (the newest picture) | Any picture | The gallery picture on top of Home ([Settings](settings.md#settings)) |
-| Scrapbook look (*Customise*) | `gallery.json` `Albums` (one look per album) | several | Colour `#0A0A09`, frame *rounded*, tape *match*, light *soft*, pattern *dots*, font Segoe UI Variable | | The board, frames, writing and stickers of that album's scrapbook |
+| Scrapbook look (*Customise*) | `gallery.json` `Albums` (one look per album) | several | Colour `#0A0A09`, frame *rounded*, light *soft*, pattern *dots*, font Segoe UI Variable | | The board, frames, writing and stickers of that album's scrapbook |
 
 ## Compatibility and interactions
 

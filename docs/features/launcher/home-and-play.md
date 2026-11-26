@@ -9,7 +9,7 @@ and the memory the game uses. After a crash or a session that ran out of memory,
 
 | | |
 |---|---|
-| Availability | Released in 4.1.0; one row of saves with their own Play: Released in 4.1.1; the health card over the picture: In development (branch `release/4.1.2`) |
+| Availability | Released in 4.1.0; one row of saves with their own Play: Released in 4.1.1; the health card over the picture: Released in 4.1.2 |
 | Default | Shown at start when a game is found |
 | Menu | Home |
 | Configuration | `settings.json` (`HideWhilePlaying`, `InstallUpdatesOnPlay`, `FixSafeAutomatically`, `HomePicture*`), `sessions.json` ([data files](data-and-files.md)) |

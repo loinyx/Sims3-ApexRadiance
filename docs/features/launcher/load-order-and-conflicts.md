@@ -9,7 +9,7 @@ mod wins over or loses to. Copies that mean the same to the game are not reporte
 
 | | |
 |---|---|
-| Availability | Conflicts compared by what the game reads, *Give priority*, ignore per conflict: Released in 4.1.1; *Load order* page: In development (branch `release/4.1.2`) |
+| Availability | Conflicts compared by what the game reads, *Give priority*, ignore per conflict: Released in 4.1.1; *Load order* page: Released in 4.1.2 |
 | Default | Always available |
 | Menu | Mods > Tools > Load order; a mod's *Conflicts* tab; Health > Mods |
 | Configuration | `conflicts.json`, `hook-table.csv`, `settings.json` `IgnoredConflicts` ([data files](data-and-files.md)) |

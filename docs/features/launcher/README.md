@@ -11,7 +11,7 @@ manual install in the [README](../../../README.md#installation) gives the same r
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1 as Apex Radiance Setup; Apex Launcher 2.0: Released in 4.1.0; Apex Launcher 2.3: Released in 4.1.1; Apex Launcher 2.3.1 (Load order page, health card on Home): In development (branch `release/4.1.2`) |
+| Availability | Released in 3.1.1 as Apex Radiance Setup; Apex Launcher 2.0: Released in 4.1.0; Apex Launcher 2.3: Released in 4.1.1; Apex Launcher 2.3.1 (Load order page, health card on Home, new scrapbook frames): Released in 4.1.2 |
 | Default | Optional, a separate release asset (`ApexLauncher.exe`, also attached as `ApexRadianceSetup.exe`) |
 | Menu | None: a separate program, not part of the in-game menu |
 | Configuration | `%LOCALAPPDATA%\Apex Launcher` ([data folders and files](data-and-files.md)); `Game\Bin\Apex Radiance backup\setup.json` |
