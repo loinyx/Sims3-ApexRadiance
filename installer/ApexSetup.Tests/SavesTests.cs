@@ -865,14 +865,15 @@ static class SavesTests
         File.WriteAllText(Path.Combine(decl, "outside.json"), """{ "paths": ["../{key}"] }""");
         File.WriteAllText(Path.Combine(decl, "nokey.json"), """{ "paths": ["ModData/all"] }""");
         File.WriteAllText(Path.Combine(decl, "broken.json"), "{ paths");
+        File.WriteAllText(Path.Combine(decl, "overlap.json"), """{ "paths": ["ModData/o/{key}", "ModData/o/{key}/x.dat"] }""");
         var logged = new List<string>();
         var oldLog = Engine.Log;
         Engine.Log = e => logged.Add(e.Message);
         try
         {
             var of = SaveCompanions.Of(docs);
-            check(of.Count == 1 && of[0].Mod == "pages" && logged.Count(l => l.StartsWith("save companion")) == 4,
-                "companions: only a declaration with {key} in places outside Saves and Mods is used, the rest are logged");
+            check(of.Count == 1 && of[0].Mod == "pages" && logged.Count(l => l.StartsWith("save companion")) == 5,
+                "companions: only a declaration with {key} in places outside Saves and Mods, none inside another, is used; the rest are logged");
 
             string Pages(string key) => Path.Combine(docs, "ModData", "pages", key);
             string Far(string key) => Path.Combine(docs, "ModData", "far", key + ".far");
@@ -943,6 +944,16 @@ static class SavesTests
             var kept = Directory.Exists(Pages("a_b.sims3"));
             SaveCopies.Rename(docs, SaveCopies.Duplicate(docs, two, "a+b"), "Third");
             check(kept && Directory.Exists(Pages("a_b.sims3")) && !Directory.Exists(Pages("Third.sims3")), "companions: data two saves share is never deleted or moved away from one of them");
+
+            // what a replace cut short set aside: back when its place is empty, to the Recycle Bin when the new data is there
+            var aside = Pages("Lost.sims3") + ".apex-old-" + new string('a', 32);
+            Write(Path.Combine(aside, "a.page"), "lost");
+            var stale = Far("Done.sims3") + ".apex-old-" + new string('b', 32);
+            Write(stale, "old far");
+            Write(Far("Done.sims3"), "new far");
+            check(SaveCopies.Recover(docs) && File.ReadAllText(Path.Combine(Pages("Lost.sims3"), "a.page")) == "lost" && !Directory.Exists(aside) && !File.Exists(stale)
+                  && File.ReadAllText(Far("Done.sims3")) == "new far",
+                "companions: at start, data a cut-short replace set aside goes back to its empty place, or to the Recycle Bin");
 
             // export and import: across machines the data arrives with the save; an import never writes over another's
             var export = Path.Combine(Path.GetDirectoryName(docs)!, "town-export.zip");

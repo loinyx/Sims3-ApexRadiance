@@ -28,6 +28,7 @@ public static class SaveCopies
     const int KeepOwn = 3;
 
     const int MaxFiles = 10_000;        // (a save has under ten files)
+    const int MaxCompanionFiles = 100_000; // mods' data beside a save (SaveCompanions); MaxBytes bounds its size
     const long MaxBytes = 16L << 30;
     static readonly EnumerationOptions Deep = new() { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
 
@@ -205,10 +206,13 @@ public static class SaveCopies
         try
         {
             using var z = ZipFile.OpenRead(zip);
-            if (z.Entries.Count > MaxFiles) throw Bad("too many files");
+            if (z.Entries.Count > MaxFiles + MaxCompanionFiles) throw Bad("too many files");
             // (the zip holds the save's folder at the top: its name is dropped, the save may have been renamed since. Mods'
             // data beside it is SaveCompanions')
             var names = z.Entries.Select(e => e.FullName.Replace('\\', '/')).ToList();
+            // (mods' data is counted on its own: a mod may keep many files for one save)
+            if (names.Count(n => only is not null ? n.StartsWith(only, StringComparison.Ordinal) : !SaveCompanions.IsCompanion(n)) > (only == SaveCompanions.Top ? MaxCompanionFiles : MaxFiles))
+                throw Bad("too many files");
             var own = names.Where(n => !SaveCompanions.IsCompanion(n)).ToList();
             var top = own.Count > 0 && own[0].IndexOf('/') is var cut and > 0 && own.All(n => n.StartsWith(own[0][..(cut + 1)], StringComparison.Ordinal)) ? cut + 1 : 0;
             var root = Path.GetFullPath(to) + Path.DirectorySeparatorChar;

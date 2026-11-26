@@ -51,6 +51,9 @@ public static class SaveCompanions
             if (!p.Contains("{key}") || Path.IsPathRooted(p) || p.Contains(':') || p.Split('/').Any(s => s is "" or "." or "..") || Theirs(p.Split('/')[0])
                 || !Path.GetFullPath(Path.Combine(docs, p.Replace("{key}", "k"))).StartsWith(root, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException($"{p}: a path in the Documents folder with {{key}}, outside Saves and Mods");
+        // (a place inside another would be in a backup twice, and a restore of it would fail)
+        if (paths.Any(a => paths.Any(b => !ReferenceEquals(a, b) && (a + "/").StartsWith(b + "/", StringComparison.OrdinalIgnoreCase))))
+            throw new InvalidDataException("one path is inside another, or given twice");
         Func<string, string> key = n => n;
         if (j.RootElement.TryGetProperty("key", out var k))
         {
@@ -128,12 +131,14 @@ public static class SaveCompanions
             foreach (var (c, p, to, _) in Places(docs, save))
             {
                 var from = Path.Combine(work, c.Mod, p);
+                // (data another save's name maps to as well stays as it is)
+                var mine = replace && !Shared(docs, c, KeyOf(c, save)!, save);
                 if (!Exists(from))
                 {
-                    if (replace && Directory.Exists(Path.Combine(work, c.Mod)) && Exists(to)) SaveCopies.Recycle(to);
+                    if (mine && Directory.Exists(Path.Combine(work, c.Mod)) && Exists(to)) SaveCopies.Recycle(to);
                     continue;
                 }
-                if (Exists(to) && !replace) { Engine.Log(new IOException($"save companion {c.Mod}: {to} is taken, left as it is")); continue; }
+                if (Exists(to) && !mine) { Engine.Log(new IOException($"save companion {c.Mod}: {to} is taken, left as it is")); continue; }
                 Place(from, to);
             }
         }
@@ -178,13 +183,13 @@ public static class SaveCompanions
             if (Exists(at) && !Shared(docs, c, KeyOf(c, save)!, null)) SaveCopies.Recycle(at);
     }
 
-    // from to to; what was at to steps aside first, comes back on a failure and goes to the Recycle Bin after
-    // shortcut: a crash between the two moves leaves <place>.apex-old-<id> beside the place; nothing tidies it at start yet
+    // from to to; what was at to steps aside first, comes back on a failure and goes to the Recycle Bin after (a crash
+    // between the two moves leaves it as <place>.apex-old-<id>, which Tidy settles)
     static void Place(string from, string to)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(to)!);
         string? old = null;
-        if (Exists(to)) { old = $"{to}.apex-old-{Guid.NewGuid():N}"; MoveAny(to, old); }
+        if (Exists(to)) { old = $"{to}{OldMark}{Guid.NewGuid():N}"; MoveAny(to, old); }
         try { MoveAny(from, to); }
         catch { if (old is not null) MoveAny(old, to); throw; }
         if (old is not null) try { SaveCopies.Recycle(old); } catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); }
@@ -195,8 +200,14 @@ public static class SaveCompanions
     {
         if (File.Exists(from)) { Fs.Retry(() => File.Move(from, to)); return; }
         if (SaveCopies.Drive(from).Equals(SaveCopies.Drive(Path.GetDirectoryName(to)!), StringComparison.OrdinalIgnoreCase)) { Fs.Retry(() => Directory.Move(from, to)); return; }
-        SaveCopies.CopyDir(from, to, default);
-        Directory.Delete(from, true);
+        // (a copy cut short is removed, the original is whole; once the copy is whole, an original that won't go is only logged)
+        try { SaveCopies.CopyDir(from, to, default); }
+        catch
+        {
+            try { if (Directory.Exists(to)) Directory.Delete(to, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+            throw;
+        }
+        try { Directory.Delete(from, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }
 
     static void Drop(string dir)
@@ -209,6 +220,31 @@ public static class SaveCompanions
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }
 
-    // work folders a closed launcher left (call with the saves' gate held)
-    internal static void Tidy(string docs) => Drop(WorkRoot(docs));
+    const string OldMark = ".apex-old-";
+    static readonly Regex OldName = new(@"\.apex-old-[0-9a-f]{32}$");
+
+    // what a closed launcher left (call with the saves' gate held): work folders, and what Place set aside, which comes
+    // back when its place is empty and goes to the Recycle Bin when the new data is in it
+    internal static void Tidy(string docs)
+    {
+        Drop(WorkRoot(docs));
+        foreach (var c in Of(docs))
+            foreach (var p in c.Paths)
+                try
+                {
+                    // (the folder above the first part with {key}, searched as deep as the path goes)
+                    var parts = p.Split('/');
+                    var at = Array.FindIndex(parts, s => s.Contains("{key}"));
+                    var dir = Path.Combine([docs, .. parts[..at]]);
+                    if (!Directory.Exists(dir)) continue;
+                    var deep = new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = parts.Length - at - 1, AttributesToSkip = FileAttributes.ReparsePoint };
+                    foreach (var old in Directory.EnumerateFileSystemEntries(dir, "*" + OldMark + "*", deep).Where(o => OldName.IsMatch(o)).ToList())
+                        if (Exists(old))
+                        {
+                            var place = OldName.Replace(old, "");
+                            if (Exists(place)) SaveCopies.Recycle(old); else MoveAny(old, place);
+                        }
+                }
+                catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { Engine.Log(e); }
+    }
 }
