@@ -55,8 +55,9 @@ menus after the main menu has loaded.
    The EA app edition goes through the EA app instead: its `TS3.exe` started by anyone else asks the EA app to start the
    game, and the EA app starts its own target, `Sims3Launcher.exe -test` (`__Installer\installerdata.xml`), so the Sims 3
    launcher would open. Play opens `origin2://game/launch?offerIds=<id>&cmdParams=<params>` with the first content id
-   of `installerdata.xml` (`sims3_dd`) and `-editInGameMode:true`: with it the Sims 3 launcher starts `TS3.exe` at once,
-   passing every argument on, without its window. A save goes first as `-worldFile:<name>.sims3"` (the EA app adds the
+   of `installerdata.xml` (`sims3_dd`) and `-editInGameMode:true0`: with it the Sims 3 launcher starts `TS3.exe` at once,
+   passing every argument on, without its window. The launcher only checks that the value starts with `true`; the game
+   turns its Edit Town mode on for `true` alone (a save opened that way had no Sims and no lots to pick), not for `true0`. A save goes first as `-worldFile:<name>.sims3"` (the EA app adds the
    opening quote itself and lowercases the switch). The launcher then waits up to 2 minutes for `TS3.exe`.
 7. **The session** (`Session` in `Launch.cs`). Every 5 s the launcher reads the game's private memory and keeps the
    peak; it follows a restart of the game (by the restart host or within about 20 s). The end is classed as a crash

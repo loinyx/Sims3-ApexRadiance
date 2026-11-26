@@ -19,13 +19,14 @@ public static class Launch
 
     // The EA app copy: its TS3.exe started by anyone but the EA app asks the EA app to start the game, and the EA app starts
     // its own target, Sims3Launcher.exe -test (installerdata.xml), so the Sims 3 launcher opens. Asked through the EA app's
-    // own link instead, with the launcher's -editInGameMode:true (it then starts TS3.exe at once, passing every argument on,
-    // with no window of its own). The EA app rewrites "-worldFile:" as "-worldfile:"" with a quote of its own, so the save
+    // own link instead, with the launcher's -editInGameMode (it then starts TS3.exe at once, passing every argument on, with
+    // no window of its own). Its value is "true0": the launcher only checks that it starts with "true", while the game turns
+    // its Edit Town mode on for "true" alone (a save opened with "true" had no Sims and no lots to pick). The EA app rewrites "-worldFile:" as "-worldfile:"" with a quote of its own, so the save
     // goes unquoted and closes with a quote, and comes first so the EA app's -test does not join its name.
     public static string EaParams(string? save)
     {
         var name = save is null ? null : Args(save)["-worldFile:\"".Length..^1];
-        return name is null ? "-editInGameMode:true" : $"-worldFile:{name}\" -editInGameMode:true";
+        return name is null ? "-editInGameMode:true0" : $"-worldFile:{name}\" -editInGameMode:true0";
     }
 
     // the game's id for the EA app: the first content id in its installer data (sims3_dd for The Sims 3)
