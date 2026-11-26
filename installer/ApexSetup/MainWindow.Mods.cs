@@ -1034,6 +1034,14 @@ public sealed partial class MainWindow
         var shown = ModTypesScroll.Visibility == Visibility.Visible;
         var less = shown && ModTypesScroll.HorizontalOffset > 1;
         var more = shown && ModTypesScroll.HorizontalOffset < ModTypesScroll.ScrollableWidth - 1;
+        // (the theme and the language of now: the arrows are made once)
+        foreach (var (arrow, name) in new[] { (_typesBack, T("Scroll left")), (_typesOn, T("Scroll right")) })
+            if (arrow is not null)
+            {
+                (arrow.Background, arrow.BorderBrush) = (Res("ApexCardBrush"), Res("ApexCardBorderBrush"));
+                ToolTipService.SetToolTip(arrow, name);
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(arrow, name);
+            }
         if (_typesBack is not null) _typesBack.Visibility = less ? Visibility.Visible : Visibility.Collapsed;
         if (_typesOn is not null) _typesOn.Visibility = more ? Visibility.Visible : Visibility.Collapsed;
         if (_typesLess is not null)

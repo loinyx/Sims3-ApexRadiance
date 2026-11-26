@@ -2827,6 +2827,7 @@ public sealed partial class MainWindow
             {
                 // (a damped spring: firm enough to follow the hand, loose enough to overshoot once when let go)
                 const double dt = 0.016, stiff = 140, damp = 11;
+                if (el.XamlRoot is null) (_held, _angle, _spin, _target) = (false, 0, 0, 0);
                 _spin += (stiff * (_target - _angle) - damp * _spin) * dt;
                 _angle += _spin * dt;
                 if (!_held && Math.Abs(_angle) < 0.05 && Math.Abs(_spin) < 0.5)
@@ -2851,7 +2852,7 @@ public sealed partial class MainWindow
     readonly Dictionary<FrameworkElement, Windows.Foundation.Point> _dragFrom = [];
     void Draggable(FrameworkElement el, Action dropped, Action? moving = null, Action? tapped = null)
     {
-        el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY | ManipulationModes.TranslateInertia;
+        el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY | (moving is null ? ManipulationModes.TranslateInertia : ManipulationModes.None);
         Microsoft.UI.Dispatching.DispatcherQueueTimer? edge = null;
         var swing = new Swing(el, DispatcherQueue, _timers);
         // (let go, it glides a short way, slowing as paper on paper does)
@@ -2899,21 +2900,22 @@ public sealed partial class MainWindow
         };
         el.ManipulationCompleted += (_, _) =>
         {
-            _dragging = Math.Max(0, _dragging - 1);
             swing.Let();
             el.Scale = Vector3.One;
             StopEdge();
+            // (the board was laid again under it: nothing of this drag is kept)
+            if (!_dragFrom.TryGetValue(el, out var from)) return;
+            _dragFrom.Remove(el);
+            _dragging = Math.Max(0, _dragging - 1);
             // (a press that barely moved is a click: the card goes back where it was and opens)
-            if (Moved(el) < 8)
+            if (Math.Abs(Canvas.GetLeft(el) - from.X) + Math.Abs(Canvas.GetTop(el) - from.Y) < 8)
             {
-                var from = _dragFrom.GetValueOrDefault(el);
                 Canvas.SetLeft(el, from.X);
                 Canvas.SetTop(el, from.Y);
                 MarkUnder(null);
                 if (tapped is not null) { tapped(); return; }
             }
             dropped();
-            _dragFrom.Remove(el);
         };
     }
 

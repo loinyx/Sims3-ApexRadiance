@@ -17,8 +17,8 @@ completed copy, to be decompiled.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
-| 2026-11-25 | branch `release/4.1.1` | `tools/save_name_fix_test -Dll -Patched` on Steam 1.67.2 | All passed; method at 0x2915FC, tokens at 0x2932E6. Decompiled, the `.sims3` branch ends in `Responder.Instance.OptionsModel.SaveName = text` and the other branches are as before | None |
-| 2026-11-25 | branch `release/4.1.1` | The game started with `-worldFile:"ApexTest-Night.sims3"`, its memory read from outside 90 s later | With the fix an `OptionsModel` object holds the save's name; without it none does. The save's files were not written | DXVK |
+| 2026-11-25 | `617655f3` | `tools/save_name_fix_test -Dll -Patched` on Steam 1.67.2 | All passed; method at 0x2915FC, tokens at 0x2932E6. Decompiled, the `.sims3` branch ends in `Responder.Instance.OptionsModel.SaveName = text` and the other branches are as before | None |
+| 2026-11-25 | `617655f3` | The game started with `-worldFile:"ApexTest-Night.sims3"`, its memory read from outside 90 s later | With the fix an `OptionsModel` object holds the save's name; without it none does. The save's files were not written | DXVK |
 
 ## In-game test plan
 

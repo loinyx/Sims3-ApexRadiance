@@ -30,7 +30,7 @@ The scripts run interpreted from the assembly's own bytes. `MainMenuState.Startu
 local set to false and never changed), next to the branch that loads a `.sims3`:
 
 1. With `-worldFile:` and `.sims3` on the command line, a low-priority thread searches the process's private memory for
-   the method's bytes (metadata tokens left free) from the start, every 100 ms, until 10 s after the last copy it
+   the method's bytes (metadata tokens left free) from the start, every 100 ms, until 2 s after the last copy it
    completed, until a world is active, or for 5 minutes.
 2. The tokens of the three calls it needs are read from `LiveModeState` in the same assembly, which makes the same
    calls. No match, two matches or tokens that disagree: nothing is written.

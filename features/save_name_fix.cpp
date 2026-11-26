@@ -18,7 +18,7 @@ namespace {
 constexpr size_t kChunk = 1u << 20;
 constexpr size_t kAround = 6u << 20; // the tokens are in the same assembly (14 MB), near the method (7.4 KB away in 1.67.2)
 constexpr ULONGLONG kGiveUpMs = 300'000;
-constexpr ULONGLONG kQuietMs = 10'000; // after the last copy: the ones seen came within 1.2 s of the first
+constexpr ULONGLONG kQuietMs = 2'000; // after the last copy: the ones seen came within 1.2 s of the first
 
 bool Wanted() {
     std::wstring cmd = GetCommandLineW();
@@ -96,7 +96,8 @@ void Search() {
     // the script comes in with the game's assemblies, some seconds before the menu state; a copy it is made from is
     // completed too, and the search goes on for the one that runs
     ULONGLONG last = start;
-    while (!WorldSession::IsActive() && GetTickCount64() - last < (total ? kQuietMs : kGiveUpMs)) {
+    // (the world's state alone: this thread must not ask the game's UI, which the main thread is building)
+    while (!WorldSession::WorldActive() && GetTickCount64() - last < (total ? kQuietMs : kGiveUpMs)) {
         const int n = Pass(buf, &why);
         passes++;
         if (n) LOG_INFO(std::format("[SaveNameFix] On after {} ms ({} in pass {}): the save on the command line keeps its name", GetTickCount64() - start, n, passes));

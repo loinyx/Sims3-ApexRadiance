@@ -40,10 +40,12 @@ public static class Parts
     {
         sv.AddHandler(UIElement.PointerWheelChangedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
         {
-            if (sv.ScrollableWidth <= 0) return;
             var w = e.GetCurrentPoint(sv).Properties;
-            var d = w.IsHorizontalMouseWheel ? -w.MouseWheelDelta : w.MouseWheelDelta;
-            sv.ChangeView(Math.Clamp(sv.HorizontalOffset - d, 0, sv.ScrollableWidth), null, null, false);
+            // (a tilting wheel the row takes by itself; at its end the wheel goes on to the page)
+            if (sv.ScrollableWidth <= 0 || w.IsHorizontalMouseWheel) return;
+            var to = Math.Clamp(sv.HorizontalOffset - w.MouseWheelDelta, 0, sv.ScrollableWidth);
+            if (Math.Abs(to - sv.HorizontalOffset) < 0.5) return;
+            sv.ChangeView(to, null, null, false);
             e.Handled = true;
         }), true);
         return sv;

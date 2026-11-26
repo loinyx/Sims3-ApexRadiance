@@ -88,18 +88,21 @@ bool IsFile(const std::wstring& p) {
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-// A folder's files into another: what is not there yet, nothing replaced. keep: they stay where they were too.
-void MoveMissing(const std::wstring& from, const std::wstring& to, bool keep) {
+// A folder's files into another: what is not there yet, nothing replaced. keep: they stay where they were too, and only the
+// settings come, the files of the folder itself (pictures, videos, captures and the shader cache stay: copying them could
+// take minutes at start-up and double the space)
+void MoveMissing(const std::wstring& from, const std::wstring& to, bool keep, int depth = 0) {
     if (!keep && MoveFileW(from.c_str(), to.c_str())) return;
     const DWORD a = GetFileAttributesW(from.c_str());
     if (keep && a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) CopyFileW(from.c_str(), to.c_str(), TRUE);
     if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY) || (a & FILE_ATTRIBUTE_REPARSE_POINT)) return;
+    if (keep && depth > 0) return;
     CreateDirectoryW(to.c_str(), nullptr);
     WIN32_FIND_DATAW found;
     const HANDLE find = FindFirstFileW((from + L"\\*").c_str(), &found);
     if (find == INVALID_HANDLE_VALUE) return;
     do {
-        if (wcscmp(found.cFileName, L".") != 0 && wcscmp(found.cFileName, L"..") != 0) MoveMissing(from + L"\\" + found.cFileName, to + L"\\" + found.cFileName, keep);
+        if (wcscmp(found.cFileName, L".") != 0 && wcscmp(found.cFileName, L"..") != 0) MoveMissing(from + L"\\" + found.cFileName, to + L"\\" + found.cFileName, keep, depth + 1);
     } while (FindNextFileW(find, &found));
     FindClose(find);
     if (!keep) RemoveDirectoryW(from.c_str()); // only when nothing stayed
