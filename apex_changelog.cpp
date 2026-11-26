@@ -29,6 +29,10 @@ constexpr const char* k413Improved[] = {
     "Apex Launcher: drag mods into order on the Load order page",
     "Apex Launcher: a save's Clean panel shows each part, and copies kept inside it",
     "Tidier pages, lists and controls across this menu, in every language",
+    "Each effect's switch sits beside its page title, and the page stays readable while it is off",
+    "Water & Snow is a Lighting tab, Lot streaming a Performance tab, and Attention shows on Overview",
+    "Shaders is out of beta",
+    "Apex Launcher: add mods to a merge from its own folder, with Select all",
     "Apex Launcher: the Home picture keeps its own shape",
     nullptr};
 
