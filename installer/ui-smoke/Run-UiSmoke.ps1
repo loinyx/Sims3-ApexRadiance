@@ -76,7 +76,7 @@ function Step([string]$what, [scriptblock]$do) {
         try { $fs.Position = $before; $new = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
         $entries = $new -split "(?m)^(?=\d{4}-\d\d-\d\dT)" | Where-Object { $_.Trim() }
         foreach ($e in $entries) {
-            if ($e -match 'Dry run: (Setup changes nothing|the game is not started)') { continue }
+            if ($e -match 'Dry run: (Setup changes nothing|the game is not started)|Test run: the launcher changes nothing') { continue }
             $script:failures.Add("${what}: LOG $($e.Trim() -replace '\s+', ' ' | ForEach-Object { $_.Substring(0, [Math]::Min(600, $_.Length)) })")
         }
     }
@@ -96,10 +96,11 @@ function Nav([string]$idOrName) {
 }
 # a screen that is no longer in the sidebar: opened from Settings' rows
 function Open([string]$screen) {
-    $id = @{ 'Game' = 'SettingsGame'; 'Repair or remove' = 'SettingsManage'; 'About and licences' = 'SettingsAbout' }[$screen]
+    $id = @{ 'Game' = 'SettingsGame'; 'Repair or remove' = 'SettingsManage'; 'Credits and licences' = 'SettingsAbout' }[$screen]
     if (-not $id) { Nav $screen; return }
     Nav 'Settings'
     $b = ById $id
+    for ($i = 0; $i -lt 10 -and -not $b; $i++) { Start-Sleep -Milliseconds 300; $b = ById $id }
     if (-not $b) { throw "settings row $id not found" }
     Invoke $b
     Start-Sleep -Milliseconds 600
@@ -194,7 +195,7 @@ function OneRun([int]$run) {
     try {
         Step "run ${run}: start" { }
         # the launcher's own screens: each one, Play (refused by the dry run), a mod search, Health's Check now and its tabs
-        foreach ($n in 'Home', 'Mods', 'Worlds', 'Saves', 'Health', "What's new", 'Settings') {
+        foreach ($n in 'Home', 'Game settings', 'Mods', 'Saves', 'Health', "What's new", 'Settings') {
             Nav $n
             Step "screen $n" { Shot ("screen-" + ($n -replace '[^A-Za-z]', '')) }
         }
@@ -205,7 +206,7 @@ function OneRun([int]$run) {
         Step "mods grid" { $g = ByName 'Grid'; if ($g) { Toggle $g; Start-Sleep -Seconds 2; Shot 'mods-grid'; Toggle (ByName 'List') } }
         Nav 'Health'
         Step "health check now" { Invoke (ById 'HealthCheckNow'); Start-Sleep -Seconds 2 }
-        foreach ($t in 'Automatic fixes', 'Restore points', 'Last session', 'Overview') { Step "health tab $t" { $x = ByName $t; if ($x) { Sel $x; Start-Sleep -Milliseconds 800 } } }
+        foreach ($t in 'HealthMods', 'HealthStability', 'HealthSaves') { Step "health page $t" { Invoke (ById $t); Start-Sleep -Milliseconds 800; Invoke (ById 'HealthBack'); Start-Sleep -Milliseconds 800 } }
         # Game: each listed game, then the first again
         Open 'Game'
         $games = (ById 'GameList').FindAll($TS::Descendants, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::ListItem)))
@@ -218,7 +219,7 @@ function OneRun([int]$run) {
         foreach ($t in $toggles) {
             $id = $t.Current.AutomationId
             for ($k = 0; $k -lt 4; $k++) { Step "toggle $id #$k" { $x = ById $id; if ($x.Current.IsEnabled) { Toggle $x } } }
-            Step "footer after $id" { [void](ById 'NextButton').Current.Name }
+            Step "footer after $id" { $b = ById 'NextButton'; if ($b) { [void]$b.Current.Name } }
         }
         $radios = (Root).FindAll($TS::Descendants, (Cond $A::ControlTypeProperty ([System.Windows.Automation.ControlType]::RadioButton)))
         $first = $null
@@ -265,9 +266,17 @@ function OneRun([int]$run) {
             }
         }
         # About and licences: each licence (the GitHub links open a browser: left alone)
-        Open 'About and licences'
-        $reads = @(Buttons | Where-Object { $_.Current.Name -eq 'Read' })
-        for ($k = 0; $k -lt $reads.Count; $k++) { Step "licence $k" { (@(Buttons | Where-Object { $_.Current.Name -eq 'Read' }))[$k] | ForEach-Object { Invoke $_ } } }
+        Open 'Credits and licences'
+        $reads = @(Buttons | Where-Object { $_.Current.Name -like 'Read, *' })
+        for ($k = 0; $k -lt $reads.Count; $k++) {
+            Step "licence $k" {
+                (@(Buttons | Where-Object { $_.Current.Name -like 'Read, *' }))[$k] | ForEach-Object { Invoke $_ }
+                Start-Sleep -Milliseconds 700
+                $close = Buttons | Where-Object { $_.Current.AutomationId -eq 'CloseButton' } | Select-Object -First 1
+                if (-not $close) { throw 'the licence did not open' }
+                Invoke $close
+            }
+        }
         # every language on the Components step, then English
         if (-not $Quick) {
             Nav 'NavComponents'

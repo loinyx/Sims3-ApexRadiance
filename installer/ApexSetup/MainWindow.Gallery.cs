@@ -44,7 +44,14 @@ public sealed partial class MainWindow
     static readonly Windows.UI.Color[] Tapes = [Windows.UI.Color.FromArgb(0x8C, 0x7F, 0x77, 0xDD), Windows.UI.Color.FromArgb(0x99, 0xE0, 0xA8, 0x4F), Windows.UI.Color.FromArgb(0x8C, 0x7D, 0xBE, 0x9A), Windows.UI.Color.FromArgb(0x80, 0xE8, 0x6F, 0xB8)];
 
     // the picture Home opens on: the one chosen in the Gallery, else the newest
-    string? HomePicture() => (_gal ??= Gallery.Load()).HomePicture is { } p && File.Exists(p) ? p : Screenshots(1).FirstOrDefault();
+    GalleryData LoadGallery()
+    {
+        var d = Gallery.Load();
+        if (_game is not null) Gallery.Follow(d, Scan.WindowsDocs(Docs), Docs);
+        return d;
+    }
+
+    string? HomePicture() => (_gal ??= LoadGallery()).HomePicture is { } p && File.Exists(p) ? p : Screenshots(1).FirstOrDefault();
 
     void BuildGallery()
     {
@@ -52,7 +59,7 @@ public sealed partial class MainWindow
         var host = ScreenGallery;
         host.Children.Clear();
         if (_game is null) { host.Children.Add(Heading(T("Gallery"))); host.Children.Add(Muted(T("Choose the game first."))); return; }
-        _gal ??= Gallery.Load();
+        _gal ??= LoadGallery();
         if (!_galRestored)
         {
             // (Home may have read the gallery already; the view and album come back once, on the first visit)
@@ -66,33 +73,20 @@ public sealed partial class MainWindow
         _lastKept ??= System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         _galPics = Gallery.List(Docs);
         _galSaves = Saves.List(Docs);
-        var page = new Grid { ColumnSpacing = 28 };
-        page.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(248) }); // (the Mods pane's width)
-        page.ColumnDefinitions.Add(new ColumnDefinition());
-        var albums = new ScrollViewer { Content = GalleryAlbums(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        _houseTitles = null;
+        var page = new Grid();
+        var albums = new ScrollViewer { Content = GalleryAlbums(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(12, 0, 12, 12) };
         _galSide = albums;
-        var sideColumn = new Grid();
-        sideColumn.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        sideColumn.RowDefinitions.Add(new RowDefinition());
-        sideColumn.Children.Add(GallerySearch());
-        Grid.SetRow(albums, 1);
-        sideColumn.Children.Add(albums);
-        page.Children.Add(sideColumn);
-        var side = 220.0;
-        var main = new StackPanel { Spacing = 18 };
-        var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = Visibility.Collapsed,
-            Flyout = new Flyout { Content = new StackPanel { Width = 260, Children = { GallerySearch(), new ScrollViewer { Content = GalleryAlbums(), MaxHeight = 520 } } } } };
+        var main = new StackPanel { Spacing = Design.Space.X6 };
+        var narrow = new ScrollViewer { MaxHeight = 520 };
+        narrow.Content = GalleryAlbums(narrow);
+        _galNarrow = narrow;
+        var picker = new DropDownButton { Content = AlbumName(_galAlbum), Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible,
+            Flyout = new Flyout { Content = Design.Parts.PopCard(new StackPanel { Width = 260, Children = { GallerySearch(), narrow } }, 6), FlyoutPresenterStyle = Design.Parts.Pop(274) } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, T("Albums"));
-        main.Children.Add(picker);
-        page.SizeChanged += (_, e) =>
-        {
-            var narrow = e.NewSize.Width < (_galBook ? 900 : 980);
-            page.ColumnDefinitions[0].Width = new GridLength(narrow ? 0 : side);
-            page.ColumnSpacing = narrow || _galBook ? 0 : 28;
-            sideColumn.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
-            picker.Visibility = narrow ? Visibility.Visible : Visibility.Collapsed;
-        };
-        main.Children.Add(GalleryHead());
+        if (_galBook) main.Children.Add(picker);
+        ShowSide(GallerySearch(), albums, () => picker.Visibility = SideFits ? Visibility.Collapsed : Visibility.Visible);
+        main.Children.Add(GalleryHead(picker));
         FullBleed(_galBook);
         _custDrawer = null;
         _boardPaper = null;
@@ -100,22 +94,15 @@ public sealed partial class MainWindow
         {
             _galRowsHost = new Border { Child = GalleryRows() };
             main.Children.Add(_galRowsHost);
-            Grid.SetColumn(main, 1);
             page.Children.Add(main);
             host.Children.Add(page);
             return;
         }
         var look = Gallery.Look(_gal!, _galAlbum);
-        side = 256;
-        page.ColumnDefinitions[0].Width = new GridLength(side);
-        page.ColumnSpacing = 0;
         page.Height = Math.Max(420, Scroller.ActualHeight);
         page.Loaded += (_, _) => page.Height = Math.Max(420, Scroller.ActualHeight);
         _galPage = page;
         WatchBoardSize();
-        // (the search and the list under it on the same margins)
-        sideColumn.Padding = new Thickness(22, 26, 14, 0);
-        albums.Padding = new Thickness(0, 0, 0, 18);
         // the title row, then the board in all the room left: the room measured, the board laid to it
         var head = (FrameworkElement)main.Children[^1];
         main.Children.Clear();
@@ -123,9 +110,9 @@ public sealed partial class MainWindow
         column.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         column.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         column.RowDefinitions.Add(new RowDefinition());
-        picker.Margin = new Thickness(32, 20, 0, 0);
+        picker.Margin = new Thickness(Design.Space.Page, Design.Space.X6, 0, 0);
         column.Children.Add(picker);
-        head.Margin = new Thickness(32, 22, 28, 6);
+        head.Margin = new Thickness(Design.Space.Page, SideFits ? Design.Space.X6 : Design.Space.X4, Design.Space.Page, Design.Space.X2);
         Grid.SetRow(head, 1);
         column.Children.Add(head);
         var room = new Border();
@@ -153,7 +140,6 @@ public sealed partial class MainWindow
         book.Children.Add(paper);
         book.Children.Add(column);
         book.Children.Add(CustomizeDrawer());
-        Grid.SetColumn(book, 1);
         page.Children.Add(book);
         host.Children.Add(page);
     }
@@ -163,12 +149,15 @@ public sealed partial class MainWindow
     // the pictures the search finds (all of them with no search)
     string _galQuery = "";
     Border? _galRowsHost;
+    ScrollViewer? _galNarrow;
+    TextBlock? _galCount;
+    string PictureCount(int n) => n == 1 ? T("1 picture · newest first") : T("{0} pictures · newest first", n);
     IEnumerable<Picture> Found => _galQuery.Length == 0 ? _galPics : _galPics.Where(Matches);
     bool Matches(Picture p)
     {
         bool Has(string? text) => text is { Length: > 0 } && text.Contains(_galQuery, StringComparison.CurrentCultureIgnoreCase);
         var culture = LangCulture();
-        return Has(Gallery.Peek(_gal!, p.Path).Caption) || Has(Gallery.HouseholdOf(p, _gal!, _galSaves)) || Has(Path.GetFileNameWithoutExtension(p.Path))
+        return Has(Gallery.Peek(_gal!, p.Path).Caption) || Gallery.HouseholdOf(p, _gal!, _galSaves) is { } house && (Has(house) || Has(HouseTitle(house))) || Has(Path.GetFileNameWithoutExtension(p.Path))
             || Has(p.Taken.ToString("D", culture)) || Has(p.Taken.ToString("MMMM yyyy", culture))
             || _gal!.Custom.Any(c => Has(c.Name) && c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase));
     }
@@ -176,7 +165,7 @@ public sealed partial class MainWindow
     // the search box over the albums: kept while the list and the pictures under it are laid again as it is typed in
     FrameworkElement GallerySearch()
     {
-        var box = new TextBox { PlaceholderText = T("Search pictures"), Text = _galQuery, Margin = new Thickness(0, 0, 0, 12) };
+        var box = new TextBox { PlaceholderText = T("Search"), Text = _galQuery };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Search pictures"));
         var typed = 0;
         box.TextChanged += (_, _) =>
@@ -187,15 +176,35 @@ public sealed partial class MainWindow
                 if (mine != typed || box.Text.Trim() == _galQuery) return;
                 _galQuery = box.Text.Trim();
                 if (_galSide is not null) _galSide.Content = GalleryAlbums();
-                if (!_galBook && _galRowsHost is not null) { _galLimit = 60; _galRowsHost.Child = GalleryRows(); }
+                if (_galNarrow is not null) _galNarrow.Content = GalleryAlbums(_galNarrow);
+                if (!_galBook && _galRowsHost is not null) { _galLimit = 60; _galRowsHost.Child = GalleryRows(); if (_galCount is not null) _galCount.Text = PictureCount(InAlbum().Count); }
                 else RefreshBoard();
             });
         };
         box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Escape && box.Text.Length > 0) { box.Text = ""; e.Handled = true; } };
-        return box;
+        var field = SearchField(box);
+        return field;
     }
     string AlbumName(string a) => a == Gallery.All ? T("All pictures") : a == Gallery.Favourites ? T("Favourites")
-        : Gallery.CustomOf(_gal!, a) is { } c ? c.Name : a;
+        : Gallery.CustomOf(_gal!, a) is { } c ? c.Name : HouseTitle(a);
+    // a household by its family, as Home and Saves name it (two of one family: the save's name too)
+    // (brief: the narrow list, where the save's name alone tells the two apart)
+    string HouseTitle(string save, bool brief)
+    {
+        var full = HouseTitle(save);
+        return brief && full.EndsWith(" · " + save, StringComparison.OrdinalIgnoreCase) ? save : full;
+    }
+    string HouseTitle(string save)
+    {
+        // (once for the saves as they were read: a search asks for it at every picture, and each save's folder is on disk)
+        if (_houseTitles is null)
+        {
+            var names = _galSaves.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase).Select(x => (x.Name, Family: FamilyName(x, SaveInfo.Of(x)))).ToList();
+            _houseTitles = names.ToDictionary(n => n.Name, n => n.Family != n.Name && names.Count(x => x.Family == n.Family) > 1 ? n.Family + " · " + n.Name : n.Family, StringComparer.OrdinalIgnoreCase);
+        }
+        return _houseTitles.GetValueOrDefault(save, save);
+    }
+    Dictionary<string, string>? _houseTitles;
 
     // ---------- the albums ----------
 
@@ -203,7 +212,7 @@ public sealed partial class MainWindow
     {
         var t = Eyebrow(text);
         t.VerticalAlignment = VerticalAlignment.Center;
-        return new Grid { Children = { t }, Height = 30, Margin = new Thickness(10, first ? 0 : 12, 0, 2) };
+        return new Grid { Children = { t }, Height = 30, Margin = new Thickness(10, first ? 0 : 14, 0, 2) };
     }
 
     // a picture dragged onto an album of the side pane: the tile is dragged by the system, a card on the board by the pointer
@@ -243,29 +252,23 @@ public sealed partial class MainWindow
         else BuildGallery();
     }
 
-    UIElement GalleryAlbums()
+    // (host: what holds this copy, the narrow window's list; null is the side pane)
+    UIElement GalleryAlbums(ScrollViewer? host = null)
     {
-        var s = new StackPanel { Spacing = 2 };
+        var s = new StackPanel { Spacing = 0 };
+        var folded = false;
         var found = Found.ToList();
-        Button Album(string key, string name, int count, Windows.UI.Color dot, string? glyph = null)
+        Button Album(string key, string name, int count, string icon)
         {
             var on = key == _galAlbum;
-            var g = new Grid { ColumnSpacing = 10 };
             // (searching: what holds nothing found stays out of the list)
             var none = _galQuery.Length > 0 && count == 0 && !on;
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            // (a dot or an icon in a 16 px column, as the Mods pane's icons)
-            g.Children.Add(glyph is null ? new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 8, Height = 8, Margin = new Thickness(4, 0, 4, 0), Fill = new SolidColorBrush(dot), VerticalAlignment = VerticalAlignment.Center }
-                : new FontIcon { Glyph = glyph, FontSize = 15, Width = 16, Foreground = new SolidColorBrush(dot), VerticalAlignment = VerticalAlignment.Center });
-            var t = new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(t, 1);
-            g.Children.Add(t);
-            if (count > 0) { var n = new TextBlock { Text = count.ToString(), FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(n, 2); g.Children.Add(n); }
-            var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 32, Padding = new Thickness(10, 0, 10, 0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(4),
-                Background = on ? new SolidColorBrush(Pick(0xFF232323, 0xFFE8E8E8)) : new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-            b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Pick(0xFF1E1E1E, 0xFFF1F1F1));
+            var g = SideLine(icon, name, count > 0 ? count.ToString() : "");
+            // (the mark of the place shown, as a list draws it)
+            if (on) g.Children.Add(new Border { Width = 3, Height = 16, CornerRadius = new CornerRadius(1.5), Background = Res("ApexAccentBrush"), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(-16, 0, 0, 0) });
+            var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Height = 38, Padding = new Thickness(16, 0, 16, 0), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(0),
+                Background = on ? Res("ApexTileBrush") : Res("ApexClearBrush") };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
             b.Click += (_, _) => { _galAlbum = key; _galLimit = 60; BuildGallery(); };
             if (none) b.Visibility = Visibility.Collapsed;
             if (key != Gallery.All)
@@ -285,39 +288,37 @@ public sealed partial class MainWindow
             }
             return b;
         }
-        Windows.UI.Color[] dots = [Rgb(0x7D, 0xBE, 0x9A), Rgb(0x57, 0xB6, 0xE8), Rgb(0xE0, 0xA8, 0x4F), Rgb(0xE8, 0x6F, 0xB8), Rgb(0xB4, 0xAE, 0xF2), Rgb(0x8E, 0x8E, 0x8E)];
-        s.Children.Add(SideHeading(T("LIBRARY"), first: true));
-        s.Children.Add(Album(Gallery.All, T("All pictures"), _galPics.Count, AccentInk));
-        s.Children.Add(Album(Gallery.Favourites, T("Favourites"), found.Count(p => Gallery.InAlbum(p, Gallery.Favourites, _gal!, _galSaves)), Rgb(0xF2, 0xC9, 0x4C)));
-        s.Children.Add(SideHeading(T("HOUSEHOLDS")));
+        Group("library", T("Library"));
+        Into(Album(Gallery.All, T("All pictures"), _galPics.Count, "image"));
+        Into(Album(Gallery.Favourites, T("Favourites"), found.Count(p => Gallery.InAlbum(p, Gallery.Favourites, _gal!, _galSaves)), "star"));
+        Group("households", T("Households"));
         // the player's own albums (a trip, a family's story) under the household they belong to, each with its icon;
         // right-click one to rename or delete it, a household to make an album in it
         var homes = _gal!.Custom.ToDictionary(c => c, c => Gallery.HomeOf(c, _gal, _galPics, _galSaves));
-        var i = 0;
         foreach (var save in _galSaves)
         {
-            var hb = Album(save.Name, save.Name, found.Count(p => Gallery.InAlbum(p, save.Name, _gal!, _galSaves)), dots[i++ % dots.Length]);
-            var here = new MenuFlyoutItem { Text = T("New album in {0}", save.Name), Icon = new FontIcon { Glyph = "\uE710" } };
+            var hb = Album(save.Name, HouseTitle(save.Name, brief: true), found.Count(p => Gallery.InAlbum(p, save.Name, _gal!, _galSaves)), "users");
+            var here = new MenuFlyoutItem { Text = T("New album in {0}", save.Name), Icon = Lucide.Element("plus") };
             var home = save.Name;
             here.Click += async (_, _) => { if (await AlbumDialog(null, home) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
             hb.ContextFlyout = new MenuFlyout { Items = { here } };
-            s.Children.Add(hb);
+            Into(hb);
             foreach (var c in _gal.Custom.Where(c => string.Equals(homes[c], save.Name, StringComparison.OrdinalIgnoreCase)))
-                s.Children.Add(Mine(c, true));
+                Into(Mine(c, true));
         }
         var loose = _gal.Custom.Where(c => !_galSaves.Any(v => string.Equals(homes[c], v.Name, StringComparison.OrdinalIgnoreCase))).ToList();
         Button Mine(CustomAlbum c, bool inside)
         {
-            var b = Album(c.Key, c.Name, found.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), AccentInk, c.Icon);
+            var b = Album(c.Key, c.Name, found.Count(p => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)), AlbumIcon(c.Icon));
             if (inside) b.Margin = new Thickness(14, 0, 0, 0); // (one level in, as a folder inside a folder in Mods)
             var menu = new MenuFlyout();
-            var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = new FontIcon { Glyph = "\uE70F" } };
+            var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = Lucide.Element("pencil") };
             var one = c;
             rename.Click += async (_, _) => { if (await AlbumDialog(one) is not null) BuildGallery(); };
-            var drop = new MenuFlyoutItem { Text = T("Delete the album"), Icon = new FontIcon { Glyph = "\uE74D" } };
+            var drop = new MenuFlyoutItem { Text = T("Delete album"), Icon = Lucide.Element("trash-2") };
             drop.Click += async (_, _) =>
             {
-                if (!await Confirm(T("Delete {0}?", one.Name), T("Only the album is deleted. Its pictures stay in your Screenshots folder and other albums."), T("Delete"))) return;
+                if (!await Confirm(T("Delete {0}?", one.Name), T("Only the album is deleted. Its pictures stay in your Screenshots folder and other albums."), T("Delete"), danger: true)) return;
                 _gal.Custom.Remove(one);
                 _gal.Albums.Remove(one.Key);
                 Keep();
@@ -329,36 +330,22 @@ public sealed partial class MainWindow
             b.ContextFlyout = menu;
             return b;
         }
-        var mine = new Grid { Margin = new Thickness(10, 12, 2, 2), Height = 30 };
-        mine.ColumnDefinitions.Add(new ColumnDefinition());
-        mine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var mineHead = Eyebrow(T("ALBUMS"));
-        mineHead.VerticalAlignment = VerticalAlignment.Center;
-        mine.Children.Add(mineHead);
-        var make = new Button { Content = new FontIcon { Glyph = "\uE710", FontSize = 12 }, Width = 26, Height = 26, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(make, T("New album…"));
-        ToolTipService.SetToolTip(make, T("New album…"));
-        make.Click += async (_, _) => { if (await AlbumDialog(null) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
-        Grid.SetColumn(make, 1);
-        mine.Children.Add(make);
-        s.Children.Add(mine);
-        foreach (var c in loose) s.Children.Add(Mine(c, false));
-        if (_gal.Custom.Count == 0)
-        {
-            var hint = new HyperlinkButton { Content = T("+ an album of your own, like a trip"), FontSize = 13, Padding = new Thickness(10, 4, 0, 4) };
-            hint.Click += async (_, _) => { if (await AlbumDialog(null) is { } made) { _galAlbum = made.Key; BuildGallery(); } };
-            s.Children.Add(hint);
-        }
-        var note = Muted(T("Pictures go to the household you saved right after taking them. To change it, open the picture. Albums are inside their household."));
-        note.TextWrapping = TextWrapping.Wrap;
-        note.FontSize = 12;
-        note.Margin = new Thickness(10, 16, 10, 0);
-        s.Children.Add(note);
+        Group("albums", T("Albums"), (T("New album\u2026"), () => Safe(NewAlbum())));
+        foreach (var c in loose) Into(Mine(c, false));
         return s;
+
+        async Task NewAlbum() { if (await AlbumDialog(null) is { } made) { _galAlbum = made.Key; BuildGallery(); } }
+        void Group(string key, string label, (string, Action)? add = null)
+        {
+            s.Children.Add(SideGroup("gallery:" + key, label, () => { if ((host ?? _galSide) is { } h) h.Content = GalleryAlbums(host); }, add));
+            folded = _collapsed.Contains("gallery:" + key) && _galQuery.Length == 0;
+        }
+        void Into(UIElement e) { if (!folded) s.Children.Add(e); }
     }
 
     // the title, what it holds, and the controls of the open view; the switch between the two views on the right
-    UIElement GalleryHead()
+    // pick: the albums' list, where a narrow window has no room for them at the side
+    UIElement GalleryHead(FrameworkElement pick)
     {
         var g = new Grid { ColumnSpacing = 12 };
         g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -368,15 +355,16 @@ public sealed partial class MainWindow
         var look = Gallery.Look(_gal!, _galAlbum);
         var titles = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        if (Gallery.CustomOf(_gal!, _galAlbum) is { } own) name.Children.Add(new FontIcon { Glyph = own.Icon, FontSize = _galBook ? 28 : 22, Foreground = new SolidColorBrush(AccentInk), VerticalAlignment = VerticalAlignment.Center });
+        if (Gallery.CustomOf(_gal!, _galAlbum) is { } own) name.Children.Add(new LucideIcon { Kind = AlbumIcon(own.Icon), Size = _galBook ? 28 : 22, Stroke = new SolidColorBrush(AccentInk), VerticalAlignment = VerticalAlignment.Center, StrokeWidth = 1.75 });
         _boardTitle = _galBook
             ? new TextBlock { Text = AlbumName(_galAlbum), FontFamily = new FontFamily(look.Font), FontSize = 40, FontWeight = FontWeights.SemiBold, Foreground = Ink(look) }
             : new TextBlock { Text = AlbumName(_galAlbum), FontSize = 28, FontWeight = FontWeights.SemiBold };
         name.Children.Add(_boardTitle);
         titles.Children.Add(name);
-        var hint = Muted(_galBook ? T("Drag to travel the timeline · click a picture to open it")
-            : pics.Count == 1 ? T("1 picture · newest first") : T("{0} pictures · newest first", pics.Count));
-        if (_galBook) { _boardHint = hint; hint.Foreground = Ink(look); hint.Opacity = 0.7; hint.TextWrapping = TextWrapping.NoWrap; hint.TextTrimming = TextTrimming.CharacterEllipsis; _boardTitle.TextTrimming = TextTrimming.CharacterEllipsis; }
+        var hint = Muted(_galBook ? T("Drag to travel the timeline · click a picture to open it") : PictureCount(pics.Count));
+        hint.FontSize = 13;
+        _galCount = _galBook ? null : hint;
+        if (_galBook) { _boardHint = hint; hint.Foreground = Ink(look); hint.Opacity = 0.85; hint.TextWrapping = TextWrapping.NoWrap; hint.TextTrimming = TextTrimming.CharacterEllipsis; _boardTitle.TextTrimming = TextTrimming.CharacterEllipsis; }
         titles.Children.Add(hint);
         g.Children.Add(titles);
 
@@ -384,43 +372,42 @@ public sealed partial class MainWindow
         if (_galBook)
         {
             _boardTools.Clear();
-            T Round<T>(T b, string glyph, string name) where T : Button
+            Button Tool(string icon, string name)
             {
-                b.Content = new FontIcon { Glyph = glyph, FontSize = 16 };
-                b.Width = 44; b.Height = 44; b.Padding = new Thickness(0); b.CornerRadius = new CornerRadius(22); b.BorderThickness = new Thickness(1);
+                var b = Design.Parts.Named(new Button { Content = new LucideIcon { Kind = icon, Size = 16, Follow = true, StrokeWidth = 1.75 }, Width = Design.Size.Control, Height = Design.Size.Control, Padding = new Thickness(0), BorderThickness = new Thickness(1) }, name);
                 _boardTools.Add(b);
-                InkTool(b, look);
-                ToolTipService.SetToolTip(b, name);
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
                 return b;
             }
-            var custom = Round(new Button(), "\uE790", T("Customise"));
+            var custom = Tool("palette", T("Customise"));
             custom.Click += (_, _) => ToggleCustomize();
-            var add = Round(new Button(), "\uE70B", T("Add a note"));
+            var add = Tool("sticky-note", T("Add a note"));
             var menu = new MenuFlyout();
             foreach (var (key, color) in NoteColors)
             {
-                var item = new MenuFlyoutItem { Text = T(char.ToUpperInvariant(key[0]) + key[1..]), Icon = new FontIcon { Glyph = "", Foreground = new SolidColorBrush(color) } };
+                var item = new MenuFlyoutItem { Text = T(char.ToUpperInvariant(key[0]) + key[1..]), Icon = Lucide.Element("circle", new SolidColorBrush(color), solid: true) };
                 item.Click += (_, _) => AddNote(key);
                 menu.Items.Add(item);
             }
             add.Flyout = menu;
             tools.Children.Add(custom);
             tools.Children.Add(add);
-            var shuffle = Round(new Button(), "\uE8B1", T("Rearrange"));
+            var shuffle = Tool("shuffle", T("Rearrange"));
             shuffle.Click += (_, _) => ShuffleBoard();
             tools.Children.Add(shuffle);
+            if (pick is Button albums) { albums.Height = Design.Size.Control; _boardTools.Add(albums); }
         }
         else
         {
-            var by = new ComboBox { MinWidth = 150 };
+            pick.Height = Design.Size.Control;
+            tools.Children.Add(pick);
+            var by = new ComboBox { Width = 160 };
             by.Items.Add(T("By day"));
             by.Items.Add(T("By household"));
             by.SelectedIndex = _galByHome ? 1 : 0;
             by.SelectionChanged += (_, _) => { _galByHome = by.SelectedIndex == 1; DispatcherQueue.TryEnqueue(BuildGallery); }; // (later: the build removes this box)
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(by, T("Group"));
             tools.Children.Add(by);
-            tools.Children.Add(Button(T("Screenshots folder"), () => OpenFolder(Gallery.Folder(Docs))));
+            tools.Children.Add(Button(T("Open folder"), () => OpenFolder(Gallery.Folder(Docs))));
             if (_galPics.Any(pc => pc.Video)) tools.Children.Add(Button(T("Videos folder"), () => OpenFolder(Gallery.VideoFolder(Docs))));
         }
         Grid.SetColumn(tools, 1);
@@ -429,72 +416,59 @@ public sealed partial class MainWindow
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         g.SizeChanged += (_, e) =>
         {
-            var low = e.NewSize.Width < (_galBook ? 640 : 1150);
+            var low = e.NewSize.Width < (_galBook ? 640 : 760);
             Grid.SetRow(tools, low ? 1 : 0);
             Grid.SetColumn(tools, low ? 0 : 1);
             Grid.SetColumnSpan(tools, low ? 3 : 1);
             tools.HorizontalAlignment = HorizontalAlignment.Left;
             tools.Margin = new Thickness(0, low ? 12 : 0, 0, 0);
         };
-        var sw = ViewSwitch();
+        var sw = _boardSwitch = ViewSwitch();
+        if (_galBook) InkBoard(look);
         Grid.SetColumn(sw, 2);
         g.Children.Add(sw);
         return g;
     }
 
-    // Albums or Scrapbook: two buttons on a track, the pill sliding under the chosen one
-    FrameworkElement ViewSwitch()
+    // Albums or Scrapbook
+    Design.Segmented ViewSwitch() => new([("layout-grid", T("Albums")), ("book-open", T("Scrapbook"))], _galBook ? 1 : 0, at =>
     {
-        var track = new Grid { Padding = new Thickness(3), CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center };
-        track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
-        track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(118) });
-        var pill = new Border { CornerRadius = new CornerRadius(7), Background = new SolidColorBrush(Pick(0xFF2C2C2C, 0xFFE5E5E5)), Width = 118, HorizontalAlignment = HorizontalAlignment.Left,
-            TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, Translation = new Vector3(_galBook ? 0 : 118, 0, 0) };
-        Grid.SetColumnSpan(pill, 2);
-        track.Children.Add(pill);
-        DispatcherQueue.TryEnqueue(() => pill.Translation = new Vector3(_galBook ? 118 : 0, 0, 0));
-        Button Side(string glyph, string text, bool book)
-        {
-            var c = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
-            c.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
-            c.Children.Add(new TextBlock { Text = text, FontSize = 13 });
-            var b = new Button { Content = c, Height = 34, HorizontalAlignment = HorizontalAlignment.Stretch, BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                Foreground = _galBook == book ? Res("TextFillColorPrimaryBrush") : Res("ApexSoftTextBrush") };
-            b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, text);
-            b.Click += (_, _) => { if (_galBook == book) return; _galBook = book; if (_gal is not null) { _gal.Book = book; KeepQuiet(); } pill.Translation = new Vector3(book ? 118 : 0, 0, 0); DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, BuildGallery); };
-            return b;
-        }
-        var albums = Side("", T("Albums"), false);
-        var book = Side("", T("Scrapbook"), true);
-        Grid.SetColumn(book, 1);
-        track.Children.Add(albums);
-        track.Children.Add(book);
-        return track;
+        _galBook = at == 1;
+        if (_gal is not null) { _gal.Book = _galBook; KeepQuiet(); }
+        After(Design.Motion.Base, () => { if (_step == GalleryScreen) BuildGallery(); }); // (the mark arrives first; another screen may be open by then)
+    });
+    Design.Segmented? _boardSwitch;
+
+    // everything over the board in the ink that reads on its colour
+    void InkBoard(AlbumLook look)
+    {
+        foreach (var b in _boardTools) InkTool(b, look);
+        _boardSwitch?.Paint(_galBook ? BoardInk(look) : null);
+        if (_boardTitle is not null) _boardTitle.Foreground = Ink(look);
+        if (_boardHint is not null) _boardHint.Foreground = Ink(look);
     }
 
     // ---------- Albums: rows by day or by household ----------
 
     UIElement GalleryRows()
     {
-        var s = new StackPanel { Spacing = 26 };
+        var s = new StackPanel { Spacing = Design.Space.Section };
         var pics = InAlbum();
-        if (pics.Count == 0 && _galQuery.Length > 0) { s.Children.Add(Muted(T("Nothing found for “{0}”.", _galQuery))); return s; }
-        if (pics.Count == 0) { s.Children.Add(Muted(_galAlbum == Gallery.Favourites ? T("No favourites yet: open a picture and add it.") : T("No pictures here yet."))); return s; }
+        if (pics.Count == 0 && _galQuery.Length > 0) { s.Children.Add(EmptyPlace("search", T("Nothing found for “{0}”.", _galQuery))); return s; }
+        if (pics.Count == 0) { s.Children.Add(EmptyPlace("image", _galAlbum == Gallery.Favourites ? T("No favourites yet. Open a picture and choose Add to favourites.") : Gallery.CustomOf(_gal!, _galAlbum) is not null ? T("This album is empty. Open a picture and choose Add to an album.") : T("No pictures here yet. Take one in the game with C."))); return s; }
         var shown = pics.Take(_galLimit).ToList();
         var groups = _galByHome
-            ? shown.GroupBy(p => Gallery.HouseholdOf(p, _gal!, _galSaves) ?? T("Not sorted yet")).Select(x => (Key: x.Key, List: x.ToList()))
+            ? shown.GroupBy(p => Gallery.HouseholdOf(p, _gal!, _galSaves) is { } h ? HouseTitle(h) : T("No household yet")).Select(x => (Key: x.Key, List: x.ToList()))
             : shown.GroupBy(p => p.Taken.Date).Select(x => (Key: x.Key.ToString("D", LangCulture()), List: x.ToList()));
         var index = 0;
         foreach (var (key, list) in groups)
         {
-            var block = new StackPanel { Spacing = 10 };
+            var block = new StackPanel { Spacing = Design.Space.SectionToBody };
             var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            head.Children.Add(new TextBlock { Text = key, FontSize = 17, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            head.Children.Add(new TextBlock { Text = key, FontSize = 16, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
             head.Children.Add(new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 1, 8, 2), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock { Text = list.Count.ToString(), FontSize = 12, Foreground = Res("ApexSoftTextBrush") } });
-            if (!_galByHome && string.Join(" · ", list.Select(p => Gallery.HouseholdOf(p, _gal!, _galSaves)).OfType<string>().Distinct()) is { Length: > 0 } homes)
+            if (!_galByHome && string.Join(" · ", list.Select(p => Gallery.HouseholdOf(p, _gal!, _galSaves)).OfType<string>().Distinct().Select(HouseTitle)) is { Length: > 0 } homes)
                 head.Children.Add(new TextBlock { Text = homes, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
             block.Children.Add(head);
             var wrap = new CardGrid { MinItemWidth = 250, Spacing = 10, Aspect = 9.0 / 16, ChildrenTransitions = new TransitionCollection { new EntranceThemeTransition { IsStaggeringEnabled = true, FromVerticalOffset = 30 } } };
@@ -603,7 +577,7 @@ public sealed partial class MainWindow
         Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0C, 0x0C, 0x0C)), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x55, 255, 255, 255)), BorderThickness = new Thickness(1.5),
         IsHitTestVisible = false,
-        Child = new FontIcon { Glyph = "\uF5B0", FontSize = size * 0.38, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), Margin = new Thickness(size * 0.06, 0, 0, 0) },
+        Child = new LucideIcon { Solid = true, Kind = "play", Size = size * 0.38, Stroke = new SolidColorBrush(Microsoft.UI.Colors.White), Margin = new Thickness(size * 0.06, 0, 0, 0), StrokeWidth = 1.75 },
     };
 
     static async Task<bool> Blank(string file)
@@ -671,15 +645,15 @@ public sealed partial class MainWindow
         g.Children.Add(image);
         var when = new Border { VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(12, 18, 12, 9), Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) },
             Background = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(0, 1), GradientStops = { new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0xB3, 0, 0, 0), Offset = 1 } } },
-            Child = new TextBlock { Text = p.Taken.ToString("t", LangCulture()) + "  ·  " + (Gallery.HouseholdOf(p, _gal!, _galSaves) ?? ""), FontSize = 12, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), TextTrimming = TextTrimming.CharacterEllipsis } };
+            Child = new TextBlock { Text = p.Taken.ToString("t", LangCulture()) + "  ·  " + (Gallery.HouseholdOf(p, _gal!, _galSaves) is { } own ? HouseTitle(own) : ""), FontSize = 12, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), TextTrimming = TextTrimming.CharacterEllipsis } };
         g.Children.Add(when);
         if (Gallery.Peek(_gal!, p.Path).Favourite)
             g.Children.Add(new Border { Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Margin = new Thickness(8), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0C, 0x0C, 0x0C)), Child = new FontIcon { Glyph = "", FontSize = 13, Foreground = new SolidColorBrush(Rgb(0xF2, 0xC9, 0x4C)) } });
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 0x0C, 0x0C, 0x0C)), Child = new LucideIcon { Solid = true, Kind = "star", Size = 13, Stroke = new SolidColorBrush(Rgb(0xF2, 0xC9, 0x4C)), StrokeWidth = 1.75 } });
         var b = new Button { Content = g, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Shadow = new ThemeShadow(), Translation = new Vector3(0, 0, 8) };
-        b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            Background = Res("ApexClearBrush"), Shadow = new ThemeShadow(), Translation = new Vector3(0, 0, 8) };
+        b.Resources["ButtonBackgroundPointerOver"] = Res("ApexClearBrush");
+        b.Resources["ButtonBackgroundPressed"] = Res("ApexClearBrush");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, Path.GetFileNameWithoutExtension(p.Path));
         // (16:9, as wide as its column)
         b.VerticalAlignment = VerticalAlignment.Stretch;
@@ -734,7 +708,7 @@ public sealed partial class MainWindow
     // drifts down turning gently, zoom grows from the middle, slide comes in along the timeline, playful drops with a
     // small bounce, none is simply there.
     static readonly (string Key, string Name, string Glyph)[] Entrances =
-        [("soft", "Soft", "\uE7B3"), ("float", "Float", "\uE753"), ("zoom", "Zoom", "\uE8A3"), ("slide", "Slide", "\uE76C"), ("playful", "Playful", "\uE76E"), ("none", "None", "\uE711")];
+        [("soft", "Soft", "feather"), ("float", "Float", "cloud"), ("zoom", "Zoom", "zoom-in"), ("slide", "Slide", "chevron-right"), ("playful", "Playful", "smile"), ("none", "None", "x")];
 
     // a little picture that comes in the way it names: once when shown, again under the pointer
     static FrameworkElement EntranceArt(string mode, bool chosen)
@@ -745,7 +719,7 @@ public sealed partial class MainWindow
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xE6, 0xEC, 0xE7, 0xDA)),
             Child = new Border { CornerRadius = new CornerRadius(5), Background = new LinearGradientBrush(new GradientStopCollection { new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x8E, 0x86, 0xD8), Offset = 0 }, new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x4A, 0x55, 0x7A), Offset = 1 } }, 60) },
         };
-        var room = new Grid { Width = 160, Height = 100, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var room = new Grid { Width = 160, Height = 100, Background = Res("ApexClearBrush") };
         room.Children.Add(card);
         var art = new Viewbox { Width = 36, Height = 22, Child = room };
         void Go() { var calm = _boardCalm; _boardCalm = false; Land(card, -4, 0, -40, mode); _boardCalm = calm; }
@@ -887,7 +861,13 @@ public sealed partial class MainWindow
         return new LinearGradientBrush { StartPoint = new(0.2, 0), EndPoint = new(0.8, 1), GradientStops =
             { new GradientStop { Color = Shade(c, 0.08), Offset = 0 }, new GradientStop { Color = c, Offset = 0.45 }, new GradientStop { Color = Shade(c, -0.42), Offset = 1 } } };
     }
-    static Brush Ink(AlbumLook look) => new SolidColorBrush(IsLight(BoardColor(look)) ? Rgb(0x3A, 0x34, 0x2A) : Rgb(0xE8, 0xE2, 0xD4));
+    // (the one of the two that reads better on it)
+    static Windows.UI.Color BoardInk(AlbumLook look)
+    {
+        var (board, dark, light) = (BoardColor(look), Rgb(0x1E, 0x1A, 0x14), Rgb(0xF2, 0xEC, 0xDF));
+        return Design.Oklch.Contrast(dark, board) > Design.Oklch.Contrast(light, board) ? dark : light;
+    }
+    static Brush Ink(AlbumLook look) => new SolidColorBrush(BoardInk(look));
 
     // ---------- Customize: a panel that slides in over the board's right side, the board changing behind it ----------
 
@@ -928,14 +908,15 @@ public sealed partial class MainWindow
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-        title.Children.Add(new FontIcon { Glyph = album.Icon, FontSize = 26, Foreground = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4)), VerticalAlignment = VerticalAlignment.Center });
+        title.Children.Add(new LucideIcon { Kind = AlbumIcon(album.Icon), Size = 26, Stroke = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4)), VerticalAlignment = VerticalAlignment.Center, StrokeWidth = 1.75 });
         title.Children.Add(new TextBlock { Text = album.Name, FontFamily = new FontFamily(look.Font), FontSize = 44, Foreground = new SolidColorBrush(Rgb(0xF4, 0xF0, 0xE6)) });
         title.Children.Add(new TextBlock { Text = members.Count == 1 ? T("1 picture") : T("{0} pictures", members.Count), FontSize = 14, Opacity = 0.65, Foreground = new SolidColorBrush(Rgb(0xE8, 0xE2, 0xD4)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 10, 0, 0) });
         head.Children.Add(title);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-        var whole = new Button { Content = T("Open the album"), CornerRadius = new CornerRadius(18), Padding = new Thickness(16, 6, 16, 7) };
-        var shut = new Button { Content = new FontIcon { Glyph = "\uE711", FontSize = 12 }, Width = 38, Height = 38, Padding = new Thickness(0), CornerRadius = new CornerRadius(19) };
+        var whole = new Button { Content = T("Open album"), Height = Design.Size.Control };
+        var shut = new Button { Content = new LucideIcon { Kind = "x", Size = 16, Follow = true, StrokeWidth = 1.75 }, Width = Design.Size.Control, Height = Design.Size.Control, Padding = new Thickness(0) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(shut, T("Close"));
+        ToolTipService.SetToolTip(shut, T("Close"));
         actions.Children.Add(whole);
         actions.Children.Add(shut);
         Grid.SetColumn(actions, 1);
@@ -1057,11 +1038,11 @@ public sealed partial class MainWindow
     MenuFlyout PileMenu(CustomAlbum c)
     {
         var menu = new MenuFlyout();
-        var open = new MenuFlyoutItem { Text = T("Open the album"), Icon = new FontIcon { Glyph = "" } };
+        var open = new MenuFlyoutItem { Text = T("Open album"), Icon = Lucide.Element("external-link") };
         open.Click += (_, _) => { _galAlbum = c.Key; BuildGallery(); };
-        var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = new FontIcon { Glyph = "" } };
+        var rename = new MenuFlyoutItem { Text = T("Rename or change the icon"), Icon = Lucide.Element("pencil") };
         rename.Click += async (_, _) => { if (await AlbumDialog(c) is not null) BuildGallery(); };
-        var undo = new MenuFlyoutItem { Text = T("Undo the album"), Icon = new FontIcon { Glyph = "" } };
+        var undo = new MenuFlyoutItem { Text = T("Ungroup album"), Icon = Lucide.Element("undo-2") };
         undo.Click += (_, _) =>
         {
             if (_gal is null) return;
@@ -1072,7 +1053,7 @@ public sealed partial class MainWindow
             Keep(step: true);
             if (_galSide is not null) _galSide.Content = GalleryAlbums();
             FlipBoard();
-            ShowUndo(T("Album undone: its pictures are back on the board"), () => StepBack(true));
+            ShowUndo(T("Album ungrouped: its pictures are back on the board"), () => StepBack(true));
         };
         menu.Items.Add(open);
         menu.Items.Add(rename);
@@ -1091,7 +1072,7 @@ public sealed partial class MainWindow
     }
 
     // while a picture is dragged: the picture whose middle it is over grows a little, ready to make an album with it
-    double Moved(FrameworkElement el) => Math.Abs(Canvas.GetLeft(el) - _dragFrom.X) + Math.Abs(Canvas.GetTop(el) - _dragFrom.Y);
+    double Moved(FrameworkElement el) => _dragFrom.TryGetValue(el, out var from) ? Math.Abs(Canvas.GetLeft(el) - from.X) + Math.Abs(Canvas.GetTop(el) - from.Y) : 0;
 
     void MarkUnder(FrameworkElement? me)
     {
@@ -1175,7 +1156,7 @@ public sealed partial class MainWindow
     // a round tool on the board, its icon in the board's ink and its fill a breath of the same
     static void InkTool(Button b, AlbumLook look)
     {
-        var c = IsLight(BoardColor(look)) ? Rgb(0x3A, 0x34, 0x2A) : Rgb(0xE8, 0xE2, 0xD4);
+        var c = BoardInk(look);
         var fill = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, c.R, c.G, c.B));
         var over = new SolidColorBrush(Windows.UI.Color.FromArgb(0x2E, c.R, c.G, c.B));
         var ink = new SolidColorBrush(c);
@@ -1186,6 +1167,7 @@ public sealed partial class MainWindow
         b.Resources["ButtonBackgroundPressed"] = over;
         b.Resources["ButtonForegroundPointerOver"] = ink;
         b.Resources["ButtonForegroundPressed"] = ink;
+        foreach (var state in new[] { "", "PointerOver", "Pressed" }) b.Resources["DropDownButtonForegroundSecondary" + state] = ink; // (the arrow of the albums' list)
         b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x50, c.R, c.G, c.B));
     }
     string _fontQuery = "";
@@ -1210,21 +1192,22 @@ public sealed partial class MainWindow
 
     Border CustomizeDrawer()
     {
-        var d = new Border
-        {
-            Width = 372, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 14, 14), CornerRadius = new CornerRadius(18),
-            Background = new AcrylicBrush { TintColor = Pick(0xFF181818, 0xFFF7F7F7), TintOpacity = 0.82, TintLuminosityOpacity = 0.9, FallbackColor = Pick(0xFF1E1E1E, 0xFFF7F7F7) },
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)), BorderThickness = new Thickness(1),
-            Shadow = new ThemeShadow(), Translation = new Vector3(420, 0, 40), Opacity = 0, IsHitTestVisible = false,
-            TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(320) }, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) },
-        };
+        var d = Design.Parts.PanelOf(new Grid(), new Thickness(16));
+        (d.HorizontalAlignment, d.Shadow, d.Translation, d.Opacity, d.IsHitTestVisible) = (HorizontalAlignment.Right, new ThemeShadow(), new Vector3(420, 0, 40), 0, false);
+        d.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(Design.Motion.Slow) };
+        d.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(Design.Motion.Base) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(d, T("Customise"));
         _custDrawer = d;
         return d;
     }
 
-    // a small header over a group of controls
-    static TextBlock Caption(string t) => new() { Text = t, FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 100, Foreground = Res("ApexMutedBrush"), Margin = new Thickness(0, 6, 0, 0) };
+    // a small header over a group of controls (the texts are in capitals, from an earlier look)
+    static TextBlock Caption(string t)
+    {
+        var h = Design.Parts.Heading(t.Length < 2 ? t : t[..1] + t[1..].ToLower(LangCulture()));
+        h.Margin = new Thickness(0, Design.Space.X3, 0, 0);
+        return h;
+    }
 
     // a choice drawn as a card: its picture over its name, lit when chosen
     Button Choice(UIElement art, string name, bool on, Action pick, double height = 92)
@@ -1238,9 +1221,8 @@ public sealed partial class MainWindow
         g.Children.Add(label);
         var b = new Button { Content = g, Height = height, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(8, 10, 8, 8), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(on ? 2 : 1),
-            BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Pick(0x1AFFFFFF, 0x1F000000)),
-            Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0CFFFFFF, 0x0A000000)) };
-        b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(on ? (byte)0x3A : (byte)0x18, 0x9F, 0x97, 0xF0));
+            BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush"), Background = Res(on ? "ApexAccentSoftBrush" : "ApexFillBrush") };
+        if (on) b.Resources["ButtonBackgroundPointerOver"] = b.Resources["ButtonBackgroundPressed"] = Res("ApexAccentSoftBrush");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
         b.Click += (_, _) => pick();
         return b;
@@ -1296,41 +1278,22 @@ public sealed partial class MainWindow
         root.RowDefinitions.Add(new RowDefinition());
 
         // the head: what is being dressed, and the way out
-        var head = new Grid { Padding = new Thickness(22, 18, 12, 8) };
+        var head = new Grid { Padding = new Thickness(20, 20, 20, 16), ColumnSpacing = 12 };
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var titles = new StackPanel { Spacing = 0 };
-        titles.Children.Add(new TextBlock { Text = T("Customise"), FontSize = 20, FontWeight = FontWeights.SemiBold });
-        titles.Children.Add(new TextBlock { Text = AlbumName(_galAlbum), FontSize = 12, Opacity = 0.6, TextTrimming = TextTrimming.CharacterEllipsis });
-        head.Children.Add(titles);
-        var x = new Button { Content = new FontIcon { Glyph = "", FontSize = 12 }, Width = 34, Height = 34, Padding = new Thickness(0), CornerRadius = new CornerRadius(17), BorderThickness = new Thickness(0),
-            Background = new SolidColorBrush(Pick(0x14FFFFFF, 0x10000000)), VerticalAlignment = VerticalAlignment.Top };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(x, T("Close"));
-        x.Click += (_, _) => ToggleCustomize(false);
+        head.Children.Add(Design.Parts.Title(Design.Parts.TitleText(T("Customise")), AlbumName(_galAlbum)));
+        var x = Design.Parts.PanelClose(T("Close"), () => ToggleCustomize(false));
         Grid.SetColumn(x, 1);
         head.Children.Add(x);
         root.Children.Add(head);
 
-        // the three parts, as a sliding switch
+        // its parts
         string[] tabs = [T("Board"), T("Frames"), T("Writing"), T("Stickers")];
-        var track = new Grid { Margin = new Thickness(20, 4, 20, 10), Padding = new Thickness(3), CornerRadius = new CornerRadius(10), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x24, 0, 0, 0)) };
-        for (int i = 0; i < tabs.Length; i++) track.ColumnDefinitions.Add(new ColumnDefinition());
-        var pill = new Border { CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x30, 255, 255, 255)) };
-        Grid.SetColumn(pill, _custTab);
-        track.Children.Add(pill);
-        for (int i = 0; i < tabs.Length; i++)
-        {
-            var n = i;
-            var t = new Button { Content = tabs[i], HorizontalAlignment = HorizontalAlignment.Stretch, Height = 34, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), FontSize = 13,
-                FontWeight = i == _custTab ? FontWeights.SemiBold : FontWeights.Normal, Opacity = i == _custTab ? 1 : 0.7 };
-            t.Click += (_, _) => { _custTab = n; FillCustomize(); };
-            Grid.SetColumn(t, i);
-            track.Children.Add(t);
-        }
+        var track = new Design.Segmented([.. tabs.Select(t => ((string?)null, t))], _custTab, n => { _custTab = n; After(Design.Motion.Base, FillCustomize); }, fill: true) { Margin = new Thickness(20, 0, 20, 8) };
         Grid.SetRow(track, 1);
         root.Children.Add(track);
 
-        var body = new StackPanel { Spacing = 10, Padding = new Thickness(22, 4, 22, 24) };
+        var body = new StackPanel { Spacing = 12, Padding = new Thickness(20, 4, 20, 20) };
         var scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         Grid.SetRow(scroll, 2);
         root.Children.Add(scroll);
@@ -1352,9 +1315,9 @@ public sealed partial class MainWindow
             var brightness = new Slider { Minimum = 4, Maximum = 100, Value = bright * 100, StepFrequency = 0.5 };
             brightness.Resources["SliderTrackFill"] = shade;
             brightness.Resources["SliderTrackFillPointerOver"] = shade;
-            brightness.Resources["SliderTrackValueFill"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            brightness.Resources["SliderTrackValueFillPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            brightness.Resources["SliderTrackValueFillPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            brightness.Resources["SliderTrackValueFill"] = Res("ApexClearBrush");
+            brightness.Resources["SliderTrackValueFillPointerOver"] = Res("ApexClearBrush");
+            brightness.Resources["SliderTrackValueFillPressed"] = Res("ApexClearBrush");
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(brightness, T("Brightness"));
             var hexText = new TextBlock { Text = Hex(now), FontSize = 12, FontFamily = new FontFamily("Cascadia Mono, Consolas"), HorizontalAlignment = HorizontalAlignment.Center, Opacity = 0.7 };
             void Mix()
@@ -1366,7 +1329,7 @@ public sealed partial class MainWindow
                 shade.GradientStops[0].Color = FromHue(v.X % 360, 0.04, v.Y);
                 shade.GradientStops[1].Color = FromHue(v.X % 360, 1, v.Y);
                 if (_boardFrame is not null) _boardFrame.Background = BoardBrush(look);
-                foreach (var t in _boardTools) InkTool(t, look);
+                InkBoard(look);
                 Changed();
             }
             var live = false;
@@ -1378,10 +1341,10 @@ public sealed partial class MainWindow
             shadeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             shadeRow.ColumnDefinitions.Add(new ColumnDefinition());
             shadeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            shadeRow.Children.Add(new FontIcon { Glyph = "\uE708", FontSize = 13, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
+            shadeRow.Children.Add(new LucideIcon { Kind = "moon", Size = 13, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Follow = true, StrokeWidth = 1.75 });
             Grid.SetColumn(brightness, 1);
             shadeRow.Children.Add(brightness);
-            var sun = new FontIcon { Glyph = "\uE706", FontSize = 15, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center };
+            var sun = new LucideIcon { Kind = "sun", Size = 16, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Follow = true, StrokeWidth = 1.75 };
             Grid.SetColumn(sun, 2);
             shadeRow.Children.Add(sun);
             body.Children.Add(shadeRow);
@@ -1465,7 +1428,7 @@ public sealed partial class MainWindow
             }
             if (look.Stickers.Count > 0)
             {
-                var clear = new HyperlinkButton { Content = T("Take every sticker off"), Margin = new Thickness(0, 8, 0, 0), Foreground = Res("ApexErrorBrush") };
+                var clear = new HyperlinkButton { Content = T("Remove all stickers"), Margin = new Thickness(0, 8, 0, 0), Foreground = Res("ApexErrorBrush") };
                 clear.Click += (_, _) => { look.Stickers.Clear(); Changed(); FillCustomize(); };
                 body.Children.Add(clear);
             }
@@ -1495,7 +1458,7 @@ public sealed partial class MainWindow
                     art.Children.Add(new Border { Width = 46, Height = 14, Background = TapeBrush(probe, 1), Rotation = -6, CenterPoint = new Vector3(23, 7, 0), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 0, 0) });
                     art.Children.Add(new Border { Width = 40, Height = 12, Background = TapeBrush(probe, 3), Rotation = 5, CenterPoint = new Vector3(20, 6, 0), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 6) });
                 }
-                else art.Children.Add(new FontIcon { Glyph = "", FontSize = 18, Opacity = 0.5 });
+                else art.Children.Add(new LucideIcon { Kind = "x", Size = 20, Opacity = 0.5, Follow = true, StrokeWidth = 1.75 });
                 PutAt(tapes, Choice(art, kinds[i].Name, look.Tape == key, () => { look.Tape = key; Changed(); FillCustomize(); }, 80), i, 3);
             }
             body.Children.Add(tapes);
@@ -1522,8 +1485,8 @@ public sealed partial class MainWindow
             body.Children.Add(Caption(T("LAYOUT")));
             body.Children.Add(Range(T("Tilt: tidy to messy"), T("Tidy"), T("Messy"), 0, 1.6, look.Tilt, v => look.Tilt = v));
             body.Children.Add(Caption(T("SPACING")));
-            body.Children.Add(Range(T("Spacing: close to apart"), T("Close"), T("Apart"), 0.6, 1.7, look.Spacing, v => look.Spacing = v, FlipBoard));
-            body.Children.Add(Caption(T("ENTRANCE")));
+            body.Children.Add(Range(T("Spacing: close to apart"), T("Together"), T("Apart"), 0.6, 1.7, look.Spacing, v => look.Spacing = v, FlipBoard));
+            body.Children.Add(Caption(T("HOW PICTURES APPEAR")));
             var ways = Columns(3);
             for (int i = 0; i < Entrances.Length; i++)
             {
@@ -1567,7 +1530,7 @@ public sealed partial class MainWindow
                     lines.Children.Add(new TextBlock { Text = AlbumName(_galAlbum), FontFamily = new FontFamily(f), FontSize = 24, TextTrimming = TextTrimming.CharacterEllipsis });
                     lines.Children.Add(new TextBlock { Text = f, FontSize = 11, Opacity = 0.55 });
                     g.Children.Add(lines);
-                    if (on) { var tick = new FontIcon { Glyph = "\uE73E", FontSize = 14, Foreground = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(tick, 1); g.Children.Add(tick); }
+                    if (on) { var tick = new LucideIcon { Kind = "check", Size = 14, Stroke = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center, StrokeWidth = 1.75 }; Grid.SetColumn(tick, 1); g.Children.Add(tick); }
                     var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(14, 8, 14, 10), CornerRadius = new CornerRadius(12),
                         BorderThickness = new Thickness(on ? 2 : 1), BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Pick(0x1AFFFFFF, 0x1F000000)),
                         Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0CFFFFFF, 0x0A000000)) };
@@ -1922,7 +1885,7 @@ public sealed partial class MainWindow
     {
         var text = new TextBlock { Text = s.Text, FontFamily = new FontFamily("Segoe UI Emoji"), FontSize = 64 * s.Size * _boardScale };
         var tilt = new Border { Child = text };
-        var outer = new Border { Child = tilt, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var outer = new Border { Child = tilt, Background = Res("ApexClearBrush") };
         Canvas.SetLeft(outer, s.X);
         Canvas.SetTop(outer, s.Y);
         Canvas.SetZIndex(outer, 3000 + order);   // (stickers over everything, a picture lifted under the pointer included)
@@ -1930,11 +1893,11 @@ public sealed partial class MainWindow
         Draggable(outer, () => { s.X = Canvas.GetLeft(outer); s.Y = Canvas.GetTop(outer); Keep(); });
         var menu = new MenuFlyout();
         void Resize(double by) { s.Size = Math.Clamp(s.Size * by, 0.5, 3); text.FontSize = 64 * s.Size * _boardScale; Keep(); }
-        var bigger = new MenuFlyoutItem { Text = T("Bigger"), Icon = new FontIcon { Glyph = "\uE8A3" } };
+        var bigger = new MenuFlyoutItem { Text = T("Bigger"), Icon = Lucide.Element("zoom-in") };
         bigger.Click += (_, _) => Resize(1.25);
-        var smaller = new MenuFlyoutItem { Text = T("Smaller"), Icon = new FontIcon { Glyph = "\uE71F" } };
+        var smaller = new MenuFlyoutItem { Text = T("Smaller"), Icon = Lucide.Element("zoom-out") };
         smaller.Click += (_, _) => Resize(0.8);
-        var off = new MenuFlyoutItem { Text = T("Take it off"), Icon = new FontIcon { Glyph = "\uE74D" } };
+        var off = new MenuFlyoutItem { Text = T("Take it off"), Icon = Lucide.Element("trash-2") };
         off.Click += (_, _) => { look.Stickers.Remove(s); Keep(); _boardCanvas?.Children.Remove(outer); };
         menu.Items.Add(bigger);
         menu.Items.Add(smaller);
@@ -1971,14 +1934,16 @@ public sealed partial class MainWindow
             _boardCalm = true;
             try
             {
+                // (a drag under way ends with the board it was on)
+                _dragging = 0;
+                _dragFrom.Clear();
                 if (page || _boardHost is null) { BuildGallery(); return; }
                 _boardHost.Child = GalleryBoard();
                 var look = Gallery.Look(_gal!, _galAlbum);
                 if (_boardLight is not null) _boardLight.Background = LightBrush(look);
                 if (_boardPaper is not null && _boardFrame is not null) DrawPaper(_boardPaper, look, _boardFrame.ActualWidth, _boardFrame.ActualHeight, 28);
-                if (_boardTitle is not null) { _boardTitle.FontFamily = new FontFamily(look.Font); _boardTitle.Foreground = Ink(look); }
-                if (_boardHint is not null) _boardHint.Foreground = Ink(look);
-                foreach (var b in _boardTools) InkTool(b, look);
+                if (_boardTitle is not null) _boardTitle.FontFamily = new FontFamily(look.Font);
+                InkBoard(look);
             }
             finally { _boardCalm = false; }
         });
@@ -2005,7 +1970,7 @@ public sealed partial class MainWindow
 
     void FullBleed(bool on)
     {
-        Scroller.Padding = on ? new Thickness(0) : new Thickness(24, 20, 24, 0);
+        Scroller.Padding = on ? new Thickness(0) : new Thickness(32, 28, 32, 0);
         Screens.Margin = on ? new Thickness(0) : new Thickness(0, 0, 0, 32);
         Scroller.VerticalScrollBarVisibility = on ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
         Scroller.VerticalScrollMode = on ? ScrollMode.Disabled : ScrollMode.Enabled;
@@ -2171,7 +2136,7 @@ public sealed partial class MainWindow
             look.SlotLead += freshSlots;
         }
         var width = Math.Max(1100, pics.Count == 0 ? 0 : x + 110 * s);
-        var canvas = new Canvas { Width = width, Height = BoardHeight, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var canvas = new Canvas { Width = width, Height = BoardHeight, Background = Res("ApexClearBrush") };
         _boardCanvas = canvas;
         _boardCards.Clear();
         // the line of time, and a mark with its date where each day begins
@@ -2186,7 +2151,7 @@ public sealed partial class MainWindow
             var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 12, Height = 12, Fill = ink };
             Canvas.SetLeft(dot, dx - 6); Canvas.SetTop(dot, mid - 5); Canvas.SetZIndex(dot, 800);
             var label = new Border { Background = pill, CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 0, 10, 2),
-                Child = new TextBlock { Text = day.ToString("d MMM", LangCulture()), FontFamily = new FontFamily(look.Font), FontSize = 22 * Math.Max(0.85, s), Foreground = ink } };
+                Child = new TextBlock { Text = MonthDay(day), FontFamily = new FontFamily(look.Font), FontSize = 22 * Math.Max(0.85, s), Foreground = ink } };
             Canvas.SetLeft(label, dx + 12); Canvas.SetTop(label, mid + 8); Canvas.SetZIndex(label, 800);
             canvas.Children.Add(dot);
             canvas.Children.Add(label);
@@ -2229,7 +2194,7 @@ public sealed partial class MainWindow
                 var k = inPile.GetValueOrDefault(heap);
                 inPile[heap] = k + 1;
                 if (k == 0) pileBase[heap] = look.Places.TryGetValue(heap.Key, out var parked) && parked.Moved
-                    ? new Placed { X = rawX[own] + parked.X, Y = Math.Clamp(parked.Y, roof, Math.Max(roof, BoardHeight - h - 70)) - 24 * s }
+                    ? new Placed { X = Math.Max(8, rawX[own] + parked.X), Y = Math.Clamp(parked.Y, roof, Math.Max(roof, BoardHeight - h - 70)) - 24 * s }
                     : Auto(own, true);
                 var under = pileBase[heap];
                 var shift = PileShift[k % PileShift.Length];
@@ -2275,7 +2240,7 @@ public sealed partial class MainWindow
             var at = pics.IndexOf(members[0]);
             var cardH = ((at % 4 == 0 ? 194 : 154) * s * look.Size) + 70;
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            row.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 14, Foreground = ink, VerticalAlignment = VerticalAlignment.Center });
+            row.Children.Add(new LucideIcon { Kind = AlbumIcon(c.Icon), Size = 14, Stroke = ink, VerticalAlignment = VerticalAlignment.Center, StrokeWidth = 1.75 });
             var tagName = new TextBlock { Text = c.Name, FontFamily = new FontFamily(look.Font), FontSize = 20, Foreground = ink, VerticalAlignment = VerticalAlignment.Center };
             row.Children.Add(tagName);
             row.Children.Add(new TextBlock { Text = members.Count.ToString(), FontSize = 12, Foreground = ink, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 0) });
@@ -2297,7 +2262,7 @@ public sealed partial class MainWindow
             var key = c.Key;
             var albumCards = members.Select(m => _boardCards.First(cc => cc.Pic.Path == m.Path).Card).ToList();
             toggle.Click += (_, _) => Spotlight(c, members, albumCards);
-            var open = TagButton(new FontIcon { Glyph = "\uE8A7", FontSize = 12, Foreground = ink }, new Thickness(0));
+            var open = TagButton(new LucideIcon { Kind = "external-link", Size = 12, Stroke = ink, StrokeWidth = 1.75 }, new Thickness(0));
             open.Width = 30;
             ToolTipService.SetToolTip(open, T("Open the album {0}", c.Name));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(open, T("Open the album {0}", c.Name));
@@ -2348,10 +2313,12 @@ public sealed partial class MainWindow
             foreach (var card in cards)
             {
                 card.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY;
-                card.ManipulationStarted += (_, _) => { _dragging = true; Fan(false); foreach (var cc in cards) cc.Scale = new Vector3(1.04f, 1.04f, 1); };
+                card.ManipulationStarted += (_, _) => { _dragging++; Fan(false); foreach (var cc in cards) cc.Scale = new Vector3(1.04f, 1.04f, 1); };
                 card.ManipulationDelta += (_, e) =>
                 {
-                    var dx = e.Delta.Translation.X;
+                    // (kept on the board, as a single picture is)
+                    var left = Canvas.GetLeft(cards[0]);
+                    var dx = Math.Clamp(e.Delta.Translation.X, 8 - left, Math.Max(8 - left, (_boardCanvas?.Width ?? 2000) - cards[0].ActualWidth - 8 - left));
                     var dy = Math.Clamp(e.Delta.Translation.Y, -Canvas.GetTop(cards[0]) - 10, BoardHeight - 120 - Canvas.GetTop(cards[0]));
                     foreach (var cc in cards) { Canvas.SetLeft(cc, Canvas.GetLeft(cc) + dx); Canvas.SetTop(cc, Canvas.GetTop(cc) + dy); }
                     Canvas.SetLeft(tags, Canvas.GetLeft(tags) + dx);
@@ -2359,11 +2326,12 @@ public sealed partial class MainWindow
                 };
                 card.ManipulationCompleted += (_, _) =>
                 {
-                    _dragging = false;
+                    _dragging = Math.Max(0, _dragging - 1);
                     foreach (var cc in cards) cc.Scale = Vector3.One;
                     look.Places[c.Key] = new Placed { X = Canvas.GetLeft(cards[0]) - _boardAnchor.GetValueOrDefault(c.Key), Y = Canvas.GetTop(cards[0]), Moved = true };
                     Keep();
                 };
+                HandCursor.On(card);
                 card.Tapped += (_, e) => { e.Handled = true; Spotlight(c, members, cards); };
             }
         }
@@ -2407,18 +2375,52 @@ public sealed partial class MainWindow
             Play(grow);
         };
         var panning = false;
-        double grabX = 0, grabOffset = 0;
+        double grabX = 0, grabOffset = 0, lastX = 0, speed = 0;
+        ulong lastAt = 0;
+        Microsoft.UI.Dispatching.DispatcherQueueTimer? throwTimer = null;
+        void StopGlide() { if (throwTimer is null) return; throwTimer.Stop(); _timers.Remove(throwTimer); throwTimer = null; }
         canvas.PointerPressed += (_, e) =>
         {
             if (e.OriginalSource != canvas) return;
+            StopGlide();
             panning = canvas.CapturePointer(e.Pointer);
-            grabX = e.GetCurrentPoint(scroll).Position.X;
+            var at = e.GetCurrentPoint(scroll);
+            (grabX, lastX, lastAt, speed) = (at.Position.X, at.Position.X, at.Timestamp, 0);
             grabOffset = scroll.HorizontalOffset;
             e.Handled = true;
         };
-        canvas.PointerMoved += (_, e) => { if (panning) scroll.ChangeView(grabOffset - (e.GetCurrentPoint(scroll).Position.X - grabX), null, null, true); };
-        canvas.PointerReleased += (_, e) => { panning = false; canvas.ReleasePointerCapture(e.Pointer); };
+        canvas.PointerMoved += (_, e) =>
+        {
+            if (!panning) return;
+            var at = e.GetCurrentPoint(scroll);
+            // (the speed of the last moves, in pixels a millisecond, smoothed so one jerk does not throw the board)
+            if (at.Timestamp > lastAt) speed = speed * 0.4 + (at.Position.X - lastX) / ((at.Timestamp - lastAt) / 1000.0) * 0.6;
+            (lastX, lastAt) = (at.Position.X, at.Timestamp);
+            scroll.ChangeView(grabOffset - (at.Position.X - grabX), null, null, true);
+        };
+        canvas.PointerReleased += (_, e) =>
+        {
+            if (!panning) return;
+            panning = false;
+            canvas.ReleasePointerCapture(e.Pointer);
+            // (a throw: the board runs on and slows down; a hold that stopped before letting go stays)
+            if (e.GetCurrentPoint(scroll).Timestamp - lastAt > 80_000 || Math.Abs(speed) < 0.15) return;
+            var v = Math.Clamp(speed, -6, 6);
+            throwTimer = DispatcherQueue.CreateTimer();
+            throwTimer.Interval = TimeSpan.FromMilliseconds(16);
+            throwTimer.Tick += (_, _) =>
+            {
+                if (_boardScroll != scroll) { StopGlide(); return; } // (the board laid again)
+                v *= 0.93;
+                var to = Math.Clamp(scroll.HorizontalOffset - v * 16, 0, scroll.ScrollableWidth);
+                if (Math.Abs(v) < 0.02 || to <= 0 || to >= scroll.ScrollableWidth) StopGlide();
+                scroll.ChangeView(to, null, null, true);
+            };
+            _timers.Add(throwTimer);
+            throwTimer.Start();
+        };
         canvas.PointerCaptureLost += (_, _) => panning = false;
+        scroll.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => StopGlide()), true);
         var inside = new Grid();
         inside.Children.Add(scroll);
         var frame = new Border { Height = BoardHeight, Child = inside };
@@ -2426,7 +2428,7 @@ public sealed partial class MainWindow
         _boardBuiltHeight = BoardHeight;
 
         // the strip of dates under the board: each day where it lies, the part in view lit; a click goes there
-        var strip = new Grid { Height = 40, Margin = new Thickness(32, 4, 32, 18), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var strip = new Grid { Height = 40, Margin = new Thickness(32, 4, 32, 18), Background = Res("ApexClearBrush") };
         var track = new Canvas();
         strip.Children.Add(track);
         var window = new Border { Height = 8, CornerRadius = new CornerRadius(4), Background = Res("ApexAccentBrush"), Opacity = 0.9 };
@@ -2447,10 +2449,10 @@ public sealed partial class MainWindow
                 Canvas.SetLeft(tick, at); Canvas.SetTop(tick, 23);
                 track.Children.Add(tick);
                 if (at < lastRight + 8) continue;  // (labels that would touch stay ticks)
-                var label = new TextBlock { Text = d.ToString("d MMM", LangCulture()), FontSize = 11, Foreground = ink, Opacity = 0.75 };
+                var label = new TextBlock { Text = MonthDay(d), FontSize = 11, Foreground = ink, Opacity = 0.75 };
                 Canvas.SetLeft(label, at - 2); Canvas.SetTop(label, 2);
                 track.Children.Add(label);
-                lastRight = at + 5 + d.ToString("d MMM", LangCulture()).Length * 6.5;
+                lastRight = at + 5 + MonthDay(d).Length * 6.5;
             }
             track.Children.Add(window);
             Place();
@@ -2503,7 +2505,7 @@ public sealed partial class MainWindow
             case "rounded":
                 stack.Children.Add(new Border { Width = w, Height = h, CornerRadius = new CornerRadius(20), Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill } });
                 caption.Foreground = dark;
-                stack.Children.Add(capBox = new Border { Child = caption, Margin = new Thickness(10, -18, 0, 0), Padding = new Thickness(12, 2, 12, 2), CornerRadius = new CornerRadius(14), HorizontalAlignment = HorizontalAlignment.Left,
+                stack.Children.Add(capBox = new Border { Child = caption, Margin = new Thickness(10, -18, 0, 0), Padding = new Thickness(12, 2, 12, 2), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Left,
                     Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xEB, 0xF6, 0xF2, 0xEA)) });
                 body = stack;
                 break;
@@ -2517,9 +2519,9 @@ public sealed partial class MainWindow
                 inner.Children.Add(caption);
                 stamp.Children.Add(inner);
                 // (a postmark over the corner, with the day)
-                var mark = new Grid { Width = 74, Height = 74, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -22, -26, 0), Rotation = -14, CenterPoint = new Vector3(37, 37, 0) };
+                var mark = new Grid { Width = 70, Height = 70, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -40, -44, 0), Rotation = -14, CenterPoint = new Vector3(35, 35, 0) };
                 mark.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB0, 0x6A, 0x4E, 0x8C)), StrokeThickness = 2 });
-                mark.Children.Add(new TextBlock { Text = p.Taken.ToString("dd MMM\nyyyy", LangCulture()).ToUpperInvariant(), FontSize = 10, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xC0, 0x6A, 0x4E, 0x8C)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+                mark.Children.Add(new TextBlock { Text = p.Taken.ToString("dd MMM\nyyyy", LangCulture()).ToUpperInvariant(), FontSize = 11, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xC0, 0x6A, 0x4E, 0x8C)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
                 stamp.Children.Add(mark);
                 body = stamp;
                 break;
@@ -2530,7 +2532,8 @@ public sealed partial class MainWindow
                 film.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
                 film.Children.Add(Holes());
                 caption.Foreground = new SolidColorBrush(Rgb(0xE6, 0xE0, 0xD2));
-                caption.Margin = new Thickness(2, 2, 2, 0);
+                caption.FontSize = Math.Min(caption.FontSize, 16);
+                caption.Margin = new Thickness(2, 0, 2, 0);
                 film.Children.Add(caption);
                 body = film;
                 break;
@@ -2588,10 +2591,13 @@ public sealed partial class MainWindow
                 body = clipped;
                 break;
             case "deckle":
-                // (an old print: a cream border with a scalloped edge, a touch of sepia, the caption on the border)
+                // (an old print: a cream border with a scalloped edge all round, a touch of sepia, the caption on the border)
                 var cream = Rgb(0xEF, 0xE6, 0xD0);
                 var aged = new Grid();
-                var print2 = new StackPanel { Background = new SolidColorBrush(cream), Padding = new Thickness(12, 12, 12, 10) };
+                // (round dots on the edge, each touching the next: the scallops)
+                aged.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle { Fill = new SolidColorBrush(cream), Stroke = new SolidColorBrush(cream), StrokeThickness = 10,
+                    StrokeDashArray = [0, 1.05], StrokeDashCap = PenLineCap.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
+                var print2 = new StackPanel { Padding = new Thickness(14, 14, 14, 10) };
                 var tinted = new Grid { Width = w, Height = h };
                 tinted.Children.Add(new Image { Source = source, Stretch = Stretch.UniformToFill, Width = w, Height = h });
                 tinted.Children.Add(new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x38, 0x8A, 0x5A, 0x20)) });
@@ -2600,14 +2606,6 @@ public sealed partial class MainWindow
                 caption.Margin = new Thickness(2, 6, 0, 0);
                 print2.Children.Add(caption);
                 aged.Children.Add(print2);
-                StackPanel Scallops(bool top)
-                {
-                    var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = top ? VerticalAlignment.Top : VerticalAlignment.Bottom, Margin = new Thickness(0, top ? -5 : 0, 0, top ? 0 : -5) };
-                    for (int q = 0; q < (int)((w + 24) / 10); q++) row.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 10, Height = 10, Fill = new SolidColorBrush(cream) });
-                    return row;
-                }
-                aged.Children.Add(Scallops(true));
-                aged.Children.Add(Scallops(false));
                 body = aged;
                 break;
             case "doodle":
@@ -2673,22 +2671,38 @@ public sealed partial class MainWindow
         if (blank && !bare && !shut) { outer.PointerEntered += (_, _) => capHost.Opacity = 1; outer.PointerExited += (_, _) => { if (!editing && Gallery.Peek(_gal!, p.Path).Caption is not { Length: > 0 }) capHost.Opacity = 0; }; }
 
         // (under the pointer it lifts, grows a touch and nearly straightens; back to its tilt when left)
-        outer.PointerEntered += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
-        outer.PointerExited += (_, _) => { if (_dragging || pile is not null || still) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, _restZ.GetValueOrDefault(outer, order * 10)); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
+        outer.PointerEntered += (_, _) => { if (_dragging > 0 || pile is not null || still) return; outer.Translation = new Vector3(0, -12, 56); outer.Scale = new Vector3(1.04f, 1.04f, 1); Canvas.SetZIndex(outer, 900); Turn(turn, place.Angle * look.Tilt * 0.25); };
+        outer.PointerExited += (_, _) => { if (_dragging > 0 || pile is not null || still) return; outer.Translation = new Vector3(0, 0, 32); outer.Scale = Vector3.One; Canvas.SetZIndex(outer, _restZ.GetValueOrDefault(outer, order * 10)); Turn(turn, place.Angle * look.Tilt, 420, new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 }); };
         if (pile is null && !still) Draggable(outer, () =>
             {
                 if (_sideLit is { Tag: string key })
                 {
                     LightAlbum(null);
                     MarkUnder(null);
-                    Canvas.SetLeft(outer, _dragFrom.X);
-                    Canvas.SetTop(outer, _dragFrom.Y);
+                    var from = _dragFrom.GetValueOrDefault(outer);
+                    Canvas.SetLeft(outer, from.X);
+                    Canvas.SetTop(outer, from.Y);
                     DropOnAlbum(key, p);
                     return;
                 }
                 CardDropped(p, place, outer, pile);
             }, () => { MarkUnder(outer); LightAlbum(AlbumAt(_dragPoint)); }, shut ? null : () => OpenViewer(pics, pics.IndexOf(p), outer));
-        if (pile is null && !shut) outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
+        if (pile is null && !shut) HandCursor.On(outer);
+        if (pile is null && !shut)
+        {
+            outer.Tapped += (_, e) => { e.Handled = true; OpenViewer(pics, pics.IndexOf(p), outer); };
+            // (reached and opened with the keyboard, named for a screen reader by its caption or its file)
+            outer.IsTabStop = true;
+            outer.UseSystemFocusVisuals = true;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(outer, info.Caption is { Length: > 0 } said ? said : Path.GetFileName(p.Path));
+            outer.KeyDown += (_, e) =>
+            {
+                if (!ReferenceEquals(e.OriginalSource, outer) || e.Key is not (Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Space)) return;
+                e.Handled = true;
+                OpenViewer(pics, pics.IndexOf(p), outer);
+            };
+        }
+        HandCursor.On(caption);
         caption.Tapped += (_, e) =>
         {
             e.Handled = true;
@@ -2703,15 +2717,15 @@ public sealed partial class MainWindow
             }
             if (caption.Parent is not (Panel or Border)) return;
             editing = true;
-            var box = new TextBox { Text = info.Caption ?? "", FontFamily = caption.FontFamily, FontSize = caption.FontSize, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0, 0, 0, 1),
+            var box = new TextBox { Text = info.Caption ?? "", FontFamily = caption.FontFamily, FontSize = caption.FontSize, Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0, 0, 0, 1),
                 Foreground = caption.Foreground, PlaceholderText = T("write something"), MinWidth = 160, Margin = caption.Margin };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Caption"));
-            box.Resources["TextControlBackgroundFocused"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            box.Resources["TextControlBackgroundFocused"] = Res("ApexClearBrush");
             box.Resources["TextControlForegroundFocused"] = caption.Foreground;
             var line = caption.Foreground is SolidColorBrush cf ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x66, cf.Color.R, cf.Color.G, cf.Color.B)) : caption.Foreground;
             foreach (var key in new[] { "TextControlBorderBrush", "TextControlBorderBrushPointerOver", "TextControlBorderBrushFocused" }) box.Resources[key] = line;
             box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0, 0, 0, 1);
-            box.Resources["TextControlBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            box.Resources["TextControlBackgroundPointerOver"] = Res("ApexClearBrush");
             box.Padding = new Thickness(0, 0, 0, 2);
             Put(caption, box);
             box.Focus(FocusState.Programmatic);
@@ -2739,14 +2753,14 @@ public sealed partial class MainWindow
         var color = NoteColors.FirstOrDefault(c => c.Key == note.Color).Color;
         if (color.A == 0) color = NoteColors[0].Color;
         var box = new TextBox { Text = note.Text, FontFamily = new FontFamily(look.Font), FontSize = 20, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, PlaceholderText = T("write here"),
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Foreground = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26)), Padding = new Thickness(0) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Add a note"));
-        box.Resources["TextControlBackgroundFocused"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        box.Resources["TextControlBackgroundPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            Background = Res("ApexClearBrush"), BorderThickness = new Thickness(0), Foreground = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26)), Padding = new Thickness(0) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("Note"));
+        box.Resources["TextControlBackgroundFocused"] = Res("ApexClearBrush");
+        box.Resources["TextControlBackgroundPointerOver"] = Res("ApexClearBrush");
         box.Resources["TextControlForegroundFocused"] = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26));
-        box.Resources["TextControlBorderBrushFocused"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        box.Resources["TextControlBorderBrushFocused"] = Res("ApexClearBrush");
         box.LostFocus += (_, _) => { note.Text = box.Text; Keep(); };
-        var close = new Button { Content = new FontIcon { Glyph = "", FontSize = 10 }, Width = 24, Height = 24, Padding = new Thickness(0), BorderThickness = new Thickness(0), Opacity = 0,
+        var close = new Button { Content = new LucideIcon { Kind = "x", Size = 11, Follow = true, StrokeWidth = 1.75 }, Width = 24, Height = 24, Padding = new Thickness(0), BorderThickness = new Thickness(0), Opacity = 0,
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 0, 0, 0)), Foreground = new SolidColorBrush(Rgb(0x2B, 0x2A, 0x26)),
             OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(150) } };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(close, T("Remove the note"));
@@ -2763,6 +2777,8 @@ public sealed partial class MainWindow
         Land(tilt, note.Angle, 160 + order * 140, 0, look.Entrance);
         outer.PointerEntered += (_, _) => close.Opacity = 1;
         outer.PointerExited += (_, _) => close.Opacity = 0;
+        close.GotFocus += (_, _) => close.Opacity = 1; // (reached with the keyboard: seen, not only under the pointer)
+        close.LostFocus += (_, _) => close.Opacity = 0;
         close.Click += (_, _) =>
         {
             look.Notes.Remove(note);
@@ -2778,26 +2794,83 @@ public sealed partial class MainWindow
         return outer;
     }
 
-    bool _dragging;
+    int _dragging; // (drags under way: with inertia one can still glide while another starts)
+    // A card held by a corner: it leans away from where it is pulled, the faster the more, and when let go it swings back
+    // to rest on a spring with a small overshoot. The lean is the element's own Rotation, round the point it was picked up
+    // by, so it never fights the tilt the card already has.
+    sealed class Swing(FrameworkElement el, Microsoft.UI.Dispatching.DispatcherQueue queue, HashSet<Microsoft.UI.Dispatching.DispatcherQueueTimer> timers)
+    {
+        double _angle, _spin, _target;
+        bool _held;
+        Microsoft.UI.Dispatching.DispatcherQueueTimer? _tick;
+        Vector3 _rest;
+
+        public void Hold(Windows.Foundation.Point at)
+        {
+            if (_tick is null) _rest = el.CenterPoint;
+            el.CenterPoint = new Vector3((float)at.X, (float)at.Y, 0);
+            _held = true;
+            Run();
+        }
+
+        // the pointer's speed across, in pixels a millisecond: about 9 degrees at a brisk pull, never past 14
+        public void Pull(double speedX, bool gliding) => _target = gliding ? 0 : Math.Clamp(speedX * 9, -14, 14);
+
+        public void Let() { _held = false; _target = 0; }
+
+        void Run()
+        {
+            if (_tick is not null) return;
+            _tick = queue.CreateTimer();
+            _tick.Interval = TimeSpan.FromMilliseconds(16);
+            _tick.Tick += (_, _) =>
+            {
+                // (a damped spring: firm enough to follow the hand, loose enough to overshoot once when let go)
+                const double dt = 0.016, stiff = 140, damp = 11;
+                if (el.XamlRoot is null) (_held, _angle, _spin, _target) = (false, 0, 0, 0);
+                _spin += (stiff * (_target - _angle) - damp * _spin) * dt;
+                _angle += _spin * dt;
+                if (!_held && Math.Abs(_angle) < 0.05 && Math.Abs(_spin) < 0.5)
+                {
+                    el.Rotation = 0;
+                    el.CenterPoint = _rest;
+                    _tick.Stop();
+                    timers.Remove(_tick);
+                    _tick = null;
+                    return;
+                }
+                el.Rotation = (float)_angle;
+            };
+            timers.Add(_tick);
+            _tick.Start();
+        }
+    }
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, string> CardPaths = new();
     readonly Dictionary<FrameworkElement, int> _restZ = [];
     // moved with the pointer (or a finger), lifted while it moves, kept where it is let go
-    Windows.Foundation.Point _dragFrom;
+    // (where each element was picked up: drags can overlap while one still glides)
+    readonly Dictionary<FrameworkElement, Windows.Foundation.Point> _dragFrom = [];
     void Draggable(FrameworkElement el, Action dropped, Action? moving = null, Action? tapped = null)
     {
-        el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY;
+        el.ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY | (moving is null ? ManipulationModes.TranslateInertia : ManipulationModes.None);
         Microsoft.UI.Dispatching.DispatcherQueueTimer? edge = null;
-        el.ManipulationStarted += (_, _) =>
+        var swing = new Swing(el, DispatcherQueue, _timers);
+        // (let go, it glides a short way, slowing as paper on paper does)
+        el.ManipulationInertiaStarting += (_, e) => e.TranslationBehavior.DesiredDeceleration = 0.006;
+        el.ManipulationStarted += (_, e) =>
         {
-            _dragFrom = new Windows.Foundation.Point(Canvas.GetLeft(el), Canvas.GetTop(el));
-            _dragging = true;
+            _dragFrom[el] = new Windows.Foundation.Point(Canvas.GetLeft(el), Canvas.GetTop(el));
+            _dragging++;
             Canvas.SetZIndex(el, Math.Max(Canvas.GetZIndex(el), 1000));
+            swing.Hold(e.Position);
             el.Scale = new Vector3(1.06f, 1.06f, 1);
             if (_boardScroll is not { } sv) return;
             edge = DispatcherQueue.CreateTimer();
             edge.Interval = TimeSpan.FromMilliseconds(16);
             edge.Tick += (_, _) =>
             {
+                // (the board laid again under the drag: this card and its scroller are gone)
+                if (el.XamlRoot is null || _boardScroll != sv) { StopEdge(); return; }
                 if (_sideLit is not null) return;
                 var left = Canvas.GetLeft(el) - sv.HorizontalOffset;
                 var right = left + el.ActualWidth - sv.ViewportWidth;
@@ -2812,25 +2885,33 @@ public sealed partial class MainWindow
             _timers.Add(edge);
             edge.Start();
         };
+        void StopEdge() { if (edge is not null) { edge.Stop(); _timers.Remove(edge); edge = null; } }
         el.ManipulationDelta += (_, e) =>
         {
+            // (thrown onto an album of the side pane: it stops there instead of gliding past)
+            if (e.IsInertial && _sideLit is not null) { e.Complete(); return; }
             var w = _boardCanvas?.Width ?? 2000;
             // (kept whole on the board)
             Canvas.SetLeft(el, Math.Clamp(Canvas.GetLeft(el) + e.Delta.Translation.X, 8, Math.Max(8, w - el.ActualWidth - 8)));
             Canvas.SetTop(el, Math.Clamp(Canvas.GetTop(el) + e.Delta.Translation.Y, 8, Math.Max(8, BoardHeight - el.ActualHeight - 8)));
             _dragPoint = el.TransformToVisual(null).TransformPoint(e.Position);
-            moving?.Invoke();
+            swing.Pull(e.Velocities.Linear.X, e.IsInertial);
+            if (!e.IsInertial) moving?.Invoke();
         };
         el.ManipulationCompleted += (_, _) =>
         {
-            _dragging = false;
+            swing.Let();
             el.Scale = Vector3.One;
-            if (edge is not null) { edge.Stop(); _timers.Remove(edge); edge = null; }
+            StopEdge();
+            // (the board was laid again under it: nothing of this drag is kept)
+            if (!_dragFrom.TryGetValue(el, out var from)) return;
+            _dragFrom.Remove(el);
+            _dragging = Math.Max(0, _dragging - 1);
             // (a press that barely moved is a click: the card goes back where it was and opens)
-            if (Moved(el) < 8)
+            if (Math.Abs(Canvas.GetLeft(el) - from.X) + Math.Abs(Canvas.GetTop(el) - from.Y) < 8)
             {
-                Canvas.SetLeft(el, _dragFrom.X);
-                Canvas.SetTop(el, _dragFrom.Y);
+                Canvas.SetLeft(el, from.X);
+                Canvas.SetTop(el, from.Y);
                 MarkUnder(null);
                 if (tapped is not null) { tapped(); return; }
             }
@@ -2947,7 +3028,7 @@ public sealed partial class MainWindow
         Gallery.Save(_gal);
         var look = Gallery.Look(_gal, _galAlbum);
         if (_boardFrame is not null) _boardFrame.Background = BoardBrush(look);
-        foreach (var t in _boardTools) InkTool(t, look);
+        if (_galBook) InkBoard(look);
         if (_galSide is not null) _galSide.Content = GalleryAlbums();
         if (_custDrawer is { Opacity: > 0.5 }) FillCustomize();
         if (_galBook) FlipBoard(); else BuildGallery(); // (the Albums view has no board to flip)
@@ -2997,34 +3078,44 @@ public sealed partial class MainWindow
 
     static readonly (string Glyph, string Name)[] AlbumIcons =
     [
-        ("\uE709", "Trip"), ("\uEB51", "Love"), ("\uE80F", "Home"), ("\uE722", "Pictures"), ("\uE734", "Favourite"), ("\uE8F1", "Gift"),
-        ("\uE7C1", "Family"), ("\uE909", "World"), ("\uE706", "Summer"), ("\uE708", "Night"), ("\uE8D6", "Music"), ("\uE7FC", "Games"),
-        ("\uE913", "Places"), ("\uE7EE", "Celebration"), ("\uEA86", "Pets"), ("\uE825", "Build"),
+        ("star", "Star"), ("heart", "Love"), ("users", "Family"), ("baby", "Baby"), ("house", "House"), ("camera", "Pictures"), ("plane", "Trip"), ("map-pin", "Places"),
+        ("globe", "World"), ("sun", "Summer"), ("moon", "Night"), ("leaf", "Autumn"), ("snowflake", "Winter"), ("flower-2", "Garden"), ("tree-palm", "Beach"), ("mountain", "Mountain"),
+        ("tent", "Camping"), ("umbrella", "Rain"), ("cake", "Birthday"), ("party-popper", "Celebration"), ("gift", "Gift"), ("gem", "Wedding"), ("crown", "Royalty"), ("trophy", "Trophy"),
+        ("graduation-cap", "Graduation"), ("school", "School"), ("briefcase", "Work"), ("building-2", "City"), ("church", "Church"), ("hammer", "Build"), ("sofa", "Furniture"), ("bed", "Bedroom"),
+        ("utensils", "Food"), ("coffee", "Coffee"), ("wine", "Drinks"), ("music", "Music"), ("guitar", "Band"), ("gamepad-2", "Games"), ("palette", "Art"), ("book-open", "Story"),
+        ("shirt", "Outfits"), ("dumbbell", "Sport"), ("bike", "Bike"), ("car", "Car"), ("rocket", "Future"), ("ghost", "Ghosts"), ("sparkles", "Magic"), ("flame", "Fire"),
+        ("paw-print", "Pets"), ("dog", "Dog"), ("cat", "Cat"), ("bird", "Bird"), ("fish", "Fish"), ("key", "Secret"),
     ];
+
+    // an album's icon: albums made before 2.3 keep a sign of Windows' icon font
+    static string AlbumIcon(string icon) => icon switch
+    {
+        "\uE709" => "plane", "\uEB51" => "heart", "\uE80F" => "house", "\uE722" => "camera", "\uE8F1" => "gift", "\uE7C1" => "users", "\uE909" => "globe", "\uE706" => "sun", "\uE708" => "moon",
+        "\uE8D6" => "music", "\uE7FC" => "gamepad-2", "\uE913" => "map-pin", "\uE7EE" => "party-popper", "\uEA86" => "paw-print", "\uE825" => "hammer", _ => Lucide.Names.Contains(icon) ? icon : "star",
+    };
 
     // a new album (album null) or a change to one: its name and its icon; the album, or null when cancelled
     async Task<CustomAlbum?> AlbumDialog(CustomAlbum? album, string? home = null)
     {
         var name = new TextBox { Header = T("Name"), Text = album?.Name ?? "", PlaceholderText = T("Trip to Egypt") };
-        var grid = new GridView { SelectionMode = ListViewSelectionMode.Single, Margin = new Thickness(0, 14, 0, 0), MaxHeight = 220 };
+        var grid = new GridView { SelectionMode = ListViewSelectionMode.Single, Margin = new Thickness(0, 0, -4, 0), MaxHeight = 232 }; // (eight across, the last on the fields' edge)
         foreach (var (glyph, label) in AlbumIcons)
         {
-            var cell = new Border { Width = 52, Height = 52, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush"), Child = new FontIcon { Glyph = glyph, FontSize = 22 } };
+            var cell = new Border { Width = 48, Height = 48, CornerRadius = new CornerRadius(10), Background = Res("ApexTileBrush"), Child = new LucideIcon { Kind = glyph, Size = 22, Follow = true, StrokeWidth = 1.75 } };
             ToolTipService.SetToolTip(cell, T(label));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cell, T(label));
             grid.Items.Add(cell);
         }
-        grid.SelectedIndex = Math.Max(0, Array.FindIndex(AlbumIcons, i => i.Glyph == album?.Icon));
-        var body = new StackPanel { Width = 400 };
+        grid.SelectedIndex = Math.Max(0, Array.FindIndex(AlbumIcons, i => i.Glyph == AlbumIcon(album?.Icon ?? "")));
+        var body = new StackPanel { Width = 412, Spacing = 16 };
         body.Children.Add(name);
-        var house = new ComboBox { Header = T("Household"), HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 14, 0, 0) };
+        var house = new ComboBox { Header = T("Household"), HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var v in _galSaves) house.Items.Add(v.Name);
         var was = album is null ? home ?? (_galSaves.Any(v => v.Name == _galAlbum) ? _galAlbum : null) : Gallery.HomeOf(album, _gal!, _galPics, _galSaves);
         house.SelectedIndex = Math.Max(0, _galSaves.ToList().FindIndex(v => string.Equals(v.Name, was, StringComparison.OrdinalIgnoreCase)));
         if (_galSaves.Count > 0) body.Children.Add(house);
-        body.Children.Add(new TextBlock { Text = T("Icon"), Margin = new Thickness(0, 14, 0, 0) });
-        body.Children.Add(grid);
-        var d = new ContentDialog { Title = album is null ? T("New album") : T("Change the album"), Content = body, PrimaryButtonText = album is null ? T("Create album") : T("Save"), CloseButtonText = T("Cancel"),
+        body.Children.Add(new StackPanel { Spacing = 8, Children = { Design.Parts.Label(T("Icon")), grid } });
+        var d = new ContentDialog { Tag = "images", Title = album is null ? T("New album") : T("Edit album"), Content = body, PrimaryButtonText = album is null ? T("Create album") : T("Save"), CloseButtonText = T("Cancel"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot, IsPrimaryButtonEnabled = name.Text.Trim().Length > 0 };
         name.TextChanged += (_, _) => d.IsPrimaryButtonEnabled = name.Text.Trim().Length > 0;
         if (await ShowDialog(d) != ContentDialogResult.Primary) return null;
@@ -3061,17 +3152,20 @@ public sealed partial class MainWindow
         // (one viewer at a time: a click can arrive both as a tap and as a press that barely moved)
         if (_viewing || at < 0 || at >= pics.Count || Content.XamlRoot is not { } root) return;
         _viewing = true;
+        // (opened from Home before the Gallery ever was: its records and the saves are read here)
+        _gal ??= LoadGallery();
+        if (_galSaves.Count == 0 && _game is not null) _galSaves = Saves.List(Docs);
         var removed = false; // a picture went to the Recycle Bin from here
         // (the board is laid again on closing only when something was changed here, so an open album stays open)
         var opened = _gal is null ? null : System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData);
         var culture = LangCulture();
         var popup = new Popup { XamlRoot = root, IsLightDismissEnabled = false };
-        var shell = new Grid { Width = root.Size.Width, Height = root.Size.Height, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) }, Opacity = 0 };
+        var shell = new Grid { RequestedTheme = Root.ActualTheme, Width = root.Size.Width, Height = root.Size.Height, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(220) }, Opacity = 0 };
         var dim = new Border { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08)) };
         Grid.SetColumnSpan(dim, 2);
         shell.Children.Add(dim);
         shell.ColumnDefinitions.Add(new ColumnDefinition());
-        shell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(372) });
+        shell.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var stage = new Grid { Padding = new Thickness(56, 48, 56, 48) };
         var zt = new CompositeTransform();
         var image = new Image { Stretch = Stretch.Uniform };
@@ -3121,7 +3215,7 @@ public sealed partial class MainWindow
             e.Handled = true;
         }), true);
         photo.Tapped += (_, e) => e.Handled = true;
-        zoomer.Background = stage.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        zoomer.Background = stage.Background = Res("ApexClearBrush");
         photo.DoubleTapped += (_, e) => { e.Handled = true; ZoomTo(zoomer.ZoomFactor > 1.05f ? 1 : 2, e.GetPosition(zoomer)); };
         Windows.Foundation.Point? grab = null;
         double gx = 0, gy = 0;
@@ -3129,16 +3223,16 @@ public sealed partial class MainWindow
         photo.PointerMoved += (_, e) => { if (grab is not { } g) return; var q = e.GetCurrentPoint(zoomer).Position; zoomer.ChangeView(gx - (q.X - g.X), gy - (q.Y - g.Y), null, true); };
         photo.PointerReleased += (_, e) => { grab = null; photo.ReleasePointerCapture(e.Pointer); };
         stage.Children.Add(zoomer);
-        Button Round(string glyph, string name, double size = 46)
+        Button Round(string glyph, string name, double size = Design.Size.ControlLarge)
         {
-            var b = new Button { Content = new FontIcon { Glyph = glyph, FontSize = 15 }, Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Padding = new Thickness(0),
+            var b = new Button { Content = new LucideIcon { Kind = glyph, Size = 16, Follow = true, StrokeWidth = 1.75 }, Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Padding = new Thickness(0),
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1F, 255, 255, 255)), BorderThickness = new Thickness(0) };
             ToolTipService.SetToolTip(b, name);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
             return b;
         }
-        var prev = Round("", T("Previous picture"));
-        var next = Round("", T("Next picture"));
+        var prev = Round("chevron-left", T("Previous picture"));
+        var next = Round("chevron-right", T("Next picture"));
         prev.HorizontalAlignment = HorizontalAlignment.Left; prev.VerticalAlignment = VerticalAlignment.Center; prev.Margin = new Thickness(-36, 0, 0, 0);
         next.HorizontalAlignment = HorizontalAlignment.Right; next.VerticalAlignment = VerticalAlignment.Center; next.Margin = new Thickness(0, 0, -36, 0);
         stage.Children.Add(prev);
@@ -3153,43 +3247,40 @@ public sealed partial class MainWindow
         island.Margin = new Thickness(0);
         Button Tool(string glyph, string name)
         {
-            var b = new Button { Content = new FontIcon { Glyph = glyph, FontSize = 15 }, Width = 40, Height = 40, Padding = new Thickness(0), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(0),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            var b = new Button { Content = new LucideIcon { Kind = glyph, Size = 16, Follow = true, StrokeWidth = 1.75 }, Width = 40, Height = 40, Padding = new Thickness(0), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(0),
+                Background = Res("ApexClearBrush") };
             ToolTipService.SetToolTip(b, name);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
             island.Children.Add(b);
             return b;
         }
-        var zoomOut = Tool("\uE71F", T("Zoom out"));
-        var zoomLabel = new Button { Content = "100%", MinWidth = 64, Height = 40, CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(0), FontSize = 13, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        var zoomOut = Tool("zoom-out", T("Zoom out"));
+        var zoomLabel = new Button { Content = "100%", MinWidth = 64, Height = 40, CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(0), FontSize = 13, Background = Res("ApexClearBrush") };
         ToolTipService.SetToolTip(zoomLabel, T("Fit to the window"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(zoomLabel, T("Fit to the window"));
         island.Children.Add(zoomLabel);
-        var zoomIn = Tool("\uE8A3", T("Zoom in"));
+        var zoomIn = Tool("zoom-in", T("Zoom in"));
         island.Children.Add(new Border { Width = 1, Height = 22, Margin = new Thickness(6, 0, 6, 0), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x30, 255, 255, 255)), VerticalAlignment = VerticalAlignment.Center });
-        var play = Tool("\uE768", T("Slideshow"));
-        var full = Tool("\uE740", T("Full screen"));
-        var photos = Tool("\uE8A7", T("Open in Photos"));
+        var play = Tool("play", T("Slideshow"));
+        var full = Tool("maximize", T("Full screen"));
+        var photos = Tool("external-link", T("Open in Photos"));
         zoomOut.Click += (_, _) => ZoomTo(zoomer.ZoomFactor / 1.4f);
         zoomIn.Click += (_, _) => ZoomTo(zoomer.ZoomFactor * 1.4f);
         zoomLabel.Click += (_, _) => ZoomTo(1);
         zoomer.ViewChanged += (_, _) => zoomLabel.Content = $"{Math.Round(zoomer.ZoomFactor * 100)}%";
         stage.Children.Add(islandFrame);
-        var close = Round("", T("Close"), 40);
+        var close = Round("x", T("Close"));
         // (the controls over the dark room keep the dark look in a light theme)
         foreach (var c in new FrameworkElement[] { prev, next, close, islandFrame }) c.RequestedTheme = ElementTheme.Dark;
-        close.HorizontalAlignment = HorizontalAlignment.Right; close.VerticalAlignment = VerticalAlignment.Top; close.Margin = new Thickness(0, -32, -40, 0);
+        // (the way out is in the side panel's corner, as in every side panel; over the picture only in full screen, without it)
+        close.HorizontalAlignment = HorizontalAlignment.Right; close.VerticalAlignment = VerticalAlignment.Top; close.Margin = new Thickness(0, 64, 24, 0); close.Visibility = Visibility.Collapsed;
         stage.Children.Add(close);
         shell.Children.Add(stage);
 
-        var panel = new Grid { Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1, 0, 0, 0) };
-        panel.RowDefinitions.Add(new RowDefinition());
-        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var side = new StackPanel { Spacing = 20, Padding = new Thickness(28, 40, 28, 20) };
-        panel.Children.Add(new ScrollViewer { Content = side, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-        var foot = new Grid { Padding = new Thickness(28, 14, 20, 18), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
-        Grid.SetRow(foot, 1);
-        panel.Children.Add(foot);
+        var (panel, side, foot) = Design.Parts.SidePanel(new Thickness(0, 48, 16, 16)); // (under the window's own buttons)
+        var panelClose = Design.Parts.PanelClose(T("Close"), () => { });
+        panelClose.Margin = new Thickness(0, Design.Space.CardPad, Design.Space.CardPad, 0);
+        ((Grid)panel.Child).Children.Add(panelClose);
         Grid.SetColumn(panel, 1);
         shell.Children.Add(panel);
         var flight = new Canvas { IsHitTestVisible = false };
@@ -3213,9 +3304,11 @@ public sealed partial class MainWindow
                 v.Source = null;
             }
         }
+        Action? flushCaption = null; // (a caption typed and not yet left, kept whichever way the viewer closes)
         void Close(bool stay = true)
         {
             if (closing) return;
+            flushCaption?.Invoke();
             closing = true;
             StopVideo();
             root.Changed -= Resized;
@@ -3223,8 +3316,9 @@ public sealed partial class MainWindow
             if (wide) Wide(false);
             zoomer.ChangeView(0, 0, 1, true);
             var away = new Storyboard();
-            var home = pics[at].Path == first ? from
-                : (from?.Parent as Panel)?.Children.OfType<FrameworkElement>().FirstOrDefault(c => CardPaths.TryGetValue(c, out var cp) && string.Equals(cp, pics[at].Path, StringComparison.OrdinalIgnoreCase) && c.Visibility == Visibility.Visible);
+            var current = at < pics.Count ? pics[at].Path : null;
+            var home = current is null ? null : current == first ? from
+                : (from?.Parent as Panel)?.Children.OfType<FrameworkElement>().FirstOrDefault(c => CardPaths.TryGetValue(c, out var cp) && string.Equals(cp, current, StringComparison.OrdinalIgnoreCase) && c.Visibility == Visibility.Visible);
             if (home != from && from is not null) from.Opacity = 1;
             if (home is not null && home != from) home.Opacity = 0;
             var back = home is { ActualWidth: > 0 } && shown is { ActualWidth: > 0 } ? Bounds(home) : (Windows.Foundation.Rect?)null;
@@ -3254,6 +3348,8 @@ public sealed partial class MainWindow
                 _viewing = false;
                 // (leaving for an album, or a picture gone, always lays the gallery again)
                 if (stay && !removed && _gal is not null && opened == System.Text.Json.JsonSerializer.Serialize(_gal, SetupJson.Default.GalleryData)) return;
+                // (opened from Home: Home shows the change, the gallery is laid when it is opened)
+                if (_step != GalleryScreen) { if (_step == Home) BuildHome(); return; }
                 // (an album open over the board stays open: the board is laid again when it closes; with a picture gone it
                 // closes, for its card would still be there)
                 if (stay && !removed && _spotlightOpen) _boardStale = true;
@@ -3262,6 +3358,7 @@ public sealed partial class MainWindow
             Play(away);
         }
         close.Click += (_, _) => Close();
+        panelClose.Click += (_, _) => Close();
         stage.Tapped += (_, e) => { if (!e.Handled) Close(); };
         foreach (var c in new UIElement[] { islandFrame, prev, next, close }) c.Tapped += (_, e) => e.Handled = true;
         void Resized(XamlRoot sender, XamlRootChangedEventArgs e) { shell.Width = root.Size.Width; shell.Height = root.Size.Height; }
@@ -3494,21 +3591,6 @@ public sealed partial class MainWindow
             }
         }
 
-        // an action tile: an icon over its name
-        Button Action(string glyph, string name, bool on = false)
-        {
-            var g = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            var icon = new FontIcon { Glyph = glyph, FontSize = 20 };
-            if (on) icon.Foreground = Res("ApexAccentBrush");
-            g.Children.Add(icon);
-            g.Children.Add(new TextBlock { Text = name, FontSize = 12, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
-            var b = new Button { Content = g, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, Height = 78, CornerRadius = new CornerRadius(12), Padding = new Thickness(6),
-                Background = on ? Res("ApexAccentSoftBrush") : new SolidColorBrush(Pick(0x0FFFFFFF, 0x0C000000)),
-                BorderBrush = on ? Res("ApexAccentBrush") : new SolidColorBrush(Pick(0x14FFFFFF, 0x1A000000)), BorderThickness = new Thickness(1) };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
-            return b;
-        }
-
         void Fill()
         {
             var p = pics[at];
@@ -3517,132 +3599,117 @@ public sealed partial class MainWindow
             Show(p.Path);
             side.Children.Clear();
 
-            // when: the day large, the weekday and time above it, where it is in the album beside
-            var when = new StackPanel { Spacing = 2 };
-            when.Children.Add(new TextBlock { Text = (p.Taken.ToString("dddd", culture) + "  ·  " + p.Taken.ToString("t", culture)).ToUpper(culture), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 80, Foreground = Res("ApexMutedBrush") });
-            var day = new TextBlock { FontSize = 26, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+            // when, and its place in the album
+            var weekday = p.Taken.ToString("dddd", culture);
+            var day = Design.Parts.TitleText("");
             day.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = p.Taken.ToString("M", culture) });
             day.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "  " + p.Taken.Year, Foreground = Res("ApexMutedBrush"), FontWeight = FontWeights.Normal });
-            when.Children.Add(day);
-            side.Children.Add(when);
+            var dayTitle = Design.Parts.Title(day, $"{char.ToUpper(weekday[0], culture)}{weekday[1..]} · {p.Taken.ToString("t", culture)} · {T("{0} of {1}", at + 1, pics.Count)}");
+            dayTitle.Margin = new Thickness(0, 0, Design.Size.ControlSmall + Design.Space.X2, 0); // (clear of the close button)
+            side.Children.Add(dayTitle);
 
-            // where it belongs: its place in the album, and its household (a menu to change it)
-            var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, -6, 0, 0) };
-            chips.Children.Add(new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 3, 10, 4), Background = new SolidColorBrush(Pick(0x14FFFFFF, 0x10000000)),
-                Child = new TextBlock { Text = T("{0} of {1}", at + 1, pics.Count), FontSize = 12, Foreground = Res("ApexSoftTextBrush") } });
+            // whose it is (a menu to change it), and its file
             var names = _galSaves.Select(s => s.Name).ToList();
             var guess = Gallery.GuessHousehold(p, _galSaves);
             var house = Gallery.HouseholdOf(p, _gal!, _galSaves);
-            var who = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            who.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 8, Height = 8, Fill = Res("ApexAccentBrush"), VerticalAlignment = VerticalAlignment.Center });
-            who.Children.Add(new TextBlock { Text = house ?? T("No household"), FontSize = 12 });
             var homeMenu = new MenuFlyout();
             foreach (var n in names)
             {
-                var item = new ToggleMenuFlyoutItem { Text = n, IsChecked = string.Equals(n, house, StringComparison.OrdinalIgnoreCase) };
+                var item = new ToggleMenuFlyoutItem { Text = HouseTitle(n), IsChecked = string.Equals(n, house, StringComparison.OrdinalIgnoreCase) };
                 var chosen = n;
                 item.Click += (_, _) => { Gallery.Info(_gal!, p.Path).Household = chosen == guess ? null : chosen; Keep(); Fill(); };
                 homeMenu.Items.Add(item);
             }
-            var whoButton = new DropDownButton { Content = who, Flyout = homeMenu, CornerRadius = new CornerRadius(12), Padding = new Thickness(10, 2, 8, 3), MinHeight = 0, FontSize = 12 };
+            var who = new Grid { ColumnSpacing = 6 };
+            who.ColumnDefinitions.Add(new ColumnDefinition());
+            who.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            who.Children.Add(new TextBlock { Text = house is null ? T("No household") : HouseTitle(house), FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
+            var more = new LucideIcon { Kind = "chevron-down", Size = 14, Follow = true, StrokeWidth = 1.75, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(more, 1);
+            who.Children.Add(more);
+            var whoButton = new HyperlinkButton { Content = who, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right };
+            whoButton.Click += (_, _) => homeMenu.ShowAt(whoButton);
             ToolTipService.SetToolTip(whoButton, T("The household this picture belongs to"));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(whoButton, T("Household"));
-            chips.Children.Add(whoButton);
-            side.Children.Add(chips);
+            var file = FactText(Path.GetFileName(p.Path));
+            ToolTipService.SetToolTip(file, p.Path);
+            side.Children.Add(Facts((T("Household"), whoButton), (T("File"), file)));
 
             // the caption, written by hand as on the board
             var look = Gallery.Look(_gal!, _galAlbum);
             var cap = new TextBox { Text = info.Caption ?? "", PlaceholderText = T("Write something about this moment…"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
-                FontFamily = new FontFamily(look.Font), FontSize = 20, MinHeight = 96, Padding = new Thickness(14, 10, 14, 10), CornerRadius = new CornerRadius(12) };
+                FontFamily = new FontFamily(look.Font), FontSize = 20, MinHeight = 96, Padding = new Thickness(15, 11, 15, 11), CornerRadius = new CornerRadius(Design.Radius.Card) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cap, T("Caption"));
-            cap.LostFocus += (_, _) => { Gallery.Info(_gal!, p.Path).Caption = cap.Text.Trim(); Keep(); };
+            void Flush()
+            {
+                var typed = cap.Text.Trim();
+                if (typed == (Gallery.Peek(_gal!, p.Path).Caption ?? "")) return;
+                Gallery.Info(_gal!, p.Path).Caption = typed;
+                Keep();
+            }
+            cap.LostFocus += (_, _) => Flush();
+            flushCaption = Flush;
             side.Children.Add(cap);
 
-            // what to do with it, as tiles
-            var grid = new Grid { ColumnSpacing = 10, RowSpacing = 10 };
-            grid.ColumnDefinitions.Add(new ColumnDefinition());
-            grid.ColumnDefinitions.Add(new ColumnDefinition());
-            grid.RowDefinitions.Add(new RowDefinition());
-            grid.RowDefinitions.Add(new RowDefinition());
-            var fav = Action(info.Favourite ? "" : "", info.Favourite ? T("In Favourites") : T("Favourite"), info.Favourite);
-            fav.Click += (_, _) => { var i = Gallery.Info(_gal!, p.Path); i.Favourite = !i.Favourite; Keep(); Fill(); };
+            // what to do with it
+            var fav = ActionRow("star", info.Favourite ? T("In favourites") : T("Add to favourites"), null, () => { var i = Gallery.Info(_gal!, p.Path); i.Favourite = !i.Favourite; Keep(); Fill(); }, info.Favourite);
             var inAlbums = _gal!.Custom.Where(c => c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase)).ToList();
-            var album = Action("", T("Add to an album"), inAlbums.Count > 0);
+            var album = ActionRow("images", T("Add to an album"), null, () => { }, inAlbums.Count > 0);
             var albums = new MenuFlyout();
             albums.Opening += (_, _) =>
             {
                 albums.Items.Clear();
                 foreach (var c in _gal.Custom)
                 {
-                    var t = new ToggleMenuFlyoutItem { Text = c.Name, IsChecked = c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase), Icon = new FontIcon { Glyph = c.Icon } };
+                    var t = new ToggleMenuFlyoutItem { Text = c.Name, IsChecked = c.Pictures.Contains(p.Path, StringComparer.OrdinalIgnoreCase), Icon = Lucide.Element(AlbumIcon(c.Icon)) };
                     var one = c;
-                    t.Click += (_, _) => { Gallery.Toggle(_gal, one, p.Path); Fill(); };
+                    t.Click += (_, _) => { Gallery.Toggle(_gal, one, p.Path); Keep(); Fill(); };
                     albums.Items.Add(t);
                 }
                 if (_gal.Custom.Count > 0) albums.Items.Add(new MenuFlyoutSeparator());
-                var make = new MenuFlyoutItem { Text = T("New album…"), Icon = new FontIcon { Glyph = "" } };
-                make.Click += async (_, _) => { popup.IsOpen = false; if (await AlbumDialog(null, Gallery.HouseholdOf(p, _gal, _galSaves)) is { } made) Gallery.Toggle(_gal, made, p.Path); popup.IsOpen = true; Fill(); };
+                var make = new MenuFlyoutItem { Text = T("New album…"), Icon = Lucide.Element("plus") };
+                make.Click += async (_, _) => { popup.IsOpen = false; if (await AlbumDialog(null, Gallery.HouseholdOf(p, _gal, _galSaves)) is { } made) { Gallery.Toggle(_gal, made, p.Path); Keep(); } popup.IsOpen = true; Fill(); };
                 albums.Items.Add(make);
             };
             album.Flyout = albums;
             var cover = _gal.HomePicture == p.Path;
-            var home = Action("", cover ? T("Home picture") : T("Use on Home"), cover);
-            home.Click += (_, _) => { _gal.HomePicture = p.Path; Keep(); Fill(); };
-            var folder = Action("", T("Show in folder"));
-            folder.Click += (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{p.Path}\"") { UseShellExecute = true });
-            Grid.SetColumn(album, 1);
-            Grid.SetRow(home, 1);
-            Grid.SetRow(folder, 1); Grid.SetColumn(folder, 1);
-            grid.Children.Add(fav); grid.Children.Add(album); grid.Children.Add(home); grid.Children.Add(folder);
-            side.Children.Add(grid);
+            var home = ActionRow("house", cover ? T("Home picture") : T("Use on Home"), null, () => { _gal.HomePicture = p.Path; Keep(); Fill(); }, cover);
+            side.Children.Add(Actions(fav, album, home));
 
             // the albums it is in, each opening its album
             if (inAlbums.Count > 0)
             {
-                var head = Eyebrow(T("IN ALBUMS"));
-                head.Margin = new Thickness(0, 4, 0, -10);
-                side.Children.Add(head);
-                var wrap = new StackPanel { Spacing = 6 };
+                var wrap = new StackPanel { Spacing = Design.Space.X2, HorizontalAlignment = HorizontalAlignment.Left };
+                side.Children.Add(new StackPanel { Spacing = Design.Space.SectionToBody, Children = { Design.Parts.Heading(T("In albums")), wrap } });
                 foreach (var c in inAlbums)
                 {
                     var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-                    row.Children.Add(new FontIcon { Glyph = c.Icon, FontSize = 14, Foreground = new SolidColorBrush(AccentInk) });
+                    row.Children.Add(new LucideIcon { Kind = AlbumIcon(c.Icon), Size = 14, Stroke = new SolidColorBrush(AccentInk), StrokeWidth = 1.75 });
                     row.Children.Add(new TextBlock { Text = c.Name, FontSize = 13 });
-                    var go = new HyperlinkButton { Content = row, Padding = new Thickness(4, 2, 4, 2) };
+                    var go = new HyperlinkButton { Content = row, Padding = new Thickness(0) };
                     var key = c.Key;
                     go.Click += (_, _) => { _galAlbum = key; Close(stay: false); };
                     wrap.Children.Add(go);
                 }
-                side.Children.Add(wrap);
             }
 
-            // the file, and the way out of the gallery for it
-            foot.Children.Clear();
-            foot.ColumnDefinitions.Clear();
-            foot.ColumnDefinitions.Add(new ColumnDefinition());
-            foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var file = new TextBlock { Text = Path.GetFileName(p.Path), FontSize = 11, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-            ToolTipService.SetToolTip(file, p.Path);
-            foot.Children.Add(file);
-            var bin = new Button { Content = new FontIcon { Glyph = "", FontSize = 14, Foreground = Res("ApexErrorBrush") }, Width = 36, Height = 36, Padding = new Thickness(0), CornerRadius = new CornerRadius(18),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
-            ToolTipService.SetToolTip(bin, T("Move to the Recycle Bin"));
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(bin, T("Move to the Recycle Bin"));
+            var folder = Button(T("Show in Explorer"), () => Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{p.Path}\"") { UseShellExecute = true }));
+            var bin = Design.Parts.IconBoxed("trash-2", T("Move to the Recycle Bin"), ink: Res("ApexErrorBrush"));
             bin.Click += async (_, _) =>
             {
-                if (!await Confirm(T("Move this picture to the Recycle Bin?"), T("You can put it back from the Recycle Bin."), T("Move it"))) return;
+                if (!await Confirm(T("Move this picture to the Recycle Bin?"), T("You can restore it from the Recycle Bin."), T("Move to the Recycle Bin"), danger: true)) return;
+                flushCaption = null; // (its caption goes with it)
                 try { Gallery.Remove(_gal!, p.Path); removed = true; pics.RemoveAt(at); if (pics.Count == 0) { Close(); return; } at = Math.Min(at, pics.Count - 1); Fill(); }
-                catch (Exception e) { App.Log(e); await Message(T("Couldn't move the picture"), ErrorText(e)); }
+                catch (Exception e) { App.Log(e); await Message(T("The picture was not moved"), ErrorText(e)); }
             };
-            Grid.SetColumn(bin, 1);
-            foot.Children.Add(bin);
+            Design.Parts.FillFoot(foot, folder, bin);
         }
         // (a slideshow moves on every four seconds until stopped or the viewer closes)
         void Slides(bool on)
         {
             show?.Stop();
             show = null;
-            ((FontIcon)play.Content).Glyph = on ? "\uE769" : "\uE768";
+            ((LucideIcon)play.Content).Kind = on ? "pause" : "play";
             ToolTipService.SetToolTip(play, on ? T("Stop the slideshow") : T("Slideshow"));
             if (!on) return;
             show = DispatcherQueue.CreateTimer();
@@ -3655,16 +3722,15 @@ public sealed partial class MainWindow
         void Wide(bool on)
         {
             wide = on;
-            shell.ColumnDefinitions[1].Width = new GridLength(on ? 0 : 372);
             panel.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
             stage.Padding = on ? new Thickness(0) : new Thickness(56, 48, 56, 48);
             dim.Background = new SolidColorBrush(on ? Microsoft.UI.Colors.Black : Windows.UI.Color.FromArgb(0xEB, 0x05, 0x06, 0x08));
-            close.Margin = on ? new Thickness(0, 64, 24, 0) : new Thickness(0, -32, -40, 0);
+            close.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
             prev.Margin = on ? new Thickness(16, 0, 0, 0) : new Thickness(-36, 0, 0, 0);
             next.Margin = on ? new Thickness(0, 0, 16, 0) : new Thickness(0, 0, -36, 0);
             islandFrame.Margin = on ? new Thickness(0, 0, 0, 24) : new Thickness(0, 0, 0, -30);
             Refit();
-            ((FontIcon)full.Content).Glyph = on ? "\uE73F" : "\uE740";
+            ((LucideIcon)full.Content).Kind = on ? "minimize" : "maximize";
             ToolTipService.SetToolTip(full, on ? T("Leave full screen") : T("Full screen"));
         }
         full.Click += (_, _) => Wide(!wide);

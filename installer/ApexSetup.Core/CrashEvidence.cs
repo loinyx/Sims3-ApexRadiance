@@ -84,13 +84,13 @@ public static class CrashEvidence
 
     public static string? CodeMeaning(string code) => code.TrimStart('0', 'x').ToLowerInvariant() switch
     {
-        "c0000005" => "It read or wrote memory it had no right to (access violation, {0}).",
+        "c0000005" => "The game tried to use memory that isn't its own (access violation, {0}).",
         "c0000096" or "c000001d" => "The processor refused an instruction ({0}). This usually comes from damaged code: a hook, an overlay or a driver.",
-        "c0000374" => "The game's memory was damaged earlier ({0}). The file named is where it showed, not always who did it.",
+        "c0000374" => "The game's memory was damaged earlier ({0}). The file shown is where it came up, not always the cause.",
         "c0000409" => "A safety check stopped the game ({0}).",
-        "c00000fd" => "The game ran out of stack ({0}), usually calls looping without end.",
+        "c00000fd" => "The game ran out of stack memory ({0}), usually because of a loop that never ends.",
         "c0000017" or "c000012d" => "Windows could not give the game more memory ({0}).",
-        "e06d7363" => "A C++ error was thrown and nothing caught it ({0}).",
+        "e06d7363" => "The game hit an error it could not handle (C++ exception, {0}).",
         _ => null,
     };
 
@@ -104,9 +104,9 @@ public static class CrashEvidence
         // the game's crash log: where it faulted and who called
         if (crash is not null)
         {
-            if (crash.Why == "called" && crash.Mod is not null) clues.Add(new("Game crash log", "The fault was in {0}, called straight from {1}.", [crash.Exception, crash.Mod]));
-            else if (crash.Mod is not null) clues.Add(new("Game crash log", "The fault was in {0}, in its own code.", [crash.Files.FirstOrDefault() is { } f ? Path.GetFileName(f) : crash.Mod]));
-            else if (crash.Why != "memory") clues.Add(new("Game crash log", "The fault was in the game's own code, with no mod calling it.", []));
+            if (crash.Why == "called" && crash.Mod is not null) clues.Add(new("Game crash log", "The crash was in {0}, called directly by {1}.", [crash.Exception, crash.Mod]));
+            else if (crash.Mod is not null) clues.Add(new("Game crash log", "The crash was in {0}, in its own code.", [crash.Files.FirstOrDefault() is { } f ? Path.GetFileName(f) : crash.Mod]));
+            else if (crash.Why != "memory") clues.Add(new("Game crash log", "The crash was in the game's own code, with no mod calling it.", []));
             if (crash.Earlier && crash.Files.FirstOrDefault() is { } file && File.Exists(file))
                 clues.Add(new("Game folder", "{0} was replaced on {1}, after this crash.", [Path.GetFileName(file), File.GetLastWriteTime(file).ToString("g")]));
         }
@@ -114,21 +114,21 @@ public static class CrashEvidence
         if (apex is not null && Math.Abs((apex.When - at).TotalSeconds) < 30)
         {
             var callers = apex.Refs.Take(8).Where(r => !r.Equals(apex.Fault, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).Take(3).ToList();
-            clues.Add(new("Apex Radiance report", callers.Count > 0 ? "It faulted in {0}; the code right above it was {1}." : "It faulted in {0}.", [apex.Fault, string.Join(", ", callers)]));
+            clues.Add(new("Apex Radiance report", callers.Count > 0 ? "The crash was in {0}; the code right above it was {1}." : "The crash was in {0}.", [apex.Fault, string.Join(", ", callers)]));
         }
         // Windows: the exception code, a freeze, the graphics driver
         foreach (var e in events.Where(e => Math.Abs((e.When - at).TotalSeconds) <= 90))
             switch (e.Kind)
             {
-                case "crash" when CodeMeaning(e.Detail) is { } meaning: clues.Add(new("Windows", meaning, ["0x" + e.Detail.TrimStart('0', 'x')])); break;
-                case "crash": clues.Add(new("Windows", "Windows recorded the crash with code {0}.", ["0x" + e.Detail.TrimStart('0', 'x')])); break;
-                case "hang": clues.Add(new("Windows", "The game stopped responding and was closed.", [])); break;
+                case "crash" when CodeMeaning(e.Detail) is { } meaning: clues.Add(new("Windows log", meaning, ["0x" + e.Detail.TrimStart('0', 'x')])); break;
+                case "crash": clues.Add(new("Windows log", "Windows recorded the crash with code {0}.", ["0x" + e.Detail.TrimStart('0', 'x')])); break;
+                case "hang": clues.Add(new("Windows log", "The game stopped responding and was closed.", [])); break;
                 case "gpu": clues.Add(new("Graphics driver", e.Detail.StartsWith("Display", StringComparison.Ordinal) ? "The graphics driver stopped responding and was restarted."
                         : e.Detail.EndsWith(" 153", StringComparison.Ordinal) ? "The graphics driver reset the GPU after it stopped responding ({0})." : "The graphics driver reported a GPU error ({0}).", [e.Detail])); break;
             }
         // the session: memory and time
         if (session is not null)
-            clues.Add(new("Session", "Memory peaked at {0} MB of 4096, after {1} min of play.", [(session.PeakBytes >> 20).ToString(), ((int)session.Played.TotalMinutes).ToString()]));
+            clues.Add(new("Session", "Memory peaked at {0} MB of the 4096 MB the game can use, after {1} min of play.", [(session.PeakBytes >> 20).ToString(), ((int)session.Played.TotalMinutes).ToString()]));
         // the renderer's logs, when they are of this session
         if (bin is not null)
         {
@@ -164,7 +164,7 @@ public static class CrashEvidence
     // Apex Radiance's log of that session (its errors before the end) and the next start's report on it ("[Session]")
     static void ApexLog(List<Clue> clues, string docs, DateTime at, DateTime from)
     {
-        var dir = Path.Combine(docs, "Apex Radiance");
+        var dir = Scan.ApexDir(docs);
         foreach (var name in new[] { "ApexRadiance_LOG.old.txt", "ApexRadiance_LOG.txt" })
         {
             var path = Path.Combine(dir, name);

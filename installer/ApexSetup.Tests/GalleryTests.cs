@@ -12,6 +12,20 @@ static class GalleryTests
         {
             Paths.LocalAppData = Path.Combine(root, "Local");
             var docs = Path.Combine(root, "Docs");
+            // a picture that moved with Apex's folder keeps what was set on it; one still at its old place stays as it is
+            var (was, isNow) = (Path.Combine(root, "Windows", "Apex Radiance", "Screenshots"), Path.Combine(docs, "Apex Radiance", "Screenshots"));
+            Directory.CreateDirectory(was);
+            Directory.CreateDirectory(isNow);
+            File.WriteAllBytes(Path.Combine(isNow, "moved.png"), [1]);
+            File.WriteAllBytes(Path.Combine(was, "stays.png"), [1]);
+            var followed = new GalleryData { HomePicture = Path.Combine(was, "moved.png"), Custom = { new CustomAlbum { Pictures = { Path.Combine(was, "moved.png"), Path.Combine(was, "stays.png") } } } };
+            followed.Pictures[Path.Combine(was, "moved.png")] = new() { Favourite = true };
+            Gallery.Follow(followed, Path.Combine(root, "Windows"), docs);
+            check(followed.HomePicture == Path.Combine(isNow, "moved.png") && followed.Pictures[Path.Combine(isNow, "moved.png")].Favourite
+                  && followed.Custom[0].Pictures.SequenceEqual([Path.Combine(isNow, "moved.png"), Path.Combine(was, "stays.png")]) && Gallery.Load().HomePicture == followed.HomePicture,
+                "gallery: a picture that moved with Apex's folder keeps its star, album and place");
+            File.Delete(Path.Combine(Paths.Data, "gallery.json"));
+            Directory.Delete(Path.Combine(docs, "Apex Radiance"), true);
             var shots = Gallery.Folder(docs);
             Directory.CreateDirectory(shots);
             var now = DateTime.Now;

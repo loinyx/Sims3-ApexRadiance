@@ -16,7 +16,9 @@ public partial class App : Application
 
     public App()
     {
-        Paths.MigrateOldData(); // (before anything writes to the new folder)
+        // (before anything writes to the new folder; not in the administrator copy an old Setup starts, which only opens the
+        // player's: moved there, the player's copy found nothing left and never said that Setup became the launcher)
+        if (!Elevation.IsUacElevated) Paths.MigrateOldData();
         InitializeComponent();
         Engine.Log = Log;
         // logged and kept running: a UI error must not end Setup in the middle of an install. A WinUI error reaches here without
@@ -84,6 +86,11 @@ public partial class App : Application
 
     Mutex? _single;
     EventWaitHandle? _show, _replace;
+    // the one-at-a-time lock: a copy with a data folder of its own (APEX_LAUNCHER_LOCALAPPDATA, the UI tests) is a launcher of
+    // its own, so a test never brings up or closes the player's launcher
+    public static readonly string Instance = Environment.GetEnvironmentVariable("APEX_LAUNCHER_LOCALAPPDATA") is { Length: > 0 } own
+        ? @"Local\ApexLauncher." + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(own.ToUpperInvariant())))[..12]
+        : @"Local\ApexLauncher";
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
@@ -96,6 +103,18 @@ public partial class App : Application
         if (maintain == "*" && screen is "uninstall" or "uninstall-keep" && Elevation.IsElevated)
         {
             Environment.Exit(MainWindow.UninstallElevated());
+            return;
+        }
+        // the administrator copy of Game settings: no window, the game folder's files, then it closes
+        if (MainWindow.GameSettingsElevated(maintain, screen, argv) is { } code)
+        {
+            Environment.Exit(code);
+            return;
+        }
+        // the same for the worlds added on the Mods screen
+        if (MainWindow.WorldsElevated(maintain, screen, argv) is { } worlds)
+        {
+            Environment.Exit(worlds);
             return;
         }
         var uninstall = argv.Contains(LauncherInstall.UninstallArg);
@@ -122,12 +141,13 @@ public partial class App : Application
             }
             catch (Exception e) { Log(e); } // (an install that fails leaves this copy running: the launcher still works from here)
         }
+        Paths.MigrateOldData(); // (an administrator copy that stays; nothing to do in the others)
         // one launcher at a time: a second start brings the first one's window up
         if (maintain is null && !uninstall)
         {
-            _single = new Mutex(true, @"Local\ApexLauncher", out var first);
-            _show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ApexLauncher.Show");
-            _replace = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ApexLauncher.Replace");
+            _single = new Mutex(true, Instance, out var first);
+            _show = new EventWaitHandle(false, EventResetMode.AutoReset, Instance + ".Show");
+            _replace = new EventWaitHandle(false, EventResetMode.AutoReset, Instance + ".Replace");
             if (!first && argv.Contains(LauncherInstall.ReplaceArg)) _replace.Set();
             // (started by Install, MakePortable or an update while the copy before it still closes: waits for it)
             if (!first && argv.Contains(LauncherInstall.HandoverArg))
@@ -145,6 +165,7 @@ public partial class App : Application
             new Thread(() => { while (replace.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => (_window as MainWindow)?.QuitForNewerCopy()); }) { IsBackground = true }.Start();
             new Thread(() => { while (show.WaitOne()) _window?.DispatcherQueue.TryEnqueue(() => { _window.AppWindow.Show(); _window.Activate(); (_window as MainWindow)?.TakeHandedFiles(); }); }) { IsBackground = true }.Start();
         }
+        Design.DesignSystem.Install(LauncherSettings.Load().Theme);
         var w = new MainWindow();
         _window = w;
         w.OpenWhenReady(MainWindow.ModFilesIn(argv));

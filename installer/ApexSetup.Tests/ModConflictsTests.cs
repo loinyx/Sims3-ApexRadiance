@@ -70,6 +70,136 @@ static class ModConflictsTests
     static (uint, uint, ulong, byte[]) S3sa(string n, byte[] img) => (ModConflicts.TypeS3sa, 0u, (ulong)n.GetHashCode() & 0xfffffff, ModConflicts.S3saWrap(img));
     static (uint, uint, ulong, byte[]) Xml(ulong i, string s) => (ModConflicts.TypeXml, 0u, i, Encoding.UTF8.GetBytes(s));
     static byte[] Pkg(params (uint, uint, ulong, byte[])[] r) => ModConflicts.WritePackage(r);
+    // a text table as the game writes it
+    static byte[] Stbl(params (ulong Id, string Text)[] texts)
+    {
+        var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        w.Write("STBL"u8); w.Write((byte)2); w.Write((ushort)0); w.Write(texts.Length); w.Write(new byte[6]);
+        foreach (var (id, t) in texts) { w.Write(id); w.Write(t.Length); w.Write(Encoding.Unicode.GetBytes(t)); }
+        return ms.ToArray();
+    }
+    static (uint, uint, ulong, byte[]) Texts(ulong i, params (ulong, string)[] texts) => (ModConflicts.TypeStbl, 0u, i, Stbl(texts));
+
+    // Only a difference the game sees is a conflict, and every one of those still is.
+    static void RunSame(Action<bool, string> check, string tmp, ModConflicts.Rules rules)
+    {
+        const string doc = "<a k=\"1\" j=\"2\"><v>5</v><w/></a>";
+        static byte[] U(string s) => Encoding.UTF8.GetBytes(s);
+        bool Xml2(string a, string b) => ModConflicts.SameMeaning(ModConflicts.TypeXml, U(a), U(b));
+        check(Xml2(doc, "\uFEFF<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<a j='2' k='1'>\r\n\t<!-- five -->\r\n\t<v> 5 </v>\r\n\t<w></w>\r\n</a>\r\n")
+              && ModConflicts.SameMeaning(ModConflicts.TypeXml, U(doc), Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes("<?xml version=\"1.0\" encoding=\"utf-16\"?>" + doc)).ToArray())
+              && ModConflicts.SameMeaning(0x03B33DDF, U(doc), U("<?xml version=\"1.0\" encoding=\"utf-16\"?>" + doc)),
+            "same meaning: XML tuning that differs in its byte order mark, encoding, declaration, comments, layout and attribute order is the same");
+        var changed = new[] { doc.Replace(">5<", ">6<"), doc.Replace("k=\"1\"", "k=\"2\""), doc.Replace("<w/>", "<x/>"), doc.Replace("<w/>", ""), doc.Replace("<w/>", "<w/><w/>"), doc.Replace(">5<", ">5 0<"),
+                              doc.Replace(" j=\"2\"", ""), doc.Replace("<v>5</v><w/>", "<w/><v>5</v>"), doc.Replace(">5<", "><!--5-->4<"), doc.Replace("<v>5</v>", "<V>5</V>"), doc + "<!DOCTYPE a>", "not xml" };
+        check(changed.All(c => !Xml2(doc, c)) && !Xml2("<a>caf\u00E9</a>", "<a>cafe</a>") && !ModConflicts.SameMeaning(ModConflicts.TypeXml, U("<a>caf\u00E9</a>"), Encoding.Latin1.GetBytes("<a>caf\u00E9</a>")),
+            $"same meaning: one changed value, attribute, element or order in XML tuning is a difference ({string.Join(", ", changed.Where(c => Xml2(doc, c)))})");
+        var (one, shuffled) = (Stbl((1, "Hello"), (2, "World"), (3, "")), Stbl((3, ""), (1, "Hello"), (2, "World")));
+        check(ModConflicts.SameMeaning(ModConflicts.TypeStbl, one, shuffled) && ModConflicts.TextsThatDiffer(one, shuffled) == 0
+              && !ModConflicts.SameMeaning(ModConflicts.TypeStbl, one, Stbl((1, "Hello"), (2, "Mundo"), (3, ""))) && ModConflicts.TextsThatDiffer(one, Stbl((1, "Hello"), (2, "Mundo"), (3, ""))) == 1
+              && !ModConflicts.SameMeaning(ModConflicts.TypeStbl, one, Stbl((1, "Hello"), (2, "World"))) && ModConflicts.TextsThatDiffer(one, Stbl((1, "Ola"), (2, "World"), (4, "x"))) == 3
+              && !ModConflicts.SameMeaning(ModConflicts.TypeStbl, one, Stbl((1, "Hello"), (2, "World"), (3, ""), (1, "Other"))) && ModConflicts.Texts(one.Concat(new byte[1]).ToArray()) is null
+              && ModConflicts.Texts(one[..^1]) is null && !ModConflicts.SameMeaning(ModConflicts.TypeXml, one, shuffled),
+            "same meaning: a text table is its texts by id in any order; one other text, or one more or less, is a difference, and is counted");
+        check(!ModConflicts.SameMeaning(0x00B2D882, [1, 2, 3, 4], [1, 2, 3, 5]) && ModConflicts.SameMeaning(0x00B2D882, [1, 2, 3, 4], [1, 2, 3, 4]), "same meaning: anything else of one size with other bytes is a difference");
+        (string Piece, string Whole, bool Says)[] names = [("Cooking_Patch", "Cooking", true), ("Creator_Cooking - optional no burn", "Creator_Cooking_v2.1", true), ("CookingAddon", "Cooking", true),
+            ("Creator_Overhaul_Tuning", "Creator_Overhaul_Main", true), ("Cooking_v2", "Cooking_v1", false), ("Cooking (2)", "Cooking", false), ("Cooking_old", "Cooking", false), ("Cooking - Copy", "Cooking", false),
+            ("TinyUIFix_backup", "TinyUIFix", false), ("Other_Patch", "Cooking", false), ("Cooking", "Cooking_Patch", false)];
+        check(names.All(n => ModConflicts.SaysPiece(n.Piece, n.Whole) == n.Says), $"mod conflicts: a name says a patch, an add-on or an optional part of another mod; a version or a copy does not ({string.Join(", ", names.Where(n => ModConflicts.SaysPiece(n.Piece, n.Whole) != n.Says).Select(n => n.Piece))})");
+
+        List<ModConflicts.Conflict> In(string name, params (string File, byte[] Pkg)[] files)
+        {
+            var mods = Path.Combine(tmp, name, "Mods");
+            foreach (var (f, b) in files) { Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(mods, f))!); File.WriteAllBytes(Path.Combine(mods, f), b); }
+            File.WriteAllText(Path.Combine(mods, "Resource.cfg"), "Priority 500\nPackedFile Packages/*.package\nPriority 1000\nPackedFile Overrides/*.package\n");
+            return ModConflicts.Scan(new() { Roots = { mods }, Rules = rules }).Conflicts;
+        }
+        ModConflict Of(ModConflicts.Conflict c) => ModConflict.Of(new ConflictEntry(c.Kind, c.Text, c.Parties, Regex.Match(c.Text, "likely winner: ([^;]+)") is { Success: true } w ? Path.GetFileNameWithoutExtension(w.Groups[1].Value.Trim()) : null) { Labels = c.Labels, Values = c.Values }, []);
+
+        // written another way in two mods: nothing; with a real difference among them: that one only
+        var layout = In("Layout", ("Packages/a.package", Pkg(Xml(1, doc), Xml(2, doc), Texts(3, (1, "a"), (2, "b")), (ModConflicts.TypeKey, 0, 0, U("names a")))),
+            ("Packages/b.package", Pkg(Xml(1, "<!-- mine -->\n<a j=\"2\" k=\"1\"><v>5</v><w/></a>"), Xml(2, doc.Replace(">5<", ">7<")), Texts(3, (2, "b"), (1, "a")), (ModConflicts.TypeKey, 0, 0, U("names b")))));
+        check(layout is [{ Kind: "resource key" } lay] && lay.Text.StartsWith("1 shared keys with different content (_XML 1; 2 identical)") && lay.Evidence is [var ev] && ev.EndsWith(":0000000000000002"),
+            $"mod conflicts: tuning and texts written another way are no conflict, name maps never are, and the one changed value still is ({string.Join(" / ", layout.Select(c => c.Text))})");
+        // two mods with the same copy and one with another: one conflict, which says who loses nothing
+        var three = In("Three", ("Packages/a.package", Pkg(Xml(1, doc))), ("Packages/b.package", Pkg(Xml(1, " " + doc))), ("Packages/c.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))));
+        var threeLast = In("ThreeLast", ("Packages/a.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))), ("Packages/b.package", Pkg(Xml(1, doc))), ("Packages/c.package", Pkg(Xml(1, doc))));
+        check(three is [{ Parties.Length: 3 } t3] && Of(t3) is { Winner: "a", InUse: "Mods/Packages/a.package", Alike: ["Mods/Packages/b.package"], Level: ConflictLevel.Look } && threeLast is [var tl] && Of(tl) is { Winner: "a", Alike.Length: 0 },
+            "mod conflicts: of two mods with the same copy and one with another, the one like the copy in use loses nothing");
+        // a script adapted for a folder that loads first is the same build, no conflict; another build is, and so are two in one folder
+        var build = Guid.NewGuid();
+        byte[] Script(Guid id, int pad) => Pkg((ModConflicts.TypeS3sa, 0, 9, ModConflicts.S3saWrap([.. Asm("Fixture", id, []), .. new byte[pad]])));
+        var adapted = In("Adapted", ("Overrides/fix.package", Script(build, 8)), ("Packages/mod.package", Script(build, 0)));
+        var other = In("AdaptedOld", ("Overrides/fix.package", Script(Guid.NewGuid(), 8)), ("Packages/mod.package", Script(build, 0)));
+        var beside = In("AdaptedBeside", ("Packages/fix.package", Script(build, 8)), ("Packages/mod.package", Script(build, 0)));
+        check(!adapted.Any(c => c.Kind is "decided" or "resource key") && other.Any(c => c.Kind == "decided") && beside.Any(c => c.Kind == "resource key"),
+            $"mod conflicts: a script's adapted copy of the same build in a folder that loads first is no conflict, another build is ({string.Join(" / ", adapted.Concat(other).Concat(beside).Select(c => c.Kind))})");
+        // a window layout resized for a folder that loads first is the other mod's own window; one with other objects is a conflict
+        byte[] Layout(string area, string extra = "") => Pkg((ModConflicts.TypeLayout, 0, 4, U($"<graph><object id=\"0x1\"><prop name=\"Area\" value=\"{area}\" />{extra}<prop name=\"Fill\" value=\"0x00ff\" /></object></graph>")));
+        var resized = In("Resized", ("Overrides/ui.package", Layout("0.0,0.0,1331.0,998.0")), ("Packages/mod.package", Layout("0,0,1024,768")));
+        var redone = In("Redone", ("Overrides/ui.package", Layout("0,0,1331,998", "<prop name=\"New\" value=\"1\" />")), ("Packages/mod.package", Layout("0,0,1024,768")));
+        var colour = In("Colour", ("Overrides/ui.package", Layout("0,0,1024,768")), ("Packages/mod.package", Pkg((ModConflicts.TypeLayout, 0, 4, U("<graph><object id=\"0x1\"><prop name=\"Area\" value=\"0,0,1024,768\" /><prop name=\"Fill\" value=\"0x00fe\" /></object></graph>")))));
+        var same = In("ResizedBeside", ("Packages/ui.package", Layout("0,0,1331,998")), ("Packages/mod.package", Layout("0,0,1024,768")));
+        check(resized.Count == 0 && redone is [{ Kind: "decided" }] && colour is [{ Kind: "decided" }] && same is [{ Kind: "resource key" }],
+            "mod conflicts: a window another tool only resized is no conflict; one with other objects or colours is");
+        // settings files: comments, layout and how a number is written don't count; a value does, and the mod that loses all of itself is told so, with the values
+        static byte[] Ini(string v, string note = "") => U($";; {note}\r\n[Lighting]\r\nSunlightScale = {v};{note}\r\n\r\nGamma = 0.4f;\r\n");
+        byte[] IniPkg(byte[] b, bool more = false) => more ? Pkg((ModConflicts.TypeIni, 0, 1, b), (ModConflicts.TypeIni, 0, 2, b)) : Pkg((ModConflicts.TypeIni, 0, 1, b));
+        var notes = In("IniSame", ("Packages/a.package", IniPkg(Ini("1.0f", "mine"))), ("Packages/b.package", IniPkg(Ini("1", "was 2"))));
+        var lights = In("IniOther", ("Packages/a.package", IniPkg(Ini("1.35"), more: true)), ("Packages/b.package", IniPkg(Ini("1.5"))));
+        check(notes.Count == 0 && lights is [{ Kind: "resource key" } li] && li.Values.SequenceEqual(["Lighting > SunlightScale", "1.35", "1.5"])
+              && Of(li) is { Level: ConflictLevel.Look, Title: "A mod that likely does nothing", SayArgs: ["b", "a"], Dead: ["Mods/Packages/b.package"], Finding: not null } lo && lo.Values is [("Lighting > SunlightScale", "1.35", "1.5")],
+            $"mod conflicts: settings files are compared by their values, and a mod that loses all of itself does nothing ({string.Join(" / ", lights.Select(c => c.Text))})");
+        check(ModConflicts.ValuesThatDiffer(ModConflicts.TypeXml, U("<base><kCar><Speed value=\"13\"/><Pace value=\"1\"/></kCar></base>"), U("<base><kCar><Speed value=\"25\"/><Pace value=\"1.0\"/></kCar></base>")) is [("kCar > Speed", "13", "25")],
+            "mod conflicts: the values two tunings set differently are told");
+        var off = Path.Combine(tmp, "Off", "Mods");
+        foreach (var f in new[] { "Packages/a.package", "Disabled (Apex Launcher)/Packages/b.package" })
+        { Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(off, f))!); File.WriteAllBytes(Path.Combine(off, f), Pkg(Xml(1, f))); }
+        File.WriteAllText(Path.Combine(off, "Resource.cfg"), "Priority 500\nPackedFile Packages/*.package\n");
+        check(ModConflicts.Scan(new() { Roots = { off }, Rules = rules, LoadedOnly = true }).Conflicts.Count == 0 && ModConflicts.Scan(new() { Roots = { off }, Rules = rules }).Conflicts.Count == 1,
+            "mod conflicts: a mod the game does not load conflicts with nothing");
+        // only texts differ, beside tuning both hold alike: a matter of texts, with how many
+        var words = In("Words", ("Packages/a.package", Pkg(Xml(1, doc), Texts(3, (1, "a"), (2, "b"), (3, "c")))), ("Packages/b.package", Pkg(Xml(1, doc), Texts(3, (1, "a"), (2, "B"), (3, "C")))));
+        check(words is [{ Kind: "resource key" } wd] && wd.Text.Contains("(STBL 1; 1 identical; 2 texts differ)") && Of(wd) is { Level: ConflictLevel.Small, SayArgs: ["a", "2"], Finding: null },
+            $"mod conflicts: texts that differ beside tuning that does not are a small conflict that says how many ({string.Join(" / ", words.Select(c => c.Text))})");
+        // a translation that is in use; one that the mod's own texts hide is a conflict of texts as before
+        var mod = Pkg(Xml(1, doc), Texts(0x17AA, (1, "Cook"), (2, "Eat")));
+        var tr = Pkg(Texts(0x17AA, (1, "Cozinhar"), (2, "Comer")));
+        var translated = In("Translated", ("Packages/Cooking.package", mod), ("Packages/!Cooking_PT-BR.package", tr));
+        var hidden = In("Hidden", ("Packages/Cooking.package", mod), ("Packages/Cooking_PT-BR.package", tr));
+        check(translated is [{ Kind: "translation" } tc] && Of(tc) is { Level: ConflictLevel.Small, SayArgs: ["!Cooking_PT-BR", "Cooking"], Finding: null } && Of(tc).Id.StartsWith("resource key|")
+              && hidden is [{ Kind: "resource key" } hc] && Of(hc) is { Level: ConflictLevel.Small, Winner: "Cooking" },
+            "mod conflicts: a package of texts only, in use over the mod it translates, is its translation");
+        // a patch of another mod in use over it; under it, or as a version of it, a conflict as before
+        var whole = Pkg(Xml(1, doc), Xml(2, doc), Xml(3, doc));
+        var patch = Pkg(Xml(2, doc.Replace(">5<", ">9<")));
+        var patched = In("Patched", ("Packages/Cooking.package", whole), ("Overrides/Cooking_Patch.package", patch));
+        var under = In("Under", ("Packages/Cooking.package", whole), ("Packages/Cooking_Patch.package", patch));
+        var version = In("Version", ("Packages/Cooking_v2.package", whole), ("Packages/Cooking_v1.package", patch));
+        var stranger = In("Stranger", ("Packages/Cooking.package", whole), ("Packages/!Other_Patch.package", patch));
+        var more = In("More", ("Packages/Cooking.package", whole), ("Packages/!Cooking_Patch.package", Pkg(Xml(2, doc.Replace(">5<", ">9<")), Xml(8, doc))));
+        check(patched is [{ Kind: "add-on" } pc] && Of(pc) is { Level: ConflictLevel.Small, SayArgs: ["Cooking_Patch", "Cooking"], Finding: null }
+              && new[] { under, version, stranger, more }.All(l => l is [{ Kind: "resource key" } c] && Of(c).Level == ConflictLevel.Look),
+            "mod conflicts: a patch in use over the mod it is for replaces part of it on purpose; one under it, a version, another mod or one with more of its own is a conflict");
+        // the folder Resource.cfg puts first decides; the id is the one it had before, so an ignored one stays ignored
+        var first = In("First", ("Overrides/zeta.package", Pkg(Xml(1, doc))), ("Packages/alpha.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))));
+        var level = In("Level", ("Packages/zeta.package", Pkg(Xml(1, doc))), ("Packages/alpha.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))));
+        check(first is [{ Kind: "decided" } fc] && Of(fc) is { Level: ConflictLevel.Small, Winner: "zeta", SayArgs: ["alpha", "zeta"], Finding: null, CanOrder: true }
+              && level is [{ Kind: "resource key" } lc] && Of(lc) is { Level: ConflictLevel.Look, Winner: "alpha" } && Of(fc).Id == Of(lc).Id,
+            "mod conflicts: a mod in a folder that loads first is the one set to win, a lower conflict with the same id");
+        // two mods of one name in two folders: each is told by its folder
+        var twins = In("Twins", ("Packages/Tuning.package", Pkg(Xml(1, doc))), ("Overrides/Tuning.package", Pkg(Xml(1, doc.Replace(">5<", ">6<")))));
+        check(twins is [var tw] && Of(tw) is { InUse: "Mods/Overrides/Tuning.package", Winner: "Tuning", SayArgs: [@"Tuning (Mods\Packages)", @"Tuning (Mods\Overrides)"], Parties: ["Tuning", "Tuning"] } m2
+              && m2.Labels.Order().SequenceEqual(["Mods/Overrides/Tuning.package", "Mods/Packages/Tuning.package"]) && m2.Names.Order().SequenceEqual([@"Tuning (Mods\Overrides)", @"Tuning (Mods\Packages)"]),
+            "mod conflicts: two files of one name are told apart by their folders");
+        // a size no packed data can have
+        bool Rejects(params byte[] b) { try { ModConflicts.RefPack(b); return false; } catch (InvalidDataException) { return true; } }
+        check(Rejects(0x90, 0xfb, 0x80, 0, 0, 0, 0xfc) && Rejects(0x90, 0xfb, 0x7f, 0xff, 0xff, 0xff, 0xfc) && ModConflicts.RefPack([0x10, 0xfb, 0, 0, 1, 0xfd, 7]) is [7],
+            "mod conflicts: packed data that says an impossible size is not read");
+        // a mod alone on a key (a default replacement of game data) is no conflict
+        check(In("Alone", ("Packages/a.package", Pkg(Xml(1, doc))), ("Packages/b.package", Pkg(Xml(2, doc)))).Count == 0, "mod conflicts: a mod that alone replaces a resource is no conflict");
+    }
 
     // the hook table: format checks, download fallbacks, edition filter, out-of-date builds
     static void RunHooks(Action<bool, string> check)
@@ -128,6 +258,9 @@ static class ModConflictsTests
             "mod conflicts: Resource.cfg priorities and pattern depth");
         check(ModConflicts.CompareKey(K("Overrides/z.package")!.Value, K("Packages/a.package")!.Value) < 0 && ModConflicts.CompareKey(K("Packages/B.package")!.Value, K("Packages/c.package")!.Value) < 0
             && ModConflicts.CompareKey(K("Packages/z.package")!.Value, K("Packages/a/a.package")!.Value) < 0, "mod conflicts: higher priority, then top folder, then case-insensitive name order load first");
+        // (as a folder is listed: capitals compared, so a name in brackets comes after the letters, and a folder before a longer name that starts with its own)
+        check(ModConflicts.CompareKey(K("Packages/Zeta.package")!.Value, K("Packages/[Creator]Hair.package")!.Value) < 0 && ModConflicts.CompareKey(K("Packages/CAS/z.package")!.Value, K("Packages/CAS 2/a.package")!.Value) < 0,
+            "mod conflicts: name order is the folder listing's, for names with brackets and folders that start alike");
 
         var game = new (string, int)[] { ("kSimDied", 3), ("kSimAgeTransition", 7), ("kBoughtObject", 9) };
         var stub = Asm("Sims3GameplaySystems", new Guid("11111111-1111-1111-1111-111111111111"), Array.Empty<(string, string, string, string, int)>(), game);
@@ -239,6 +372,8 @@ static class ModConflictsTests
                 var unknownExe = HookScan();
                 check(Kind(unknownExe, "native hook").Count == 0 && unknownExe.Info.Any(i => i.Text.Contains("game build not identified")), "hook table: an unknown game build applies no rows");
             }
+
+            RunSame(check, tmp, rules);
 
             // no extractor that reads an archive: unknown with the 7-Zip command, which the command line offers
             {

@@ -12,7 +12,7 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Unreleased, planned for 4.0.3 (Setup 1.2.0). Sims 3 Modernization's experimental channel: Unreleased. The restart host on by default in a new install, no longer experimental: Unreleased, planned for 4.1.0. Apex Launcher 2.0.10 (the launcher below): Unreleased, planned for 4.1.0 |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (offered again from 4.1.1): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Released in 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Released in 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Released in 4.0.3 (Setup 1.2.0). Sims 3 Modernization's experimental channel: Unreleased. The restart host on by default in a new install, no longer experimental: Released in 4.1.0. Apex Launcher 2.0 (the launcher below): Released in 4.1.0. Apex Launcher 2.3 (Game settings, adding files, profiles, merges edited in one go, Saves cleaning and backups, Health by check): Released in 4.1.1 |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
 | Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup; also Sims 3 Modernization's channel, `ModernizationChannel`); restore points in `Game\Bin\Apex Radiance backup\restore`; the launcher's own files in `%LOCALAPPDATA%\Apex Launcher` (`settings.json`, `gallery.json`, `language.txt`, mod notes, picture thumbnails, `ApexLauncher.log`); the program in `%LOCALAPPDATA%\Programs\Apex Launcher` |
@@ -84,7 +84,8 @@ only when Setup turned it on, recorded in `%ProgramData%\Apex Radiance Setup\smo
 player turned on with Profile Inspector shows as on and stays. The game's exes stay in NVIDIA's own *Sims 3* profile: they
 do not present frames under the bridge. The profile matches exe names, so it covers every copy of the game on the PC, Steam
 or EA app. The row shows only with an NVIDIA card. It can be turned on with an RTX 40 or 50 series card, driver 571.86 or
-newer, and the RTX Remix bridge installed; otherwise it stays off and says why. When the bridge's exe belongs to a profile
+newer, and the RTX Remix bridge chosen (installed, or going in with the same Apply or first install, which make the driver
+change after the files); otherwise it stays off and says why, and the first install leaves the row out. When the bridge's exe belongs to a profile
 of the player's, Setup leaves it alone and names that profile. The profile is not part of restore points (it is a driver setting, not a game file). Turned on, Setup also brings
 Apex's frame limit (`[screen] fps_limit` in the game's `ApexRadiance.toml`) to 60 fps when there is none (the key absent or
 0); a limit the player chose stays as it is, and the row suggests 60 to 90 fps. That change has its own restore point
@@ -187,7 +188,7 @@ as the signed-in user, not as administrator: a change to the game folder or to a
   Apex Radiance Setup's data folder move to the launcher's on first start.
 - **First install and updates as one card.** With no Apex Radiance in the game, the welcome and every step after it
   (game, components, installing, done) are one card in the middle of the window, without the sidebar; the components
-  step is a short list of Apex Radiance and its parts. Play with updates first lists them (*Update and play*, *Play
+  step is a short list of what goes in with Apex Radiance. Play with updates first lists them (*Update and play*, *Play
   without updating*); they run in the same card (*Updating*) and the game starts from Home. A failed first install or
   update is taken back out at once and one card says why (*Try again*, *Play anyway* for an update, *Copy details*). A game that is running, no internet or a protected game folder are said in the card. A new
   Apex Launcher is offered as its own card (*Restart now* or *Later*).
@@ -197,33 +198,65 @@ as the signed-in user, not as administrator: a change to the game folder or to a
   A downloaded copy newer than the installed one replaces it and takes over: an older copy running closes (unless it
   is in the middle of a change) and the new one opens in its place; an older or equal download only opens the
   installed copy.
-- **Home and Play.** The top shows the save to go back to: *Continue where you left off*, the save's name and when it
-  was saved, over the picture chosen in Settings (a gallery picture, the household's photo, or none). *Continue* starts
-  the game's exe directly (`TS3W.exe` or `TS3.exe`) straight into that save, with EA's `-worldFile` switch
-  (`Launch.cs`); with no save it reads *Play* and opens the main menu. *Another save* picks a different save for this
-  run from a menu of the newest eight, with *All saves* at its foot. With *Install updates when I press Play* on, the
-  ready updates go in first (*Play without updating* skips them). Under the top, one line holds the game's health (its
-  crystal, the state, the first thing to look at, with *Look* or *Open Health*) and the last session (how long and how
-  it ended); after a crash or low memory it offers *Start again into this save*, which opens the newest save. While the
-  game runs, the top shows the playing time and the memory the game uses. The other households follow, each with its
-  own play button and backup, then one row of the newest pictures. When Apex Radiance cannot load, a banner says so and
-  Play becomes *Play anyway*. *Hide while playing* sends the launcher to the notification area until the game
-  closes.
-- **Health.** A crystal in the state's colour and the checks grouped by area (Apex Radiance, loaders, graphics, game
-  settings, mods), with *Automatic fixes*, *Restore points* and *Last session* tabs. The state is *Blocked* only when
+- **Home and Play.** The main button starts the game's exe directly (`TS3W.exe` or `TS3.exe`) at its main menu. The newest
+  saves stand in one row, each with its own Play button, which starts the game straight into that save with EA's
+  `-worldFile` switch (`Launch.cs`), over the picture chosen in Settings (a gallery picture, the household's photo, or
+  none). With *Install updates when I press Play* on, the ready updates go in first (*Play without updating* skips
+  them). Under the top, one line holds the game's health (its crystal, the state, the first thing to look at) and the
+  last session (how long and how it ended); after a crash or low memory it offers *Start again into this save*. While
+  the game runs, the top shows the playing time and the memory the game uses. When Apex Radiance cannot load, a banner
+  says so and Play becomes *Play anyway*. *Hide while playing* sends the launcher to the notification area until the
+  game closes.
+- **Game settings.** Options the game keeps in `Game\Bin\GraphicsRules.sgr` (shadow and Sim texture size, bloom),
+  `Game\Bin\Sims3.ini` (reads in flight, walking values) and `Options.ini` (shopping mode, memories, online features).
+  Only a value the player changes is written, every other byte stays, and each file is copied before its first change;
+  *Restore my files* and the uninstall put them back. A graphics card the game does not know can be added to its list.
+  A first install offers the same options before it starts (`GameSettings.cs`).
+- **Health.** A crystal in the state's colour and one tile per check, each with its own page, with automatic fixes,
+  restore points and the last session. Every notice can be ignored and brought back. The state is *Blocked* only when
   Apex Radiance itself cannot load (`Health.StopsApex`: an error nothing fixes in Apex Radiance or the ASI loader);
   other unfixable errors need the player but leave Apex running. Suggestions, such as clearing the game caches or
   backing up a save, have their own button. The crash pattern reads the crash logs of the last week. A check that fails
   keeps the last findings rather than reading as passed. *Fix safe things without asking* applies the fixes that keep a
   copy of each file.
 - **Mods.** Every package and script mod with its kind, folder, size and an on/off switch (off moves it to
-  `Mods\Disabled (Apex Launcher)`), a grid view whose tiles fill the row and mark the mods that are off, tags, notes,
-  merge and split, a finder for the mod behind a
-  problem, a search over the side pane's folders and tags, and the mod checks contributed through `ModChecks.cs` (`IModCheck`). Files the launcher installed are
-  locked. *Default replacements* are the mods that replace an object, a Create a Sim part or a texture
-  (`Replacements.IsDefault`); a mod that only overrides the game's tuning or scripts is not one.
-- **Worlds and Saves.** The worlds the player can start a game in, by pack, and every save with its household photo
-  (resource `0x6B6D837E`), *Play this save* and a zip backup.
+  `Mods\Disabled (Apex Launcher)`), as a list sorted by its columns or a grid, with tags, notes, a page address, a
+  picture, a search over folders and tags, filters, and the mod checks contributed through `ModChecks.cs`
+  (`IModCheck`). Files the launcher installed are locked. *Default replacements* are the mods that replace an object, a
+  Create a Sim part or a texture (`Replacements.IsDefault`); a mod that only overrides the game's tuning or scripts is
+  not one. A mod's details hold its content (items and resources), the mods that share its game data, what it replaces
+  and its notes.
+  - **Add** takes packages, Sims, lots, households, worlds, archives and folders, each to the place the game reads it from
+    (`ModAdd.cs`): the files are checked, compared with what is installed, copied under a temporary name and renamed into
+    place, never over a file. A package that looks damaged shows unticked with the reason and is added when ticked;
+    a damaged world is refused.
+  - **Profiles** keep which mods are on; switching changes every mod or none, with Undo, and follows moves, renames and
+    merges.
+  - **Merge** writes several packages as one (`ModMerge.cs`). Mods that change the same game data in different ways stay out
+    until the player puts them in and orders them. Every stored byte is copied as it is, the new file is read back by its
+    SHA-256, then the originals move to `Merged (Apex Launcher)` next to Mods. A merge can be changed in one go (mods out,
+    in, replaced, reordered, renamed), updated when a newer version of a mod inside is found, and split back. Every step
+    that moves files can be undone, also after the launcher ends midway.
+  - **Tools** finds custom content (what a Sim, lot or save needs), finds the mod behind a problem by halves, clears the
+    game's caches by group and opens the game's folders.
+  - **Conflicts** compares what the game would read: tuning without comments, layout and attribute order, text tables by
+    id, settings files by their values, window layouts without their size. Identical copies are no conflict. Health shows
+    each conflict with its level, and a mod can be given priority where `Resource.cfg` allows it.
+- **Saves.** The saves on one side, with the ones gone from the game and the ones kept out of it, and the chosen one on
+  the other: its backups and what can be cleaned (`SaveClean.cs`: the plan is exact to the byte, a checked zip is made
+  first, the save is rewritten and read back, and the clean can be undone). *Clean several* cleans more than one at once;
+  the pictures that stay are a dialog; rename, duplicate, keep out of the game and delete are in the save's menu.
+  - **Backups** (`SaveCopies.cs`, `SaveBackups.cs`) are zips of the save's folder. Each can be restored over the save
+    (which becomes one more backup, with Undo) or opened as another save, named, pinned, checked against its checksums,
+    exported and moved to the Recycle Bin. A save that is gone, or kept out of the game, can be deleted with what is left
+    of it. A name and a pin are kept in the zip's own comment; the list of mods that were
+    on is a file inside (`apex-mods.txt`), used to tell which are missing on a restore and never written into the save.
+  - **Automatic backups** (off until chosen) are made when the game closes, before Play or once a day, only of saves that changed and never
+    while the game runs. Older automatic ones leave past the number to keep and past the space limit; ones the player
+    made, named or pinned, and a save's newest one, never do. Each save can have its own choice. *All backups* lists them
+    with filters and actions for a selection.
+  - The backups can be kept in another folder: they are copied and compared there before they leave the old one.
+    *Import* takes a zip with one save in it.
 - **Gallery.** The pictures and videos Apex Radiance and the game save, from the folders `ApexRadiance.toml` names
   (`[ui] screenshot_folder`, `[capture.video] folder`: the game's, Apex's own or a chosen one), all of them at once so
   changing the setting hides nothing. *Albums* lists them by day or by household (the save written soonest after a
@@ -246,6 +279,14 @@ as the signed-in user, not as administrator: a change to the game folder or to a
 | Hide while playing | None (`settings.json` `HideWhilePlaying`) | switch | On | | The launcher goes to the notification area while the game runs |
 | Fix safe things without asking | None (`settings.json` `FixSafeAutomatically`) | switch | On | | Health applies the fixes that keep a copy of each file |
 | Install updates when I press Play | None (`settings.json` `InstallUpdatesOnPlay`) | switch | On | | The ready updates go in before the game starts; off, Play starts the game as it is |
+| When the game closes (Saves, Automatic backups) | None (`backups.json` `OnClose`) | switch | Off | | A backup of each save played lately that changed since its newest one |
+| Before playing | None (`backups.json` `BeforePlay`) | switch | Off | | The same before the game starts; *Play without waiting* skips it |
+| Once a day | None (`backups.json` `Daily`) | switch | Off | | The same once a day, while the launcher is open and the game is closed |
+| Backups of each save | None (`backups.json` `Keep`) | choice | 5 | 1, 3, 5, 10, 20 | How many automatic backups of a save stay |
+| Space limit | None (`backups.json` `LimitGb`) | choice | 10 GB | 2, 5, 10, 20, 50 GB, No limit | Past it the oldest backups the launcher made by itself leave |
+| Folder | None (`backups.json` `Folders`) | folder | `Saves backups (Apex Launcher)` in the game's Documents folder | | Where the backups are |
+| Check each backup | None (`backups.json` `Check`) | switch | On | | Compares the zip with the save after copying; a backup before a clean or a restore is always compared |
+| Remember the mods that are on | None (`backups.json` `RememberMods`) | switch | On | | Keeps the list of mods in the backup |
 | Picture on top (Home) | None (`settings.json` `HomePicture`) | choice | A picture from the gallery | A picture from the gallery, The household's photo, No picture | What shows behind the save on top of Home |
 | Gallery picture (Home) | None (`gallery.json` `HomePicture`) | buttons | The newest picture | *Choose in the gallery*, *Use the newest* | The gallery picture on Home: the one marked *Use on Home* in the Gallery, else the newest |
 | Picture height (Home) | None (`settings.json` `HomePictureHeight`) | choice | Medium (330 px) | Low (240 px), Medium, Tall (440 px) | How much of the page the gallery picture takes |
@@ -281,12 +322,11 @@ folder*; the log is in the player's `%LOCALAPPDATA%\Apex Radiance Setup\`. The f
 ## Limitations
 
 - Windows 10 version 1809 or later, 64-bit.
-- Apex Launcher 2.0.10, not yet verified on a real install: the upgrade from Apex Radiance Setup 1.2.x, a full uninstall,
+- A backup made or restored by 2.3, a cleaned save, a merged package written by 2.3 and the Game settings values are not yet verified in game.
+- Not yet verified on a real install: the upgrade from Apex Radiance Setup 1.2.x, a full uninstall,
   the administrator window on a game under Program Files, Play and the session with the EA app edition, the tray.
-  *Continue* opening the save in the game, a save picked from *Another save*, the crash state on Home, and the Acrylic
-  and stronger Mica backgrounds are unverified.
-- The newest texts of the Gallery (search, album menu, videos) show in English in every language until they are
-  translated.
+  A save opened from Home, the crash state on Home, and the Acrylic and stronger Mica backgrounds are unverified.
+- The texts added in 4.1.0 and 4.1.1 show in English outside Portuguese until they are translated.
 - The game's own `Video.avi` recordings show without a picture when Windows has no decoder for them; they play when
   Windows can.
 - Ultimate ASI Loader 10 (the latest release, which Setup installs) can open a *Select Override (Update) Folder* dialog at

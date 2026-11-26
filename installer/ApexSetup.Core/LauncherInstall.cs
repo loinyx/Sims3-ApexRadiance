@@ -57,13 +57,89 @@ public static partial class LauncherInstall
 
     // Copied into the install folder, registered, and that copy started: the caller exits right after. Also the switch from
     // portable: the marker goes, the portable exe stays where it is (started again, it hands over to the installed copy).
-    public static void Install(string exe, IEnumerable<string>? args = null, Action<string, IEnumerable<string>>? start = null)
+    // folder: the install folder the player chose (null: the one it has, or the default). A copy installed elsewhere moves
+    // there: the old one goes once the new one is in place.
+    public static void Install(string exe, IEnumerable<string>? args = null, Action<string, IEnumerable<string>>? start = null, string? folder = null)
     {
-        CopyIn(exe);
-        Register(Paths.InstalledExe, VersionOf(Paths.InstalledExe), LauncherSettings.Load().DesktopShortcut);
-        if (!IsInstalledCopy(exe)) TryDelete(MarkerOf(exe));
-        Handover(Paths.InstalledExe, args, start);
+        var (dir, before) = (Paths.InstallDir, Paths.InstalledExe);
+        var (was, startup, desktop) = (File.Exists(before), RunsAtStartup(), LauncherSettings.Load().DesktopShortcut);
+        if (folder is not null) Paths.SetInstallDir(folder);
+        var target = Paths.InstalledExe;
+        var made = !File.Exists(target);
+        try
+        {
+            CopyIn(exe, whole: true);
+            Register(target, VersionOf(target), desktop);
+            if (startup) SetRunAtStartup(target, true); // (the folder it starts from)
+            TryDelete(MarkerOf(exe));
+            TryDelete(MarkerOf(target));
+            Handover(target, args, start);
+        }
+        catch
+        {
+            // (all of it points at the copy that works again, or at none)
+            try
+            {
+                Paths.SetInstallDir(dir);
+                if (was) { Register(before, VersionOf(before), desktop); if (startup) SetRunAtStartup(before, true); }
+                else RemoveTraces();
+                if (made && !IsRunningFrom(target, exe)) RemoveInstall(Path.GetDirectoryName(target)!);
+            }
+            catch (Exception e) { Engine.Log(e); }
+            throw;
+        }
+        if (was && !string.Equals(before, target, StringComparison.OrdinalIgnoreCase)) RemoveInstall(dir);
     }
+
+    static bool IsRunningFrom(string target, string exe) => string.Equals(Path.GetFullPath(target), Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase);
+
+    // ---------- the install folder ----------
+
+    // always a folder of the launcher's own, inside the one picked
+    public static string FolderFor(string picked) =>
+        string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(picked)), Name, StringComparison.OrdinalIgnoreCase) ? Path.TrimEndingDirectorySeparator(picked) : Path.Combine(picked, Name);
+
+    // a folder the launcher can live in and update itself in, with no administrator. Not among its data, nor inside the
+    // default install folder: both are removed whole.
+    public static bool CanInstallTo(string dir)
+    {
+        if (!Path.IsPathFullyQualified(dir) || dir.Contains('%') || string.Equals(dir, Paths.Data, StringComparison.OrdinalIgnoreCase) || Engine.Within(dir, Paths.Data, Paths.DefaultInstallDir)) return false;
+        // (an administrator step runs this same exe, and it sees no network drive of the player's)
+        if (dir.StartsWith(@"\\", StringComparison.Ordinal)) return false;
+        try { if (new DriveInfo(Path.GetPathRoot(dir)!).DriveType == DriveType.Network) return false; } catch (ArgumentException) { return false; }
+        var made = !Directory.Exists(dir);
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var probe = Path.Combine(dir, Path.GetRandomFileName());
+            File.WriteAllText(probe, "");
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException) { return false; }
+        finally { if (made) try { if (Directory.Exists(dir)) Directory.Delete(dir); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
+    }
+
+    // The default folder is the launcher's and goes whole. In a chosen one only its own files go, and the folder if that
+    // leaves it empty.
+    static bool OwnsFolder(string dir) => string.Equals(dir, Paths.DefaultInstallDir, StringComparison.OrdinalIgnoreCase);
+    static string[] OwnFiles(string dir) => [Path.Combine(dir, "ApexLauncher.exe"), Path.Combine(dir, "ApexLauncher.exe.old"), Path.Combine(dir, "ApexLauncher.exe.part"), Path.Combine(dir, PortableMarker)];
+    static IEnumerable<string> RemoveInstallCommands(string dir) =>
+        OwnsFolder(dir) ? RemoveCommands([dir]) : Directory.Exists(dir) ? [.. RemoveCommands(OwnFiles(dir)), $"rd {SelfUpdate.Quote(dir)}"] : [];
+
+    static void RemoveInstall(string dir)
+    {
+        if (OwnsFolder(dir)) { RemoveNowOrAfterExit(dir); return; }
+        try
+        {
+            foreach (var f in OwnFiles(dir)) File.Delete(f);
+            if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { AfterExit(RemoveInstallCommands(dir)); }
+    }
+
+    // the install folder and what else goes with it, once this process has closed
+    public static void DeleteInstallAfterExit(string install, params string[] more) => AfterExit([.. RemoveInstallCommands(install), .. RemoveCommands(more)]);
 
     // Runs portable from folder (null: where it is; the installed copy needs a folder). Shortcuts, Run and the Installed apps
     // entry go, the launcher's data stays. Moved: the new copy is started, the caller exits, and the old exe (or the install
@@ -72,8 +148,9 @@ public static partial class LauncherInstall
     {
         var target = folder is null ? Path.GetFullPath(exe) : Path.Combine(Path.GetFullPath(folder), Path.GetFileName(exe));
         var installed = IsInstalledCopy(exe);
+        var dir = Paths.InstallDir;
         // (anywhere under the install folder, which goes once the copy is made, would take the copy with it)
-        if (installed && (IsInstalledCopy(target) || Engine.Within(target, Paths.InstallDir))) throw new ArgumentException("A portable launcher needs a folder outside the install folder.", nameof(folder));
+        if (installed && (IsInstalledCopy(target) || Engine.Within(target, Paths.InstallDir, Paths.DefaultInstallDir))) throw new ArgumentException("A portable launcher needs a folder outside the install folder.", nameof(folder));
         var moved = !string.Equals(target, Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase);
         if (moved)
         {
@@ -85,13 +162,15 @@ public static partial class LauncherInstall
         if (installed || !File.Exists(Paths.InstalledExe)) RemoveTraces();
         if (!moved) return target;
         Handover(target, args, start);
-        if (installed) RemoveNowOrAfterExit(Paths.InstallDir);
+        if (installed) { Paths.SetInstallDir(null); RemoveInstall(dir); }
         else { TryDelete(MarkerOf(exe)); RemoveNowOrAfterExit(exe); }
         return target;
     }
 
     // The arguments for a copy started while this one still holds the single-instance mutex: it waits for it instead of
     // only bringing this window up.
+    public static IEnumerable<string> LastingArgs(IEnumerable<string> args) => args.Where(a => a is not (TrayArg or ReplaceArg or HandoverArg or "--was-setup") && !a.StartsWith("--moved-from=", StringComparison.Ordinal) && !File.Exists(a));
+
     public static IEnumerable<string> HandoverArgs(IEnumerable<string>? args) => (args ?? []).Where(a => a != HandoverArg).Append(HandoverArg);
 
     static void Handover(string exe, IEnumerable<string>? args, Action<string, IEnumerable<string>>? start) => (start ?? SelfUpdate.Restart)(exe, HandoverArgs(args));
@@ -112,14 +191,22 @@ public static partial class LauncherInstall
 
     // The running exe copied to the install folder when that copy is missing or older (a downloaded update, or the first
     // start); true when the installed copy should be started in place of this one.
-    public static bool CopyIn(string exe)
+    // whole: one there that is not newer and not as large as this one (a copy cut short) is made again
+    public static bool CopyIn(string exe, bool whole = false)
     {
         if (IsInstalledCopy(exe)) return false;
         var target = Paths.InstalledExe;
-        if (File.Exists(target) && !Newer(exe, target)) return true;
+        if (File.Exists(target) && !Newer(exe, target) && !(whole && !Newer(target, exe) && new FileInfo(target).Length != new FileInfo(exe).Length)) return true;
         Directory.CreateDirectory(Paths.InstallDir);
-        if (File.Exists(target)) SelfUpdate.Replace(exe, target); // (it may be running: renamed aside, removed at its next start)
-        else File.Copy(exe, target);
+        // (under another name until it is whole)
+        var part = target + ".part";
+        try
+        {
+            File.Copy(exe, part, true);
+            if (File.Exists(target)) SelfUpdate.Replace(part, target); // (it may be running: renamed aside, removed at its next start)
+            else File.Move(part, target);
+        }
+        finally { TryDelete(part); }
         return true;
     }
 
@@ -205,12 +292,14 @@ public static partial class LauncherInstall
     // everything Register and SetRunAtStartup wrote
     public static void RemoveTraces()
     {
+        // (a key that goes between the look and the delete throws: the second look finds it gone)
+        static void Drop(string key) { try { Registry.CurrentUser.DeleteSubKeyTree(key, false); } catch (IOException) { Registry.CurrentUser.DeleteSubKeyTree(key, false); } }
         foreach (var l in new[] { StartMenuLink, DesktopLink })
             try { if (File.Exists(l)) File.Delete(l); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
+        Drop(UninstallKey);
         using (var k = Registry.CurrentUser.OpenSubKey(RunKey, true)) k?.DeleteValue(Name, false);
-        Registry.CurrentUser.DeleteSubKeyTree(ClassesBase + @"\" + ProgId, false);
-        Registry.CurrentUser.DeleteSubKeyTree(AppKey, false);
+        Drop(ClassesBase + @"\" + ProgId);
+        Drop(AppKey);
         foreach (var t in OpenTypes.Concat(DroppedTypes))
         {
             using var w = Registry.CurrentUser.OpenSubKey(ClassesBase + @"\" + t + @"\OpenWithProgids", true);
@@ -221,14 +310,19 @@ public static partial class LauncherInstall
 
     // Folders (the install folder, the launcher's data) and files (a portable exe) removed once this process has closed: a
     // running exe cannot delete itself. The log being written goes with them.
-    public static void DeleteAfterExit(params string[] paths)
+    public static void DeleteAfterExit(params string[] paths) => AfterExit(RemoveCommands(paths));
+
+    static IEnumerable<string> RemoveCommands(IEnumerable<string> paths) =>
+        paths.Select(p => Directory.Exists(p) ? $"rd /s /q {SelfUpdate.Quote(p)}" : File.Exists(p) ? $"del /f /q {SelfUpdate.Quote(p)}" : null).OfType<string>();
+
+    static void AfterExit(IEnumerable<string> commands)
     {
-        var rd = string.Join(" & ", paths.Select(p => Directory.Exists(p) ? $"rd /s /q {SelfUpdate.Quote(p)}" : File.Exists(p) ? $"del /f /q {SelfUpdate.Quote(p)}" : null).OfType<string>());
+        var rd = string.Join(" & ", commands);
         if (rd.Length == 0) return;
         // (ping waits without a console; timeout refuses to run without one, and another timeout.exe can come first on the
         // PATH, so the delete ran at once while the exe was still open)
         var ping = Path.Combine(Environment.SystemDirectory, "ping.exe"); // (unquoted: cmd /c strips the first and last quote of a line that starts with one)
-        Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/c {ping} -n 5 127.0.0.1 >nul & {rd}") { CreateNoWindow = true, UseShellExecute = false });
+        Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/c {ping} -n 5 127.0.0.1 >nul & {rd}") { CreateNoWindow = true, UseShellExecute = false, WorkingDirectory = Environment.SystemDirectory }); // (not in the folder it removes)
     }
 
     // ---------- shortcuts (IShellLinkW through source-generated COM: the exe is trimmed) ----------

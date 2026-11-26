@@ -93,12 +93,18 @@ Repeat until the tester stops you or a round finds nothing new three times in a 
 - Selecting: click, Ctrl and Shift, the row checkboxes, the selection bar.
 - A mod's details: picture (add and remove), rename in place and Undo, tags (make, give, take off, edit, delete),
   notes kept after leaving and coming back, creator (guessed and typed), type, folder and Move, "Replaces in the
-  game" for default replacements, "Inside" for objects and Create a Sim parts.
+  game" for default replacements, "Content" for objects and Create a Sim parts
+  (and the resource list: search, copy, save as text), "Conflicts" (give priority and Undo, See in Health).
 - On and off for one mod, many mods, a whole folder; turning a mod with items off warns about saves.
 - Folders: make, rename, drag a mod or a folder into another, delete an empty one; a folder that cannot be deleted
   says why.
-- Merge: the plan, the run with its log, the check of the result, splitting back, taking one mod out of a merge; the
+- Merge: the plan, the run with its progress and its log at the end, the check of the result, splitting back, taking one mod out of a merge; the
   originals come back identical (compare file hashes).
+- Profiles (the button on top of the side pane): save what is on, switch, Undo, rename, copy, update, delete; a mod added
+  later stays as it is, a mod moved or renamed in the launcher follows, a mod held open by another program leaves every
+  mod as it was; refused while the game or a hunt runs.
+- Tools: each entry, the folder buttons, and an entry that can't be used says why.
+- A mod's page: add, open, copy, edit, remove; anything but a web address is refused.
 - Add mods: the picker, drag and drop from Explorer, and "Open with" on `.package` and `.zip`; every file is checked
   first; damaged and duplicate files are refused or offered as a copy; a `.sims3pack` is refused (not a mod file).
 - The problem-mod hunt: start, answer rounds, stop; every mod is back where it was.
@@ -108,7 +114,7 @@ Repeat until the tester stops you or a round finds nothing new three times in a 
 
 - Home: banners, Play (refused in a dry run), the health card, Continue, What's new, pictures.
 - Components: the toggles, Stable and Experimental, Apply.
-- Worlds and Saves: cards fill the width, pictures load, Back up all.
+- Worlds and Saves: cards fill the width, pictures load, Copy all.
 - Health: Check now, every area, Automatic fixes, Restore points, Last session, the copy-report button.
 - What's new, Settings (every row), the language menu, the first-start question (installed or portable).
 - Every dialog: the action has the accent colour; removing and deleting are in red; Esc and Cancel change nothing.

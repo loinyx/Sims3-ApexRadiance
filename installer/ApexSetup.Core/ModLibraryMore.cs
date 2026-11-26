@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Security.Cryptography;
 
 namespace ApexSetup;
@@ -19,41 +18,6 @@ public static partial class ModLibrary
 
     public const int MaxGamePath = 259;
 
-    public sealed record AddResult(List<string> Added, List<string> Skipped);
-
-    // files the player dropped or picked: packages into the folder, a zip's packages taken out by name only (never a path
-    // from inside the zip). Every file
-    // is checked first (ModInstall): a broken, protected, Sims 4 or empty one is not added, nor one already installed unless
-    // asked. Skipped: "name: why".
-    public static AddResult AddAny(string docs, string folderRel, IEnumerable<string> files, IReadOnlyList<ModFile>? installed = null, bool duplicates = false)
-    {
-        Engine.CheckWritable();
-        var dir = Under(docs, folderRel);
-        var added = new List<string>();
-        var skipped = new List<string>();
-        foreach (var item in ModInstall.Inspect(files, installed ?? []))
-        {
-            if (!item.Ok) { skipped.Add($"{item.Name}: {item.Problems[0]}"); continue; }
-            if (item.SameAs is { } same && !duplicates) { skipped.Add($"{item.Name}: already installed as {same}"); continue; }
-            if (!SafeFileName(item.Name)) { skipped.Add($"{item.Name}: the name can't be used for a file"); continue; }
-            var into = dir;
-            var target = Mods.Free(Path.Combine(into, item.Name), Path.Combine(Mods.Disabled(docs), folderRel));
-            // (the game, a 32-bit program, does not read files past the old 260-character path limit)
-            if (target.Length >= MaxGamePath) { skipped.Add($"{item.Name}: the folder and name are too long for the game to read"); continue; }
-            Directory.CreateDirectory(into);
-            if (item.ZipEntry is { } entry)
-            {
-                using var zip = ZipFile.OpenRead(item.Source);
-                (zip.GetEntry(entry) ?? throw new SetupException("The zip changed while it was being added. Try adding it again.")).ExtractToFile(target);
-                // (checked again where it landed: the zip may have changed since it was inspected)
-                if (item.Kind == "package" && ModInstall.PackageProblems(target).FirstOrDefault() is { } late) { File.Delete(target); skipped.Add($"{item.Name}: {late}"); continue; }
-            }
-            else File.Copy(item.Source, target);
-            added.Add(target);
-        }
-        return new AddResult(added, skipped);
-    }
-
     // a folder name from a display name: its letters, digits and spaces, at most 60 characters; null when nothing is left
     static string? SafeFolder(string name)
     {
@@ -62,7 +26,8 @@ public static partial class ModLibrary
         return s.Length == 0 ? null : s.Length > 60 ? s[..60].Trim() : s;
     }
 
-    static bool SafeFileName(string n) => n.Length is > 0 and < 200 && n.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && n is not ("." or "..");
+    internal static bool SafeFileName(string n) => n.Length is > 0 and < 200 && n.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && n is not ("." or "..")
+        && !ReservedName(n);
 
     // packages that are the same file twice (equal size, then equal SHA-256), each pointing at the other copy's path;
     // shortcut: files over 512 MB are not hashed (rare, slow to read), upgrade if players report duplicates that big
@@ -127,6 +92,14 @@ public static class ModViewPrefs
         d["sort"] = p.Sort.ToString();
         d["collapsed"] = string.Join(",", p.Collapsed);
         Write(d);
+    }
+
+    // newer versions of merged mods the player put off ("Later"), by file: one that changes again is offered again
+    public static string LaterKey(ModFile m) { var f = new FileInfo(m.Path); return $"{m.Rel}*{(f.Exists ? f.Length : 0)}*{(f.Exists ? f.LastWriteTimeUtc.Ticks : 0)}"; }
+    public static List<string> MergeLater
+    {
+        get => (Read().GetValueOrDefault("mergelater") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries).ToList();
+        set { var d = Read(); d["mergelater"] = string.Join("|", value.Distinct(StringComparer.OrdinalIgnoreCase).TakeLast(500)); Write(d); }
     }
 
     // the end of the last game session: mods newer than it are "new since last play"

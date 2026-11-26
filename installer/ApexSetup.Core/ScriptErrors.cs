@@ -34,7 +34,9 @@ public static partial class ScriptErrors
     // namespaces of the game, the runtime and Mono: a frame there is nobody's mod
     static readonly Regex GameType = new(@"^(Sims3\.(Gameplay|SimIFace|UI|Metadata|Store)|ScriptCore|System|Mono|Microsoft|MonoPatcherLib)\b");
     static readonly Regex ExceptionLine = new(@"^\s*([A-Za-z_][\w.]*(Exception|Error)):\s?(.*)$", RegexOptions.Multiline);
-    static readonly Regex Frame = new(@"^#\d+:\s+0x[0-9a-fA-F]+\s+\S+\s+in\s+([^\s:(]+):", RegexOptions.Multiline);
+    static readonly Regex Frame = new(@"^#\d+:\s+0x[0-9a-fA-F]+\s+\S+\s+in\s+([^\s:(]+):([^\s(]+)", RegexOptions.Multiline);
+    static readonly Regex Runtime = new(@"^(System|Mono)\b");
+    const int Near = 3;                       // game frames a mod's call may be above a throw and still count as its cause (unverified cut)
 
     // the logs written since `since` (default: the last week), mapped to the player's mods (null: the Mods folder's packages).
     // The crash logs go back a week at least: a game session ends at its crash, so "since the last start" never holds two,
@@ -55,7 +57,8 @@ public static partial class ScriptErrors
         {
             var all = new DirectoryInfo(docs).EnumerateFiles().Where(f => IsLog(f.Name) && f.LastWriteTime >= (IsCrash(f.Name) ? crashFrom : from)).OrderByDescending(f => f.LastWriteTime).ToList();
             var crashes = all.Where(f => IsCrash(f.Name)).ToList();
-            var scripts = all.Where(f => !IsCrash(f.Name)).ToList();
+            // (a removed mod's own logs are not read, so they never fill the cap)
+            var scripts = all.Where(f => !IsCrash(f.Name) && (mods is null || Writer(f.Name) is not { } w || Installed(mods, w))).ToList();
             unread = Math.Max(0, scripts.Count - MaxFiles);
             logs = crashes.Concat(scripts.Take(MaxFiles)).ToList();
         }
@@ -75,17 +78,34 @@ public static partial class ScriptErrors
         }
         // script errors of a mod no longer installed (no file or folder of that name among the mods) are nothing to act on:
         // its old logs drop out. Crashes always stay (one in d3d9.dll is the renderer's, not a mod's).
-        if (mods is not null)
-        {
-            bool Installed(string mod) => mods.Any(m => Path.GetFileNameWithoutExtension(m.Name).StartsWith(mod, StringComparison.OrdinalIgnoreCase)
-                || m.Rel.Split(Path.DirectorySeparatorChar).Any(part => part.Equals(mod, StringComparison.OrdinalIgnoreCase)));
-            errors = errors.Where(e => e.Crash || e.Mod is not { } name || Installed(name)).ToList();
-        }
+        if (mods is not null) errors = errors.Where(e => e.Crash || e.Mod is not { } name || Installed(mods, name)).ToList();
         var byMod = errors.GroupBy(e => (Mod: e.Mod ?? "", e.Earlier, e.Why)).Select(g => new ModErrors(g.Key.Mod == "" ? null : g.Key.Mod, g.SelectMany(e => e.Files).Distinct().ToList(), g.Count(),
                 g.Count(e => e.Crash), g.Max(e => e.When), g.GroupBy(e => e.Exception).OrderByDescending(x => x.Count()).First().Key, g.Key.Earlier, g.Key.Why))
             .OrderByDescending(m => m.Newest).ThenByDescending(m => m.Count).ToList();
         return new(from, errors.OrderByDescending(e => e.When).ToList(), byMod, unread);
     }
+
+    // from when Health counts script errors: the last game start, at most a week back (a game started without the launcher
+    // records no start, so the last recorded one can be long ago). It only moves forward.
+    public static DateTime Since() => DateTime.Now.AddDays(-7) is var week && SessionHistory.List().FirstOrDefault()?.Started is { } s && s > week ? s : week;
+
+    // the script error logs Health no longer reads (a crash log is never one: the Stability timeline goes by them)
+    public static List<string> OldLogs(string docs)
+    {
+        try
+        {
+            var since = Since();
+            return new DirectoryInfo(docs).EnumerateFiles().Where(f => IsLog(f.Name) && !IsCrash(f.Name) && f.LastWriteTime < since).Select(f => f.FullName).ToList();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    static bool Installed(IReadOnlyList<ModFile> mods, string mod) => mods.Any(m => Path.GetFileNameWithoutExtension(m.Name).StartsWith(mod, StringComparison.OrdinalIgnoreCase)
+        || m.Rel.Split(Path.DirectorySeparatorChar).Any(part => part.Equals(mod, StringComparison.OrdinalIgnoreCase)));
+
+    // a mod's own log (<Mod>_Error_...) names the mod that wrote it; ErrorTrap's names nobody
+    static string? Writer(string log) => log.StartsWith("ScriptError_", StringComparison.OrdinalIgnoreCase) || IsCrash(log) ? null
+        : log[..log.IndexOf("_Error_", StringComparison.OrdinalIgnoreCase)];
 
     static bool IsCrash(string name) => name.StartsWith("xcpt ", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase);
 
@@ -96,19 +116,27 @@ public static partial class ScriptErrors
 
     static IEnumerable<Error> Script(string text, FileInfo f, Func<string, (string Mod, string File)?> map)
     {
-        // a mod's own log (<Mod>_Error_...) names the mod that wrote it; ErrorTrap's names nobody
-        var writer = f.Name.StartsWith("ScriptError_", StringComparison.OrdinalIgnoreCase) ? null : f.Name[..f.Name.IndexOf("_Error_", StringComparison.OrdinalIgnoreCase)];
+        var writer = Writer(f.Name);
         var starts = ExceptionLine.Matches(text).ToList();
         for (var i = 0; i < starts.Count; i++)
         {
             var end = i + 1 < starts.Count ? starts[i + 1].Index : text.Length;
-            string? mod = null, file = null, guess = null;
-            // the frame closest to the throw that is a player's mod; else the first one outside the game's namespaces
+            string? mod = null, file = null, guess = null, below = null;
+            var game = 0;
+            // The mod the throw is in, or the one that called the game code that threw, at most Near frames up. A mod further
+            // down the stack only started the Sim's action, and a hook that runs the game's own method (Run over RunOrig, or an
+            // override over its base) passes the call on: neither is the cause.
             foreach (Match m in Frame.Matches(text[starts[i].Index..end]))
             {
-                var type = m.Groups[1].Value;
-                if (map(type) is { } hit) { (mod, file) = hit; break; }
-                if (guess is null && !GameType.IsMatch(Dedupe(type))) guess = Dedupe(type).Split('.')[0];
+                var (type, method) = (m.Groups[1].Value, m.Groups[2].Value);
+                if (Runtime.IsMatch(type)) continue;
+                if (below is null || below != method && below != method + "Orig")
+                {
+                    if (map(type) is { } hit) { (mod, file) = hit; break; }
+                    if (!GameType.IsMatch(Dedupe(type))) { guess = Dedupe(type).Split('.')[0]; break; }
+                }
+                if (++game > Near) break;
+                below = method;
             }
             yield return new(f.LastWriteTime, mod ?? writer ?? guess, file is null ? [] : [file], starts[i].Groups[1].Value, false, f.FullName);
         }
@@ -130,7 +158,7 @@ public static partial class ScriptErrors
     {
         try
         {
-            var path = Path.Combine(docs, "Apex Radiance", "ApexRadiance_Crash.txt");
+            var path = Path.Combine(Scan.ApexDir(docs), "ApexRadiance_Crash.txt");
             if (!File.Exists(path)) return null;
             var text = File.ReadAllText(path);
             var when = Regex.Match(text, @"crash report, (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)");
@@ -228,10 +256,8 @@ public static partial class ScriptErrors
         {
             types ??= TypeMap(mods?.Where(m => m.Enabled && m.Path.EndsWith(".package", StringComparison.OrdinalIgnoreCase)).Select(m => m.Path)
                               ?? (Directory.Exists(Path.Combine(docs, "Mods")) ? Directory.EnumerateFiles(Path.Combine(docs, "Mods"), "*.package", SearchOption.AllDirectories) : []));
-            // the whole name, then each shorter suffix (Mono's doubled namespace)
-            for (var i = -1; i < t.Length; i = t.IndexOf('.', i + 1) is var n and >= 0 ? n : t.Length)
-                if (types.TryGetValue(t[(i + 1)..], out var file)) return (Path.GetFileNameWithoutExtension(file), file);
-            return null;
+            // (the whole name, then without Mono's doubled namespace; never a shorter suffix, which is another type's name)
+            return types.TryGetValue(t, out var file) || types.TryGetValue(Dedupe(t), out file) ? (Path.GetFileNameWithoutExtension(file), file) : null;
         };
     }
 
@@ -287,7 +313,7 @@ public static partial class ScriptErrors
                     using var pe = new PEReader(ImmutableArray.Create(img));
                     if (pe.HasMetadata) list.Add(read(pe.GetMetadataReader()));
                 }
-                catch (Exception x) when (x is BadImageFormatException or InvalidDataException or IndexOutOfRangeException or ArgumentException or InvalidOperationException) { }
+                catch (Exception x) when (x is BadImageFormatException or InvalidDataException or IndexOutOfRangeException or ArgumentException or InvalidOperationException or OverflowException or InvalidCastException) { }
         }
         catch (Exception e) when (e is InvalidDataException or IOException or ArgumentException or IndexOutOfRangeException) { }
         return list;
@@ -300,23 +326,24 @@ public static partial class ScriptErrors
         var f = new List<ModFinding>();
         foreach (var m in r.ByMod.Take(8))
         {
-            var sev = m.Count - m.Crashes >= 5 ? Severity.Warning : Severity.Info; // (unverified cut: one stray error is common with ErrorTrap)
+            // (unverified cut: one stray error is common with ErrorTrap. Errors no mod is behind ask nothing of the player)
+            var sev = m.Mod is not null && m.Count - m.Crashes >= 5 ? Severity.Warning : Severity.Info;
             // the game crashes now and then without any mod: one or two in a place is a note, three a pattern worth a look
             if (m.Crashes > 0 && m.Why == "memory")
             {
                 // (the memory was nearly full: no file is blamed for where the allocation happened to fail)
                 var full = r.Errors.Where(e => e.Crash && e.Why == "memory").Max(e => e.When).ToString("g");
                 f.Add(new(new(m.Crashes >= 2 ? Severity.Warning : Severity.Info, m.Crashes == 1
-                        ? "The game crashed once with its memory nearly full (peak {1} MB of 4096), on {2}. Fewer mods, less CC or a smaller world lowers it."
-                        : "The game crashed {0} times with its memory nearly full (peak {1} MB of 4096), last on {2}. Fewer mods, less CC or a smaller world lowers it.",
+                        ? "The game crashed once with its memory nearly full (peak {1} MB of 4096), on {2}. Fewer mods, less custom content or a smaller world help."
+                        : "The game crashed {0} times with its memory nearly full (peak {1} MB of 4096), last on {2}. Fewer mods, less custom content or a smaller world help.",
                     [m.Crashes.ToString(), m.Exception, full]), m.Files));
             }
             else if (m.Crashes > 0 && m.Earlier)
             {
                 // (crashes in a file updated since: a note, never a pattern; nothing has crashed there since the update)
                 var before = r.Errors.Where(e => e.Crash && e.Earlier && e.Mod == m.Mod && e.Why == m.Why).Max(e => e.When).ToString("g");
-                f.Add(new(new(Severity.Info, m.Crashes == 1 ? "{1} crashed the game once on {2}, before it was updated. No crash in it since."
-                        : "{1} crashed the game {0} times before it was updated, last on {2}. No crash in it since.",
+                f.Add(new(new(Severity.Info, m.Crashes == 1 ? "{1} crashed the game once on {2}, before it was updated. It has not crashed since."
+                        : "{1} crashed the game {0} times before it was updated, last on {2}. It has not crashed since.",
                     [m.Crashes.ToString(), m.Mod!, before]), m.Files));
             }
             else if (m.Crashes > 0 && m.Why == "called" && m.Mod is not null)
@@ -325,7 +352,7 @@ public static partial class ScriptErrors
                 var last = r.Errors.Where(e => e.Crash && !e.Earlier && e.Mod == m.Mod && e.Why == m.Why).Max(e => e.When).ToString("g");
                 f.Add(new(new(m.Crashes >= CrashPattern ? Severity.Warning : Severity.Info, m.Crashes == 1
                         ? "The game crashed once in a call {1} made into {3}, on {2}."
-                        : "{1} crashed the game {0} times in calls it made into {3}. This past week, last on {2}.",
+                        : "{1} crashed the game {0} times in the past week, in calls to {3}. The last one was on {2}.",
                     [m.Crashes.ToString(), m.Mod, last, m.Exception]), m.Files));
             }
             else if (m.Crashes > 0)
@@ -333,14 +360,14 @@ public static partial class ScriptErrors
                 var last = r.Errors.Where(e => e.Crash && !e.Earlier && e.Mod == m.Mod && e.Why == m.Why).Max(e => e.When).ToString("g");
                 f.Add(new(new(m.Crashes >= CrashPattern ? Severity.Warning : Severity.Info, m.Crashes == 1
                         ? m.Mod is null ? "The game crashed once in its own code, on {1}." : "The game crashed once in {1}, on {2}."
-                        : m.Mod is null ? "The game crashed {0} times in its own code. This past week, last on {1}." : "{1} crashed the game {0} times. This past week, last on {2}.",
+                        : m.Mod is null ? "The game crashed {0} times in its own code in the past week. The last one was on {1}." : "{1} crashed the game {0} times in the past week. The last one was on {2}.",
                     m.Mod is null ? [m.Crashes.ToString(), last] : [m.Crashes.ToString(), m.Mod, last]), m.Files));
             }
             if (m.Count - m.Crashes is var n and > 0)
                 f.Add(new(new(sev, r.Unread > 0
-                        ? m.Mod is null ? "At least {0} script errors in the game's own code since {1} ({2})." : "At least {0} script errors went through {1} since {2} ({3}). If it misbehaves, update or remove it."
-                        : m.Mod is null ? "{0} script errors in the game's own code since {1} ({2})." : "{0} script errors involved {1} since {2} ({3}). If it causes problems, update or remove it.",
-                    m.Mod is null ? [n.ToString(), r.Since.ToString("g"), m.Exception] : [n.ToString(), m.Mod, r.Since.ToString("g"), m.Exception]), m.Files));
+                        ? m.Mod is null ? "Script errors in the game's own code: at least {0} since {1}. No mod appears as the cause." : "Script errors in {1}: at least {0} since {2}. If it causes problems, update it or turn it off."
+                        : m.Mod is null ? "Script errors in the game's own code: {0} since {1}. No mod appears as the cause." : "Script errors in {1}: {0} since {2}. If it causes problems, update it or turn it off.",
+                    m.Mod is null ? [n.ToString(), r.Since.ToString("d")] : [n.ToString(), m.Mod, r.Since.ToString("d")]), m.Files));
         }
         return f;
     }

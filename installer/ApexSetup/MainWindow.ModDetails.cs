@@ -7,140 +7,123 @@ using static ApexSetup.Strings;
 
 namespace ApexSetup;
 
-// One mod's details: a picture strip with its name, badges and switch; tabs that only show when they hold something
-// (Inside for what it holds or a merge's mods, Replaces for a default replacement, Problems when something needs a look,
-// Notes); facts as tiles; and one main action for the case with icon buttons beside it.
+// One mod's details: a head with its picture, name, badges and switch; tabs that only show when they hold something
+// (Mods for a merge's mods, see MainWindow.MergePanel.cs, Content for what a package holds, Conflicts for the mods that share its game data, Replaces
+// for a default replacement, Problems when something needs a look, Notes); facts as tiles; and one main action for the
+// case with icon buttons beside it.
 public sealed partial class MainWindow
 {
     string _detailsTab = "overview";
     string? _detailsFor;
-    static readonly string[] MergeColors = ["#6CB2EA", "#B598F6", "#93D27C", "#F2B25C", "#F08FC4", "#62CBDD", "#E8C466", "#EF9872"];
 
     void FillOneModDetails(ModRow r)
     {
         var m = r.File;
         var mine = Mine(r);
-        if (_detailsFor != m.Rel) { _detailsFor = m.Rel; _detailsTab = "overview"; }
         var merge = m.FileType == "package" ? ModMerge.Info(m) : null;
+        if (_detailsFor != m.Rel) { _detailsFor = m.Rel; _detailsTab = merge is not null ? "inside" : "overview"; _mergeInner = null; }
+        if (merge is not null)
+        {
+            DraftFor(r, merge);
+            if (merge.Originals.FirstOrDefault(o => o.Rel.Equals(_mergeInner, StringComparison.OrdinalIgnoreCase)) is { } inner) { FillInnerDetails(r, merge, inner, mine); return; }
+            _mergeInner = null;
+        }
 
         // what needs a look
         var problems = new List<(string Title, string? Text, string? Action, Action? Run)>();
         if (m.Enabled && !Loaded(m))
             problems.Add((T("The game does not load this folder"), T("Mods\\Resource.cfg doesn't list this folder, so the game skips this mod. Move it into Packages, or a folder inside it."), null, null));
-        if (r.DuplicateOf is { } dup) problems.Add((T("Same as {0}", dup), T("The same file is in two places. Keep the newer one and remove the other."), null, null));
+        if (r.DuplicateOf is { } dup) problems.Add((T("Same as {0}", dup), T("The same file is in two places. Keep one and remove the other."), null, null));
         foreach (var f in r.Findings) problems.Add((f, null, T("See in Health"), () => Show(HealthScreen)));
 
         var tabs = new List<(string Key, string Label)> { ("overview", T("Overview")) };
-        if (merge is not null) tabs.Add(("inside", T("Inside ({0})", merge.Originals.Count)));
-        else if (m.FileType == "package") tabs.Add(("inside", T("Inside")));
+        if (merge is not null) tabs.Insert(0, ("inside", T("Mods ({0})", merge.Originals.Count)));
+        else if (m.FileType == "package") tabs.Add(("content", T("Content")));
+        if (merge is null && m.Enabled && (m.FileType == "package" || ModInspect.OnlyInHealth(_conflicts?.Found ?? [], m, _mods).Count > 0)) tabs.Add(("conflicts", T("Conflicts")));
         if (r.Defaults.IsDefault && _gameIndex is not null) tabs.Add(("replaces", T("Replaces")));
         if (problems.Count > 0) tabs.Add(("problems", T("Problems ({0})", problems.Count)));
         if (mine) tabs.Add(("notes", T("Notes")));
         if (!tabs.Any(t => t.Key == _detailsTab)) _detailsTab = "overview";
 
-        ModDetailsHead.Children.Add(DetailsStrip(r, merge, problems.Count > 0, mine));
-        if (tabs.Count > 1)
-        {
-            var bar = new SelectorBar { Margin = new Thickness(12, 0, 12, 0) };
-            foreach (var (key, label) in tabs) bar.Items.Add(new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab });
-            bar.SelectionChanged += (s, _) => { if (s.SelectedItem?.Tag is string k && k != _detailsTab) { _detailsTab = k; DispatcherQueue.TryEnqueue(FillModDetails); } }; // (later: the fill removes this bar)
-            ModDetailsHead.Children.Add(bar);
-            ModDetailsHead.Children.Add(new Border { Height = 1, Background = Res("ApexCardBorderBrush") });
-        }
+        ModDetailsHead.Children.Add(DetailsHead(r, merge, problems.Count > 0, mine));
+        if (tabs.Count > 1) DetailsTabs(tabs, m);
+        else ModDetailsHead.Children.Add(new Border { Height = 1, Margin = new Thickness(0, 8, 0, 0), Background = Res("ApexCardBorderBrush") });
 
         var host = ModDetails;
         switch (_detailsTab)
         {
-            case "inside": host.Children.Add(merge is not null ? MergeCards(r, merge) : InsidePanel(r)); break;
+            case "inside": host.Children.Add(MergeTab(r, merge!, mine)); break;
+            case "content": host.Children.Add(ContentTab(m.Path)); break;
+            case "conflicts": host.Children.Add(ConflictsTab(m)); break;
             case "replaces": host.Children.Add(ReplacesTab(r)); break;
             case "problems": foreach (var p in problems) host.Children.Add(Warn(p.Title, p.Text, p.Action, p.Run)); break;
-            case "notes": host.Children.Add(NotesBox(r, 200)); break;
+            case "notes": host.Children.Add(NotesBox(ModNotes.Get(m.Rel)?.Notes, 200, text => { ModNotes.SetNotes(r.File.Rel, text); r.Refresh(); })); break;
             default: Overview(r, merge, mine); break;
         }
         DetailsFoot(r, merge, mine);
     }
 
-    // ---------- the strip ----------
+    // (count: the mod whose conflicts the Conflicts tab counts)
+    void DetailsTabs(List<(string Key, string Label)> tabs, ModFile? count)
+    {
+        var bar = new SelectorBar();
+        var side = tabs.Count > 4 ? 6 : 8; // (five tabs, as a default replacement has, still fit the pane)
+        foreach (var (key, label) in tabs)
+        {
+            var tab = new SelectorBarItem { Text = label, Tag = key, IsSelected = key == _detailsTab, FontSize = 14, Padding = new Thickness(side, 10, side, 10) };
+            bar.Items.Add(tab);
+            if (key == "conflicts" && count is not null) _ = CountConflictsAsync(count, bar, tab);
+        }
+        bar.SelectionChanged += (s, _) => { if (s.SelectedItem?.Tag is string k && k != _detailsTab) { _detailsTab = k; DispatcherQueue.TryEnqueue(FillModDetails); } }; // (later: the fill removes this bar)
+        // (more tabs than fit in a long language: the row scrolls to the open one)
+        bar.Loaded += (_, _) => bar.SelectedItem?.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
+        ModDetailsHead.Children.Add(Design.Parts.Sideways(new ScrollViewer { Content = bar, Margin = new Thickness(20 - side, 0, 20 - side, 0), HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled }));
+        ModDetailsHead.Children.Add(new Border { Height = 1, Background = Res("ApexCardBorderBrush") });
+    }
 
-    UIElement DetailsStrip(ModRow r, MergeRecord? merge, bool problem, bool mine)
+    // ---------- the head ----------
+
+    UIElement DetailsHead(ModRow r, MergeRecord? merge, bool problem, bool mine)
     {
         var m = r.File;
-        var g = new Grid { Height = 176, Background = Res("ApexPillBrush") };
-        g.Children.Add(new Border { Background = r.TileBrush });
-        var placeholder = Lucide.Icon(merge is not null ? "merge" : r.KindIcon, 48, r.GlyphBrush, 1.4);
-        placeholder.HorizontalAlignment = HorizontalAlignment.Center;
-        placeholder.VerticalAlignment = VerticalAlignment.Center;
-        placeholder.Margin = new Thickness(0, 0, 0, 24);
-        g.Children.Add(placeholder);
-        // (the player's own picture fills the strip; a package's small thumbnail shows at twice its size)
-        if (r.Image is { } img)
-            g.Children.Add(ModNotes.PicturePath(m.Rel) is not null
-                ? new Image { Source = img, Stretch = Stretch.UniformToFill }
-                : new Image { Source = img, Stretch = Stretch.Uniform, MaxWidth = 112, MaxHeight = 112, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 24) });
-
-        // badges: what kind of thing this is, at a glance
-        // (wrapping before the corner buttons: two badges on a narrow panel take two lines, never run under them)
-        var badges = new WrapPanel { Spacing = 6, Margin = new Thickness(12, 12, mine || _modsNarrow ? 96 : 12, 12), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
-        if (merge is not null) badges.Children.Add(StripBadge(T("Merged · {0} mods", merge.Originals.Count), "merge", "#CECBF6"));
-        if (r.Defaults.IsDefault) badges.Children.Add(StripBadge(T("Default replacement"), "replace", "#9CC7EE"));
-        if (problem) badges.Children.Add(StripBadge(T("Needs a look"), "triangle-alert", "#E0A84F"));
-        if (m.Locked) badges.Children.Add(m.FileType switch
-        {
-            "asi" => StripBadge(T("In the game folder"), "plug", "#CECBF6"),
-            _ => StripBadge(T("Installed by Apex Launcher"), "lock", "#CECBF6"),
-        });
-        g.Children.Add(badges);
-        // (badges on two lines push the centre picture down, clear of them)
-        if (badges.Children.Count > 1) placeholder.Margin = new Thickness(0, 52, 0, 20);
-
-        var corner = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(12), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top };
+        var own = ModNotes.PicturePath(m.Rel) is not null;
+        // the picture, and the button that changes it
+        FrameworkElement tile = PictureTile(r, merge is not null ? "merge" : r.KindIcon, own);
+        // (the player's own picture shows whole under the pointer: the banner cuts it to its shape)
+        if (own && r.Image is { } whole) ToolTipService.SetToolTip(tile, new ToolTip { Content = new Image { Source = whole, MaxWidth = 300, MaxHeight = 300 } });
+        Button? change = null;
         if (mine)
         {
-            var own = ModNotes.PicturePath(m.Rel) is not null;
-            var pic = StripButton("image-plus", own ? T("Change picture") : T("Add picture"));
+            var label = own ? T("Change picture") : T("Add picture");
+            change = IconButton("image-plus", label);
             var menu = new MenuFlyout();
-            menu.Items.Add(MenuItem(own ? T("Change picture") : T("Add picture"), async () =>
+            menu.Items.Add(MenuItem(label, async () =>
             {
                 var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
                 foreach (var x in new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif" }) picker.FileTypeFilter.Add(x);
                 if (await picker.PickSingleFileAsync() is { } file) SetPicture(r, file.Path);
-            }));
-            if (own) menu.Items.Add(MenuItem(T("Remove picture"), () => SetPicture(r, null)));
-            pic.Click += (_, _) => menu.ShowAt(pic);
-            corner.Children.Add(pic);
+            }, "image-plus"));
+            if (own) menu.Items.Add(MenuItem(T("Remove picture"), () => SetPicture(r, null), "trash-2"));
+            change.Click += (_, _) => menu.ShowAt(change);
         }
-        if (_modsNarrow)
-        {
-            var close = StripButton("x", T("Close"));
-            close.Click += (_, _) => CloseModDetails();
-            corner.Children.Add(close);
-        }
-        g.Children.Add(corner);
 
-        // the name over the strip's foot, with its switch
-        var foot = new Grid { VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(20, 36, 16, 12), ColumnSpacing = 10 };
-        foot.Background = new LinearGradientBrush
-        {
-            StartPoint = new Windows.Foundation.Point(0, 1), EndPoint = new Windows.Foundation.Point(0, 0),
-            GradientStops = { new GradientStop { Color = Pick(0xFF101010, 0xFFFFFFFF), Offset = 0 }, new GradientStop { Color = Pick(0x00101010, 0x00FFFFFF), Offset = 1 } },
-        };
-        foot.ColumnDefinitions.Add(new ColumnDefinition());
-        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var names = new StackPanel { Spacing = 2 };
-        var nameRow = new Grid { ColumnSpacing = 2 };
-        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+        var name = merge is not null ? _draft?.Name ?? r.Name : r.Name;
+        // (as wide as the name: the pencil stands beside it)
+        var nameRow = new Grid { ColumnSpacing = 4, HorizontalAlignment = HorizontalAlignment.Left };
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var nameText = new TextBlock { Text = r.Name, FontSize = 18, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-        ToolTipService.SetToolTip(nameText, m.Name);
+        var nameText = NameText(name, m.Name);
         nameRow.Children.Add(nameText);
         if (mine)
         {
             var rename = IconButton("pencil", T("Rename"));
             rename.Width = rename.Height = 28;
+            rename.VerticalAlignment = VerticalAlignment.Top;
             rename.Click += (_, _) =>
             {
-                var box = new TextBox { Text = r.Name, FontSize = 15 };
+                var box = new TextBox { Text = name, FontSize = 14, MinWidth = 0, Height = 36, Padding = new Thickness(12, 8, 12, 8) };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, T("New name"));
+                (nameRow.HorizontalAlignment, nameRow.ColumnSpacing) = (HorizontalAlignment.Stretch, 0);
                 nameRow.Children.Remove(nameText);
                 nameRow.Children.Insert(0, box);
                 rename.Visibility = Visibility.Collapsed;
@@ -150,8 +133,9 @@ public sealed partial class MainWindow
                 {
                     if (done) return;
                     done = true;
-                    if (save && box.Text.Trim() is { Length: > 0 } n && n != r.Name) RenameMod(r, n);
-                    else FillModDetails();
+                    if (!save || box.Text.Trim() is not { Length: > 0 } n || n == name) FillModDetails();
+                    else if (merge is not null) RenameMerge(r, n); // (with the merge's other changes, when they are saved)
+                    else RenameMod(r, n);
                 }
                 box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; End(true); } else if (e.Key == Windows.System.VirtualKey.Escape) { e.Handled = true; End(false); } };
                 box.LostFocus += (_, _) => End(OnScreen(box));
@@ -159,42 +143,66 @@ public sealed partial class MainWindow
             Grid.SetColumn(rename, 1);
             nameRow.Children.Add(rename);
         }
-        names.Children.Add(nameRow);
-        names.Children.Add(new TextBlock
+
+        // badges: what kind of thing this is, at a glance
+        var badges = new List<Border>();
+        if (r.Defaults.IsDefault) badges.Add(StripBadge(T("Default replacement"), "replace", "#9CC7EE"));
+        if (problem) badges.Add(StripBadge(T("Needs a look"), "triangle-alert", "#E0A84F"));
+        if (m.Locked) badges.Add(m.FileType switch
         {
-            Text = string.Join(" · ", new[] { r.Kinds.Count > 0 ? KindLabel(r.Kinds[0]) : null, r.Size, m.Enabled || m.Locked ? null : T("Off") }.OfType<string>()),
-            FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextTrimming = TextTrimming.CharacterEllipsis,
+            "asi" => StripBadge(T("In the game folder"), "plug", "#CECBF6"),
+            _ => StripBadge(T("Installed by Apex Launcher"), "lock", "#CECBF6"),
         });
-        foot.Children.Add(names);
-        if (!m.Locked)
+        var sub = string.Join(" · ", new[] { merge is not null ? T("Merged · {0} mods", merge.Originals.Count) : r.Kind, m.Enabled || m.Locked ? null : T("Off") }.OfType<string>());
+        return HeadPanel(null, tile, change, nameRow, sub, badges);
+    }
+
+    static TextBlock NameText(string name, string tip)
+    {
+        var t = new TextBlock { Text = name, FontSize = 20, LineHeight = 28, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(t, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
+        ToolTipService.SetToolTip(t, tip);
+        return t;
+    }
+
+    // (the player's own picture fills the banner, a package's small thumbnail stands whole in its middle)
+    static FrameworkElement PictureTile(ModRow r, string icon, bool own)
+    {
+        if (r.Image is { } img) return new Image { Source = img, Stretch = own ? Stretch.UniformToFill : Stretch.Uniform, MaxHeight = own ? double.PositiveInfinity : 104, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var glyph = Lucide.Icon(icon, 40, Res("ApexMutedBrush"), 1.5);
+        (glyph.HorizontalAlignment, glyph.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center);
+        return glyph;
+    }
+
+    // the head of a mod's details: its picture as a banner with what closes the pane and what changes the picture in its corners,
+    // then the name, what it is, and its badges
+    UIElement HeadPanel(UIElement? above, FrameworkElement tile, Button? change, UIElement name, string sub, List<Border> badges, string? closeTip = null)
+    {
+        var panel = new StackPanel { Spacing = Design.Space.X4, Padding = new Thickness(20, 20, 20, closeTip is null ? 12 : 20) };
+        if (above is not null) panel.Children.Add(above);
+        var banner = new Grid { Height = 136, CornerRadius = new CornerRadius(Design.Radius.Card), Background = Res("ApexTileBrush") };
+        tile.HorizontalAlignment = HorizontalAlignment.Center;
+        tile.VerticalAlignment = VerticalAlignment.Center;
+        banner.Children.Add(tile);
+        var close = IconButton("x", closeTip ?? T("Close"));
+        close.Click += (_, _) => CloseModDetails();
+        banner.Children.Add(Design.Parts.OverPicture(close, VerticalAlignment.Top));
+        if (change is not null) banner.Children.Add(Design.Parts.OverPicture(change, VerticalAlignment.Bottom));
+        panel.Children.Add(banner);
+        var names = new StackPanel { Spacing = Design.Space.TitleToSub };
+        names.Children.Add(name);
+        names.Children.Add(new TextBlock { Text = sub, FontSize = 14, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(names);
+        if (badges.Count > 0)
         {
-            var sw = new ToggleSwitch { IsOn = m.Enabled, OnContent = "", OffContent = "", MinWidth = 0, VerticalAlignment = VerticalAlignment.Bottom };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(sw, m.Enabled ? T("Turn off") : T("Turn on"));
-            sw.Toggled += (_, _) => { if (sw.IsOn != r.File.Enabled) SetMods([r], sw.IsOn); };
-            Grid.SetColumn(sw, 1);
-            foot.Children.Add(sw);
+            var wrap = new WrapPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
+            foreach (var b in badges) wrap.Children.Add(b);
+            panel.Children.Add(wrap);
         }
-        g.Children.Add(foot);
-        return g;
+        return panel;
     }
 
-    static Border StripBadge(string text, string icon, string color)
-    {
-        var brush = TagDot.BrushOf(color);
-        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        s.Children.Add(Lucide.Icon(icon, 12, brush, 2.2));
-        s.Children.Add(new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = brush, VerticalAlignment = VerticalAlignment.Center });
-        return new Border { Child = s, Height = 26, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(13), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 11, 12, 14)) };
-    }
-
-    static Button StripButton(string icon, string tip)
-    {
-        var b = new Button { Content = Lucide.Icon(icon, 15, Res("ApexSoftTextBrush")), Width = 32, Height = 32, Padding = new Thickness(0), CornerRadius = new CornerRadius(8),
-            Background = new SolidColorBrush(Pick(0x990B0C0E, 0xCCFFFFFF)), BorderThickness = new Thickness(0) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
-        ToolTipService.SetToolTip(b, tip);
-        return b;
-    }
+    static Border StripBadge(string text, string icon, string color) => Design.Parts.Chip(icon, text, warn: color == "#E0A84F");
 
     // ---------- Overview ----------
 
@@ -202,63 +210,42 @@ public sealed partial class MainWindow
     {
         var m = r.File;
         var host = ModDetails;
-        var tiles = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
-        tiles.ColumnDefinitions.Add(new ColumnDefinition());
-        tiles.ColumnDefinitions.Add(new ColumnDefinition());
-        void Tile(int i, string label, FrameworkElement value)
-        {
-            if (i % 2 == 0) tiles.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var s = new StackPanel { Spacing = 3 };
-            s.Children.Add(new TextBlock { Text = label, FontSize = 11, Foreground = Res("ApexMutedBrush") });
-            s.Children.Add(value);
-            var b = new Border { Child = s, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(10), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
-            Grid.SetRow(b, i / 2);
-            Grid.SetColumn(b, i % 2);
-            tiles.Children.Add(b);
-        }
-        TextBlock Big(string t, string? brush = null)
-        {
-            var b = new TextBlock { Text = t, FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
-            if (brush is not null) b.Foreground = Res(brush);
-            return b;
-        }
-        Tile(0, T("Size"), Big(r.Size));
-        Tile(1, T("Added"), Big(Added(m).ToString("d")));
         // the creator, written in place; the guess shows as the hint
         var (who, guessed) = ModCreators.Of(m, _modCreatorGuess);
-        var creator = new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), FontSize = 14, FontWeight = FontWeights.SemiBold, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0),
-            BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), IsReadOnly = !mine };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(creator, T("Creator"));
-        ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name. Type the maker's name to change it.") : T("The maker's name."));
-        creator.LostFocus += (_, _) =>
-        {
-            try { ModNotes.SetCreator(r.File.Rel, creator.Text); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
-        };
-        Tile(2, T("Creator"), creator);
-        Tile(3, merge is not null ? T("Made from") : T("State"),
-            merge is not null ? Big(T("{0} mods", merge.Originals.Count))
-            : Big(!m.Locked ? (m.Enabled ? T("On") : T("Off")) : m.FileType switch { "asi" => T("Loaded"), _ => T("Managed") },
-                m.Enabled || m.Locked ? null : "ApexWarningBrush"));
+        var creator = CreatorBox(who, guessed, mine, name => ModNotes.SetCreator(r.File.Rel, name));
         if (m.Locked) host.Children.Add(Note("lock", "ApexMutedBrush", ModRow.LockText(m)));
-        host.Children.Add(tiles);
+        var place = new Grid { ColumnSpacing = 12, HorizontalAlignment = HorizontalAlignment.Right };
+        place.ColumnDefinitions.Add(new ColumnDefinition());
+        place.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var where = FactText(ModRow.Place(m));
+        ToolTipService.SetToolTip(where, ModRow.Place(m));
+        var file = FactText(m.Name);
+        ToolTipService.SetToolTip(file, m.Name);
+        place.Children.Add(where);
+        if (mine)
+        {
+            var move = new HyperlinkButton { Content = T("Move to…"), FontSize = 13, Padding = new Thickness(0) };
+            move.Click += (_, _) => MoveMenu([r]).ShowAt(move);
+            Grid.SetColumn(move, 1);
+            place.Children.Add(move);
+        }
+        host.Children.Add(Facts((T("Size"), FactText(r.Size)), (T("Added"), FactText(Day(Added(m)))), (T("Folder"), place), (T("File"), file), (T("Creator"), creator)));
+        if (merge is not null)
+        {
+            var notes = new StackPanel { Spacing = 10 };
+            notes.Children.Add(Note("lightbulb", "ApexAccentBrush", T("The game loads this as one file instead of {0}, so it starts faster. The {0} mods are kept as they were, and you can take any of them out.", merge.Originals.Count)));
+            notes.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked when it was made, on {0}: everything matches the originals.", Day(merge.Created.ToLocalTime()))));
+            host.Children.Add(PaneCard(notes, new Thickness(14, 12, 14, 13)));
+        }
         if (!m.Enabled && !m.Locked && HasItems(r))
             host.Children.Add(Warn(T("Off: saving now removes its items"), T("Lots and Sims that use its objects or outfits lose them the next time you save without it.")));
 
+        if (mine) host.Children.Add(LinkSection(r));
+
         // what it is
         var what = Section(T("What it is"), mine ? T("Change") : null, out var change);
-        var kinds = new WrapPanel { Spacing = 6 };
-        foreach (var k in r.Kinds.Take(8))
-        {
-            var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-            chip.Children.Add(Lucide.Icon(KindIcon(k), 12, Res("ApexMutedBrush")));
-            chip.Children.Add(new TextBlock { Text = KindLabel(k), FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
-            kinds.Children.Add(new Border { Child = chip, Height = 26, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(13), Background = Res("ApexPillBrush") });
-        }
-        if (ModNotes.Get(m.Rel)?.Kinds is not null)
-            kinds.Children.Add(new TextBlock { Text = T("Chosen by you"), FontSize = 11, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
         if (change is not null) change.Click += (_, _) => PickKinds(r, change);
-        what.Children.Add(kinds);
+        what.Children.Add(KindChips(r, ModNotes.Get(m.Rel)?.Kinds is not null));
         host.Children.Add(what);
 
         if (mine)
@@ -268,23 +255,68 @@ public sealed partial class MainWindow
             host.Children.Add(tags);
         }
 
-        // where it is, in full
-        var where = Section(T("Where"), mine ? T("Move…") : null, out var move);
-        if (move is not null) move.Click += (_, _) => MoveMenu([r]).ShowAt(move);
-        where.Children.Add(new TextBlock { Text = ModRow.Place(m) + " › " + m.Name, FontSize = 13, TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush") });
-        host.Children.Add(where);
+        host.Children.Add(Actions(CanOpenInS3pe(r) ? ActionRow("package", T("Open in s3pe"), null, () => Safe(OpenInS3peAsync(r))) : null,
+            ActionRow("folder-search", T("Show in Explorer"), null, () => ShowFile(r.File.Path))));
+    }
+
+    // what the pane's cards are made of: one surface, one corner
+    static Border PaneCard(UIElement child, Thickness padding = default) => Design.Parts.Card(child, padding);
+
+    // facts, one to a row: what it is on the left, the value on the right edge
+    static Border Facts(params (string Label, FrameworkElement Value)[] facts)
+    {
+        var rows = new StackPanel();
+        foreach (var (label, value) in facts)
+        {
+            var g = new Grid { ColumnSpacing = 12, MinHeight = 48, Padding = new Thickness(16, 0, 16, 0), BorderBrush = Res("ApexHairlineBrush"), BorderThickness = new Thickness(0, rows.Children.Count == 0 ? 0 : 1, 0, 0) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.Children.Add(new TextBlock { Text = label, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+            value.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(value, 1);
+            g.Children.Add(value);
+            rows.Children.Add(g);
+        }
+        return PaneCard(rows);
+    }
+
+    static TextBlock FactText(string t) => new() { Text = t, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right, TextTrimming = TextTrimming.CharacterEllipsis };
+
+    TextBox CreatorBox(string? who, bool guessed, bool mine, Action<string> save)
+    {
+        var creator = Design.Parts.QuietField(new TextBox { Text = guessed ? "" : who ?? "", PlaceholderText = who ?? T("Unknown"), TextAlignment = TextAlignment.Right,
+            Margin = new Thickness(0, 0, -8, 0) }, mine); // (its text stands on the other values' edge)
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(creator, T("Creator"));
+        ToolTipService.SetToolTip(creator, guessed ? T("Guessed from the file name. Type the creator's name to change it.") : T("The creator's name"));
+        creator.LostFocus += (_, _) =>
+        {
+            try { save(creator.Text); }
+            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("Nothing was changed"), ErrorText(e)); }
+        };
+        return creator;
+    }
+
+    static WrapPanel KindChips(ModRow r, bool chosen)
+    {
+        var kinds = new WrapPanel { Spacing = 8 };
+        foreach (var k in r.Kinds.Take(8))
+        {
+            kinds.Children.Add(Design.Parts.Chip(KindIcon(k), KindLabel(k)));
+        }
+        if (chosen) kinds.Children.Add(new TextBlock { Text = T("Chosen by you"), FontSize = 11, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+        return kinds;
     }
 
     // a small heading with an optional link on its right
     StackPanel Section(string title, string? link, out HyperlinkButton? linkButton)
     {
-        var s = new StackPanel { Spacing = 8 };
+        var s = new StackPanel { Spacing = 12 };
         var head = new Grid();
-        head.Children.Add(new TextBlock { Text = title, FontSize = 12, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+        head.Children.Add(Design.Parts.Heading(title));
         linkButton = null;
         if (link is not null)
         {
-            linkButton = new HyperlinkButton { Content = link, Padding = new Thickness(0), FontSize = 12, HorizontalAlignment = HorizontalAlignment.Right };
+            linkButton = new HyperlinkButton { Content = link, Padding = new Thickness(0), FontSize = 13, HorizontalAlignment = HorizontalAlignment.Right };
             head.Children.Add(linkButton);
         }
         s.Children.Add(head);
@@ -306,17 +338,18 @@ public sealed partial class MainWindow
         return g;
     }
 
-    TextBox NotesBox(ModRow r, double height)
+    TextBox NotesBox(string? text, double height, Action<string> save)
     {
-        var notes = new TextBox
+        var notes = Field(new TextBox
         {
-            Text = ModNotes.Get(r.File.Rel)?.Notes ?? "", PlaceholderText = T("Notes: where it came from, what it changes"), AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap, MinHeight = height,
-        };
+            Text = text ?? "", PlaceholderText = T("Notes: where it came from, what it changes"), AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap, MinHeight = height, CornerRadius = new CornerRadius(Design.Radius.Card),
+        });
+        notes.Padding = new Thickness(15, 11, 15, 11);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(notes, T("Notes"));
         notes.LostFocus += (_, _) =>
         {
-            try { ModNotes.SetNotes(r.File.Rel, notes.Text); r.Refresh(); }
+            try { save(notes.Text); }
             catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The notes were not saved"), ErrorText(e)); }
         };
         return notes;
@@ -339,238 +372,53 @@ public sealed partial class MainWindow
         if (d.Objects.Count > 0) parts.Add(d.Objects.Count == 1 ? T("1 object") : T("{0} objects", d.Objects.Count));
         if (d.CasParts.Count > 0) parts.Add(d.CasParts.Count == 1 ? T("1 Create a Sim part") : T("{0} Create a Sim parts", d.CasParts.Count));
         if (d.Images > 0) parts.Add(d.Images == 1 ? T("1 texture") : T("{0} textures", d.Images));
-        return parts.Count == 0 ? T("Replaces {0} of the game's resources", d.Replaced) : T("Replaces {0}", string.Join(", ", parts));
-    }
-
-    // ---------- a merge's mods ----------
-
-    UIElement MergeCards(ModRow r, MergeRecord info)
-    {
-        var s = new StackPanel { Spacing = 10 };
-        var explain = Note("lightbulb", "ApexAccentBrush", T("The game loads this as one file instead of {0}, so it starts faster. The {0} mods are kept as they were, and you can take any of them out.", info.Originals.Count));
-        s.Children.Add(new Border { Child = explain, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(10), Background = Res("ApexAccentSoftBrush"), BorderBrush = Res("ApexAccentLineBrush"), BorderThickness = new Thickness(1) });
-        var head = Section(T("Made from {0} mods", info.Originals.Count), Mine(r) ? T("Edit merge") : null, out var edit);
-        if (edit is not null) edit.Click += (_, _) => Safe(EditMergeAsync(r, info));
-        s.Children.Add(head);
-        var i = 0;
-        foreach (var o in info.Originals.OrderBy(o => o.Rel, StringComparer.OrdinalIgnoreCase))
-        {
-            var color = MergeColors[i++ % MergeColors.Length];
-            var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(12) };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-            g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(new Border { CornerRadius = new CornerRadius(3), Background = TagDot.BrushOf(color) });
-            var text = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
-            var name = Path.GetFileNameWithoutExtension(o.Rel);
-            text.Children.Add(new TextBlock { Text = name, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-            var what = new TextBlock { Text = ModRow.SizeText(o.Size), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap };
-            text.Children.Add(what);
-            Grid.SetColumn(text, 1);
-            g.Children.Add(text);
-            // what this one replaces in the game, read from the copy kept at the merge
-            var kept = Path.Combine(info.Dir, Path.GetRelativePath("Mods", o.Rel));
-            if (_gameIndex is { } gi && File.Exists(kept))
-                _ = Task.Run(() => DefaultReplacements.Analyze(gi, kept)).ContinueWith(t =>
-                {
-                    if (t.IsCompletedSuccessfully && t.Result.Replaced > 0)
-                    {
-                        what.Text = ReplacesSummary(t.Result) + " · " + ModRow.SizeText(o.Size);
-                        what.Foreground = new SolidColorBrush(Pick(0xFF9CC7EE, 0xFF2F6FA8));
-                    }
-                }, TaskScheduler.FromCurrentSynchronizationContext());
-            if (Mine(r))
-            {
-                var take = new Button { Content = T("Take out"), Height = 30, Padding = new Thickness(10, 0, 10, 0), FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-                var rel = o.Rel;
-                take.Click += (_, _) => Safe(TakeOutAsync(r, [rel]));
-                Grid.SetColumn(take, 2);
-                g.Children.Add(take);
-            }
-            s.Children.Add(new Border { Child = g, CornerRadius = new CornerRadius(12), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) });
-        }
-        s.Children.Add(Note("circle-check", "ApexSuccessBrush", T("Checked on {0}, when it was made: every resource matched.", info.Created.ToLocalTime().ToString("d"))));
-        return s;
-    }
-
-    // rename it, untick mods to take them out, tick others to add them; the result is merged again and checked
-    async Task EditMergeAsync(ModRow r, MergeRecord info)
-    {
-        var body = new StackPanel { Spacing = 14, Width = 440 };
-        var name = new TextBox { Header = T("Name"), Text = r.Name };
-        body.Children.Add(name);
-        body.Children.Add(new TextBlock { Text = T("Mods in it · untick one to take it out"), FontSize = 12, Foreground = Res("ApexMutedBrush") });
-        var boxes = new List<(CheckBox Box, MergeOriginal O)>();
-        var adds = new List<(CheckBox Box, ModRow Row)>();
-        var list = new StackPanel { Spacing = 4 };
-        var after = new TextBlock { FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap };
-        void Update()
-        {
-            var stay = boxes.Count(b => b.Box.IsChecked == true);
-            var added = adds.Count(a => a.Box.IsChecked == true);
-            var keep = stay + added;
-            after.Text = keep == 0 ? T("After saving: every mod is separate again and the merge is removed.")
-                : keep == 1 ? T("After saving: a merge needs at least 2 mods, so every mod is separate again.")
-                : added == 0 && stay == info.Originals.Count ? T("After saving: the same {0} mods, in one file.", keep)
-                : added == 0 ? T("After saving: {0} mods in one file, rebuilt and checked. The others are separate again and stay on.", keep)
-                : T("After saving: {0} mods in one file, {1} of them new, rebuilt and checked.", keep, added);
-        }
-        foreach (var o in info.Originals.OrderBy(o => o.Rel, StringComparer.OrdinalIgnoreCase))
-        {
-            var cb = new CheckBox { IsChecked = true, Content = $"{Path.GetFileNameWithoutExtension(o.Rel)}   {ModRow.SizeText(o.Size)}" };
-            cb.Checked += (_, _) => Update();
-            cb.Unchecked += (_, _) => Update();
-            boxes.Add((cb, o));
-            list.Children.Add(cb);
-        }
-        body.Children.Add(new ScrollViewer { Content = list, MaxHeight = 240 });
-
-        // other mods that can go in: packages of the player's that are on, found by name or folder
-        var candidates = _modRows.Where(x => Mine(x) && x.File.Enabled && !x.File.Rel.Equals(r.File.Rel, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
-        var addPanel = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
-        var search = new TextBox { PlaceholderText = T("Search mods") };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(search, T("Search mods"));
-        var addList = new StackPanel { Spacing = 2 };
-        foreach (var c in candidates)
-        {
-            var cb = new CheckBox { Content = $"{c.Name}   {c.Size}", Tag = (c.Name + " " + ModRow.Place(c.File)).ToLowerInvariant() };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cb, c.Name);
-            ToolTipService.SetToolTip(cb, ModRow.Place(c.File) + " › " + c.File.Name);
-            cb.Checked += (_, _) => Update();
-            cb.Unchecked += (_, _) => Update();
-            adds.Add((cb, c));
-            addList.Children.Add(cb);
-        }
-        search.TextChanged += (_, _) =>
-        {
-            var q = search.Text.Trim().ToLowerInvariant();
-            foreach (var (cb, _) in adds) cb.Visibility = q.Length == 0 || ((string)cb.Tag).Contains(q) || cb.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        };
-        addPanel.Children.Add(search);
-        addPanel.Children.Add(new ScrollViewer { Content = addList, MaxHeight = 220 });
-        var addLabel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
-        addLabel.Children.Add(Lucide.Icon("plus", 15, Res("ApexAccentBrush")));
-        addLabel.Children.Add(new TextBlock { Text = T("Add mods to this merge"), FontSize = 13 });
-        var addButton = new Button { Content = addLabel, Height = 44, HorizontalAlignment = HorizontalAlignment.Stretch, CornerRadius = new CornerRadius(10), IsEnabled = candidates.Count > 0 };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(addButton, T("Add mods to this merge"));
-        addButton.Click += (_, _) => { addButton.Visibility = Visibility.Collapsed; addPanel.Visibility = Visibility.Visible; search.Focus(FocusState.Programmatic); };
-        body.Children.Add(addButton);
-        body.Children.Add(addPanel);
-        body.Children.Add(new Border { Child = after, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(8), Background = Res("ApexAccentSoftBrush") });
-        Update();
-        var d = new ContentDialog { Title = T("Edit merge"), Content = body, PrimaryButtonText = T("Save and check"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
-        if (await ShowDialog(d) != ContentDialogResult.Primary) return;
-        var outRels = boxes.Where(b => b.Box.IsChecked != true).Select(b => b.O.Rel).ToList();
-        var addFiles = adds.Where(a => a.Box.IsChecked == true).Select(a => a.Row.File).ToList();
-        var newName = name.Text.Trim();
-        if (outRels.Count == info.Originals.Count && addFiles.Count == 0) { await SplitAsync(r); return; }
-        if (outRels.Count > 0 || addFiles.Count > 0)
-        {
-            ModsInfo.IsOpen = true;
-            ModsInfo.Severity = InfoBarSeverity.Informational;
-            ModsInfo.Title = addFiles.Count > 0 ? T("Merging again with the new mods…") : T("Merging the rest again…");
-            ModsInfo.Message = "";
-            ModMerge.TakeOutResult? res = null;
-            try { res = await ModWork(() => ModMerge.Edit(Docs, r.File, outRels, addFiles)); }
-            catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merged package couldn't be changed"), ErrorText(e)); }
-            if (res is not null) ModsResult(res.Remerged is { } m ? T("{0} now holds {1} mods", m.Merged.Name, m.Mods) : T("Every mod is separate again"), null);
-            // (read again after a failure too: the split may be done, with the merged file already in the Recycle Bin)
-            _modsLoaded = false;
-            _folderSig = "";
-            await LoadModsAsync();
-            if (res is null) return;
-        }
-        if (newName.Length > 0 && newName != r.Name && _modRows.FirstOrDefault(x => x.File.Rel.Equals(r.File.Rel, StringComparison.OrdinalIgnoreCase)) is { } now)
-            RenameMod(now, newName);
-    }
-
-    // one mod out of a merge, and what becomes of it: kept on, turned off, or to the Recycle Bin
-    async Task TakeOutAsync(ModRow r, List<string> rels)
-    {
-        var info = ModMerge.Info(r.File);
-        var name = Path.GetFileNameWithoutExtension(rels[0]);
-        var body = new StackPanel { Spacing = 14, Width = 440 };
-        var n = info?.Originals.Count ?? 0;
-        body.Children.Add(new TextBlock
-        {
-            Text = n > 2 ? T("{0} goes back where it was. The other {1} are merged again into {2} and checked.", name, n - 1, r.Name)
-                : T("{0} goes back where it was, and so does the other mod: a merge needs at least 2 mods.", name),
-            TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush"),
-        });
-        body.Children.Add(new TextBlock { Text = T("Then {0}", name), FontSize = 12, Foreground = Res("ApexMutedBrush") });
-        var on = new RadioButton { GroupName = "after", IsChecked = true, Content = T("Stays on, as a separate mod") };
-        var off = new RadioButton { GroupName = "after", Content = T("Turned off: the game's own items come back") };
-        var bin = new RadioButton { GroupName = "after", Content = T("Goes to the Recycle Bin") };
-        body.Children.Add(on);
-        body.Children.Add(off);
-        body.Children.Add(bin);
-        var d = new ContentDialog { Title = T("Take {0} out of {1}?", name, r.Name), Content = body, PrimaryButtonText = T("Take it out"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
-        if (await ShowDialog(d) != ContentDialogResult.Primary) return;
-        var then = off.IsChecked == true ? 1 : bin.IsChecked == true ? 2 : 0;
-        ModsInfo.IsOpen = true;
-        ModsInfo.Severity = InfoBarSeverity.Informational;
-        ModsInfo.Title = T("Taking {0} out of the merge…", name);
-        ModsInfo.Message = "";
-        ModMerge.TakeOutResult? res = null;
-        try { res = await ModWork(() => ModMerge.TakeOut(Docs, r.File, rels)); }
-        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merged package couldn't be changed"), ErrorText(e)); }
-        _modsLoaded = false;
-        _folderSig = "";
-        await LoadModsAsync();
-        if (res is null) return;
-        var back = _modRows.FirstOrDefault(x => x.File.Rel.Equals(rels[0], StringComparison.OrdinalIgnoreCase));
-        if (back is not null && then == 1) SetMods([back], false);
-        else if (back is not null && then == 2) await ModsChange(() => ModLibrary.Remove(back.File), T("{0} moved to the Recycle Bin", name));
-        else ModsResult(res.Remerged is { } m ? T("{0} is on its own again; {1} now has {2} mods", name, m.Merged.Name, m.Mods) : T("{0} and the other mod are on their own again", name), null);
+        return parts.Count == 0 ? (d.Replaced == 1 ? T("Replaces 1 of the game's resources") : T("Replaces {0} of the game's resources", d.Replaced)) : T("Replaces {0}", string.Join(", ", parts));
     }
 
     // ---------- the footer ----------
 
     void DetailsFoot(ModRow r, MergeRecord? merge, bool mine)
     {
+        if (merge is not null && DraftRow() is not null) { DraftFoot(r); return; }
         var m = r.File;
         var f = ModDetailsFoot;
         f.Visibility = Visibility.Visible;
         f.ColumnDefinitions.Add(new ColumnDefinition());
         Button main;
         if (m.Locked) main = MainButton(T("Open in Components"), () => Show(ComponentsStep));
-        else if (merge is not null && mine) main = MainButton(T("Edit merge"), () => Safe(EditMergeAsync(r, merge)));
-        else main = MainButton(m.Enabled ? T("Turn off") : T("Turn on"), () => SetMods([r], !r.File.Enabled));
+        else if (merge is not null && mine)
+        {
+            main = WideButton("scissors", T("Split into mods"), () => Safe(SplitAsync(r)));
+            main.Height = Design.Size.ControlLarge;
+            ToolTipService.SetToolTip(main, T("Split it into its {0} original mods", merge.Originals.Count));
+        }
+        else main = MainButton(m.Enabled ? T("Turn off") : T("Turn on"), () => SetMods([r], !r.File.Enabled), accent: !m.Enabled);
         f.Children.Add(main);
         void Icon(Button b)
         {
-            b.Width = 36;
-            b.Height = 36;
-            b.BorderThickness = new Thickness(1);
-            b.BorderBrush = Res("ApexCardBorderBrush");
             f.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             Grid.SetColumn(b, f.ColumnDefinitions.Count - 1);
             f.Children.Add(b);
         }
         if (merge is not null && mine)
         {
-            var split = IconButton("scissors", T("Split it into its {0} original mods", merge.Originals.Count));
-            split.Click += (_, _) => Safe(SplitAsync(r));
-            Icon(split);
-            var power = IconButton(m.Enabled ? "power-off" : "power", m.Enabled ? T("Turn off") : T("Turn on"));
+            var power = Dims(Design.Parts.IconBoxed("power", m.Enabled ? T("Turn off") : T("Turn on")));
             power.Click += (_, _) => SetMods([r], !r.File.Enabled);
             Icon(power);
         }
-        var show = IconButton("folder-search", T("Show file"));
-        show.Click += (_, _) => ShowFile(m.Path);
-        Icon(show);
         if (mine)
         {
-            var remove = IconButton("trash-2", T("Move to the Recycle Bin"), "ApexErrorBrush");
+            var remove = Dims(Design.Parts.IconBoxed("trash-2", T("Move to the Recycle Bin"), ink: Res("ApexErrorBrush")));
             remove.Click += (_, _) => RemoveMods([r]);
             Icon(remove);
         }
     }
 
-    static Button MainButton(string text, Action click)
+    // (accent: the screen's main action; turning mods off is not one)
+    static Button MainButton(string text, Action click, bool accent = true)
     {
-        var b = new Button { Content = text, Style = (Style)Application.Current.Resources["AccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Height = 36 };
+        var b = new Button { Content = text, HorizontalAlignment = HorizontalAlignment.Stretch, Height = Design.Size.ControlLarge };
+        if (accent) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         b.Click += (_, _) => click();
         return Dims(b);
     }

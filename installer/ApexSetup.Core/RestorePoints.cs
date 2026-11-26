@@ -55,9 +55,10 @@ public static class RestorePoints
             if (Point.Entries.Count == 0) { if (Directory.Exists(Point.Dir)) DeleteTree(Point.Dir); return; }
             Committed = Point; // (point.json is already written, entry by entry)
             foreach (var old in List(Point.Bin).Skip(Keep)) DeleteTree(old.Dir);
-            // a folder with no readable point.json: cut off before its first entry was saved, so nothing it copied was changed
+            // a folder with no point.json: cut off before its first entry was saved, so nothing it copied was changed (one that
+            // only can't be read now, as when an antivirus holds it, is a restore point all the same)
             foreach (var d in Directory.EnumerateDirectories(RootOf(Point.Bin)))
-                if (Read(d) is null) DeleteTree(d);
+                if (!File.Exists(Path.Combine(d, "point.json"))) DeleteTree(d);
         }
     }
 
@@ -88,10 +89,10 @@ public static class RestorePoints
         var now = DateTime.Now;
         var p = new RestorePoint
         {
-            Created = now.ToUniversalTime(), CreatedLocal = now.ToString("yyyy-MM-dd HH:mm:ss zzz"), Label = label, Args = args, Bin = bin,
+            Created = now.ToUniversalTime(), CreatedLocal = now.ToString("yyyy-MM-dd HH:mm:ss zzz", System.Globalization.CultureInfo.InvariantCulture), Label = label, Args = args, Bin = bin,
             SetupVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "",
         };
-        var name = now.ToString("yyyyMMdd-HHmmss");
+        var name = now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
         p.Dir = Path.Combine(RootOf(bin), name);
         for (int n = 2; Directory.Exists(p.Dir); n++) p.Dir = Path.Combine(RootOf(bin), $"{name}-{n}"); // (two actions in one second)
         return _open = new Scope(p, true);
@@ -138,58 +139,61 @@ public static class RestorePoints
     // Undoes that point and every newer one, newest first. Restoring is final: the points restored are deleted (one with a path
     // that could not be put back stays, to try again, and the older ones are left untouched: each point's copies are the state
     // after the older ones, so they are undone only once every newer one is). Returns the paths that could not be put back.
-    public static List<string> Restore(string bin, RestorePoint point)
+    public static List<string> Restore(string bin, RestorePoint point, string? docs = null)
     {
         Engine.CheckWritable();
         if (_open is not null) throw new InvalidOperationException("The launcher is applying changes");
         var points = List(bin);
-        if (!points.Any(p => p.Dir == point.Dir)) throw new InvalidOperationException("This restore point is gone.");
+        if (!points.Any(p => p.Dir == point.Dir)) throw new InvalidOperationException("This restore point no longer exists.");
         var failed = new List<string>();
         foreach (var p in points.TakeWhile(p => p.Dir != point.Dir).Append(point))
         {
             var before = failed.Count;
             // last change first: a file goes before the folder it was created in
             foreach (var e in Enumerable.Reverse(p.Entries))
-                try { Undo(p, e); }
+                try { Undo(p, e, docs); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failed.Add(e.Path); }
             if (failed.Count > before) break;
             DeleteTree(p.Dir);
         }
-        // the backup folder Setup made goes too, once nothing is left in it
+        // the backup folder Setup made goes too, once nothing is left in it (an antivirus's own file, NAME.tmp, is waited for)
         foreach (var d in new[] { RootOf(bin), Manifest.DirOf(bin) })
-            try { Fs.Retry(() => { if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d); }); Fs.Gone(d); }
+            try { Fs.Retry(() => { if (Directory.Exists(d) && Directory.EnumerateFileSystemEntries(d).All(f => f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) && Fs.Emptied(d)) { Directory.Delete(d); Fs.Gone(d); } }); }
             catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
         return failed;
     }
 
-    static void Undo(RestorePoint p, RestoreEntry e)
+    static void Undo(RestorePoint p, RestoreEntry e, string? docs)
     {
+        // (Apex's settings moved to the game's folder since: the key goes back where they are now)
+        var toml = File.Exists(e.Path) || docs is null ? e.Path : Engine.ApexToml(docs);
         if (e.Dir)
         {
             if (e.Existed) Directory.CreateDirectory(e.Path);
-            else { Fs.Retry(() => { if (Directory.Exists(e.Path) && !Directory.EnumerateFileSystemEntries(e.Path).Any()) Directory.Delete(e.Path); }); Fs.Gone(e.Path); }
+            // (an antivirus may still list a file just deleted, or one of its own beside it: waited for)
+            else Fs.Retry(() => { if (Directory.Exists(e.Path) && Fs.Emptied(e.Path)) { Directory.Delete(e.Path); Fs.Gone(e.Path); } });
             return;
         }
         if (File.Exists(e.Path)) File.SetAttributes(e.Path, File.GetAttributes(e.Path) & ~FileAttributes.ReadOnly);
         if (e.FpsLimitKey)
         {
             // only the key goes back: the game may have saved other settings since
-            if (!File.Exists(e.Path)) return;
-            var text = File.ReadAllText(e.Path);
+            if (!File.Exists(toml)) return;
+            var text = File.ReadAllText(toml);
             // only while the file still holds what Setup wrote: a limit the player changed since stays (Restore checked the game is closed)
             if (Engine.FpsLimitKey(text) == (e.FpsLimitSet ?? Engine.FrameGenFps))
-                Fs.WriteAtomic(e.Path, e.FpsLimitWas is { } was ? Engine.WithFpsLimit(text, was) : Engine.WithoutFpsLimit(text));
+                Fs.WriteAtomic(toml, e.FpsLimitWas is { } was ? Engine.WithFpsLimit(text, was) : Engine.WithoutFpsLimit(text));
             return;
         }
         if (e.RestartHostKey)
         {
             // the game may have saved other settings in the file since: only the key goes back (the whole file when the game
             // never wrote it after Setup created it)
-            if (!File.Exists(e.Path)) return;
-            var text = File.ReadAllText(e.Path);
-            if (!e.Existed && text == Engine.NewApexToml) File.Delete(e.Path);
+            if (!File.Exists(toml)) return;
+            var text = File.ReadAllText(toml);
+            if (!e.Existed && text == Engine.NewApexToml && toml == e.Path) File.Delete(e.Path);
             else if (Engine.RestartHostKey(text) != e.RestartHostWas)
-                Fs.WriteAtomic(e.Path, e.RestartHostWas is { } was ? Engine.WithRestartHost(text, was) : Engine.WithoutRestartHost(text));
+                Fs.WriteAtomic(toml, e.RestartHostWas is { } was ? Engine.WithRestartHost(text, was) : Engine.WithoutRestartHost(text));
             return;
         }
         if (!e.Existed) { if (File.Exists(e.Path)) File.Delete(e.Path); return; }
@@ -214,12 +218,11 @@ public static class RestorePoints
     {
         try
         {
-            Fs.Retry(() =>
+            Fs.DeleteClear(dir, () =>
             {
                 foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
-                Directory.Delete(dir, true);
+                return true;
             });
-            Fs.Gone(dir);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // (pruned the next time)
     }
@@ -239,7 +242,7 @@ public static class Fs
         });
     }
     public static void Move(string from, string to) { RestorePoints.Touch(from); RestorePoints.Touch(to); Retry(() => File.Move(from, to, true)); }
-    public static void Write(string path, string text) { RestorePoints.Touch(path); Retry(() => WriteAtomic(path, text)); }
+    public static void Write(string path, string text, System.Text.Encoding? encoding = null) { RestorePoints.Touch(path); Retry(() => WriteAtomic(path, text, encoding)); }
 
     // a file an antivirus scan or the game's launcher holds a moment: tried again 4 times, waiting 0.5, 1, 2 and 4 s (a scan of
     // a large package just written can take seconds); a missing file fails at once
@@ -257,8 +260,28 @@ public static class Fs
     // a folder whose files were just deleted, empty once Windows lets go of them (up to 2 s)
     public static bool Emptied(string dir)
     {
-        for (var i = 0; i < 40 && Directory.EnumerateFileSystemEntries(dir).Any(); i++) Thread.Sleep(50);
-        return !Directory.EnumerateFileSystemEntries(dir).Any();
+        // (one look decides: an antivirus may add a file of its own for a moment between two)
+        for (var i = 0; Directory.EnumerateFileSystemEntries(dir).Any(); i++)
+        {
+            if (i == 40) return false;
+            Thread.Sleep(50);
+        }
+        return true;
+    }
+    // A folder and its subfolders, while clear says they hold nothing to keep. A file just moved that an antivirus still holds
+    // stays listed a moment, and the antivirus puts a file of its own beside it: any look or delete can meet one, and a delete
+    // that meets one in a subfolder says nothing. So both are done again until the folder is gone: 2 s for a file to go, 8 s
+    // for the folder.
+    public static void DeleteClear(string dir, Func<bool>? clear = null)
+    {
+        for (var i = 0; i < 160 && Directory.Exists(dir); i++)
+            try
+            {
+                if (i > 0) Thread.Sleep(50);
+                if (clear is null || clear()) Directory.Delete(dir, true);
+                else if (i >= 40) return;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && i < 159) { }
     }
     public static void Gone(string dir)
     {
@@ -269,12 +292,12 @@ public static class Fs
     public static void WriteFpsKey(string path, string text, int? was, int set) { RestorePoints.Touch(path, fps: true, fpsWas: was, fpsSet: set); Retry(() => WriteAtomic(path, text)); }
     // a temporary file in the same folder, then moved over: a crash never leaves half of ApexRadiance.toml. A read-only target is
     // made writable (the restore point keeps it as it was); a failed move leaves no temporary file behind.
-    public static void WriteAtomic(string path, string text)
+    public static void WriteAtomic(string path, string text, System.Text.Encoding? encoding = null)
     {
         var tmp = path + ".apex-tmp";
         try
         {
-            File.WriteAllText(tmp, text);
+            if (encoding is null) File.WriteAllText(tmp, text); else File.WriteAllText(tmp, text, encoding);
             Writable(path);
             File.Move(tmp, path, true);
         }

@@ -30,6 +30,21 @@ public static class SaveHealth
     // (two checks at once, e.g. Check now while the start-up check runs, write the history one after the other)
     static readonly object Gate = new();
 
+    // a save's sizes over time, oldest first (what Check recorded)
+    public static List<SizePoint> History(string name) => Load().GetValueOrDefault(name) ?? [];
+
+    // a renamed save keeps its history
+    public static void Renamed(string from, string to)
+    {
+        lock (Gate)
+        {
+            var history = Load();
+            if (!history.Remove(from, out var points)) return;
+            history[to] = points;
+            Fs.Retry(() => Fs.WriteAtomic(FilePath, JsonSerializer.Serialize(history, SetupJson.Default.DictionaryStringListSizePoint)));
+        }
+    }
+
     public static List<SaveReport> Check(string docs, bool record = true)
     {
         var history = Load();
@@ -38,12 +53,10 @@ public static class SaveHealth
         foreach (var s in Saves.List(docs))
         {
             List<FileInfo> files;
-            try { files = new DirectoryInfo(s.Dir).EnumerateFiles().Where(f => !f.Name.EndsWith(".backup", StringComparison.OrdinalIgnoreCase)).ToList(); }
+            try { files = new DirectoryInfo(s.Dir).EnumerateFiles().Where(f => !f.Name.EndsWith(".backup", StringComparison.OrdinalIgnoreCase) && !Saves.Passing(f.Name)).ToList(); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
             var bytes = files.Sum(f => f.Length);
-            var incomplete = !files.Any(f => f.Extension.Equals(".nhd", StringComparison.OrdinalIgnoreCase)) ? "no .nhd world file"
-                : !files.Any(f => f.Name.Equals("Meta.data", StringComparison.OrdinalIgnoreCase)) ? "no Meta.data"
-                : files.FirstOrDefault(f => f.Length == 0) is { } empty ? $"{empty.Name} is empty" : null;
+            var incomplete = Incomplete(files);
             var points = history.GetValueOrDefault(s.Name) ?? [];
             // one point a day, or when the size changed
             if (record && (points.Count == 0 || points[^1].Bytes != bytes || points[^1].When.Date != now.Date)) points.Add(new(now, bytes));
@@ -55,6 +68,12 @@ public static class SaveHealth
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         return list;
     }
+
+    // why a save folder with these files looks cut short, or null
+    internal static string? Incomplete(IReadOnlyCollection<FileInfo> files) =>
+        !files.Any(f => f.Extension.Equals(".nhd", StringComparison.OrdinalIgnoreCase)) ? "no .nhd world file"
+        : !files.Any(f => f.Name.Equals("Meta.data", StringComparison.OrdinalIgnoreCase)) ? "no Meta.data"
+        : files.FirstOrDefault(f => f.Length == 0) is { } empty ? $"{empty.Name} is empty" : null;
 
     // the newest zip Saves.Backup made of this save ("<name> yyyy-MM-dd HH.mm.ss.zip")
     public static DateTime? LastBackup(Save s, string docs)
@@ -70,6 +89,9 @@ public static class SaveHealth
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
+    // a copy made since the save was last played, or not long ago
+    public static bool RecentCopy(DateTime? copy, Save s) => copy is { } c && (c >= s.LastPlayed || c >= DateTime.Now.AddDays(-BackupDays));
+
     public static List<Finding> Findings(IEnumerable<SaveReport> reports, string docs)
     {
         var f = new List<Finding>();
@@ -77,16 +99,16 @@ public static class SaveHealth
         {
             var mb = (r.Bytes >> 20).ToString();
             if (r.Incomplete is { } why)
-                f.Add(new(Severity.Warning, "The save {0} looks incomplete ({1}). If the game can't open it, load a backup of it.", [r.Save.Name, why]));
+                f.Add(new(Severity.Warning, "The save {0} looks incomplete ({1}). If the game can't open it, restore a backup.", [r.Save.Name, why]));
             if (r.Bytes >= LargeBytes)
-                f.Add(new(Severity.Info, "The save {0} is {1} MB. Saves this large load and save slowly. NRaas Overwatch or moving out unused households makes it smaller.", [r.Save.Name, mb]));
+                f.Add(new(Severity.Info, "The save {0} is {1} MB. Saves this large load and save slowly. To make it smaller, use NRaas Overwatch or move out households you do not use.", [r.Save.Name, mb]));
             if (r.History.FirstOrDefault(p => p.When >= DateTime.Now.AddDays(-GrowthDays)) is { Bytes: > 0 } first && r.Bytes > first.Bytes * (1 + FastGrowth) && r.Bytes - first.Bytes > 20L << 20)
                 f.Add(new(Severity.Info, "The save {0} grew from {1} MB to {2} MB in {3} days.", [r.Save.Name, (first.Bytes >> 20).ToString(), mb, Math.Max(1, (int)(DateTime.Now - first.When).TotalDays).ToString()]));
             // a save played since its last backup, more than BackupDays ago (or never backed up)
-            if (r.Incomplete is null && (r.LastBackup is not { } b || (b < r.Save.LastPlayed && b < DateTime.Now.AddDays(-BackupDays))))
+            if (r.Incomplete is null && !RecentCopy(r.LastBackup, r.Save))
             {
                 var save = r.Save;
-                f.Add(new(Severity.Info, r.LastBackup is null ? "The save {0} has no backup yet." : "The save {0} was last backed up {1} days ago.",
+                f.Add(new(Severity.Info, r.LastBackup is null ? "The save {0} has no backup yet." : "The newest backup of the save {0} is {1} days old.",
                     [save.Name, r.LastBackup is { } d ? ((int)(DateTime.Now - d).TotalDays).ToString() : ""], () => Saves.Backup(save, docs), Suggest: "Back up the save"));
             }
         }

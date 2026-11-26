@@ -14,7 +14,8 @@ namespace ApexSetup;
 
 // Mod-vs-mod conflict scan: which installed mods clash with each other, by fixed rules only. Read-only: links
 // found inside mods are printed, never fetched (the only download is the hook table, ModConflictsHooks.cs). Output names types, members, resource keys and counts, never mod code.
-//   CONFLICT: one resource key in packages of 2+ mods with different bytes (and the likely winner by load order); 2+ core
+//   CONFLICT: one resource key in packages of 2+ mods with a different meaning (ModConflictsSame.cs; and the likely winner
+//     by load order; a translation, an add-on or a folder set to load first is told as such); 2+ core
 //     mods replacing one game assembly; one script assembly name with different builds; 2+ mods storing the same game
 //     interaction Singleton; 2+ ASIs with known hook tables sharing an exe address.
 //   WARNING: 2+ mods with write-type calls, event listeners or native imports and strings in one area of the rule table
@@ -24,7 +25,11 @@ namespace ApexSetup;
 // Ported from sims3-modernization's compat-scan (tools/mod-conflicts.ts), same rules and rule table.
 public static partial class ModConflicts
 {
-    public sealed record Conflict(string Kind, string Text, string[] Parties, string[] Evidence);
+    public sealed record Conflict(string Kind, string Text, string[] Parties, string[] Evidence)
+    {
+        public string[] Labels { get; init; } = []; // each party's file
+        public string[] Values { get; init; } = []; // what differs, for two mods: name, value in use, the other's value, one after the other
+    }
     public sealed record WarningParty(string Name, string[] Calls);
     public sealed record AreaWarning(string Area, string Label, string Risk, WarningParty[] Parties);
     public sealed record Note(string Party, string Text);
@@ -49,6 +54,7 @@ public static partial class ModConflicts
         public string? Game { get; init; }                  // the install folder (holds Game\Bin)
         public Rules Rules { get; init; } = Rules.Load();
         public bool Describe { get; init; }
+        public bool LoadedOnly { get; init; }               // only what the game loads: no archive, nor a package no Resource.cfg line names
         public bool ModFolders { get; init; }               // every first-level folder is one mod (its files are versions of it)
         public List<KnownAsi> KnownAsi { get; init; } = new();
         public HookTable? Hooks { get; init; }              // applied to the edition of the exe in Bin (or Game)
@@ -91,18 +97,18 @@ public static partial class ModConflicts
     public static string[] NativeAreas(Rules r, string s) => r.Areas.Where(a => a.Native.Any(x => x.IsMatch(s))).Select(a => a.Id).ToArray();
 
     // ---------- DBPF packages ----------
-    public const uint TypeS3sa = 0x073faa07, TypeKey = 0x0166038c, TypeXml = 0x0333406c, TypeStbl = 0x220557da;
+    public const uint TypeS3sa = 0x073faa07, TypeKey = 0x0166038c, TypeXml = 0x0333406c, TypeStbl = 0x220557da, TypeIni = 0x1f886ead, TypeLayout = 0x025c95b6;
     // a package's own manifest (one per package, instance 0): about the package, not the game's data
     public const uint TypeManifest = 0x73e93eeb;
     // a resource this small in every copy is a placeholder (an empty video or image): mods that blank the same thing agree
     public const uint TinyBytes = 256;
     // (media only: a video, an image or a sound this small is blanked out; a small tuning file is still a real change)
-    static readonly HashSet<uint> Blankable = [0xB1CC1AF6, 0x00B2D882, 0x2F7D0004, 0x01A527DB, 0x01EEF63A, 0x8070223D];
+    internal static readonly HashSet<uint> Blankable = [0xB1CC1AF6, 0x00B2D882, 0x2F7D0004, 0x01A527DB, 0x01EEF63A, 0x8070223D];
     static readonly Dictionary<uint, string> TypeNames = new()
     {
         [0x0333406c] = "_XML", [0x03b33ddf] = "ITUN", [0x034aeecb] = "CASP", [0x319e4f1d] = "OBJD", [0x073faa07] = "S3SA", [0x0166038c] = "_KEY", [0x00b2d882] = "_IMG",
         [0x220557da] = "STBL", [0x015a1849] = "GEOM", [0x01661233] = "MODL", [0x01d10f34] = "MLOD", [0x033a1435] = "TXTC", [0x736884f1] = "VPXY", [0x02dc343f] = "OBJK",
-        [0xd382bf57] = "FTPT", [0xd3044521] = "RSLT", [0x2e75c764] = "ICON", [0x6b20c4f3] = "CLIP", [0x02d5dd13] = "JAZZ", [0x2f7d0004] = "PNG",
+        [0xd382bf57] = "FTPT", [0xd3044521] = "RSLT", [0x2e75c764] = "ICON", [0x6b20c4f3] = "CLIP", [0x02d5dd13] = "JAZZ", [0x2f7d0004] = "PNG", [TypeIni] = "INI", [TypeLayout] = "LAYO",
     };
     static string TypeName(uint t) => TypeNames.TryGetValue(t, out var n) ? n : $"0x{t:x8}";
 
@@ -114,7 +120,7 @@ public static partial class ModConflicts
     static uint U32(ReadOnlySpan<byte> b, int p) => BinaryPrimitives.ReadUInt32LittleEndian(b[p..]);
 
     // head: the 96-byte header; index: the index block it points at
-    static List<Entry> ReadIndex(byte[] head, byte[] index)
+    internal static List<Entry> ReadIndex(byte[] head, byte[] index)
     {
         if (head.Length < 96 || Encoding.Latin1.GetString(head, 0, 4) != "DBPF") throw new InvalidDataException("not DBPF");
         var count = U32(head, 36);
@@ -142,6 +148,7 @@ public static partial class ModConflicts
         if ((flags & 0x01) != 0) p += sb;
         var size = 0;
         for (var i = 0; i < sb; i++) size = size * 256 + src[p++];
+        if (size < 0 || size > src.Length * 258L) throw new InvalidDataException("a size no RefPack data unpacks to"); // (4 bytes give 1028 at most)
         var o = 0;
         var dst = new byte[size];
         for (;;)
@@ -182,6 +189,7 @@ public static partial class ModConflicts
 
         static byte[] ReadAt(FileStream fs, long pos, int len)
         {
+            if (len < 0 || len > fs.Length - pos) throw new InvalidDataException("data past the end of the file");
             var b = new byte[len];
             fs.Position = pos;
             fs.ReadAtLeast(b, len, throwOnEndOfStream: false);
@@ -502,8 +510,11 @@ public static partial class ModConflicts
     public static (int, int, string)? LoadKey(List<Directive> dirs, string rel)
     {
         var i = dirs.FindIndex(d => d.Pattern.IsMatch(rel));
-        return i < 0 ? null : (-dirs[i].Priority, i, rel.ToLowerInvariant());
+        return i < 0 ? null : (-dirs[i].Priority, i, NameKey(rel));
     }
+    // a path as a folder listing orders it: capitals (as Windows compares names, so [ ] ^ _ ` come after the letters), and
+    // folder by folder, a folder's name ending before any character of a longer one
+    public static string NameKey(string rel) => rel.ToUpperInvariant().Replace('/', '\0');
     public static int CompareKey((int, int, string) a, (int, int, string) b) =>
         a.Item1 != b.Item1 ? a.Item1.CompareTo(b.Item1) : a.Item2 != b.Item2 ? a.Item2.CompareTo(b.Item2) : string.CompareOrdinal(a.Item3, b.Item3);
 
@@ -676,7 +687,107 @@ public static partial class ModConflicts
                 catch (Exception e) when (e is InvalidDataException or IOException or ArgumentException) { }
         return d;
     }
+    // A copy adapted on purpose, in a folder Resource.cfg loads first: one build of a script as the others' (Tiny UI Fix makes
+    // one of each script whose windows it enlarges), or one window layout with other sizes (the same of each window). Another
+    // build, or a layout with other objects, is another mod's, a conflict.
+    static bool Adapted(List<(PkgRec Rec, Entry E)> l, List<(PkgRec Rec, Entry E)> sorted)
+    {
+        if (l[0].E.Type is not (TypeS3sa or TypeLayout) || sorted.Count != l.Count || !sorted.Skip(1).All(x => x.Rec.Key!.Value.Item1 > sorted[0].Rec.Key!.Value.Item1)) return false;
+        if (l[0].E.Type == TypeLayout)
+            try { var first = sorted[0].Rec.Pkg.Read(sorted[0].E); return sorted.Skip(1).All(x => Resized(first, x.Rec.Pkg.Read(x.E))); }
+            catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { return false; }
+        var builds = l.Select(x => { try { return Build(x.Rec.Pkg.Read(x.E)); } catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException or OverflowException) { return null; } }).ToList();
+        return builds[0] is not null && builds.All(b => b == builds[0]);
+    }
+
+    // which build of an assembly a script resource holds: its name and module id, null when it can't be read
+    public static string? Build(byte[] s3sa)
+    {
+        try
+        {
+            if (Image(s3sa) is not { } img) return null;
+            using var pe = new PEReader(ImmutableArray.Create(img));
+            if (!pe.HasMetadata) return null;
+            var r = pe.GetMetadataReader();
+            var m = r.GetModuleDefinition();
+            return r.GetString(m.Name) + " " + r.GetGuid(m.Mvid);
+        }
+        catch (Exception e) when (e is BadImageFormatException or InvalidDataException or InvalidOperationException or IndexOutOfRangeException or ArgumentException or OverflowException or InvalidCastException) { return null; }
+    }
+
     static byte[]? Image(byte[] s3sa) => PeImage(s3sa) ?? PeImage(DecryptS3sa(s3sa));
+
+    // The packages that share some keys. Recs: in load order (the one in use first), those Resource.cfg does not load last.
+    // All: the types of the shared keys, Types: of those that differ. Real: the keys that differ where some copy is more than a placeholder (TinyBytes or
+    // less in every copy: blank intro videos and the like, the same fix whichever wins). Texts: the texts that differ in
+    // the text tables among them, null when one can't be read.
+    sealed class Shared(List<Party> parties, List<PkgRec> recs, string winner, bool alt, List<string> notLoaded)
+    {
+        public readonly List<Party> Parties = parties;
+        public readonly List<PkgRec> Recs = recs;
+        public readonly string Winner = winner;
+        public readonly bool Alt = alt;
+        public readonly List<string> NotLoaded = notLoaded;
+        public readonly Dictionary<string, int> All = new(), Types = new();
+        public readonly List<string> Keys = new();
+        public readonly HashSet<PkgRec> Unlike = new();
+        public readonly List<string> Values = new();
+        public int Same, Real;
+        public int? Texts = 0;
+    }
+
+    // The copies of one key by what they mean: each one's number is the place of the first copy like it (its own when it
+    // is unlike the ones before, or can't be read). Read one at a time; a copy with the bytes of the first costs no more.
+    static int[] Sides(List<(PkgRec Rec, Entry E)> l)
+    {
+        var side = new int[l.Count];
+        var digest = new UInt128?[l.Count];
+        byte[]? first = null;
+        var firstAt = 0;
+        for (var i = 0; i < l.Count; i++)
+        {
+            var e = l[i].E;
+            side[i] = i;
+            // (too large for tuning or texts, and no other copy of its size: different, without reading it)
+            if (e.MemSize > MeaningCap && l.Count(x => x.E.MemSize == e.MemSize) == 1) continue;
+            byte[] b;
+            try { b = l[i].Rec.Pkg.Read(e); }
+            catch (Exception x) when (x is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { continue; }
+            if (first is null) { (first, firstAt) = (b, i); continue; }
+            if (b.AsSpan().SequenceEqual(first)) { side[i] = firstAt; continue; }
+            var mine = Canon(e.Type, b);
+            if (mine is null && l.Count == 2) continue; // (two copies, and only this one's bytes say what it is: they differ)
+            digest[firstAt] ??= Meaning(e.Type, first);
+            digest[i] = mine ?? Digest(0, b);
+            for (var j = 0; j < i; j++)
+                if (side[j] == j && digest[j] == digest[i]) { side[i] = j; break; }
+        }
+        return side;
+    }
+
+    // What two packages that differ on some keys are to each other, with the conflict's parties (the one in use first).
+    //   translation: the one in use holds only texts, of a mod that holds more.
+    //   add-on: all the one in use holds is in the other, which holds more, and its name says it is a piece of it.
+    //   decided: the one in use is in a folder Resource.cfg gives a higher Priority than the others'.
+    //   resource key: anything else, and whenever the piece is not the one in use (it has no effect then).
+    static (string Kind, List<Party> Parties) Relation(Shared g)
+    {
+        var loaded = g.Recs.Where(r => r.Key is not null).ToList();
+        if (loaded.Count == 2 && g.Recs.Count == 2)
+        {
+            var (piece, whole) = (loaded[0], loaded[1]);
+            static bool Content(Entry e) => e.Type is not (TypeKey or TypeManifest);
+            static bool OnlyTexts(PkgRec r) => r.Pkg.Entries.Where(Content).All(e => e.Type == TypeStbl);
+            static string Name(PkgRec r) => Path.GetFileNameWithoutExtension(r.Label[(r.Label.LastIndexOfAny(['/', '!']) + 1)..]);
+            List<Party> ps = [piece.Party, whole.Party];
+            if (g.Types.Keys.All(t => t == "STBL") && OnlyTexts(piece) && !OnlyTexts(whole)) return ("translation", ps);
+            var keys = whole.Pkg.Entries.Where(Content).Select(e => (e.Type, e.Group, e.Instance)).ToHashSet();
+            var mine = piece.Pkg.Entries.Where(Content).Select(e => (e.Type, e.Group, e.Instance)).ToHashSet();
+            if (mine.Count < keys.Count && mine.IsSubsetOf(keys) && SaysPiece(Name(piece), Name(whole))) return ("add-on", ps);
+        }
+        if (loaded.Count > 1 && loaded.Skip(1).All(r => r.Key!.Value.Item1 > loaded[0].Key!.Value.Item1)) return ("decided", g.Parties);
+        return ("resource key", g.Parties);
+    }
 
     public static Report Scan(Options o)
     {
@@ -785,7 +896,7 @@ public static partial class ModConflicts
                     if (Image(pkg.Read(e)) is { } img) DoAsm(p, img, label);
                     else p.Unknown.Add($"{label}: S3SA {e.Instance:x} without a PE image");
                 }
-                catch (Exception x) when (x is InvalidDataException or IOException or ArgumentException or IndexOutOfRangeException) { p.Unknown.Add($"{label}: S3SA not read ({x.Message})"); }
+                catch (Exception x) when (x is not (OutOfMemoryException or OperationCanceledException)) { p.Unknown.Add($"{label}: S3SA not read ({x.Message})"); } // (a damaged one fails in any of a dozen ways, and must not stop the check of the others)
             if (o.Describe)
                 foreach (var e in pkg.Entries.Where(e => (e.Type == TypeXml || e.Type == TypeStbl) && e.MemSize < 262144))
                     try
@@ -808,6 +919,7 @@ public static partial class ModConflicts
                 var ext = Path.GetExtension(f).ToLowerInvariant();
                 if (ext is not (".package" or ".zip" or ".rar" or ".7z" or ".asi" or ".dbc")) continue;
                 var rel = Slash(Path.GetRelativePath(@base, f));
+                if (o.LoadedOnly && (ext is ".zip" or ".rar" or ".7z" || ext == ".package" && LoadKey(dirs, rel) is null)) continue;
                 var relRoot = Slash(Path.GetRelativePath(root, f));
                 var file = $"{rootName}/{relRoot}";
                 // ModFolders: every first-level folder is one mod (a collection of versions); else every file
@@ -871,7 +983,9 @@ public static partial class ModConflicts
         }
 
         if (o.Bin is not null)
-            foreach (var f in Walk(o.Bin).Where(n => n.EndsWith(".asi", StringComparison.OrdinalIgnoreCase)))
+            // (not the launcher's backup folder, whose restore points keep old plugins the game never loads)
+            foreach (var f in Walk(o.Bin).Where(n => n.EndsWith(".asi", StringComparison.OrdinalIgnoreCase)
+                         && !n.StartsWith(Manifest.DirOf(o.Bin) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
             {
                 var p = new Party(Path.GetFileNameWithoutExtension(f), $"Bin/{Slash(Path.GetRelativePath(o.Bin, f))}", "");
                 p.Mod = p.File;
@@ -879,7 +993,7 @@ public static partial class ModConflicts
                 DoAsi(p, File.ReadAllBytes(f), f, f);
             }
 
-        // (1) resource keys: the likely winner by load order; identical bytes = duplicate; one archive or mod = alternatives
+        // (1) resource keys: the likely winner by load order; the same meaning = duplicate; one archive or mod = alternatives
         var byKey = new Dictionary<string, List<(PkgRec Rec, Entry E)>>();
         foreach (var rec in recs)
             foreach (var e in rec.Pkg.Entries)
@@ -888,46 +1002,68 @@ public static partial class ModConflicts
                 if (!byKey.TryGetValue(e.Key, out var l)) byKey[e.Key] = l = new();
                 l.Add((rec, e));
             }
-        // Dup[1]: differing keys where some copy is more than a placeholder (TinyBytes or less in every copy: blank intro
-        // videos and the like, the same fix whichever wins)
-        var pairs = new Dictionary<string, (List<Party> Parties, string Winner, Dictionary<string, int> Types, List<string> Keys, int[] Dup, bool Alt, List<string> NotLoaded)>();
+        var pairs = new Dictionary<string, Shared>();
+        var hidden = new Dictionary<(PkgRec Rec, PkgRec By), int>(); // how many of a package's resources another one is used for
         foreach (var (k, l) in byKey)
         {
             if (l.Count < 2) continue;
             var sorted = l.Where(x => x.Rec.Key is not null).OrderBy(x => x.Rec.Key!.Value, Comparer<(int, int, string)>.Create(CompareKey)).ToList();
-            var same = false;
-            try { var first = l[0].Rec.Pkg.Read(l[0].E); same = l.Skip(1).All(x => x.Rec.Pkg.Read(x.E).AsSpan().SequenceEqual(first)); }
-            catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { } // unreadable: different
+            var side = Sides(l);
+            if (Adapted(l, sorted)) Array.Clear(side);
             var ps = l.Select(x => x.Rec.Party).Distinct().ToList();
             var id = string.Join(" | ", l.Select(x => x.Rec.Label).OrderBy(x => x, StringComparer.Ordinal));
             if (!pairs.TryGetValue(id, out var g))
-                pairs[id] = g = (ps, sorted.FirstOrDefault().Rec?.Label ?? "-", new(), new(), new int[2], OneMod(ps), l.Where(x => x.Rec.Key is null).Select(x => x.Rec.Label).ToList());
+                pairs[id] = g = new(ps, sorted.Select(x => x.Rec).Concat(l.Select(x => x.Rec)).Distinct().ToList(), sorted.FirstOrDefault().Rec?.Label ?? "-", OneMod(ps), l.Where(x => x.Rec.Key is null).Select(x => x.Rec.Label).ToList());
+            foreach (var x in sorted.Skip(1)) hidden[(x.Rec, sorted[0].Rec)] = hidden.GetValueOrDefault((x.Rec, sorted[0].Rec)) + 1;
             var tn = TypeName(l[0].E.Type);
+            g.All[tn] = g.All.GetValueOrDefault(tn) + 1;
+            if (side.All(x => x == side[0])) { g.Same++; continue; }
             g.Types[tn] = g.Types.GetValueOrDefault(tn) + 1;
-            if (same) g.Dup[0]++;
-            else
-            {
-                if (!Blankable.Contains(l[0].E.Type) || l.Any(x => x.E.MemSize > TinyBytes)) g.Dup[1]++;
-                if (g.Keys.Count < 5) g.Keys.Add($"{tn} {k}");
-            }
+            if (!Blankable.Contains(l[0].E.Type) || l.Any(x => x.E.MemSize > TinyBytes)) g.Real++;
+            if (g.Keys.Count < 5) g.Keys.Add($"{tn} {k}");
+            // (who holds another copy than the one in use; with none loaded, than the first)
+            var used = sorted.Count > 0 ? l.IndexOf(sorted[0]) : 0;
+            for (var i = 0; i < l.Count; i++)
+                if (side[i] != side[used]) g.Unlike.Add(l[i].Rec);
+            if (l[0].E.Type is (TypeXml or TypeIni or 0x03B33DDF /* ITUN */) && sorted.Count == 2 && l.Count == 2 && g.Values.Count < 24 && l.All(x => x.E.MemSize < 1 << 20))
+                try { foreach (var v in ValuesThatDiffer(l[0].E.Type, sorted[0].Rec.Pkg.Read(sorted[0].E), sorted[1].Rec.Pkg.Read(sorted[1].E)).Take(8)) if (g.Values.Count < 24) g.Values.AddRange([v.Name, v.First, v.Second]); }
+                catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { }
+            if (l[0].E.Type == TypeStbl && g.Texts is not null)
+                try
+                {
+                    var first = l[used].Rec.Pkg.Read(l[used].E);
+                    foreach (var x in l.Where((_, i) => side[i] == i && side[i] != side[used])) g.Texts += TextsThatDiffer(first, x.Rec.Pkg.Read(x.E));
+                }
+                catch (Exception e) when (e is InvalidDataException or IOException or IndexOutOfRangeException or ArgumentException) { g.Texts = null; }
         }
         foreach (var (id, g) in pairs)
         {
-            var total = g.Types.Values.Sum();
+            var differ = g.Types.Values.Sum();
+            var total = differ + g.Same;
             var types = string.Join(", ", g.Types.Select(t => $"{t.Key} {t.Value}"));
             var nl = g.NotLoaded.Count > 0 ? $"; not loaded by Resource.cfg: {string.Join(", ", g.NotLoaded)}" : "";
             if (g.Alt) report.Info.Add(new(g.Parties[0].Name, $"{total} keys in several packages of one {(g.Parties.Count == 1 ? "archive" : "mod")} (versions or alternatives: install one): {id}{nl}"));
-            else if (g.Dup[0] == total) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"duplicate copy: {total} identical resources ({types}) in {id}"));
-            else if (g.Dup[1] == 0) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"the same fix twice: {total - g.Dup[0]} keys replaced by small placeholders in each ({types}) in {id}"));
-            else report.Conflicts.Add(new("resource key", $"{total - g.Dup[0]} shared keys with different content ({types}{(g.Dup[0] > 0 ? $"; {g.Dup[0]} identical" : "")}): {id}; likely winner: {g.Winner}{nl}",
-                g.Parties.Select(p => p.Name).ToArray(), g.Keys.ToArray()));
+            else if (differ == 0) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"duplicate copy: {total} identical resources ({string.Join(", ", g.All.Select(t => $"{t.Key} {t.Value}"))}) in {id}"));
+            else if (g.Real == 0) report.Info.Add(new(string.Join(" + ", g.Parties.Select(p => p.Name)), $"the same fix twice: {differ} keys replaced by small placeholders in each ({types}) in {id}"));
+            else
+            {
+                var (kind, who) = Relation(g);
+                var texts = g.Texts is > 0 and var t && g.Types.Count == 1 ? $"; {t} texts differ" : "";
+                // (the others that hold the copy in use: they lose nothing there)
+                var alike = g.Recs.Skip(1).Where(r => r.Key is not null && !g.Unlike.Contains(r)).Select(r => r.Label).ToList();
+                // (a mod the one in use replaces whole: it does nothing)
+                var dead = g.Recs.Where(r => r.Key is not null && g.Unlike.Contains(r) && g.Recs[0] != r && hidden.GetValueOrDefault((r, g.Recs[0])) >= r.Pkg.Entries.Count(e => e.Type is not (TypeKey or TypeManifest))).Select(r => r.Label).ToList();
+                report.Conflicts.Add(new(kind, $"{differ} shared keys with different content ({types}{(g.Same > 0 ? $"; {g.Same} identical" : "")}{texts}): {id}; likely winner: {g.Winner}{nl}"
+                    + (alike.Count > 0 && g.Winner != "-" ? $"; same copy as the winner: {string.Join(" | ", alike)}" : "")
+                    + (dead.Count > 0 ? $"; no effect: {string.Join(" | ", dead)}" : ""), who.Select(p => p.Name).ToArray(), g.Keys.ToArray()) { Labels = who.Select(p => p.File).ToArray(), Values = g.Values.ToArray() });
+            }
         }
 
         // (2) core mods, (3) assembly copies, (4) singletons, (5) ASI hook tables; parties all of one mod (ModFolders) = INFO
         void Add(Conflict c, List<Party> ps)
         {
             if (OneMod(ps)) report.Info.Add(new(ps[0].Mod, $"versions of one mod: {c.Text}"));
-            else report.Conflicts.Add(c);
+            else report.Conflicts.Add(c with { Labels = ps.Select(p => p.File).ToArray() });
         }
         foreach (var grp in parties.SelectMany(p => p.Replaces.Select(r => (r, p))).GroupBy(x => x.r))
         {
@@ -964,7 +1100,7 @@ public static partial class ModConflicts
                 var shared = all.Where(x => Co(x) is null).ToList();
                 if (shared.Count > 0) report.Conflicts.Add(new("native hook",
                     $"{a.Name} and {b.Name} patch {shared.Count} of the same TS3W.exe addresses ({a.KnownTable} / {b.KnownTable}): install order decides which patch survives",
-                    new[] { a.Name, b.Name }, shared.Take(8).Select(x => $"0x{x:X}" + (a.Purposes?.GetValueOrDefault(x) is { } pa && b.Purposes?.GetValueOrDefault(x) is { } pb ? $" ({pa} / {pb})" : "")).ToArray()));
+                    new[] { a.Name, b.Name }, shared.Take(8).Select(x => $"0x{x:X}" + (a.Purposes?.GetValueOrDefault(x) is { } pa && b.Purposes?.GetValueOrDefault(x) is { } pb ? $" ({pa} / {pb})" : "")).ToArray()) { Labels = [a.File, b.File] });
             }
         foreach (var p in parties.Where(p => p.Addrs is not null && p.KnownTable is null))
             foreach (var t in tabled)

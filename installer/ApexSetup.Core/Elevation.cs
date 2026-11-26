@@ -42,11 +42,11 @@ public static class Elevation
     // (a restart as the player that lands elevated again, within half a minute, runs here instead of restarting once more)
     public static bool RestartedRecently()
     {
-        var stamp = Path.Combine(Paths.Ops, "restart-as-player.stamp");
+        // (not in the launcher's data folder: one made here, before the player's copy moves the old Setup's, would stop that move)
+        var stamp = Path.Combine(Path.GetTempPath(), "apex-launcher-restart-as-player.stamp");
         try
         {
             if (File.Exists(stamp) && DateTime.Now - File.GetLastWriteTime(stamp) < TimeSpan.FromSeconds(30)) return true;
-            Directory.CreateDirectory(Paths.Ops);
             File.WriteAllText(stamp, "");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }

@@ -12,6 +12,15 @@ public sealed class CardGrid : Panel
     public double Spacing { get; set; } = 16;
     public double Aspect { get; set; }   // height over width of every cell; 0: as tall as its content
 
+    public bool Even { get; set; }       // only as many columns as leave no row short
+
+    int Cols(double width)
+    {
+        var cols = Columns(width, MinItemWidth, Spacing);
+        while (Even && cols > 1 && Children.Count % cols != 0) cols--;
+        return cols;
+    }
+
     public static int Columns(double width, double min, double gap) =>
         double.IsInfinity(width) || width <= 0 ? 1 : Math.Max(1, (int)((width + gap) / (min + gap)));
 
@@ -19,7 +28,7 @@ public sealed class CardGrid : Panel
 
     protected override Size MeasureOverride(Size available)
     {
-        var cols = Columns(available.Width, MinItemWidth, Spacing);
+        var cols = Cols(available.Width);
         var w = ItemWidth(available.Width, cols);
         double height = 0, row = 0;
         for (int i = 0; i < Children.Count; i++)
@@ -33,7 +42,7 @@ public sealed class CardGrid : Panel
 
     protected override Size ArrangeOverride(Size final)
     {
-        var cols = Columns(final.Width, MinItemWidth, Spacing);
+        var cols = Cols(final.Width);
         var w = ItemWidth(final.Width, cols);
         double y = 0;
         for (int start = 0; start < Children.Count; start += cols)

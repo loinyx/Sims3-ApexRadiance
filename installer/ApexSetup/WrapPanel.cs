@@ -26,11 +26,11 @@ public sealed class WrapPanel : Panel
 
     protected override Size ArrangeOverride(Size final)
     {
-        double x = 0, y = 0, line = 0;
+        double x = 0, y = 0, line = 0; // (the width measured comes back rounded to whole pixels: a hair less must not break the line)
         foreach (var c in Children)
         {
             var s = c.DesiredSize;
-            if (x > 0 && x + s.Width > final.Width) { y += line + Spacing; x = 0; line = 0; }
+            if (x > 0 && x + s.Width > final.Width + 1) { y += line + Spacing; x = 0; line = 0; }
             c.Arrange(new Rect(x, y, s.Width, s.Height));
             x += s.Width + Spacing;
             line = Math.Max(line, s.Height);

@@ -103,11 +103,11 @@ Step "undo the rename" { Click 'Undo' } { Test-Path (Join-Path $set "$third.pack
 Step "merge three mods, verified, with a log" {
   Pick $names[3]; Pick $names[4] -Add; Pick $names[5] -Add
   Click 'Merge into one package…'; Start-Sleep 2; Dialog 'PrimaryButton'; Start-Sleep 6; Dialog 'CloseButton' } {
-  (Get-ChildItem $set -Filter '*merged*.package').Count -eq 1 -and (Get-ChildItem (Join-Path $docs 'Mods\Merged (Apex Launcher)') -Recurse -Filter merge.json).Count -eq 1 }
+  (Get-ChildItem $set -Filter '*merged*.package').Count -eq 1 -and (Get-ChildItem (Join-Path $docs 'Merged (Apex Launcher)') -Recurse -Filter merge.json).Count -eq 1 }
 Step "split the merge back" {
-  $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split it back into its 3 mods'; Dialog 'PrimaryButton'; Start-Sleep 4 } {
+  $m = (Get-ChildItem $set -Filter '*merged*.package')[0].BaseName; Pick $m; Click 'Split into mods'; Dialog 'PrimaryButton'; Start-Sleep 4 } {
   (Get-ChildItem $set -Filter '*merged*.package').Count -eq 0 -and (Test-Path (Join-Path $set "$($names[4]).package")) }
-Step "start a problem-mod hunt" { Click 'Find a problem mod'; Dialog 'PrimaryButton'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -ge 2 }
+Step "start a problem-mod hunt" { Click 'Tools'; Start-Sleep 1; Click 'Find a problem mod'; Dialog 'PrimaryButton'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -ge 2 }
 Step "stop it: every mod back" { Click 'Stop and put every mod back'; Start-Sleep 3 } { (Get-ChildItem $off -Filter *.package -ErrorAction SilentlyContinue).Count -eq 0 -and (Get-ChildItem $set -Filter *.package).Count -eq $src.Count }
 Step "make a folder" { Click 'New folder'; Type-Into 'New folder' 'Harness folder'; Dialog 'PrimaryButton' } { Test-Path (Join-Path $pk 'Set\Harness folder') }
 $drop = Join-Path $Out 'drop'; New-Item -ItemType Directory -Force $drop | Out-Null
@@ -117,7 +117,7 @@ Step "Open with: a second launcher hands two files over, only the real one is in
   Start-Process $Exe -ArgumentList "`"$(Join-Path $drop 'Opened with.package')`" `"$(Join-Path $drop 'fake.package')`""; Start-Sleep 6
   Dialog 'PrimaryButton'; Start-Sleep 4; Dialog 'CloseButton' } {
   (Get-ChildItem $docs -Recurse -Filter 'Opened with.package').Count -eq 1 -and (Get-ChildItem $docs -Recurse -Filter 'fake.package').Count -eq 0 }
-Step "remove a mod to the Recycle Bin, confirmed" { Pick ("Set {0}" -f (Get-ChildItem $set -Recurse -Filter *.package).Count); Pick $second; Click 'Remove to the Recycle Bin'; Dialog 'PrimaryButton'; Start-Sleep 2 } { -not (Test-Path (Join-Path $set "$second.package")) }
+Step "remove a mod to the Recycle Bin, confirmed" { Pick ("Set {0}" -f (Get-ChildItem $set -Recurse -Filter *.package).Count); Pick $second; Click 'Move to the Recycle Bin'; Dialog 'PrimaryButton'; Start-Sleep 2 } { -not (Test-Path (Join-Path $set "$second.package")) }
 
 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 Write-Output ("steps: {0}, failures: {1}, captures: {2}" -f $step, $fails, $shots)

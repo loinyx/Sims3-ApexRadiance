@@ -26,6 +26,7 @@ Rows marked *tree* ran on `1f76e83` with the 3.0.0 working tree; the release com
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-25 | `02a40a7c` (release ASI) | `tools/ingame_runner` jobs `smoke`, `capture` and `night-lot-load` (on) | All passed, with the fixes for deleted and freed lamps; deleting lamps in Buy mode was tested by their author, not by the runner | RTX Remix bridge, Steam 1.67.2 |
 | 2026-11-18 | 1d588da8 | `rt_lamps_test` (with a plant record: three balls of leaves on the GPU against `BlockerTable::Occlude`, a floor and a ceiling lamp) | 680,419 checks, 0 failures | Direct3D 9 HAL |
 | 2026-11-18 | 1d588da8 | `tools/plant_puffs_table/check.cpp`: `PlantScan`'s C++ bake on the game's 67 packages against `plant_puffs_data.inc`; then the maintainer's Mods and DCCache | 87 models, 725 balls identical; custom content 106 files in about 1 s, 41 models | None |
 | 2026-11-10 | release tree | `rt_lamps_test`, `room_ambient_test` (with `unlit_rooms_recovery_test`), after the rows beyond follow their edge (`GhostKeptPS`) | 680,409 checks, 0 failures (the class-2 kept atlas: the GPU against `FollowGhosts` + `BlurBlock`, largest difference 0/255); 153 + 1,345 checks, 0 failures (7 `FollowGhosts` checks) | MSVC x86; native D3D9 |

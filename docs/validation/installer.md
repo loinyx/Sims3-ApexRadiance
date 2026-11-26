@@ -24,6 +24,23 @@ described in [features/installer.md](../features/installer.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-25 | `af2b44ab` | `installer/ApexSetup.Tests` | All passed | none |
+| 2026-11-25 | `af2b44ab` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run, a data folder of its own) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `a3c94ef0` | `installer/ApexSetup.Tests` | All passed | none |
+| 2026-11-25 | `a3c94ef0` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `a3c94ef0` | `installer/ui-smoke/Run-UiSmoke.ps1` (full, dry run) | 81 steps passed; the language cycle again ended the launcher (0xC000027B) while UI Automation read it, as on `6a272a14` | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `5ea03f21` | Sixty changes of light and dark in a row on Settings, the gallery, Mods and Components (a test build that switches by itself) | Kept running; before `5ea03f21` the third change closed the launcher (a new Mica at every change) | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `f4c02666` to `a3c94ef0` | Three independent reviews (Mods; Home, Saves and the gallery; install, settings and Health) | 51 findings, all fixed in `709d78bd`, `829c4616` and `7196b72b`; none seen in the app yet | none |
+| 2026-11-25 | `43c2f8c2` | `installer/ApexSetup.Tests` | All passed | none |
+| 2026-11-25 | `43c2f8c2` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `43c2f8c2` | `installer/ui-smoke/Run-UiSmoke.ps1` (full, dry run) | Every screen and step passed up to the language cycle; there the launcher closed (0xC000027B in Microsoft.UI.Xaml) after 15 to 20 changes of language while UI Automation read the window. The same happens on `6a272a14`. Sixty changes of language in a row without UI Automation, on Home and on Components, left it running | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `09c42079` | Layout tour (`APEX_LAUNCHER_AUDIT_TOUR`): nine screens at five window sizes, in the 21 languages | Texts cut short fixed: row details take up to three lines, the facts of a save and the profile's name wrap; what is left is the row of mod types, which scrolls | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `43c2f8c2` | `installer/ui-smoke/Run-ModsHarness.ps1` | 6 of 11 steps passed (turn off and on, tag, notes, rename and undo, start a hunt); the others look for the Set folder by an older name and fail from there | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `785921fc` to `43c2f8c2` | Published exe in a sandbox: every screen, the 18 dialogs, menus, messages and the install, dark and light, English and Portuguese | Rendered as expected; captures reviewed | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `5166d9cd` and the review fixes after it | `installer/ApexSetup.Tests` | All passed, with new checks of packages that look damaged and of files replaced between two plans of a merge | none |
+| 2026-11-25 | `5166d9cd` and the review fixes after it | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run) | 79 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `5166d9cd` and the review fixes after it | Merge of 4000 generated packages (1.9 GB, NVMe): core run, and the launcher in a sandbox | Run 6.6 s to 3.4 s, plan again 1.3 s to 0.4 s, 234,857 progress reports to 53, peak 208 MB, same SHA-256; in the launcher 4.1.0's dialog answered again after about 8 minutes, this one stayed responsive and took 5.7 s | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-25 | `5166d9cd` and the review fixes after it | Published exe in a sandbox: Mods, its details pane and menus, merge dialogs and Health, dark and light, 780 to 1920 wide, English, Portuguese and German | Rendered as expected; captures reviewed | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-24 | `e64890dd` | `installer/ApexSetup.Tests` | All passed, with the new folder-guard and crash-timeline checks | none |
 | 2026-11-24 | `1a2b53e6` | The move from Apex Radiance Setup on this PC (separate `%LOCALAPPDATA%`, the old data folder, `ApexRadianceSetup.exe` in a Downloads folder, a copied `TS3W.exe` with the ASI loader) | What's new, Where it lives and Ready rendered; Install copied it, the installed copy opened on Ready, the old copy in Downloads was deleted, Start menu entry made | Windows 11 |
 | 2026-11-24 | `a19e0296` | Stability timeline on the player's real logs (read only) | Sessions, crashes and freezes matched to Windows events, RTX Remix and Apex Radiance logs; no crash put on a plugin that was only further down the stack | Windows 11, RTX 4070 Ti SUPER |
@@ -68,3 +85,10 @@ described in [features/installer.md](../features/installer.md).
 - Home (2.0.10): *Continue* opening the game into the save shown (`-worldFile`), a save picked from *Another save* with a
   real click, and the crash or low-memory state with *Start again into this save*.
 - The Acrylic and stronger Mica window backgrounds.
+- In game: a save restored from a backup, a cleaned save, a package merged by 2.3, the Game settings values, and which of two packages of one folder is in
+  use.
+- The merge on a hard disk and with a player's own thousands of mods; the question about a package that looks damaged, on
+  screen.
+- Automatic backups when a real game closes and before Play (once a day was run on a copy of real saves), the pickers of
+  Import, Export and the folder, and a folder on a USB or network drive.
+- A theme switch with the launcher open after 2.3 (menus and lists), and a contrast theme.

@@ -373,7 +373,12 @@ not be made`). The law itself: [engine/terrain-and-light-bake.md](../../engine/t
 
 `TerrainStamps` (render thread) receives every frame the lamps of the active lot's room-0 lists from
 [Real-time outdoor lamps](rt-outdoor-lamps.md) and draws a moving lamp's ground light on the GPU instead of relighting
-whole chunks on the CPU:
+whole chunks on the CPU. The list also holds the lot's lamps of `LotLightBridge::CurrentBakeLamps`, which is read every
+20 frames, so a lamp deleted in Buy mode stayed in it for up to 20 frames after the game freed it, and `StampOf`'s light
+test called vfunc+0x20 through whatever had reused the memory, which could fault after lamps were deleted in Buy mode.
+`StampOf` and that list now leave out a light whose vtable slot +0x24 is not the position function
+`0x009691E0` (`LevelLightShare::LightLive`, the same test as the directional map step; log line `Lamp X is destroyed: left
+out of the terrain stamps`):
 
 - **Enter.** A lamp the bake takes (`NightTerrainBake::StampOf`) that moved more than 1 cm since its last counted place
   joins the bake's exclusion list (`NightTerrainBake::SetExcluded`, at most 8; `BakeColourStub` gives it no colour), and

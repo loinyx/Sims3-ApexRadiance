@@ -135,8 +135,28 @@ static class HealthTests
         check(r.Summary.Args[0] == "5" && r.Summary.Args[2] == "fixturemod" && ScriptErrors.Findings(r).Any(f => f.Finding.Args.Contains("fixturemod") && f.Files.Count > 0) && ScriptErrors.Read(docs, DateTime.Now.AddDays(-60), mods).Total == 6,
             "script errors: summary, findings and the time window");
         string Crashes(int n) => ScriptErrors.Findings(r with { ByMod = [r.ByMod.First(m => m.Mod == "Crashy.asi") with { Count = n, Crashes = n }] }).Single().Finding.Severity.ToString();
+        // one the player ignored stays ignored whatever its count and date, and no other finding goes with it
+        Health.Item Stab(string text, params string[] args) => new(new Finding(Severity.Warning, text, args), HealthArea.Stability, []);
+        check(Stab("{0} in {1} since {2}", "3", "Mod", DateTime.Now.ToString("d")).Id == Stab("{0} in {1} since {2}", "12", "Mod", DateTime.Now.AddDays(-3).ToString("g")).Id
+              && Stab("{0} in {1}", "3", "Save1").Id != Stab("{0} in {1}", "3", "Save2").Id && (Stab("x") with { Files = ["a1.package"] }).Id != (Stab("x") with { Files = ["a2.package"] }).Id,
+              "health: what an ignored finding is known by does not change with counts and dates, and no other goes with it");
         check(Crashes(1) == "Info" && Crashes(2) == "Info" && Crashes(ScriptErrors.CrashPattern) == "Warning",
             $"script errors: one or two crashes in a place are a note, {ScriptErrors.CrashPattern} a warning ({Crashes(1)}, {Crashes(2)}, {Crashes(3)})");
+        // a mod that only started the action (a hook over the game's own method, or one far up the stack) is not the cause; the
+        // one that called the game code that threw is
+        var far = Path.Combine(docs, "ScriptError_PC__far.xml");
+        string? Blamed(params string[] frames)
+        {
+            File.WriteAllText(far, ErrorTrap(frames));
+            return ScriptErrors.Read(docs, DateTime.Now.AddDays(-1), mods).Errors.Single(e => e.Log == far).Mod;
+        }
+        const string Game = "Sims3.Gameplay.Core.Sims3.Gameplay.Core.";
+        check(Blamed(Game + "Route:Do", Game + "Route:Single", Game + "Sim:Go", Game + "GoHome:Walk", "Fixture.Fixture.Entry:Run") is null
+              && Blamed(Game + "GoHome:RunOrig", "Fixture.Fixture.Entry:Run") is null && Blamed(Game + "GoHome:Run", "Fixture.Fixture.Entry:Run") is null
+              && Blamed("System.Collections.System.Collections.List`1:get_Item", "Fixture.Fixture.Entry:Run") == "fixturemod"
+              && Blamed(Game + "Household:Add", "Fixture.Fixture.Entry:Run") == "fixturemod" && Blamed(Game + "Other.Entry:Add") is null,
+            "script errors: a mod is named when it threw or made the call that threw, not for being further down the stack");
+        File.Delete(far);
         // two older crashes, before the window asked for (the last game start) but within the week
         foreach (var n in new[] { 1, 2 })
         {
@@ -263,12 +283,76 @@ static class HealthTests
         check(c.Duplicates.Count == 1 && c.Duplicates[0].Parties.OrderBy(x => x).SequenceEqual(["copy1", "copy2"]) && f.All(x => x.Finding.Args.All(a => !a.Contains("copy1"))),
             "conflicts: identical copies go to Duplicates, not to findings");
 
+        var only = c.Found.Single();
+        check(only is { Level: ConflictLevel.Look, Files.Length: 2, SayArgs.Length: 2 } && !new ConflictCheck { Offline = true, Ignored = [only.Id] }.Check(Mods(), g, docs).Any(x => x.Finding.Severity == Severity.Warning),
+            "conflicts: a game data conflict is one to look at, and an ignored one warns no more");
+        ModConflict Kind(string kind, string text, params string[] parties) => ModConflict.Of(new ConflictEntry(kind, text, parties, null), []);
+        var debug = Kind("interaction", "2 mods replace Sims3.Gameplay.Abstracts.GameObject+DEBUG_Clone (store its Singleton): the last one to run wins", "icarusallsorts.Transmogrifier", "S3DecoratingTools_V.1.2");
+        check(debug is { Level: ConflictLevel.Small, Finding: null } && Kind("assembly", "x", "a", "b").Level == ConflictLevel.Fix && Kind("core mod", "x", "a", "b").Level == ConflictLevel.Fix
+              && Kind("resource key", "3 shared keys with different content (STBL 2, _IMG 1; 4 identical): x", "a", "b").Level == ConflictLevel.Small
+              && Kind("resource key", "3 shared keys with different content (STBL 2, _XML 1): x", "a", "b").Level == ConflictLevel.Look, "conflicts: the level follows what is at stake");
+        check(debug.Id == Kind("interaction", "2 mods replace Sims3.Gameplay.Abstracts.GameObject+DEBUG_Clone (store its Singleton): x", "S3DecoratingTools_V.1.3", "icarusallsorts.Transmogrifier").Id
+              && debug.Id != Kind("interaction", "2 mods replace Other+Thing (store its Singleton): x", "icarusallsorts.Transmogrifier", "S3DecoratingTools_V.1.2").Id,
+            "conflicts: an ignored conflict is the same one after a mod's update, and no other");
+        var backup = Path.Combine(Manifest.DirOf(bin), "restore", "p");
+        Directory.CreateDirectory(backup);
+        File.WriteAllBytes(Path.Combine(backup, "0-Old.asi"), [1, 2]);
+        File.WriteAllBytes(Path.Combine(bin, "Real.asi"), [1, 2]);
+        check(ModConflicts.Scan(new ModConflicts.Options { Bin = bin }).Summary["asi"] == 1, "conflicts: the plugins the launcher's restore points keep are not mods");
+        File.Delete(Path.Combine(bin, "Real.asi"));
+        Directory.Delete(Manifest.DirOf(bin), true);
+
         var again = new ConflictCheck { Offline = true };
         again.Check(Mods(), g, docs).ToList();
         check(again.Scans == 0 && again.Duplicates.Count == 1, "conflicts: an unchanged Mods folder reuses the kept result");
         File.SetLastWriteTimeUtc(Path.Combine(packages, "beta.package"), DateTime.UtcNow.AddMinutes(1));
         again.Check(Mods(), g, docs).ToList();
         check(again.Scans == 1, "conflicts: a changed file scans again");
+
+        // what Resource.cfg loads counts, also when no mod file changed
+        var cfg = Path.Combine(docs, "Mods", "Resource.cfg");
+        File.WriteAllText(cfg, "Priority 500\nPackedFile Other/*.package\n");
+        check(!again.Check(Mods(), g, docs).Any() && again.Scans == 2, "conflicts: a changed Resource.cfg scans again");
+        File.WriteAllText(cfg, "Priority 500\nPackedFile Packages/*.package\nPackedFile Packages/*/*.package\n");
+        check(again.Check(Mods(), g, docs).Any() && again.Scans == 3, "conflicts: and finds the conflict it hid");
+        List<ModFile> All() => Directory.EnumerateFiles(packages, "*.package", SearchOption.AllDirectories).Select(p => new ModFile(p, Path.GetRelativePath(docs, p), new FileInfo(p).Length, ModKind.Package, true, false)).ToList();
+        // two files of one name: each party is its own file
+        var twin = Path.Combine(packages, "Old", "alpha.package");
+        Directory.CreateDirectory(Path.GetDirectoryName(twin)!);
+        File.WriteAllBytes(twin, Res(1, "alpha tuning, older"));
+        again.Check(All(), g, docs).ToList();
+        check(again.Found is [{ Parties.Length: 3 } t] && t.Files.Order().SequenceEqual(new[] { twin, Path.Combine(packages, "alpha.package"), Path.Combine(packages, "beta.package") }.Order())
+              && t.Labels.Select(Path.GetFileName).SequenceEqual(t.Files.Select(Path.GetFileName)), "conflicts: two mods of one name are two files");
+        Directory.Delete(Path.GetDirectoryName(twin)!, true);
+        // two versions of a mod, each against another on its own data: both show, under the one id an ignore keeps
+        var versions = new[] { "Mod_v1", "Mod_v2", "X" }.Select(n => Path.Combine(packages, n + ".package")).ToArray();
+        byte[] Two(string data, params ulong[] at) => ModConflicts.WritePackage(at.Select(i => (0x0333406Cu, 0u, i, Encoding.UTF8.GetBytes(data))).ToArray());
+        File.WriteAllBytes(versions[0], Two("v1", 11));
+        File.WriteAllBytes(versions[1], Two("v2", 12));
+        File.WriteAllBytes(versions[2], Two("x", 11, 12));
+        again.Check(All(), g, docs).ToList();
+        var both = again.Found.Where(x => x.Parties.Contains("X")).ToList();
+        check(both.Count == 2 && both[0].Id == both[1].Id && both[0].Key != both[1].Key && both.SelectMany(x => x.Parties).Order().SequenceEqual(["Mod_v1", "Mod_v2", "X", "X"]),
+            "conflicts: one conflict each for two versions of a mod against another");
+        foreach (var v in versions) File.Delete(v);
+        // a damaged package (an index size no file has) is left out, and the rest is checked
+        var damaged = Path.Combine(packages, "damaged.package");
+        var bytes = Res(3, "damaged");
+        bytes[47] = 0x80;
+        File.WriteAllBytes(damaged, bytes);
+        check(again.Check(All(), g, docs).Any(x => x.Finding.Severity == Severity.Warning) && again.Last is not null, "conflicts: a damaged package does not stop the check");
+        File.Delete(damaged);
+        // a check that failed is not taken for the one before it
+        again.Check(Mods(), g, docs).ToList();
+        var failing = false;
+        var later = new ConflictCheck { Offline = true, Scan = o => failing ? throw new InvalidOperationException("broken scan") : ModConflicts.Scan(o) };
+        later.Check(Mods(), g, docs).ToList();
+        var first = later.Last;
+        failing = true;
+        File.AppendAllText(cfg, "# other\n");
+        try { later.Check(Mods(), g, docs).ToList(); } catch (AggregateException) { }
+        check(first is not null && later.Last is null, "conflicts: a check that failed leaves no result of the one before");
+        File.Delete(cfg);
 
         var s = Scan.Run(g, docs);
         var broken = new ConflictCheck { Offline = true, Scan = _ => throw new InvalidOperationException("broken scan") };

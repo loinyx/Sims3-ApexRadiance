@@ -80,7 +80,7 @@ public sealed class CustomAlbum
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
     public string Name { get; set; } = "";
-    public string Icon { get; set; } = "";        // a Segoe Fluent Icons glyph
+    public string Icon { get; set; } = "star";        // a Lucide icon's name (before 2.3: a sign of Windows' icon font)
     public List<string> Pictures { get; set; } = [];
     public string? Household { get; set; }     // the household it belongs to; null: the one most of its pictures belong to
     public string Key => Gallery.Mine + Id;
@@ -115,26 +115,26 @@ public static class Gallery
     {
         var toml = ApexToml(docs);
         var chosen = Chosen(docs, Setting(toml, "ui", "screenshot_folder"), Setting(toml, "ui", "screenshot_custom_folder"), "Screenshots", "Screenshots");
-        return Folders(chosen, Path.Combine(docs, "Screenshots"), Path.Combine(docs, "Apex Radiance", "Screenshots"));
+        return Folders(chosen, Path.Combine(docs, "Screenshots"), Path.Combine(Scan.ApexDir(docs), "Screenshots"), Path.Combine(Scan.WindowsDocs(docs), "Screenshots"));
     }
 
     public static List<string> VideoFolders(string docs)
     {
         var toml = ApexToml(docs);
         var chosen = Chosen(docs, Setting(toml, "capture.video", "folder"), Setting(toml, "capture.video", "custom_folder"), "Recorded Videos", "Videos");
-        return Folders(chosen, Path.Combine(docs, "Recorded Videos"), Path.Combine(docs, "Apex Radiance", "Videos"));
+        return Folders(chosen, Path.Combine(docs, "Recorded Videos"), Path.Combine(Scan.ApexDir(docs), "Videos"), Path.Combine(Scan.WindowsDocs(docs), "Recorded Videos"));
     }
 
     static string ApexToml(string docs)
     {
-        try { var f = Path.Combine(docs, "Apex Radiance", "ApexRadiance.toml"); return File.Exists(f) ? File.ReadAllText(f) : ""; }
+        try { var f = Path.Combine(Scan.ApexDir(docs), "ApexRadiance.toml"); return File.Exists(f) ? File.ReadAllText(f) : ""; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return ""; }
     }
 
     // game, apex or custom (a folder that resolves to a full path; else the game's, as Apex falls back)
     static string Chosen(string docs, string? mode, string? custom, string gameSub, string apexSub)
     {
-        if (mode == "apex") return Path.Combine(docs, "Apex Radiance", apexSub);
+        if (mode == "apex") return Path.Combine(Scan.ApexDir(docs), apexSub);
         if (mode == "custom" && custom is { Length: > 0 } && Environment.ExpandEnvironmentVariables(custom) is var c && !c.Contains('%') && Path.IsPathFullyQualified(c)) return c;
         return Path.Combine(docs, gameSub);
     }
@@ -223,6 +223,32 @@ public static class Gallery
 
     public static PictureInfo Info(GalleryData d, string path) => d.Pictures.TryGetValue(path, out var i) ? i : d.Pictures[path] = new PictureInfo();
     public static AlbumLook Look(GalleryData d, string album) => d.Albums.TryGetValue(album, out var l) ? l : d.Albums[album] = new AlbumLook();
+
+    // Pictures that moved with Apex's folder (framework/apex_paths.cpp) keep what was set on them: every stored path under the
+    // old place whose file is gone and is at the new one.
+    public static void Follow(GalleryData d, string windows, string docs)
+    {
+        if (docs.Equals(windows, StringComparison.OrdinalIgnoreCase)) return;
+        var (from, to) = (Path.Combine(windows, "Apex Radiance") + Path.DirectorySeparatorChar, Path.Combine(docs, "Apex Radiance") + Path.DirectorySeparatorChar);
+        var changed = false;
+        string Now(string p)
+        {
+            if (!p.StartsWith(from, StringComparison.OrdinalIgnoreCase) || File.Exists(p) || to + p[from.Length..] is var n && !File.Exists(n)) return p;
+            changed = true;
+            return n;
+        }
+        Dictionary<string, T> Keys<T>(Dictionary<string, T> all)
+        {
+            var now = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in all) now.TryAdd(Now(k), v);
+            return now;
+        }
+        d.Pictures = Keys(d.Pictures);
+        foreach (var look in d.Albums.Values) look.Places = Keys(look.Places);
+        foreach (var c in d.Custom) c.Pictures = c.Pictures.Select(Now).ToList();
+        if (d.HomePicture is { } home) d.HomePicture = Now(home);
+        if (changed) Save(d);
+    }
 
     public static GalleryData Load()
     {

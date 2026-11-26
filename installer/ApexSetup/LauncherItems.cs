@@ -18,6 +18,10 @@ public sealed class ModRow : INotifyPropertyChanged
     // what of it replaces the game's own resources (a default replacement), when the game's index is read
     public Replacements Defaults { get; set; } = Replacements.None;
     public string? DuplicateOf { get; set; }
+    // of the mods inside a merge, how many the list holds a newer version of
+    public int NewVersions { get; set; }
+    // a merge: how many mods it holds (the row says so, and shows as a merge)
+    public int Inside { get; set; }
 
     public string Name => File.FileType == "package" ? System.IO.Path.GetFileNameWithoutExtension(File.Name) : File.Name;
     public string FullName => File.Name + "\n" + Place(File);
@@ -30,13 +34,14 @@ public sealed class ModRow : INotifyPropertyChanged
     public string Size => SizeText(File.Size);
     // (a very large package: worth knowing, it slows loading)
     public Brush SizeBrush => File.Size > 200L << 20 ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
-    public Brush TileBrush { get; }
+    public Brush TileBrush => App.Brush("ApexTileBrush");
     public static bool ShowPlace = true;
-    public string Sub => Findings.Count > 0 ? Findings[0]
+    public string Sub => NewVersions == 0 ? Line : (NewVersions == 1 ? T("1 new version") : T("{0} new versions", NewVersions)) + (Line.Length > 0 ? " · " + Line : "");
+    string Line => Findings.Count > 0 ? Findings[0]
         : DuplicateOf is { } d ? T("Same as {0}", d)
-        : ModNotes.Get(File.Rel)?.Notes is { } n ? n.Split('\n')[0]
-        : ShowPlace ? Place(File) : "";
-    public Brush SubBrush => Findings.Count > 0 || DuplicateOf is not null ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
+        : ModNotes.Get(File.Rel)?.Notes is { Length: > 0 } n ? n.Split('\n')[0]
+        : string.Join(" · ", new[] { ShowPlace ? Place(File) : "", Inside > 0 ? T("{0} mods inside", Inside) : "" }.Where(x => x.Length > 0));
+    public Brush SubBrush => Findings.Count > 0 || NewVersions > 0 || DuplicateOf is not null ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
     public Visibility LookVisible => Findings.Count > 0 || DuplicateOf is not null ? Visibility.Visible : Visibility.Collapsed;
     public Visibility TagsVisible => TagPills.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SubVisible => Sub.Length > 0 || TagPills.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -63,9 +68,8 @@ public sealed class ModRow : INotifyPropertyChanged
     public Visibility Placeholder => _image is null ? Visibility.Visible : Visibility.Collapsed;
 
     // the list's columns, narrowed on a small window (set before the rows are shown)
-    public static GridLength KindColumn { get; set; } = new(140);
-    public static GridLength SizeColumn { get; set; } = new(72);
-    public static double NameMax { get; set; } = 10000;
+    public static GridLength KindColumn { get; set; } = new(132);
+    public static GridLength SizeColumn { get; set; } = new(80);
 
     // the screen's handler: switch the file and return the moved file, or null when it stayed (the reason shown there)
     public static Func<ModRow, bool, ModFile?>? Toggle;
@@ -75,24 +79,19 @@ public sealed class ModRow : INotifyPropertyChanged
         File = f;
         Findings = findings;
         Kinds = [f.Kind.ToString()];
-        // one soft hue per kind: the glyph in it, the tile a faint wash of it (calmer than solid blocks of colour)
-        var hue = f.Kind switch
-        {
-            ModKind.Script => Rgb(0x8E, 0x9C, 0xFF), ModKind.Cas => Rgb(0xF0, 0x8F, 0xC4), ModKind.Objects => Rgb(0xE8, 0xC4, 0x66),
-            ModKind.Lighting => Rgb(0xF2, 0xB2, 0x5C), ModKind.Sound => Rgb(0x62, 0xCB, 0xDD), ModKind.Textures => Rgb(0x93, 0xD2, 0x7C),
-            ModKind.Tuning => Rgb(0x6E, 0xD3, 0xA8), ModKind.Interface => Rgb(0xB5, 0x98, 0xF6),
-            ModKind.Asi => Rgb(0xA6, 0xAC, 0xCC),
-            _ => Rgb(0xA2, 0xA5, 0xB2),
-        };
-        GlyphBrush = new SolidColorBrush(hue);
-        TileBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x24, hue.R, hue.G, hue.B));
     }
 
-    public Brush GlyphBrush { get; }
+    // (neutral, as every icon: a mod's picture is its colour; of the theme in use)
+    public Brush GlyphBrush => App.Brush("ApexSoftTextBrush");
 
     // the row's checkbox mirrors the list's selection; a click on it adds or takes the row out (the screen's handler)
     bool _picked;
-    public bool Picked { get => _picked; set { if (_picked != value) { _picked = value; Changed(nameof(Picked)); } } }
+    public bool Picked { get => _picked; set { if (_picked != value) { _picked = value; Changed(nameof(Picked), nameof(CheckOpacity)); } } }
+    // the box on its picture: under the pointer, with the keyboard on it, or chosen
+    bool _over;
+    public double CheckOpacity => _over || _picked ? 1 : 0;
+    public void OnOver() { _over = true; Changed(nameof(CheckOpacity)); }
+    public void OnOut() { _over = false; Changed(nameof(CheckOpacity)); }
     public static Action<ModRow>? Check;
     public void OnCheck() => Check?.Invoke(this);
 
@@ -106,7 +105,12 @@ public sealed class ModRow : INotifyPropertyChanged
         _ => "puzzle",
     };
 
-    public static string SizeText(long n) => n >= 1L << 30 ? $"{n / (1024.0 * 1024 * 1024):0.#} GB" : n >= 1 << 20 ? $"{n / (1024.0 * 1024):0.#} MB" : $"{Math.Max(1, n / 1024)} KB";
+    // in the launcher's language; whole MB from 10 on
+    public static string SizeText(long n)
+    {
+        var (v, unit) = n >= 1L << 30 ? (n / (1024.0 * 1024 * 1024), "GB") : n >= 1 << 20 ? (n / (1024.0 * 1024), "MB") : (Math.Max(1, n / 1024), "KB");
+        return v.ToString(unit == "GB" || v < 10 ? "0.#" : "0", MainWindow.LangCulture()) + " " + unit;
+    }
 
     // where a mod is, as the side pane names it ("Packages › NRaas"); the game folder
     public static string Place(ModFile f) => f.FileType switch
@@ -141,7 +145,7 @@ public sealed class ModRow : INotifyPropertyChanged
     public void SetFindings(IReadOnlyList<string> findings) { Findings = findings; Refresh(); }
 
     // notes, tags, findings or the New mark changed
-    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(TagsVisible), nameof(NewVisible), nameof(Kind), nameof(KindIcon), nameof(SizeBrush));
+    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(TagsVisible), nameof(NewVisible), nameof(Kind), nameof(KindIcon), nameof(SizeBrush), nameof(GlyphBrush), nameof(TileBrush));
 
     public void OnToggled(object sender, RoutedEventArgs e)
     {
@@ -168,28 +172,18 @@ public sealed record TagDot(string Name, Brush Fill, Brush Back)
     }
 }
 
-public sealed class SaveCard(Save save) : INotifyPropertyChanged
+// the pictures of a save as something an Image shows
+public static class SaveCard
 {
-    public Save Save { get; } = save;
-    public string Name => Save.Name;
-    public string When => T("Last played {0}", Save.LastPlayed.ToString("g"));
-    public string PlayText => T("Play this save");
-    public string BackupText => T("Back up this save");
-    public static Action<SaveCard>? Play, Backup;
-    public void OnPlay(object sender, RoutedEventArgs e) => Play?.Invoke(this);
-    public void OnBackup(object sender, RoutedEventArgs e) => Backup?.Invoke(this);
-    ImageSource? _photo;
-    public ImageSource? Photo { get => _photo; set { _photo = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Photo))); PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Placeholder))); } }
-    public Visibility Placeholder => _photo is null ? Visibility.Visible : Visibility.Collapsed;
-    public event PropertyChangedEventHandler? PropertyChanged;
-
     // image bytes from a package (a JPEG or PNG the game stored) as something an Image shows; null when not an image
-    public static async Task<ImageSource?> ImageOf(byte[]? bytes)
+    // (width: decoded no wider than that)
+    public static async Task<ImageSource?> ImageOf(byte[]? bytes, int width = 0)
     {
         if (bytes is null || bytes.Length < 8) return null;
         try
         {
             var bmp = new BitmapImage();
+            if (width > 0) bmp.DecodePixelWidth = width;
             using var ms = new Windows.Storage.Streams.InMemoryRandomAccessStream();
             await ms.WriteAsync(System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.AsBuffer(bytes));
             ms.Seek(0);
@@ -201,7 +195,8 @@ public sealed class SaveCard(Save save) : INotifyPropertyChanged
 
     // the household photo cut to its Sims (the game draws them small in a wide transparent frame); the whole photo when
     // it has no transparent edge
-    public static async Task<ImageSource?> SimsOf(byte[]? bytes)
+    // (small: one Sim alone, tall and thin, from the head to the waist, so a small picture still tells who it is)
+    public static async Task<ImageSource?> SimsOf(byte[]? bytes, bool small = false)
     {
         if (bytes is null || bytes.Length < 8) return null;
         try
@@ -220,6 +215,15 @@ public sealed class SaveCard(Save save) : INotifyPropertyChanged
                     if (px[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
             if (x1 < 0 || (x1 - x0 + 1) * (y1 - y0 + 1) > w * h * 0.9) return await ImageOf(bytes);
             int cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+            if (small && cw < ch * 0.7)
+            {
+                // (the shadow at the feet is wider than the Sim)
+                (ch, x0, x1) = (ch / 2, w, -1);
+                for (int y = y0; y < y0 + ch; y++)
+                    for (int x = 0; x < w; x++)
+                        if (px[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
+                cw = x1 - x0 + 1;
+            }
             var cut = new Windows.Graphics.Imaging.SoftwareBitmap(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, cw, ch, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied);
             var rows = new byte[cw * ch * 4];
             for (int y = 0; y < ch; y++) Buffer.BlockCopy(px, ((y0 + y) * w + x0) * 4, rows, y * cw * 4, cw * 4);

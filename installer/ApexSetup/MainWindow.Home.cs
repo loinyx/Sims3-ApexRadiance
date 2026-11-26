@@ -1,18 +1,18 @@
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using static ApexSetup.Strings;
 
 namespace ApexSetup;
 
-// Home, like a game's own page: the picture as a wide rounded card, the save to go back to straight on it, low in its corner,
-// with Continue (and a "more" menu for the rarer choices), health as a small glass note in the other corner, and rows of
-// the other saves and the newest pictures under it. The picture is the player's choice in Settings: a gallery picture,
+// Home, like a game's own page: the picture as a wide rounded card, the game's name low in its corner with Play (and a "more"
+// menu for the rarer choices), health as a small glass note in the other corner, and rows of the newest saves, each with its
+// own Play, and the newest pictures under it. Play on top opens the game's main menu; a save starts only from its own button. The picture is the player's choice in Settings: a gallery picture,
 // the household's own photo, or none.
 public sealed partial class MainWindow
 {
-    string? _homeSave;          // the save Continue opens: the one chosen on Home for this run, else the newest
     DispatcherTimer? _homeTick; // the playing time, ticking while the game runs
 
     void BuildHome()
@@ -26,25 +26,23 @@ public sealed partial class MainWindow
         {
             host.Spacing = 12;
             host.Children.Add(Heading(T("Home")));
-            host.Children.Add(Card(Body(T("The launcher can't find The Sims 3. Choose the game folder in Settings.")), Button(T("Choose the game"), () => Show(GameStep))));
+            host.Children.Add(Card(Body(T("The launcher can't find The Sims 3. Choose the folder where it is installed.")), Button(T("Choose the game"), () => Show(GameStep))));
             return;
         }
         // (the picture runs to the window's edges; every other screen gets the page margins back in Show)
         Scroller.Padding = new Thickness(0);
         Screens.Margin = new Thickness(0, 0, 0, 32);
         var saves = Saves.List(Docs);
-        var save = saves.FirstOrDefault(s => s.Name == _homeSave) ?? saves.FirstOrDefault();
-        host.Children.Add(HomeTop(saves, save));
-        var below = new StackPanel { Spacing = 28, Padding = new Thickness(40, 28, 40, 0) };
+        host.Children.Add(HomeTop(saves.FirstOrDefault()));
+        var below = new StackPanel { Spacing = 28, Padding = new Thickness(32, 28, 32, 0) };
         if (_healthState == HealthState.Blocked)
             below.Children.Add(Banner(InfoBarSeverity.Error, T("Apex Radiance can't start"), T("The game still starts, but without Apex Radiance until this is fixed."), T("Open Health"), () => Show(HealthScreen)));
         if (_offline) below.Children.Add(Banner(InfoBarSeverity.Warning, T("No internet"), T("You can still play. Updates wait until you're back online."), T("Try again"), async () => await LoadReleasesAsync()));
         // the last session shows only when it went wrong: straight back into the newest save
         if (!_running && SessionHistory.List().FirstOrDefault() is { End: SessionEnd.Crash or SessionEnd.LowMemory } last && Saves.Newest(Docs) is { } newest)
             below.Children.Add(Banner(InfoBarSeverity.Warning, last.End == SessionEnd.Crash ? T("The game closed on its own") : T("Ran out of memory"),
-                Played(last.Played) + " · " + T("{0} at its peak", ModRow.SizeText(last.PeakBytes)), T("Open this save again"), async () => await PlayAsync(newest.Name)));
-        var others = saves.Where(s => s != save).Take(4).ToList();
-        if (others.Count > 0) below.Children.Add(HomeOthers(others, saves.Count - 1));
+                Played(last.Played) + " · " + T("memory peaked at {0}", ModRow.SizeText(last.PeakBytes)), T("Open this save again"), async () => await PlayAsync(newest.Name)));
+        if (saves.Count > 0) below.Children.Add(HomeSaves(saves.Take(4).ToList()));
         below.Children.Add(HomePictures());
         host.Children.Add(below);
         if (!_homeFitHooked) { _homeFitHooked = true; Scroller.SizeChanged += (_, _) => { if (_step == Home) FitHome(); }; }
@@ -62,7 +60,6 @@ public sealed partial class MainWindow
         {
             var l = Link(link, go);
             l.Padding = new Thickness(0);
-            l.Foreground = Res("ApexSoftTextBrush");
             l.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(l, 1);
             g.Children.Add(l);
@@ -70,14 +67,14 @@ public sealed partial class MainWindow
         return g;
     }
 
-    // when a save was made, in words
+    // when a save was made: in words while it is recent, else its day
     string SavedWhen(DateTime t)
     {
         var c = LangCulture();
         var days = (DateTime.Today - t.Date).Days;
-        return days <= 0 ? T("Saved today at {0}", t.ToString("HH:mm", c))
-            : days == 1 ? T("Saved yesterday at {0}", t.ToString("HH:mm", c))
-            : T("Saved {0} days ago, on {1}", days, t.ToString("d MMM", c));
+        return days <= 0 ? T("Saved today at {0}", t.ToString("t", c))
+            : days == 1 ? T("Saved yesterday at {0}", t.ToString("t", c))
+            : Day(t);
     }
 
     // how long a session was, in words
@@ -91,9 +88,10 @@ public sealed partial class MainWindow
         return b;
     }
 
-    // ---------- the top: the picture, the save to go back to and Continue ----------
+    // ---------- the top: the picture, the game and Play ----------
 
-    UIElement HomeTop(List<Save> saves, Save? save)
+    // newest: the save whose household stands on the plain card
+    UIElement HomeTop(Save? newest)
     {
         var mode = _settings.HomePicture;
         var shot = mode == "gallery" ? HomePicture() : null;
@@ -118,44 +116,39 @@ public sealed partial class MainWindow
             // no picture: a plain card, lit softly from the right by the accent, with the household standing there when chosen
             var accent = ((SolidColorBrush)Res("ApexAccentBrush")).Color;
             pic.Children.Add(new Border { IsHitTestVisible = false, Background = Fade(accent, [(0, 0), (0.55, 0), (1, 0x1C)], across: true) });
-            if (mode == "household" && save is not null)
+            if (mode == "household" && newest is not null)
             {
                 // (low on the right, under the health note; the game stores these photos small, so they stay small)
                 var photo = new Grid { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Height = 170, Margin = new Thickness(0, 0, 96, 12) };
                 pic.Children.Add(photo);
-                _ = Task.Run(() => Saves.Photo(save)).ContinueWith(async t =>
+                _ = Task.Run(() => Saves.Photo(newest)).ContinueWith(async t =>
                 {
                     if (!t.IsFaulted && await SaveCard.SimsOf(t.Result) is { } img) photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Bottom });
                 }, TaskScheduler.FromCurrentSynchronizationContext());
             }
         }
-        g.Children.Add(new Border { Child = pic, CornerRadius = new CornerRadius(12), Margin = new Thickness(40, 40, 40, 0), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexCardBrush") });
+        g.Children.Add(new Border { Child = pic, CornerRadius = new CornerRadius(12), Margin = new Thickness(32, 24, 32, 0), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexCardBrush") });
 
-        // the save to go back to, low in the corner of the picture or centred on the plain card
+        // the game, low in the corner of the picture or centred on the plain card
         var words = new StackPanel { Spacing = 6, HorizontalAlignment = HorizontalAlignment.Left };
-        var kick = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        kick.Children.Add(new Border { Background = onPhoto ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x26, 255, 255, 255)) : Res("ApexPillBrush"), CornerRadius = new CornerRadius(11), Padding = new Thickness(9, 3, 9, 3),
-            Child = new TextBlock { Text = "The Sims 3", FontSize = 12, Foreground = onPhoto ? text : soft } });
-        kick.Children.Add(new TextBlock { Text = save is null ? T("Welcome") : T("Continue where you left off"), FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Foreground = soft });
-        words.Children.Add(kick);
         _homeWords = words;
         words.Children.Add(_homeName = new TextBlock
         {
-            Text = save?.Name ?? "The Sims 3", FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 48, FontWeight = FontWeights.SemiBold,
-            TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 4, 0, 0), Foreground = text,
+            Text = "The Sims 3", FontFamily = new FontFamily("Segoe UI Variable Display"), FontSize = 48, FontWeight = FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis, Foreground = text,
         });
-        words.Children.Add(new TextBlock { Text = save is null ? T("No saves yet. They show here after you save a game.") : SavedWhen(save.LastPlayed), FontSize = 14, Foreground = soft });
-        var acts = HomeActions(saves, save);
+        words.Children.Add(new TextBlock { Text = _game is { } game ? string.Join(" \u00b7 ", new[] { (game.Label + " " + game.Version).Trim(), _state?.ApexVersion is { Length: > 0 } av ? "Apex Radiance " + av : "" }.Where(p => p.Length > 0)) : "", FontSize = 14, Foreground = soft });
+        var acts = HomeActions();
         acts.Margin = new Thickness(0, 16, 0, 0);
         words.Children.Add(acts);
         words.VerticalAlignment = onPhoto ? VerticalAlignment.Bottom : VerticalAlignment.Center;
-        words.Margin = onPhoto ? new Thickness(72, 0, 40, 44) : new Thickness(72, 80, 40, 40);
+        words.Margin = onPhoto ? new Thickness(64, 0, 40, 40) : new Thickness(64, 64, 40, 40);
         g.Children.Add(words);
 
         var chip = HealthChip();
         chip.HorizontalAlignment = HorizontalAlignment.Right;
         chip.VerticalAlignment = VerticalAlignment.Top;
-        chip.Margin = new Thickness(0, 56, 56, 0);
+        chip.Margin = new Thickness(0, 40, 48, 0);
         g.Children.Add(chip);
         return g;
     }
@@ -177,8 +170,8 @@ public sealed partial class MainWindow
         if (_homeWords is not null) _homeWords.MaxWidth = Math.Max(560, w * 0.42);
     }
 
-    // Continue goes straight into the save on top; the "more" menu holds playing without the updates and another save
-    StackPanel HomeActions(List<Save> saves, Save? save)
+    // Play opens the game's main menu; the "more" menu holds playing without the updates and all the saves
+    StackPanel HomeActions()
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         // (on the picture: white on frosted white; on the plain card: the theme's own fills)
@@ -216,58 +209,54 @@ public sealed partial class MainWindow
             _homeTick.Start();
             return row;
         }
+        var update = WelcomeUpdates().Count > 0 && _settings.InstallUpdatesOnPlay;
+        var blocked = _healthState == HealthState.Blocked;
+        row.Children.Add(PlayButton(null));
+
+        var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft };
+        if (update && !blocked)
+        {
+            var asIs = new MenuFlyoutItem { Text = T("Play without updating"), Icon = Lucide.Element("play"), IsEnabled = !_busy && !Maintenance };
+            asIs.Click += async (_, _) => await PlayAsync(null);
+            menu.Items.Add(asIs);
+            menu.Items.Add(new MenuFlyoutSeparator());
+        }
+        var all = new MenuFlyoutItem { Text = T("All saves"), Icon = Lucide.Element("save") };
+        all.Click += (_, _) => Show(SavesScreen);
+        menu.Items.Add(all);
+        var more = new Button
+        {
+            Width = 56, Height = 56, Padding = new Thickness(0), CornerRadius = new CornerRadius(8), Background = glass, BorderThickness = new Thickness(0), Flyout = menu,
+            Content = new LucideIcon { Kind = "ellipsis", Size = 16, Stroke = ink, StrokeWidth = 1.75 },
+        };
+        ToolTipService.SetToolTip(more, T("More options"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, T("More options"));
+        row.Children.Add(more);
+        return row;
+    }
+
+    // the large Play: the game's main menu, or straight into a save
+    Button PlayButton(string? save)
+    {
         var ups = WelcomeUpdates();
         var update = ups.Count > 0 && _settings.InstallUpdatesOnPlay;
         var blocked = _healthState == HealthState.Blocked;
         var play = new Button { Height = 56, Padding = new Thickness(22, 0, 28, 0), CornerRadius = new CornerRadius(8), IsEnabled = !_busy && !Maintenance };
         if (!blocked) play.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         var pc = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-        pc.Children.Add(new FontIcon { Glyph = "", FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
+        pc.Children.Add(new LucideIcon { Solid = true, Kind = "play", Size = 14, VerticalAlignment = VerticalAlignment.Center, Follow = true, StrokeWidth = 1.75 });
         var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        var title = blocked ? T("Play anyway") : save is null ? T("Play") : T("Continue");
+        var title = blocked ? T("Play anyway") : T("Play");
         label.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold });
         var sub = blocked ? T("The game starts without Apex Radiance") : update ? (ups.Count == 1 ? T("1 update installs first") : T("{0} updates install first", ups.Count)) : null;
         if (sub is not null) label.Children.Add(new TextBlock { Text = sub, FontSize = 12, Opacity = 0.75 });
         pc.Children.Add(label);
         play.Content = pc;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(play, "PlayButton");
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(play, title);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(play, save is null ? "PlayButton" : "PlaySaveButton");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(play, save is null ? title : T("Play {0}", save));
         if (update) ToolTipService.SetToolTip(play, string.Join("\n", ups.Select(c => Name(c) + " " + (ReleaseOf(c)?.Version ?? ""))));
-        var name = save?.Name;
-        play.Click += async (_, _) => await PlayAsync(name, update: update);
-        row.Children.Add(play);
-
-        var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft };
-        if (update && !blocked)
-        {
-            var asIs = new MenuFlyoutItem { Text = T("Play without updating"), Icon = new FontIcon { Glyph = "" }, IsEnabled = !_busy && !Maintenance };
-            asIs.Click += async (_, _) => await PlayAsync(name);
-            menu.Items.Add(asIs);
-            menu.Items.Add(new MenuFlyoutSeparator());
-        }
-        if (saves.Count > 1)
-        {
-            foreach (var s in saves.Take(8))
-            {
-                var pick = s.Name;
-                var item = new ToggleMenuFlyoutItem { Text = pick, IsChecked = s == save };
-                item.Click += (_, _) => { _homeSave = pick; BuildHome(); };
-                menu.Items.Add(item);
-            }
-            menu.Items.Add(new MenuFlyoutSeparator());
-        }
-        var all = new MenuFlyoutItem { Text = T("All saves"), Icon = new FontIcon { Glyph = "" } };
-        all.Click += (_, _) => Show(SavesScreen);
-        menu.Items.Add(all);
-        var more = new Button
-        {
-            Width = 56, Height = 56, Padding = new Thickness(0), CornerRadius = new CornerRadius(8), Background = glass, BorderThickness = new Thickness(0), Flyout = menu,
-            Content = new FontIcon { Glyph = "", FontSize = 16, Foreground = ink },
-        };
-        ToolTipService.SetToolTip(more, T("Another save"));
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, T("Another save"));
-        row.Children.Add(more);
-        return row;
+        play.Click += async (_, _) => await PlayAsync(save, update: update);
+        return play;
     }
 
     Action? _homeTickAction;
@@ -279,43 +268,76 @@ public sealed partial class MainWindow
 
     // ---------- health: a small note in the picture's corner ----------
 
+    // The game's health over the picture: frosted glass tinted with the crystal's colour, the crystal in its own light (a slow
+    // breath while something waits), what the state is and, below it, the first thing to look at.
     FrameworkElement HealthChip()
     {
-        var crystal = new Crystal(24);
+        var crystal = new Crystal(30);
         crystal.SetLevel(HealthLevel, animate: false);
-        // (only what stops Apex gets its own words here; the rest waits calmly in Health)
-        var first = _healthState == HealthState.Blocked ? _health.FirstOrDefault(h => h.Finding.Severity == Severity.Error) : null;
-        var note = first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1
-            : _healthState == HealthState.NeedsYou ? T("Nothing stops the game from starting.") : T("Everything is in place.");
+        var calm = _healthState == HealthState.Ready;
+        // (what to look at first, in a few words: the first sentence of the first thing that is not only a note)
+        // (as Health's own list: a finding first, else the mods that clash, by their title)
+        var first = _health.FirstOrDefault(h => h.Finding.Severity == Severity.Error && !h.Conflict) ?? _health.FirstOrDefault(h => h.Finding.Severity != Severity.Info && !h.Conflict);
+        var clashes = ConflictsNow().Where(c => c.Level != ConflictLevel.Small).ToList();
+        var note = calm ? T("Open Health") : first is not null ? Sentences(T(first.Finding.Text, first.Finding.Args)).Item1.TrimEnd('.')
+            : clashes.Count == 1 ? T(clashes[0].Title) : clashes.Count > 1 ? T("{0} conflicts between mods", clashes.Count) : "";
+        var tint = StateTint(255);
         var white = new SolidColorBrush(Microsoft.UI.Colors.White);
-        var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 10, 18, 10), MaxWidth = 360 };
+        var soft = new SolidColorBrush(Alpha(Microsoft.UI.Colors.White, 0xC8));
+        var g = new Grid { ColumnSpacing = 14, Padding = new Thickness(10, 10, 18, 10), MaxWidth = 380 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        crystal.VerticalAlignment = VerticalAlignment.Center;
-        g.Children.Add(crystal);
-        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = _healthState == HealthState.Blocked ? Res("ApexErrorBrush") : white, TextTrimming = TextTrimming.CharacterEllipsis });
-        words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xBF, 255, 255, 255)), TextTrimming = TextTrimming.CharacterEllipsis });
+        // the crystal on a round tile of its colour, a soft light round it
+        var glow = new SoftGlow(tint, calm ? 0.35 : 0.6, 0.5) { Width = 84, Height = 84, Margin = new Thickness(-20), IsHitTestVisible = false };
+        var tile = new Grid { Width = 44, Height = 44 };
+        tile.Children.Add(glow);
+        tile.Children.Add(new Border { CornerRadius = new CornerRadius(22), Background = new SolidColorBrush(Alpha(tint, 0x38)),
+            BorderBrush = new SolidColorBrush(Alpha(tint, 0x66)), BorderThickness = new Thickness(1) });
+        (crystal.HorizontalAlignment, crystal.VerticalAlignment) = (HorizontalAlignment.Center, VerticalAlignment.Center);
+        tile.Children.Add(crystal);
+        g.Children.Add(tile);
+        if (!calm && new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
+        {
+            var breathe = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
+            var fade = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0.45, To = 1, Duration = TimeSpan.FromMilliseconds(1600), EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(fade, glow);
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(fade, "Opacity");
+            breathe.Children.Add(fade);
+            tile.Loaded += (_, _) => breathe.Begin();
+            tile.Unloaded += (_, _) => breathe.Stop();
+        }
+        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+        words.Children.Add(new TextBlock { Text = HealthTitle(), FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = white, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (note.Length > 0) words.Children.Add(new TextBlock { Text = note, FontSize = 12, Foreground = soft, TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(words, 1);
         g.Children.Add(words);
-        var chev = Lucide.Icon("chevron-right", 12, new SolidColorBrush(Windows.UI.Color.FromArgb(0xBF, 255, 255, 255)));
+        var chev = Lucide.Icon("chevron-right", 14, soft);
         chev.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(chev, 2);
         g.Children.Add(chev);
         var b = new Button
         {
-            Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(1),
-            Background = Glass(0.28), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x2E, 255, 255, 255)),
+            Content = g, Padding = new Thickness(0), CornerRadius = new CornerRadius(32), BorderThickness = new Thickness(1),
+            Background = Glass(0.42, tint), BorderBrush = new SolidColorBrush(Alpha(tint, calm ? (byte)0x3A : (byte)0x80)),
         };
         // (frosted glass that blurs the picture behind it, a little lighter under the pointer)
-        b.Resources["ButtonBackgroundPointerOver"] = Glass(0.16);
-        b.Resources["ButtonBackgroundPressed"] = Glass(0.4);
-        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x47, 255, 255, 255));
+        b.Resources["ButtonBackgroundPointerOver"] = Glass(0.3, tint);
+        b.Resources["ButtonBackgroundPressed"] = Glass(0.55, tint);
+        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Alpha(tint, 0xA0));
         b.Click += (_, _) => Show(HealthScreen);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("Open Health"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, HealthTitle() + ". " + T("Open Health"));
+        HandCursor.On(b);
         return b;
     }
+
+    static Windows.UI.Color Alpha(Windows.UI.Color c, byte a) => Windows.UI.Color.FromArgb(a, c.R, c.G, c.B);
+    // the dark glass, with a breath of the state's colour in it
+    static Microsoft.UI.Xaml.Media.AcrylicBrush Glass(double tint, Windows.UI.Color hue) => new()
+    {
+        TintColor = Windows.UI.Color.FromArgb(255, (byte)(20 + hue.R * 0.12), (byte)(20 + hue.G * 0.12), (byte)(20 + hue.B * 0.12)), TintOpacity = tint, TintLuminosityOpacity = 0.3,
+        FallbackColor = Windows.UI.Color.FromArgb(0xD0, 20, 20, 20),
+    };
 
     static Microsoft.UI.Xaml.Media.AcrylicBrush Glass(double tint) => new()
     {
@@ -323,67 +345,65 @@ public sealed partial class MainWindow
         FallbackColor = Windows.UI.Color.FromArgb(0xC8, 20, 20, 20),
     };
 
-    // ---------- the other saves: a row of tiles, each with its household ----------
+    // ---------- the newest saves: a row of tiles, each with its household and its own Play ----------
 
-    UIElement HomeOthers(List<Save> others, int count)
+    readonly Dictionary<string, string> _homeNames = new(); // (a tile made again shows its family at once)
+    UIElement HomeSaves(List<Save> saves)
     {
-        var s = new StackPanel { Spacing = 12 };
-        s.Children.Add(Head(T("Other saves"), T("All saves"), () => Show(SavesScreen)));
+        var s = new StackPanel { Spacing = 10 };
+        s.Children.Add(Head(T("Your saves"), T("All saves"), () => Show(SavesScreen)));
         var grid = new Grid { ColumnSpacing = 16, RowSpacing = 16 };
         for (int i = 0; i < 4; i++) grid.ColumnDefinitions.Add(new ColumnDefinition());
         var docs = Docs;
         var white = new SolidColorBrush(Microsoft.UI.Colors.White);
-        var rows = new List<(Save Save, Grid Photo, TextBlock Meta)>();
+        var rows = new List<(Save Save, Grid Photo, TextBlock Title, TextBlock Meta)>();
         var tiles = new List<Grid>();
-        for (int i = 0; i < others.Count; i++)
+        for (int i = 0; i < saves.Count; i++)
         {
-            var save = others[i];
+            var save = saves[i];
             var name = save.Name;
             // a stage for the household: a soft light behind them, a shadow at their feet, the name at the foot
             var tile = new Grid { Background = Fade(((SolidColorBrush)Res("ApexRaisedBrush")).Color, [(0, 0xFF), (1, 0x80)]) };
             var photo = new Grid();
             tile.Children.Add(photo);
-            var foot = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16, 0, 16, 14), Spacing = 1 };
-            foot.Children.Add(new TextBlock { Text = name, FontSize = 15, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-            var meta = Muted(save.LastPlayed.ToString("d MMM", LangCulture()));
+            var foot = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16, 0, 72, 14), Spacing = 1 };
+            var title = new TextBlock { Text = _homeNames.GetValueOrDefault(save.Dir) ?? name, FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+            foot.Children.Add(title);
+            var meta = Muted(Day(save.LastPlayed));
             meta.TextWrapping = TextWrapping.NoWrap;
+            meta.TextTrimming = TextTrimming.CharacterEllipsis;
             foot.Children.Add(meta);
             tile.Children.Add(foot);
-            // under the pointer: a round Play in the corner, straight into this save
+            // Play in the corner, straight into this save (the updates first, as Play on top)
             var play = new Button
             {
-                Width = 40, Height = 40, CornerRadius = new CornerRadius(20), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0, 12, 12, 0), Opacity = 0, Style = (Style)Application.Current.Resources["AccentButtonStyle"], IsEnabled = !_busy && !Maintenance && !_running,
-                Content = new FontIcon { Glyph = "", FontSize = 12, Margin = new Thickness(2, 0, 0, 0) },
+                Height = PlaySize, CornerRadius = new CornerRadius(PlaySize / 2), Padding = new Thickness(0), BorderThickness = new Thickness(0),
+                IsEnabled = !_busy && !Maintenance && !_running,
             };
-            play.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
             ToolTipService.SetToolTip(play, T("Play this save"));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(play, T("Play {0}", name));
-            play.Click += async (_, _) => await PlayAsync(name);
-            var b = new Button
-            {
-                Content = tile, Padding = new Thickness(0), CornerRadius = new CornerRadius(12), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                VerticalContentAlignment = VerticalAlignment.Stretch, Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1),
-            };
-            b.Click += (_, _) => { _homeSave = name; BuildHome(); Scroller.ChangeView(null, 0, null); };
-            ToolTipService.SetToolTip(b, T("Put {0} on top", name));
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
+            play.Click += async (_, _) => await PlayAsync(name, update: _settings.InstallUpdatesOnPlay);
             var cell = new Grid();
-            cell.Children.Add(b);
-            cell.Children.Add(play);
-            Lift(cell, () => play.Opacity = 1, () => play.Opacity = 0);
+            cell.Children.Add(new Border { Child = tile, CornerRadius = new CornerRadius(12), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) });
+            var (corner, over) = PlayCorner(play);
+            cell.Children.Add(corner);
+            ToolTipService.SetToolTip(tile, SavedWhen(save.LastPlayed));
+            cell.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(200) };
+            cell.PointerEntered += (_, _) => { cell.Translation = new(0, -4, 0); over(true); };
+            cell.PointerExited += (_, _) => { cell.Translation = default; over(false); };
             Grid.SetColumn(cell, i);
             grid.Children.Add(cell);
             tiles.Add(tile);
-            rows.Add((save, photo, meta));
+            rows.Add((save, photo, title, meta));
         }
         // tiles keep their shape as the window grows; a narrow window: two a row
         grid.SizeChanged += (_, e) =>
         {
-            var two = e.NewSize.Width < 760;
+            var two = e.NewSize.Width < 880; // (a household's name keeps its room)
             while (grid.RowDefinitions.Count < 2) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            for (int i = 2; i < 4; i++) grid.ColumnDefinitions[i].Width = two ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
             var cols = two ? 2 : 4;
+            while (grid.ColumnDefinitions.Count > cols) grid.ColumnDefinitions.RemoveAt(cols); // (an empty column would still take its gap)
+            while (grid.ColumnDefinitions.Count < cols) grid.ColumnDefinitions.Add(new ColumnDefinition());
             var tw = (e.NewSize.Width - 16 * (cols - 1)) / cols;
             foreach (var t in tiles) t.Height = Math.Clamp(tw * 0.6, 200, 250);
             for (int i = 0; i < grid.Children.Count; i++) { var el = (FrameworkElement)grid.Children[i]; Grid.SetColumn(el, two ? i % 2 : i); Grid.SetRow(el, two ? i / 2 : 0); }
@@ -393,17 +413,20 @@ public sealed partial class MainWindow
         s.Children.Add(backup);
 
         // the photos, sizes and backups read off the UI thread
-        _ = Task.Run(() => (SaveHealth.Check(docs, record: false), others.Select(Saves.Photo).ToList())).ContinueWith(async t =>
+        _ = Task.Run(() => (SaveHealth.Check(docs, record: false), saves.Select(Saves.Photo).ToList(), saves.Select(x => FamilyName(x, SaveInfo.Of(x))).ToList())).ContinueWith(async t =>
         {
             if (t.IsFaulted) return;
-            var (reports, photos) = t.Result;
+            var (reports, photos, names) = t.Result;
             var bare = new List<Save>();
             for (int i = 0; i < rows.Count; i++)
             {
-                var (save, photo, meta) = rows[i];
+                var (save, photo, title, meta) = rows[i];
+                // (two saves of one household differ by the save's name, said where the size would be)
+                title.Text = _homeNames[save.Dir] = names[i];
+                var same = names.Count(n => n == names[i]) > 1;
                 if (reports.FirstOrDefault(r => r.Save.Dir == save.Dir) is { } r)
                 {
-                    meta.Text = save.LastPlayed.ToString("d MMM", LangCulture()) + " · " + ModRow.SizeText(r.Bytes);
+                    meta.Text = Day(save.LastPlayed) + " · " + (same ? save.Name : ModRow.SizeText(r.Bytes));
                     if (r.LastBackup is null) bare.Add(save);
                 }
                 if (await SaveCard.SimsOf(photos[i]) is { } img) photo.Children.Add(new Image { Source = img, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 16, 0, 58) });
@@ -411,6 +434,85 @@ public sealed partial class MainWindow
             BackupLine(backup, bare, docs);
         }, TaskScheduler.FromCurrentSynchronizationContext());
         return s;
+    }
+
+    const double PlaySize = 44;
+
+    // a save's round Play in its card's corner, a dark green circle. Under the pointer anywhere on the card, or with the
+    // keyboard on it, the accent rises inside like a liquid (a turning rounded square, larger than the circle) and the triangle
+    // turns dark; leaving, it goes back down. Without a wait when Windows' animation effects are off.
+    static (FrameworkElement Corner, Action<bool> Over) PlayCorner(Button play)
+    {
+        const float size = (float)PlaySize, wave = 100, empty = 48, full = -22;
+        var none = Res("ApexClearBrush");
+        foreach (var state in new[] { "", "PointerOver", "Pressed", "Disabled" }) play.Resources["ButtonBackground" + state] = none;
+        play.Background = none;
+        var accent = Res("ApexAccentBrush");
+        FrameworkElement Tri(Brush fill)
+        {
+            var path = new Microsoft.UI.Xaml.Shapes.Path
+            {
+                Data = (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), "M3.5 2.2c0-0.9 1-1.5 1.8-1l8 5c0.8 0.5 0.8 1.6 0 2.1l-8 5c-0.8 0.5-1.8-0.1-1.8-1z"),
+                Fill = fill, Width = 16, Height = 16,
+            };
+            return new Canvas { Width = 16, Height = 16, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(13, 14, 0, 0), Children = { path } };
+        }
+        var liquid = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = wave, Height = wave, RadiusX = wave * 0.42, RadiusY = wave * 0.42, Fill = accent };
+        Canvas.SetLeft(liquid, -28);
+        var (light, dark) = (Tri(accent), Tri(Res("ApexOnAccentBrush")));
+        var inside = new Grid { Width = size, Height = size, IsHitTestVisible = false, Opacity = play.IsEnabled ? 1 : 0.45,
+            Background = Res("ApexAccentSoftBrush") };
+        foreach (var e in new UIElement[] { new Canvas { Children = { liquid } }, light, dark }) inside.Children.Add(e);
+        (play.Width, play.Content) = (size, inside);
+        (play.HorizontalAlignment, play.VerticalAlignment, play.Margin) = (HorizontalAlignment.Right, VerticalAlignment.Bottom, new Thickness(0, 0, 14, 14));
+
+        Microsoft.UI.Composition.Visual V(UIElement e) => ElementCompositionPreview.GetElementVisual(e);
+        var (pv, iv, wv, lv, dv) = (V(play), V(inside), V(liquid), V(light), V(dark));
+        var c = pv.Compositor;
+        pv.CenterPoint = new(size / 2, size / 2, 0);
+        var round = c.CreateRoundedRectangleGeometry();
+        (round.Size, round.CornerRadius) = (new(size, size), new(size / 2, size / 2));
+        iv.Clip = c.CreateGeometricClip(round);
+        ElementCompositionPreview.SetIsTranslationEnabled(liquid, true);
+        wv.Properties.InsertVector3("Translation", new(0, empty, 0));
+        wv.CenterPoint = new(wave / 2, wave / 2, 0);
+        dv.Opacity = 0;
+
+        var moves = AnimationsOn;
+        var ease = c.CreateCubicBezierEasingFunction(new(0.22f, 1f), new(0.36f, 1f));
+        var soft = c.CreateCubicBezierEasingFunction(new(0.25f, 0.1f), new(0.25f, 1f));
+        TimeSpan Ms(int ms) => TimeSpan.FromMilliseconds(moves ? ms : 1);
+        void To(Microsoft.UI.Composition.Visual v, string what, float to, int ms, Microsoft.UI.Composition.CompositionEasingFunction how, int wait = 0)
+        {
+            var a = c.CreateScalarKeyFrameAnimation();
+            a.InsertKeyFrame(1, to, how);
+            (a.Duration, a.DelayTime) = (Ms(ms), TimeSpan.FromMilliseconds(moves ? wait : 0));
+            v.StartAnimation(what, a);
+        }
+        var (over, focus, shown) = (false, false, false);
+        void Press()
+        {
+            var a = c.CreateVector3KeyFrameAnimation();
+            var to = play.IsPressed ? 0.9f : shown ? 1.08f : 1f;
+            a.InsertKeyFrame(1, new(to, to, 1), ease);
+            a.Duration = Ms(play.IsPressed ? 100 : 320);
+            pv.StartAnimation("Scale", a);
+        }
+        void Open()
+        {
+            var on = play.IsEnabled && (over || focus);
+            if (on == shown) return;
+            shown = on;
+            To(wv, "Translation.Y", on ? full : empty, 700, ease);
+            To(wv, "RotationAngleInDegrees", on ? 150 : 0, 700, ease);
+            To(dv, "Opacity", on ? 1 : 0, 200, soft, 120);
+            To(lv, "Opacity", on ? 0 : 1, 200, soft, 120);
+            Press();
+        }
+        play.RegisterPropertyChangedCallback(Microsoft.UI.Xaml.Controls.Primitives.ButtonBase.IsPressedProperty, (_, _) => Press());
+        play.GotFocus += (_, _) => { focus = play.FocusState == FocusState.Keyboard; Open(); };
+        play.LostFocus += (_, _) => { focus = false; Open(); };
+        return (play, on => { over = on; Open(); });
     }
 
     // a card that rises a little under the pointer, as the gallery's do
@@ -423,7 +525,7 @@ public sealed partial class MainWindow
         el.PointerExited += (_, _) => { el.Translation = System.Numerics.Vector3.Zero; el.Scale = System.Numerics.Vector3.One; exit?.Invoke(); };
     }
 
-    // one quiet line for the saves with no backup, and one link that backs them all up
+    // one quiet line for the saves with no copy, and one link that copies them all
     void BackupLine(StackPanel line, List<Save> bare, string docs)
     {
         line.Children.Clear();
@@ -441,12 +543,17 @@ public sealed partial class MainWindow
         line.Children.Add(now);
         now.Click += async (_, _) =>
         {
+            if (_savesBusy) return;
+            // (a test run, or the game writing its saves: nothing is copied, as on the Saves screen)
+            if (SavesBlocked() is { } why) { await Message(T("Back up now"), why); return; }
+            SavesBusy(true); // (the window stays open until they are made)
             now.IsEnabled = false;
             now.Content = new ProgressRing { IsActive = true, Width = 12, Height = 12 };
             var left = new List<Save>();
             foreach (var save in bare)
                 try { await Task.Run(() => Saves.Backup(save, docs)); }
                 catch (Exception e) { App.Log(e); left.Add(save); ToolTipService.SetToolTip(line, ErrorText(e)); }
+            SavesBusy(false);
             BackupLine(line, left, docs);
         };
     }
@@ -464,7 +571,7 @@ public sealed partial class MainWindow
         var s = new StackPanel { Spacing = 12 };
         var all = Gallery.List(Docs).Where(p => !p.Video).ToList();
         s.Children.Add(Head(T("Your pictures"), all.Count == 0 ? null : T("Gallery"), () => Show(GalleryScreen)));
-        if (all.Count == 0) { s.Children.Add(Muted(T("Pictures you take in the game show here."))); return s; }
+        if (all.Count == 0) { s.Children.Add(Muted(T("Pictures you take in the game appear here."))); return s; }
         var shown = all.Take(6).ToList();
         var row = new Grid { ColumnSpacing = 12 };
         var cells = new List<Button>();
@@ -481,7 +588,7 @@ public sealed partial class MainWindow
             // under the pointer: when it was taken, and a way to put it on top of Home
             var over = new Grid { Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) } };
             over.Children.Add(new Border { Background = Fade(Windows.UI.Color.FromArgb(255, 12, 12, 12), [(0, 0xD0), (0.6, 0)]), IsHitTestVisible = false });
-            over.Children.Add(new TextBlock { Text = p.Taken.ToString("d MMM · HH:mm", culture), FontSize = 12, Foreground = white, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(10, 0, 10, 8) });
+            over.Children.Add(new TextBlock { Text = Day(p.Taken, hour: true), FontSize = 12, Foreground = white, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(10, 0, 10, 8) });
             g.Children.Add(over);
             var isTop = _gal?.HomePicture == p.Path || (_gal?.HomePicture is null && i == 0);
             var pin = new Button
@@ -493,10 +600,13 @@ public sealed partial class MainWindow
             };
             ToolTipService.SetToolTip(pin, isTop ? T("Home picture") : T("Use on Home"));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(pin, isTop ? T("Home picture") : T("Use on Home"));
+            // (shown when reached with the keyboard too, not only under the pointer)
+            pin.GotFocus += (_, _) => pin.Opacity = 1;
+            pin.LostFocus += (_, _) => pin.Opacity = isTop ? 1 : 0;
             pin.Click += (_, _) =>
             {
                 if (isTop) return;
-                (_gal ??= Gallery.Load()).HomePicture = p.Path;
+                (_gal ??= LoadGallery()).HomePicture = p.Path;
                 Gallery.Save(_gal);
                 if (_settings.HomePicture != "gallery") { _settings.HomePicture = "gallery"; _settings.Save(); }
                 BuildHome();
@@ -508,7 +618,7 @@ public sealed partial class MainWindow
                 HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, Background = Res("ApexPillBrush"),
             };
             b.Click += (_, _) => OpenViewer(all, at); // (no flight from the small copy: the viewer waits for the picture, then fades it in)
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, p.Taken.ToString("d MMM yyyy HH:mm", culture));
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, Day(p.Taken, hour: true));
             var cell = new Grid();
             cell.Children.Add(b);
             cell.Children.Add(pin);
@@ -525,16 +635,23 @@ public sealed partial class MainWindow
 
     // the window's background, as chosen in Settings: Windows' Mica (tinted by the desktop wallpaper), its stronger kind,
     // Acrylic, or the launcher's own solid colour
+    // (a new backdrop only when its kind changes: the one in place follows light and dark by itself, and replacing it at every
+    // change of theme made the window's drawing fail after two or three changes)
+    string? _backdropKind;
     void ApplyBackdrop()
     {
-        SystemBackdrop = _settings.Backdrop switch
+        if (_backdropKind != _settings.Backdrop)
         {
-            "micaalt" => new MicaBackdrop { Kind = Microsoft.UI.Composition.SystemBackdrops.MicaKind.BaseAlt },
-            "acrylic" => new DesktopAcrylicBackdrop(),
-            "solid" => null,
-            _ => new MicaBackdrop(),
-        };
-        if (_settings.Backdrop == "solid") Root.SetValue(Panel.BackgroundProperty, Res("ApexPaneBrush"));
-        else Root.ClearValue(Panel.BackgroundProperty);
+            _backdropKind = _settings.Backdrop;
+            SystemBackdrop = _settings.Backdrop switch
+            {
+                "micaalt" => new MicaBackdrop { Kind = Microsoft.UI.Composition.SystemBackdrops.MicaKind.BaseAlt },
+                "acrylic" => new DesktopAcrylicBackdrop(),
+                "solid" => null,
+                _ => new MicaBackdrop(),
+            };
+        }
+        // (the theme's pane over what Windows lets through: a tint of the wallpaper, never lighter than the page)
+        Root.Background = _settings.Backdrop == "solid" ? Res("ApexPaneBrush") : new SolidColorBrush(Tone("Pane", 0xE6));
     }
 }

@@ -14,6 +14,7 @@ public static class Uninstall
     public static List<string> FromGame(Game g, string docs)
     {
         var left = new List<string>();
+        GameSettings.RestoreBin(g); // (before its copies, in the backup folder, go)
         Engine.RemoveAll(g, docs);
         var dir = Manifest.DirOf(g.Bin);
         if (Manifest.Load(g.Bin).Files.Count > 0) { left.Add(dir); return left; } // (a file could not be put back: its backup stays where Repair can find it)
@@ -25,10 +26,10 @@ public static class Uninstall
             if (Path.GetFileName(f).Equals("setup.json", StringComparison.OrdinalIgnoreCase) && Path.GetDirectoryName(f)!.Equals(dir, StringComparison.OrdinalIgnoreCase)) continue;
             if (f.StartsWith(restore, StringComparison.OrdinalIgnoreCase)) continue;
             try { ModLibrary.Recycle(f); }
-            catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { left.Add(f); }
+            catch (Exception e) when (e is SetupException or IOException or UnauthorizedAccessException) { if (File.Exists(f)) left.Add(f); } // (an antivirus's own file comes and goes)
         }
         if (left.Count > 0) return left;
-        try { Fs.Retry(() => Directory.Delete(dir, true)); }
+        try { Fs.DeleteClear(dir); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(dir); }
         return left;
     }
@@ -38,6 +39,7 @@ public static class Uninstall
     public static List<string> FromDocuments(Game g, string docs, bool keepSettings)
     {
         Mods.EnableAll(g, docs);
+        GameSettings.RestoreDocs(docs);
         return keepSettings ? [] : ApexSettings(docs);
     }
 
@@ -45,12 +47,17 @@ public static class Uninstall
     // Screenshots and Videos folders, and any folder its settings send captures to), and so does the folder holding them
     public static List<string> ApexSettings(string docs)
     {
-        var left = new List<string>();
-        var apex = Path.Combine(docs, "Apex Radiance");
-        if (!Directory.Exists(apex) || File.GetAttributes(apex).HasFlag(FileAttributes.ReparsePoint)) return left;
-        var keep = Gallery.PictureFolders(docs).Concat(Gallery.VideoFolders(docs))
-            .Append(Path.Combine(apex, "Screenshots")).Append(Path.Combine(apex, "Videos"))
+        // (also where an ASI that never moved it left it; what stays is known before the settings that say it go)
+        var all = new[] { Scan.ApexDir(docs), Path.Combine(docs, "Apex Radiance") }.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var keep = Gallery.PictureFolders(docs).Concat(Gallery.VideoFolders(docs)).Concat(all.SelectMany(d => new[] { Path.Combine(d, "Screenshots"), Path.Combine(d, "Videos") }))
             .Select(f => Path.GetFullPath(f).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar).ToList();
+        return all.SelectMany(d => ApexSettings(d, keep)).ToList();
+    }
+
+    static List<string> ApexSettings(string apex, List<string> keep)
+    {
+        var left = new List<string>();
+        if (!Directory.Exists(apex) || File.GetAttributes(apex).HasFlag(FileAttributes.ReparsePoint)) return left;
         bool Holds(string entry)
         {
             var e = Path.GetFullPath(entry).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -64,7 +71,7 @@ public static class Uninstall
             {
                 // (a link goes alone, never what it points to)
                 if (Directory.Exists(entry) && File.GetAttributes(entry).HasFlag(FileAttributes.ReparsePoint)) Directory.Delete(entry);
-                else if (Directory.Exists(entry)) Fs.Retry(() => Directory.Delete(entry, true));
+                else if (Directory.Exists(entry)) Fs.DeleteClear(entry);
                 else Fs.Retry(() => File.Delete(entry));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { left.Add(entry); }
@@ -103,7 +110,9 @@ public static class Uninstall
         exe ??= Environment.ProcessPath;
         LauncherInstall.RemoveTraces();
         var outside = exe is not null && !LauncherInstall.IsInstalledCopy(exe);
+        var install = Paths.InstallDir;
+        Paths.SetInstallDir(null);
         string[] data = keepData ? [Path.Combine(Paths.Data, "thumbs"), Paths.Ops] : [Paths.Data];
-        LauncherInstall.DeleteAfterExit(outside ? [Paths.InstallDir, .. data, exe!, LauncherInstall.MarkerOf(exe!)] : [Paths.InstallDir, .. data]);
+        LauncherInstall.DeleteInstallAfterExit(install, outside ? [.. data, exe!, LauncherInstall.MarkerOf(exe!)] : data);
     }
 }

@@ -8,7 +8,8 @@
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
 
-            <!-- the Launcher's colours, dark and light as Windows is set; the accent is the one chosen in Windows -->
+            <!-- the app's brushes. Design/DesignSystem.cs gives them the colours of the theme in use when the app starts and when it changes;
+                 the ones written here are what a Windows contrast theme keeps -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
                     <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#0E0E0E" />
@@ -39,10 +40,20 @@
                     <SolidColorBrush x:Key="ApexHairlineBrush" Color="#12FFFFFF" />
                     <SolidColorBrush x:Key="ApexGlassBrush" Color="#EB141414" />
                     <SolidColorBrush x:Key="ApexGlassLineBrush" Color="#10FFFFFF" />
-                    <SolidColorBrush x:Key="ApexAccentBrush" Color="{ThemeResource SystemAccentColorLight2}" />
-                    <SolidColorBrush x:Key="ApexAccentTextBrush" Color="{ThemeResource SystemAccentColorLight3}" />
-                    <SolidColorBrush x:Key="ApexAccentSoftBrush" Color="{ThemeResource SystemAccentColor}" Opacity="0.16" />
-                    <SolidColorBrush x:Key="ApexAccentLineBrush" Color="{ThemeResource SystemAccentColor}" Opacity="0.4" />
+                    <SolidColorBrush x:Key="ApexInkBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ApexOnAccentBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ApexInputBorderHoverBrush" Color="#454545" />
+                    <SolidColorBrush x:Key="ApexSelectedBrush" Color="#2C2C2C" />
+                    <SolidColorBrush x:Key="ApexTileBrush" Color="#232323" />
+                    <SolidColorBrush x:Key="ApexClearBrush" Color="#00FFFFFF" />
+                    <SolidColorBrush x:Key="ApexFillBrush" Color="#0FFFFFFF" />
+                    <SolidColorBrush x:Key="ApexFillOverBrush" Color="#1AFFFFFF" />
+                    <SolidColorBrush x:Key="ApexFillDownBrush" Color="#0BFFFFFF" />
+                    <SolidColorBrush x:Key="ApexVeilBrush" Color="#A6000000" />
+                    <SolidColorBrush x:Key="ApexAccentBrush" Color="#B79CFF" />
+                    <SolidColorBrush x:Key="ApexAccentTextBrush" Color="#C9B8FF" />
+                    <SolidColorBrush x:Key="ApexAccentSoftBrush" Color="#33A78BFA" />
+                    <SolidColorBrush x:Key="ApexAccentLineBrush" Color="#33A78BFA" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D9FBFBFB" />
@@ -54,7 +65,7 @@
                     <SolidColorBrush x:Key="ApexCardBorderBrush" Color="#D4D4D4" />
                     <SolidColorBrush x:Key="ApexMutedBrush" Color="#6E6E6E" />
                     <SolidColorBrush x:Key="ApexSoftTextBrush" Color="#454545" />
-                    <SolidColorBrush x:Key="ApexSuccessBrush" Color="#2F8A5B" />
+                    <SolidColorBrush x:Key="ApexSuccessBrush" Color="#28774E" />
                     <SolidColorBrush x:Key="ApexWarningBrush" Color="#B5771C" />
                     <SolidColorBrush x:Key="ApexErrorBrush" Color="#C53A35" />
                     <SolidColorBrush x:Key="ApexPillBrush" Color="#EFEFEF" />
@@ -73,27 +84,52 @@
                     <SolidColorBrush x:Key="ApexHairlineBrush" Color="#14000000" />
                     <SolidColorBrush x:Key="ApexGlassBrush" Color="#EBFFFFFF" />
                     <SolidColorBrush x:Key="ApexGlassLineBrush" Color="#14000000" />
-                    <SolidColorBrush x:Key="ApexAccentBrush" Color="{ThemeResource SystemAccentColorDark1}" />
-                    <SolidColorBrush x:Key="ApexAccentTextBrush" Color="{ThemeResource SystemAccentColorDark2}" />
-                    <SolidColorBrush x:Key="ApexAccentSoftBrush" Color="{ThemeResource SystemAccentColor}" Opacity="0.1" />
-                    <SolidColorBrush x:Key="ApexAccentLineBrush" Color="{ThemeResource SystemAccentColor}" Opacity="0.35" />
+                    <SolidColorBrush x:Key="ApexInkBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ApexOnAccentBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ApexInputBorderHoverBrush" Color="#B4B4B4" />
+                    <SolidColorBrush x:Key="ApexSelectedBrush" Color="#E5E5E5" />
+                    <SolidColorBrush x:Key="ApexTileBrush" Color="#EFEFEF" />
+                    <SolidColorBrush x:Key="ApexClearBrush" Color="#00000000" />
+                    <SolidColorBrush x:Key="ApexFillBrush" Color="#0A000000" />
+                    <SolidColorBrush x:Key="ApexFillOverBrush" Color="#12000000" />
+                    <SolidColorBrush x:Key="ApexFillDownBrush" Color="#08000000" />
+                    <SolidColorBrush x:Key="ApexVeilBrush" Color="#B8FFFFFF" />
+                    <SolidColorBrush x:Key="ApexAccentBrush" Color="#6A48B9" />
+                    <SolidColorBrush x:Key="ApexAccentTextBrush" Color="#54359C" />
+                    <SolidColorBrush x:Key="ApexAccentSoftBrush" Color="#33A78BFA" />
+                    <SolidColorBrush x:Key="ApexAccentLineBrush" Color="#33A78BFA" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
+            <!-- one shape for every control, and one height for what is picked in a row: 36 -->
+            <CornerRadius x:Key="ControlCornerRadius">8</CornerRadius>
+            <CornerRadius x:Key="OverlayCornerRadius">12</CornerRadius>
+            <x:Double x:Key="TextControlThemeMinHeight">36</x:Double>
+            <Thickness x:Key="TextControlThemePadding">12,8,8,8</Thickness>
+            <Style TargetType="ComboBox" BasedOn="{StaticResource DefaultComboBoxStyle}">
+                <Setter Property="MinHeight" Value="36" />
+            </Style>
+            <Style TargetType="CheckBox" BasedOn="{StaticResource DefaultCheckBoxStyle}">
+                <Setter Property="CornerRadius" Value="5" />
+            </Style>
             <Style x:Key="ApexCard" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource ApexCardBrush}" />
                 <Setter Property="BorderBrush" Value="{ThemeResource ApexCardBorderBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="CornerRadius" Value="12" />
-                <Setter Property="Padding" Value="18,14" />
+                <Setter Property="Padding" Value="20" />
             </Style>
             <Style x:Key="ApexTitle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}">
                 <Setter Property="FontSize" Value="28" />
+                <Setter Property="LineHeight" Value="36" />
+                <!-- (its first letter stands on the same line as everything under it) -->
+                <Setter Property="OpticalMarginAlignment" Value="None" />
             </Style>
             <Style x:Key="ApexMuted" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
                 <Setter Property="Foreground" Value="{ThemeResource ApexMutedBrush}" />
                 <Setter Property="TextWrapping" Value="Wrap" />
-                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="LineHeight" Value="18" />
             </Style>
             <Style x:Key="ApexBody" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
                 <Setter Property="FontSize" Value="13" />
@@ -103,7 +139,7 @@
                 <Setter Property="FontSize" Value="14" />
             </Style>
             <Style x:Key="ApexSection" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
-                <Setter Property="FontSize" Value="15" />
+                <Setter Property="FontSize" Value="16" />
             </Style>
             <!-- a choice drawn as a whole card (the install's graphics cards): no radio circle of its own, the card paints the state -->
             <Style x:Key="ApexOptionCard" TargetType="RadioButton">
@@ -119,8 +155,8 @@
             </Style>
             <Style x:Key="ApexPill" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource ApexPillBrush}" />
-                <Setter Property="CornerRadius" Value="11" />
-                <Setter Property="Padding" Value="9,3" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="8,4" />
                 <Setter Property="VerticalAlignment" Value="Center" />
             </Style>
         </ResourceDictionary>

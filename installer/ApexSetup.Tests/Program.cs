@@ -241,16 +241,16 @@ try
     var rcfg = Path.Combine(docs, "Mods", "Resource.cfg");
     var rcfgOld = Read(rcfg);
     File.WriteAllText(rcfg, "Priority 500\r\nPackedFile Packages/*.package\r\n");
-    var lost = Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.Text.StartsWith("Mods\\Resource.cfg does not read")).ToList();
+    var lost = Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.Text.StartsWith("The game does not load {0}. Mods\\Resource.cfg")).ToList();
     Check(lost.Count == 1 && lost[0].Args[0].EndsWith("ld_MonoPatcher.package"), "Resource.cfg that skips MonoPatcher's folder reported");
     lost[0].Fix!();
-    Check(!Compat.Check(g, Scan.Run(g, docs), docs).Any(x => x.Text.StartsWith("Mods\\Resource.cfg does not read")) && File.Exists(rcfg + ".apex-backup"), "Resource.cfg fixed, copy kept");
+    Check(!Compat.Check(g, Scan.Run(g, docs), docs).Any(x => x.Text.StartsWith("The game does not load {0}. Mods\\Resource.cfg")) && File.Exists(rcfg + ".apex-backup"), "Resource.cfg fixed, copy kept");
     Check(Read(rcfg) == "Priority 500\r\nPackedFile Packages/*.package\r\nPriority 500\r\nPackedFile Packages/*/*.package\r\nPackedFile Packages/*/*/*.package\r\n",
           "the added Packages lines come with their own Priority");
     var deep = Path.Combine(docs, "Mods", "Packages", "a", "b", "c", "ts3fixes.package");
     Directory.CreateDirectory(Path.GetDirectoryName(deep)!);
     File.WriteAllText(deep, "pkg");
-    var tooDeep = Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.Text.StartsWith("Mods\\Resource.cfg does not read")).ToList();
+    var tooDeep = Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.Text.StartsWith("The game does not load {0}. Mods\\Resource.cfg")).ToList();
     Check(tooDeep.Count == 1 && tooDeep[0].Fix is null && tooDeep[0].Args[0] == Path.Combine("Packages", "a", "b", "c", "ts3fixes.package"),
           "a package the Packages lines do not reach either is told to move, with no fix that changes nothing");
     Directory.Delete(Path.Combine(docs, "Mods", "Packages", "a"), true);
@@ -453,7 +453,7 @@ try
     var cfg3 = Path.Combine(docs3, "Mods", "Resource.cfg");
     File.WriteAllText(cfg3, "Priority 500\r\nPackedFile *.package\r\n");
     var t1 = Tree();
-    Compat.Check(g3, Scan.Run(g3, docs3), docs3).First(x => x.Text.StartsWith("Mods\\Resource.cfg does not read")).Fix!();
+    Compat.Check(g3, Scan.Run(g3, docs3), docs3).First(x => x.Text.StartsWith("The game does not load {0}. Mods\\Resource.cfg")).Fix!();
     Check(File.Exists(cfg3 + ".apex-backup") && Read(cfg3) != "Priority 500\r\nPackedFile *.package\r\n", "the Resource.cfg fix ran");
     pts = RestorePoints.List(bin3);
     Check(pts.Count == 1 && pts[0].Label == "Fix incompatible settings" && RestorePoints.Restore(bin3, pts[0]).Count == 0 && SameTree(Tree(), t1),
@@ -1431,8 +1431,8 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
             && Health.StateOf([new Health.Item(new Finding(Severity.Info, "x", []), HealthArea.Mods, [])]) == HealthState.Ready,
             "Health: ready, needs you, blocked");
         Check(Health.AreaOf(new Finding(Severity.Error, "{0} is missing: the RTX Remix bridge does not start.", [])) == HealthArea.Graphics
-            && Health.AreaOf(new Finding(Severity.Error, "Two ASI loaders ({0}) load every mod twice. The launcher keeps {1} and moves the others to the backup folder.", [])) == HealthArea.Loaders
-            && Health.AreaOf(new Finding(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it.", [])) == HealthArea.GameSettings
+            && Health.AreaOf(new Finding(Severity.Error, "Two ASI loaders are in the game folder: {0}. Every ASI mod loads twice, so the launcher keeps {1} and moves the others to the backup folder.", [])) == HealthArea.Loaders
+            && Health.AreaOf(new Finding(Severity.Warning, "The game does not load {0}. Mods\\Resource.cfg does not include its folder. Move it to Mods\\Packages.", [])) == HealthArea.GameSettings
             && Health.AreaOf(new Finding(Severity.Error, "Apex Radiance is not installed in this game.", [])) == HealthArea.ApexRadiance,
             "Health: findings fall in their area");
 
@@ -1667,8 +1667,8 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         var cp = Path.Combine(lr, "Contents", "Sofa.package");
         var stblData = Stbl((0x1111, "Comfy Sofa"), (0x2222, "A sofa."));
         TestPackage(cp, (0x220557DAu, stblData, false, stblData.Length), (0x319E4F1Du, objd.ToArray(), false, objd.Count), (0x034AEECBu, casp.ToArray(), false, casp.Count));
-        var inside = ModContent.Read(cp);
-        Check(inside.Names.SequenceEqual(["Comfy Sofa"]) && inside.PartNames.SequenceEqual(["afHairLong"])
+        var inside = ModInspect.Read(cp, "en");
+        Check(inside.Items.Select(i => i.Name).SequenceEqual(["Comfy Sofa", "afHairLong"])
             && inside.Parts.Contains(("Object", 1)) && inside.Parts.Contains(("Hair", 1)),
             "mods: an object's catalog name from the package's strings, a CAS part's kind and name");
 
@@ -1684,12 +1684,20 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
 
 ModConflictsTests.Run(Check);
 InstallTests.Run(Check);
+DesignTests.Run(Check);
 ModMergeTests.Run(Check);
+MergeDraftTests.Run(Check);
 ModKindsTests.Run(Check);
+GameSettingsTests.Run(Check);
 HealthTests.Run(Check);
 ModToolsTests.Run(Check);
+ModProfilesTests.Run(Check);
+ModAddTests.Run(Check);
 GalleryTests.Run(Check);
 DefaultReplacementsTests.Run(Check);
+ModInspectTests.Run(Check);
+ModFindTests.Run(Check);
+SavesTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;

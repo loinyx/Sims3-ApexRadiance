@@ -18,15 +18,18 @@ public sealed partial class MainWindow
         var wizard = Wizard && _step == GameStep;
         GamePanel.Children.Clear();
         GamePanel.Visibility = Visibility.Collapsed;
+        GameSub.Visibility = Visibility.Visible;
         _gameAllSet = false;
         if (!wizard)
         {
+            BackOnce(GameHead);
             GameTitle.Text = T("Choose your game");
-            GameSub.Text = T("The launcher found these installs. Pick the one you play.");
+            GameSub.Text = T("The launcher found these installs. Choose the one you play.");
             GameList.Visibility = GameBrowse.Visibility = Visibility.Visible;
             GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;
             return;
         }
+        if (GameHead.Children[0] is Button) GameHead.Children.RemoveAt(0);
         NoGames.Visibility = Visibility.Collapsed;
         if (_games.Count == 0)
         {
@@ -39,8 +42,8 @@ public sealed partial class MainWindow
         }
         if (_games.Count > 1)
         {
-            GameTitle.Text = T("Which is your game?");
-            GameSub.Text = T("The launcher found {0} installs. Apex goes only into the one you choose.", _games.Count);
+            GameTitle.Text = T("Choose your game");
+            GameSub.Text = T("The launcher found {0} installs. Apex Radiance goes only into the one you choose.", _games.Count);
             GameList.Visibility = GameBrowse.Visibility = Visibility.Visible;
             return;
         }
@@ -53,62 +56,73 @@ public sealed partial class MainWindow
         GamePanel.Visibility = Visibility.Visible;
     }
 
-    // one game: its name and packs, Change folder, then its folder and what the launcher checked
+    // one game: its name and packs, Change folder, then what the launcher checked, side by side
     Border GameCard(Game g)
     {
-        var head = new Grid { ColumnSpacing = 14, Padding = new Thickness(18, 16, 18, 16) };
+        var head = new Grid { ColumnSpacing = Design.Space.IconToText, Padding = new Thickness(Design.Space.CardPad) };
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        head.Children.Add(new Border { Width = 44, Height = 44, CornerRadius = new CornerRadius(12), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
-            Child = Lucide.Icon("gamepad-2", 22, Res("ApexAccentBrush")) });
+        head.Children.Add(Design.IconTile.Of("gamepad-2"));
         var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         words.Children.Add(new TextBlock { Text = "The Sims 3", FontSize = 16, FontWeight = FontWeights.SemiBold });
-        words.Children.Add(new TextBlock { Text = g.Label + " · " + Packs(g), FontSize = 13, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+        words.Children.Add(new TextBlock { Text = g.Label + " \u00b7 " + Packs(g), FontSize = 13, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(words, 1); head.Children.Add(words);
-        var change = new Button { Content = Labeled("folder", T("Change folder")), VerticalAlignment = VerticalAlignment.Center };
+        var change = new Button { Content = T("Change folder"), MinHeight = Design.Size.Control, Padding = new Thickness(14, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
         change.Click += OnBrowse;
+        ToolTipService.SetToolTip(change, g.Root);
         Grid.SetColumn(change, 2); head.Children.Add(change);
 
-        var body = new StackPanel { Padding = new Thickness(18, 4, 18, 10), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
-        var path = new TextBlock { Text = g.Root, FontFamily = new FontFamily("Consolas"), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 10, 0, 2) };
-        ToolTipService.SetToolTip(path, g.Root);
-        body.Children.Add(path);
         var findings = _state is { } s ? GpuFindings(s).Concat(_found.Where(x => x.Suggest is null)).ToList() : [];
-        _gameAllSet = findings.Count == 0 && !_running;
-        // the version, the card and the space: what the launcher read, each with what it means for the install
-        body.Children.Add(Check(true, T("Version {0}", g.Version), findings.Any(f => f.Severity == Severity.Error) ? "" : T("the one Apex Radiance uses")));
-        if (_vulkan is { Card: { } card } vk)
-            body.Children.Add(Check(!OldCard && !OldDriver, card, OldCard || OldDriver ? BridgeDetail.Text : T("Vulkan {0}, ready for the bridge", vk.Version?.ToString(2) ?? "")));
+        var checks = new List<(bool Ok, string What, string Value)> { (!findings.Any(f => f.Severity == Severity.Error), T("Version"), g.Version) };
+        if (_vulkan is { Card: { } card }) checks.Add((!OldCard && !OldDriver, T("Graphics"), card.Replace("NVIDIA GeForce ", "").Replace("AMD Radeon ", "Radeon ")));
         try
         {
             var free = Engine.FreeBytes(g.Bin);
             var need = Engine.DownloadEstimate(Plan().Install, c => Repo.GetValueOrDefault(c) is { } r ? _latest.GetValueOrDefault(r) : null);
-            body.Children.Add(Check(free > Math.Max(need * 2, 200L << 20), T("{0} GB free", (free >> 30).ToString()), need > 0 ? T("the install uses about {0} MB", Math.Max(1, need >> 20).ToString()) : ""));
+            checks.Add((free > Math.Max(need * 2, 200L << 20), T("Free space"), T("{0} GB", (free >> 30).ToString())));
         }
         catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { }
-        var all = new StackPanel();
-        all.Children.Add(head);
-        all.Children.Add(body);
-        return new Border { Child = all, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexHairlineBrush") };
+        _gameAllSet = findings.Count == 0 && !_running && checks.All(c => c.Ok);
+
+        var facts = new StackPanel();
+        facts.Children.Add(Fact(null, T("Folder"), g.Root));
+        foreach (var (ok, what, value) in checks) facts.Children.Add(Fact(ok, what, value));
+        var all = new StackPanel { Children = { head, facts } };
+        if (OldCard || OldDriver) all.Children.Add(new TextBlock { Text = BridgeDetail.Text, FontSize = 13, LineHeight = 18, Foreground = Res("ApexWarningTextBrush"), TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(Design.Space.CardPad, 0, Design.Space.CardPad, Design.Space.CardPad) });
+        return new Border { Child = all, CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(1), BorderBrush = Res("ApexCardBorderBrush"), Background = Res("ApexRaisedBrush") };
     }
 
-    FrameworkElement Check(bool ok, string what, string meaning)
+    // something checked: its mark, what it is, and what was found on the right
+    // (ok null: a fact, not a check, shown whole)
+    static FrameworkElement Fact(bool? ok, string what, string value)
     {
-        var p = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(0, 8, 0, 8) };
-        p.Children.Add(Lucide.Icon(ok ? "check" : "triangle-alert", 14, Res(ok ? "ApexSuccessBrush" : "ApexWarningBrush"), ok ? 2.5 : 2));
-        p.Children.Add(new TextBlock { Text = what, FontSize = 13, Foreground = Res("ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center });
-        if (meaning.Length > 0) p.Children.Add(new TextBlock { Text = "· " + meaning, FontSize = 13, Foreground = Res("ApexMutedBrush"), VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
-        return p;
+        var g = new Grid { ColumnSpacing = Design.Space.X3, MinHeight = 52, Padding = new Thickness(Design.Space.CardPad, Design.Space.X3, Design.Space.CardPad, Design.Space.X3), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Res("ApexHairlineBrush") };
+        foreach (var w in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star) }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+        var mark = Lucide.Icon(ok switch { null => "folder", true => "circle-check", _ => "triangle-alert" }, 18, Res(ok switch { null => "ApexMutedBrush", true => "ApexSuccessBrush", _ => "ApexWarningBrush" }));
+        mark.VerticalAlignment = VerticalAlignment.Center;
+        g.Children.Add(mark);
+        var name = new TextBlock { Text = what, FontSize = 14, Foreground = Res("ApexSoftTextBrush"), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(name, 1);
+        g.Children.Add(name);
+        var found = FactText(value);
+        if (ok is null) (found.TextWrapping, found.TextTrimming) = (TextWrapping.Wrap, TextTrimming.None);
+        (found.FontSize, found.HorizontalAlignment) = (14, HorizontalAlignment.Right);
+        Grid.SetColumn(found, 2);
+        g.Children.Add(found);
+        ToolTipService.SetToolTip(g, what + ": " + value);
+        return g;
     }
 
     // no game found: where it is, said once, and the folder picker
     Border FindGameCard()
     {
         var p = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center, Padding = new Thickness(34) };
-        p.Children.Add(new Border { Width = 52, Height = 52, CornerRadius = new CornerRadius(14), Background = Res("ApexPillBrush"), HorizontalAlignment = HorizontalAlignment.Center,
-            Child = Lucide.Icon("folder", 24, Res("ApexSoftTextBrush")) });
-        p.Children.Add(new TextBlock { Text = T("Choose the The Sims 3 folder"), FontSize = 15, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
+        var tile = Design.IconTile.Of("folder", 52);
+        tile.HorizontalAlignment = HorizontalAlignment.Center;
+        p.Children.Add(tile);
+        p.Children.Add(new TextBlock { Text = T("Choose The Sims 3 folder"), FontSize = 16, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
         p.Children.Add(new TextBlock { Text = T("The one with Game\\Bin\\TS3W.exe inside. In Steam: Library › right-click the game › Manage › Browse local files."),
             FontSize = 13, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, MaxWidth = 440, HorizontalAlignment = HorizontalAlignment.Center });
         var pick = new Button { Content = Labeled("folder", T("Choose folder")), Style = (Style)Application.Current.Resources["AccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Center };

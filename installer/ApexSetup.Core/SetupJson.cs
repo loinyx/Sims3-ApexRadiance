@@ -8,10 +8,13 @@ namespace ApexSetup;
 [JsonSerializable(typeof(Manifest))]
 [JsonSerializable(typeof(RestorePoint))]
 [JsonSerializable(typeof(LauncherSettings))]
+[JsonSerializable(typeof(BackupChoices))]
 [JsonSerializable(typeof(ModNotesFile))]
+[JsonSerializable(typeof(ModProfilesFile))]
 [JsonSerializable(typeof(MergeRecord))]
 [JsonSerializable(typeof(List<SessionInfo>))]
 [JsonSerializable(typeof(Dictionary<string, List<SizePoint>>))]
+[JsonSerializable(typeof(Dictionary<string, List<string>>))]
 [JsonSerializable(typeof(ConflictResult))]
 [JsonSerializable(typeof(GalleryData))]
 public partial class SetupJson : JsonSerializerContext;

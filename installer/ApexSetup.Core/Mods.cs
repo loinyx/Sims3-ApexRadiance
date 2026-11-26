@@ -34,11 +34,10 @@ public static class Mods
         var list = new List<ModFile>();
         var mods = Path.Combine(docs, "Mods");
         var off = Disabled(docs);
-        var merged = ModMerge.Folder(docs) + Path.DirectorySeparatorChar; // (originals kept by a merge: not the player's mods now)
         var managed = Manifest.Load(g.Bin).Files.Select(f => Path.IsPathRooted(f.Path) ? f.Path : Path.Combine(g.Bin, f.Path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (Directory.Exists(mods))
-            foreach (var p in Files(mods, "*.package").Where(p => !p.StartsWith(merged, StringComparison.OrdinalIgnoreCase)))
+            foreach (var p in Files(mods, "*.package").Where(p => !ModMerge.Keeps(docs, p)))
             {
                 var isOff = p.StartsWith(off + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
                 var rel = Path.Combine("Mods", Path.GetRelativePath(isOff ? off : mods, p));
@@ -52,7 +51,7 @@ public static class Mods
             .ThenBy(m => m.Rel, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    static IEnumerable<string> Files(string dir, string pattern)
+    internal static IEnumerable<string> Files(string dir, string pattern)
     {
         // (hidden and system files too: the game loads them)
         try { return Directory.EnumerateFiles(dir, pattern, new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 }).ToList(); }
@@ -116,16 +115,17 @@ public static class Mods
             Fs.Retry(() => File.Move(m.Path, target));
             n++;
         }
-        try { if (Directory.Exists(Disabled(docs)) && !Directory.EnumerateFileSystemEntries(Disabled(docs), "*", SearchOption.AllDirectories).Any(e => File.Exists(e))) Fs.Retry(() => Directory.Delete(Disabled(docs), true)); }
+        try { Fs.DeleteClear(Disabled(docs), () => !Directory.EnumerateFiles(Disabled(docs), "*", SearchOption.AllDirectories).Any()); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return n;
     }
 
-    // a file of the same name already there (the player put a copy back by hand): " (2)" before the extension. otherSide: the
-    // same folder on the other side, on or off, whose names are taken too (an on and an off mod there would share one Rel)
-    public static string Free(string path, string? otherSide = null)
+    // a file of the same name already there (the player put a copy back by hand): " (2)" before the extension. otherSides: the
+    // same folder on the other side, on or off, whose names are taken too (an on and an off mod there would share one Rel),
+    // and where a merge keeps its mods of that folder
+    public static string Free(string path, params string?[] otherSides)
     {
-        bool Taken(string p) => File.Exists(p) || otherSide is not null && File.Exists(Path.Combine(otherSide, Path.GetFileName(p)));
+        bool Taken(string p) => File.Exists(p) || otherSides.Any(o => o is not null && File.Exists(Path.Combine(o, Path.GetFileName(p))));
         if (!Taken(path)) return path;
         var dir = Path.GetDirectoryName(path)!;
         var name = Path.GetFileNameWithoutExtension(path);

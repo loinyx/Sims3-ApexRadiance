@@ -9,7 +9,15 @@ public enum HealthArea { ApexRadiance, Loaders, Graphics, GameSettings, Mods, Sa
 // crystal: blocked when Apex Radiance cannot run and nothing fixes it, needs you when something waits for the player.
 public static class Health
 {
-    public sealed record Item(Finding Finding, HealthArea Area, IReadOnlyList<string> Files);
+    public sealed record Item(Finding Finding, HealthArea Area, IReadOnlyList<string> Files)
+    {
+        // a mod conflict (it has its own cards and its own Ignore)
+        public bool Conflict { get; init; }
+        // the same finding at the next check, whatever its counts and dates: one the player ignored stays ignored. Its files
+        // count: the same words about another file are another finding.
+        public string Id => string.Join("|", Finding.Args.Select(a => int.TryParse(a, out _) || DateTime.TryParse(a, out _) ? "#" : a)
+            .Prepend(Finding.Text.Replace("at least ", "", StringComparison.Ordinal)).Prepend(Area.ToString()).Concat(Files.Select(f => Path.GetFileName(f)).Order(StringComparer.OrdinalIgnoreCase)));
+    }
 
     // conflicts: ModConflicts' scan (seconds on a cold cache: call Gather off the UI thread when passing it).
     // beforePlay: only Verify's and Compat's findings, the ones that decide a start (every StopsApex item is one of them)
@@ -26,17 +34,22 @@ public static class Health
         Add("compatibility", () => Compat.Check(g, s, docs).Select(f => new Item(f, AreaOf(f), [])));
         if (beforePlay) return items;
         if (mods is not null) Add("mods", () => ModChecks.Run(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
-        if (mods is not null && conflicts is not null) Add("conflicts", () => conflicts.Check(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files)));
+        if (mods is not null && conflicts is not null) Add("conflicts", () => conflicts.Check(mods, g, docs).Select(m => new Item(m.Finding, HealthArea.Mods, m.Files) { Conflict = m.Files.Count > 0 }));
+        Add("merges", () => ModMerge.Lost(docs).Select(x => new Item(new Finding(Severity.Warning,
+            "Part of {1} is missing from the merge {0}. Split it to get every mod back.", [Path.GetFileNameWithoutExtension(x.Merged.Name), string.Join(", ", x.Mods.Take(4)) + (x.Mods.Count > 4 ? "…" : "")],
+            () => ModMerge.Split(docs, x.Merged), Suggest: "Split"), HealthArea.Mods, [x.Merged.Path])));
+        Add("kept mods", () => ModMerge.Orphans(docs).Select(o => new Item(new Finding(Severity.Warning,
+            o.Files.Count == 1 ? "1 mod is out of the game because the merge {1} is gone. Put it back to use it again." : "{0} mods are out of the game because the merge {1} is gone. Put them back to use them again.",
+            [o.Files.Count.ToString(), o.Name], () => ModMerge.PutBack(docs, o), Suggest: "Put back"), HealthArea.Mods, [])));
         Add("saves", () => SaveHealth.Findings(SaveHealth.Check(docs), docs).Select(f => new Item(f, HealthArea.Saves, [])));
         Add("places", () => PlaceChecks.Check(g, docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("caches", () => CacheFindings(docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("sessions", () => SessionHistory.Check().Select(f => new Item(f, HealthArea.Stability, [])));
-        // the script errors since the last game start, at most a week back (a game started without the launcher records no
-        // start, so the last recorded one can be long ago); Read takes the crash logs of the whole week either way
+        // the script errors since the last game start; Read takes the crash logs of the whole week either way
         var week = DateTime.Now.AddDays(-7);
         // (one read for both: the crash logs of the week come with it, which is what the timeline needs)
         ScriptErrors.Report? report = null;
-        Add("script errors", () => ScriptErrors.Findings(report = ScriptErrors.Read(docs, SessionHistory.List().FirstOrDefault()?.Started is { } s && s > week ? s : week, mods))
+        Add("script errors", () => ScriptErrors.Findings(report = ScriptErrors.Read(docs, ScriptErrors.Since(), mods))
             .Select(m => new Item(m.Finding, HealthArea.Stability, m.Files)));
         try
         {
@@ -57,7 +70,7 @@ public static class Health
         var bytes = GameCaches.List(docs).Sum(c => c.Size);
         var crashed = SessionHistory.List().FirstOrDefault() is { End: not SessionEnd.Normal };
         if (bytes > 0 && (bytes >= CacheSuggestBytes || crashed))
-            yield return new(Severity.Info, crashed ? "The game's caches take {0} MB, and the game didn't close normally last time. Clearing them often helps. The game rebuilds them, and a copy is kept until it starts normally."
+            yield return new(Severity.Info, crashed ? "The game's caches take {0} MB. The game didn't close normally last time, and clearing them often helps. The game rebuilds them, and a copy is kept until it starts normally."
                     : "The game's caches take {0} MB. Clearing them frees that space. The game rebuilds them, and a copy is kept until it starts normally.",
                 [(bytes >> 20).ToString()], () => GameCaches.Clean(docs), Suggest: "Clear the game caches");
         if (GameCaches.Backup is not null)

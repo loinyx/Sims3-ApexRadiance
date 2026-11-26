@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace ApexSetup;
 
-// What the player adds to mods in the launcher: notes, a picture and tags (a name and a colour, made by the player). Kept
+// What the player adds to mods in the launcher: notes, a picture, its page and tags (a name and a colour, made by the player). Kept
 // by the mod's place as the game sees it (ModFile.Rel), in %LOCALAPPDATA%\Apex Launcher\mod-notes.json and
 // mod-pictures\; moved along when the launcher moves or renames the mod. Nothing is written next to the mod.
 public sealed class ModNote
@@ -14,6 +14,7 @@ public sealed class ModNote
     public List<string>? Tags { get; set; }
     public string? Creator { get; set; } // set by the player; else ModCreators guesses it from the file name
     public List<string>? Kinds { get; set; } // what it is, chosen by the player; else what the package index says
+    public string? Link { get; set; } // the mod's page
 }
 
 public sealed class ModTag
@@ -104,6 +105,28 @@ public static class ModNotes
         Edit(rel, n => n.Kinds = list is { Count: > 0 } ? list : null);
     }
 
+    // the mod's page on the web; null removes it
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
+    public static void SetLink(string rel, string? link)
+    {
+        link = string.IsNullOrWhiteSpace(link) ? null : WebLink(link) ?? throw new SetupException("Use a web address, such as https://example.com.");
+        if (Get(rel)?.Link == link) return;
+        Edit(rel, n => n.Link = link);
+    }
+
+    // (checked again when read: the notes file can be changed by hand, and what is in it is opened)
+    public static string? LinkOf(string rel) => WebLink(Get(rel)?.Link);
+
+    // a web address the player typed or pasted, "https://" put before one without it; null when it is anything else
+    // (a file, a script, a program's own address, a name and password in front of the site)
+    public static string? WebLink(string? text)
+    {
+        text = text?.Trim() ?? "";
+        if (text.Length is 0 or > 2000) return null;
+        if (!text.Contains("://")) text = "https://" + text;
+        return Uri.TryCreate(text, UriKind.Absolute, out var u) && u.Scheme is "http" or "https" && u.UserInfo.Length == 0 && u.Host.Contains('.') && u.AbsoluteUri.Length <= 2000 ? u.AbsoluteUri : null;
+    }
+
     // ---- tags ----
 
     public static IReadOnlyList<ModTag> Tags => Data.Tags;
@@ -145,10 +168,20 @@ public static class ModNotes
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
-    public static void SetTag(string rel, string tag, bool on)
+    public static void SetTag(string rel, string tag, bool on) => SetTag([rel], tag, on);
+
+    // many mods at once: the file is written once
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
+    public static void SetTag(IEnumerable<string> rels, string tag, bool on)
     {
-        if (TagsOf(rel).Contains(tag, StringComparer.OrdinalIgnoreCase) == on) return;
-        Edit(rel, n => n.Tags = on ? [.. n.Tags ?? [], tag] : n.Tags!.Where(t => !t.Equals(tag, StringComparison.OrdinalIgnoreCase)).ToList());
+        var changed = false;
+        foreach (var rel in rels)
+        {
+            if (TagsOf(rel).Contains(tag, StringComparer.OrdinalIgnoreCase) == on) continue;
+            Edit(rel, n => n.Tags = on ? [.. n.Tags ?? [], tag] : n.Tags!.Where(t => !t.Equals(tag, StringComparison.OrdinalIgnoreCase)).ToList(), save: false);
+            changed = true;
+        }
+        if (changed) Save();
     }
 
     static string TagName(string name)
@@ -158,10 +191,11 @@ public static class ModNotes
         return name;
     }
 
-    // the mod moved or was renamed (a folder: every mod under it); its notes follow
+    // the mod moved or was renamed (a folder: every mod under it); its notes and the profiles follow
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
     public static void Move(string oldRel, string newRel, bool folder = false)
     {
+        ModProfiles.Moved(oldRel, newRel, folder);
         var moves = All.Keys.Where(k => folder ? k.StartsWith(oldRel + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) : k.Equals(oldRel, StringComparison.OrdinalIgnoreCase)).ToList();
         if (moves.Count == 0) return;
         foreach (var k in moves)
@@ -205,7 +239,7 @@ public static class ModNotes
         change(n);
         if (n.Tags is { Count: 0 }) n.Tags = null;
         if (n.Kinds is { Count: 0 }) n.Kinds = null;
-        if (n.Notes is null && n.Picture is null && n.Tags is null && n.Creator is null && n.Kinds is null) All.Remove(rel); else All[rel] = n;
+        if (n.Notes is null && n.Picture is null && n.Tags is null && n.Creator is null && n.Kinds is null && n.Link is null) All.Remove(rel); else All[rel] = n;
         if (save) Save();
     }
 
@@ -220,8 +254,8 @@ public static class ModNotes
 
     static void TryDelete(string p) { try { File.Delete(p); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
 
-    // for tests: read the file again
-    public static void Reload() => _file = null;
+    // for tests: read the files again
+    public static void Reload() { _file = null; ModProfiles.Reload(); }
 }
 
 // The player's folders under Mods, and moving, renaming and removing mods in them. Only the player's own packages under
@@ -244,18 +278,21 @@ public static partial class ModLibrary
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
     }
 
+    // (names Windows keeps for devices)
+    static bool ReservedName(string name) => Regex.IsMatch(name, @"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", RegexOptions.IgnoreCase);
+
     // a folder or file name the player typed: one name, no path, nothing Windows refuses
     public static string CleanName(string name)
     {
         name = name.Trim().TrimEnd('.');
         if (name.Length == 0 || name.Length > 120 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name is "." or ".."
-            || Regex.IsMatch(name, @"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", RegexOptions.IgnoreCase))
+            || ReservedName(name))
             throw new SetupException("That name can't be used for a file or folder.");
         if (name.Equals(Mods.DisabledName, StringComparison.OrdinalIgnoreCase) || name.Equals(ModMerge.FolderName, StringComparison.OrdinalIgnoreCase)) throw new SetupException("That name is taken by the launcher's own folder.");
         return name;
     }
 
-    static string Under(string docs, string rel) // rel relative to Mods, never outside it
+    internal static string Under(string docs, string rel) // rel relative to Mods, never outside it
     {
         var mods = Path.GetFullPath(Path.Combine(docs, "Mods"));
         var full = Path.GetFullPath(Path.Combine(mods, rel));
@@ -337,7 +374,7 @@ public static partial class ModLibrary
 
     static void Mine(ModFile m)
     {
-        if (m.Locked || m.FileType != "package") throw new SetupException("The launcher does not move, rename or remove this file.");
+        if (m.Locked || m.FileType != "package") throw new SetupException("The launcher can't move, rename or remove this file.");
         Engine.CheckWritable();
     }
 
@@ -404,13 +441,17 @@ public static partial class ModLibrary
         return added;
     }
 
-    public static void Recycle(string path)
+    // (a file, or a whole folder: a save)
+    public static void Recycle(string path) => Recycle(path, FOF_WANTNUKEWARNING);
+    // never asks: what the Recycle Bin can't take (it is off, or full) is deleted. Only for what the launcher made by itself.
+    public static void RecycleQuiet(string path) => Recycle(path, 0);
+    static void Recycle(string path, ushort ask)
     {
-        if (!File.Exists(path)) return;
+        if (!File.Exists(path) && !Directory.Exists(path)) return;
         // (Windows asks before it deletes for good a file the Recycle Bin can't take: a network folder, a file too big)
-        var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = Path.GetFullPath(path) + "\0\0", fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_WANTNUKEWARNING };
+        var op = new SHFILEOPSTRUCT { wFunc = FO_DELETE, pFrom = Path.GetFullPath(path) + "\0\0", fFlags = (ushort)(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | ask) };
         var r = SHFileOperation(ref op);
-        if (r != 0 || op.fAnyOperationsAborted || File.Exists(path)) throw new SetupException("Windows couldn't move the file to the Recycle Bin.");
+        if (r != 0 || op.fAnyOperationsAborted || File.Exists(path) || Directory.Exists(path)) throw new SetupException("Windows couldn't move the file to the Recycle Bin.");
     }
 
     const uint FO_DELETE = 3;

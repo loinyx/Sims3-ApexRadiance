@@ -23,6 +23,13 @@ static class ModToolsTests
             var list = () => Mods.List(game, docs, kinds: false);
             Mods.SetEnabled(list().Single(m => m.Name == "already-off.package"), false, docs);
             bool On(string name) => list().Single(m => m.Name == name).Enabled;
+            // (the ticked files, or every one that can be added)
+            List<AddItem> AddTo(string folder, IEnumerable<string> files, bool all = false)
+            {
+                using var add = ModAdd.Open(game, docs, folder, files, list());
+                foreach (var i in add.Items.Where(i => i.Ok && (i.Add || all))) add.Add(i);
+                return add.Items;
+            }
             string[] Names() => list().Where(m => m.FileType == "package").Select(m => m.Name).Order().ToArray();
             var before = list().ToDictionary(m => m.Name, m => m.Enabled);
 
@@ -91,10 +98,10 @@ static class ModToolsTests
             var dropSame = Path.Combine(root, "drop-same", "same.package");
             Directory.CreateDirectory(Path.GetDirectoryName(dropSame)!);
             File.WriteAllBytes(dropSame, Dbpf20(9));
-            var addedSame = ModLibrary.AddAny(docs, Path.Combine("Packages", "C"), [dropSame], list());
+            var addedSame = AddTo(Path.Combine("Packages", "C"), [dropSame]);
             check(movedOff is { Name: "same (2).package", Enabled: false } && File.Exists(Path.Combine(offRoot, "Packages", "C", "same (2).package"))
                 && ModNotes.Get(onRel)?.Notes == "on note" && Refused(() => ModLibrary.Rename(onOne, "same (2)")) && File.Exists(onOne.Path)
-                && addedSame.Added.Single().EndsWith("same (3).package"),
+                && addedSame.Single().Added!.EndsWith("same (3).package"),
                 "names: a move or an add onto a turned-off mod's name gets \" (2)\" and a rename onto it is refused, the notes stay with their mod");
             Write(Path.Combine(mods, "Packages", "twin.package"), "twin on");
             Write(Path.Combine(offRoot, "Packages", "twin.package"), "twin off");
@@ -176,37 +183,38 @@ static class ModToolsTests
             }
             var all = new[] { "new.package", "house.sims3pack", "readme.txt", "text.package", "sims4.package", "protected.package", "cut.package", "empty.package" }
                 .Select(n => Path.Combine(drop, n)).Append(zip).ToList();
-            var looked = ModInstall.Inspect(all, list());
-            string Why(string n) => looked.First(x => x.Name == n).Problems.FirstOrDefault() ?? "ok";
-            check(Why("new.package") == "ok" && Why("house.sims3pack").StartsWith("Not a mod file") && Why("inner.package") == "ok" && Why("evil.package") == "ok"
+            var res = AddTo("Packages", all);
+            string Why(string n) => res.FirstOrDefault(x => x.Name == n) is { } x ? x.Problem ?? (x.Doubt ? x.Warning! : "ok") : "gone";
+            check(Why("new.package") == "ok" && Why("house.sims3pack").StartsWith("Install it with") && Why("inner.package") == "ok" && Why("evil.package") == "ok"
                 && Why("sims4.package").Contains("Sims 4") && Why("protected.package").Contains("protected") && Why("cut.package").Contains("damaged")
                 && Why("empty.package").Contains("empty") && Why("text.package").StartsWith("Not a package") && Why("broken.package").StartsWith("Not a package")
-                && Why("readme.txt").StartsWith("Not a mod file"),
-                "install: each file checked, with the reason a Sims 4, protected, cut-short, empty, fake or Sims3Pack file is not added | " + string.Join(" | ", looked.Select(x => x.Name + "=" + (x.Problems.FirstOrDefault() ?? "ok"))));
-            var res = ModLibrary.AddAny(docs, "Packages", all, list());
+                && Why("readme.txt").StartsWith("Not a mod file") && Why("notes.txt") == "gone",
+                "install: each file checked, with the reason a Sims 4, protected, cut-short, empty, fake or Sims3Pack file is not added; a text inside a zip is passed over | " + string.Join(" | ", res.Select(x => x.Name + "=" + (x.Problem ?? "ok"))));
             check(File.Exists(Path.Combine(mods, "Packages", "new.package")) && !File.Exists(Path.Combine(docs, "Downloads", "house.sims3pack"))
                 && File.Exists(Path.Combine(mods, "Packages", "inner.package")) && File.Exists(Path.Combine(mods, "Packages", "evil.package"))
                 && !File.Exists(Path.Combine(root, "evil.package")) && !File.Exists(Path.Combine(docs, "evil.package"))
-                && res.Added.Count == 3 && res.Skipped.Count == 8 && !File.Exists(Path.Combine(mods, "Packages", "sims4.package")),
-                "install: only the files that pass go in, a zip's by name only (no path from inside it) | " + res.Added.Count + " | " + string.Join(" | ", res.Skipped));
-            var again = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "new.package")], list());
-            var forced = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "new.package")], list(), duplicates: true);
-            check(again.Added.Count == 0 && again.Skipped.Single().Contains("already installed as new.package") && forced.Added.Single().EndsWith("new (2).package"),
+                && res.Count(x => x.Added is not null) == 3 && !File.Exists(Path.Combine(mods, "Packages", "sims4.package")),
+                "install: only the files that pass go in, a zip's by name only (no path from inside it)");
+            var again = AddTo("Packages", [Path.Combine(drop, "new.package")]);
+            var forced = AddTo("Packages", [Path.Combine(drop, "new.package")], all: true);
+            check(again.Single() is { Added: null, Add: false, SameAs: "new.package" } && forced.Single().Added!.EndsWith("new (2).package"),
                 "install: a file already installed is not added twice unless asked, then it gets \" (2)\"");
-            // the same bytes twice in one drop (a zip and its own extracted copy, a file given twice): only the first goes in
+            // the same bytes twice in one drop (a zip and its own extracted copy): only the first goes in
             var twice = Path.Combine(drop, "twice.zip");
             using (var z = ZipFile.Open(twice, ZipArchiveMode.Create))
             using (var w = z.CreateEntry("inner-copy.package").Open()) w.Write(Dbpf20(8));
             File.WriteAllBytes(Path.Combine(drop, "loose-copy.package"), Dbpf20(8));
-            var batch = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "loose-copy.package"), twice, Path.Combine(drop, "loose-copy.package")], list());
-            check(batch.Added.Count == 1 && batch.Skipped.Count == 2 && batch.Skipped.All(s => s.EndsWith("already installed as loose-copy.package")),
-                "install: the same file twice in one drop goes in once | " + string.Join(" | ", batch.Skipped));
+            var batch = AddTo("Packages", [Path.Combine(drop, "loose-copy.package"), twice, Path.Combine(drop, "loose-copy.package")]);
+            check(batch.Count == 2 && batch.Count(x => x.Added is not null) == 1 && batch.Single(x => x.Added is null) is { SameAs: "loose-copy.package", SameInList: true },
+                "install: the same file twice in one drop goes in once");
 
             // a folder so deep that the file would pass the game's 260-character path: not installed, said why
             var deep = Path.Combine("Packages", new string('d', 120), new string('e', 120));
             Directory.CreateDirectory(Path.Combine(mods, deep));
-            var far = ModLibrary.AddAny(docs, deep, [Path.Combine(drop, "new.package")], [], duplicates: true);
-            check(far.Added.Count == 0 && far.Skipped.Single().Contains("too long"), "install: a path too long for the game is refused");
+            var longOne = Path.Combine(drop, "long.package");
+            File.WriteAllBytes(longOne, Dbpf20(10));
+            var far = AddTo(deep, [longOne], all: true);
+            check(far.Single() is { Added: null, Problem: { } tooLong } && tooLong.Contains("too long"), "install: a path too long for the game is refused");
 
             // duplicates by content, whatever the name or folder
             Write(Path.Combine(mods, "Packages", "B", "copy-of-mod3.package"), "content 3");
@@ -245,6 +253,8 @@ static class ModToolsTests
             // the remembered view
             ModViewPrefs.Save(new ModViewPrefs.Prefs(Path.Combine("Packages", "B"), true, 4, ["tags", "game"]));
             ModViewPrefs.LastPlay = new DateTime(2026, 11, 18, 22, 0, 0, DateTimeKind.Utc);
+            ModViewPrefs.MergeLater = [@"Mods\Packages\a.package*1*2", @"Mods\Packages\b.package*3*4", @"Mods\Packages\a.package*1*2"];
+            check(ModViewPrefs.MergeLater.SequenceEqual([@"Mods\Packages\a.package*1*2", @"Mods\Packages\b.package*3*4"]), "view: the newer versions put off are kept, each once");
             var p = ModViewPrefs.Load();
             check(p.Place == Path.Combine("Packages", "B") && p.Grid && p.Sort == 4 && p.Collapsed.SequenceEqual(["tags", "game"])
                 && ModViewPrefs.LastPlay == new DateTime(2026, 11, 18, 22, 0, 0, DateTimeKind.Utc), "view: place, grid, sort, folded groups and the last game kept");
@@ -259,7 +269,7 @@ static class ModToolsTests
     }
 
     // a small DBPF 2.0 package with n resources, as the game writes it (header, data, index with no constant fields)
-    static byte[] Dbpf20(int n)
+    internal static byte[] Dbpf20(int n)
     {
         using var ms = new MemoryStream();
         var w = new BinaryWriter(ms);

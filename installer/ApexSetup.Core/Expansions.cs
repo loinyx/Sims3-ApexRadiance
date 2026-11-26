@@ -183,7 +183,7 @@ public static class Worlds
         return null;
     }
 
-    static ulong Fnv64(string s)
+    internal static ulong Fnv64(string s)
     {
         var h = 0xCBF29CE484222325UL;
         foreach (var c in s.ToLowerInvariant()) { h *= 0x100000001B3UL; h ^= (byte)c; }
@@ -216,7 +216,7 @@ public static class Worlds
     }
 
     // "IslaParadiso" → "Isla Paradiso", "AppaloosaPlains" → "Appaloosa Plains"; World Adventures' destinations by name
-    static string Pretty(string file) => file switch
+    public static string Pretty(string file) => file switch
     {
         "China" => "Shang Simla", "Egypt" => "Al Simhara", "France" => "Champs Les Sims",
         _ => System.Text.RegularExpressions.Regex.Replace(file, "(?<=[a-z])(?=[A-Z])", " "),

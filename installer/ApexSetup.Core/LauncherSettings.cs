@@ -15,7 +15,15 @@ public sealed class LauncherSettings
     public int HomePictureHeight { get; set; } = 330;     // its height on Home, in pixels
     public int HomePictureStrength { get; set; } = 100;   // how strongly it shows, 30 to 100 (%)
     public string Backdrop { get; set; } = "mica";        // the window's background: "mica", "micaalt", "acrylic" or "solid"
+    public string Theme { get; set; } = "amethyst";       // the colours (Design/Themes.cs), or "windows" for Windows' accent
+    public string Mode { get; set; } = "system";          // "system" (as Windows), "dark" or "light"
     public bool NavCompact { get; set; }                  // the side pane kept to its icons (the toggle at its top)
+
+    // the game options chosen before the game ever wrote Options.ini, by its Documents folder: set once the game has made it
+    public Dictionary<string, Dictionary<string, string>> PendingOptions { get; set; } = new();
+
+    public List<string> IgnoredConflicts { get; set; } = new(); // mod conflicts the player does not want to see again (ModConflict.Id)
+    public List<string> IgnoredFindings { get; set; } = new();  // and every other finding of Health (Health.Item.Id)
 
     static string FilePath => Path.Combine(Paths.Data, "settings.json");
 

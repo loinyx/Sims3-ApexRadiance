@@ -43,7 +43,7 @@ public static class SelfUpdate
     }
 
     public static void Restart(string self, IEnumerable<string> args) =>
-        Process.Start(new ProcessStartInfo(self, string.Join(" ", args.Select(Quote))) { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo(self, string.Join(" ", args.Select(Quote))) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(self) ?? "" });
 
     // The new exe in place and started; only then may this one close. A start that fails puts the old exe back. The .old is
     // deleted by the new Setup at its start (CleanUp), never by this one.
