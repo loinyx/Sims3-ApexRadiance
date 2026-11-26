@@ -19,6 +19,20 @@ constexpr const char* k407Improved[] = {
     "RTX Remix bridge: the game keeps its graphics settings on every start",
     nullptr};
 
+constexpr const char* k414Added[] = {
+    "Apex Launcher: an update button beside Play installs updates without starting the game",
+    nullptr};
+
+constexpr const char* k414Improved[] = {
+    "Apex Launcher: the EA app version starts the game without the Sims 3 launcher",
+    "Apex Launcher: Play asks before it fixes the game's files",
+    nullptr};
+
+constexpr const char* k414Fixed[] = {
+    "Shaders: the look list shows again in a narrow menu",
+    "Apex Launcher: closing the administrator window brings you back Home",
+    nullptr};
+
 constexpr const char* k413Added[] = {
     "Apex Launcher: a Game caches page in Saves, with every cache and its files",
     "Apex Launcher: custom content in a Sims3Pack is added as mods",
@@ -870,6 +884,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.1.4", "2026-11-26", k414Added, k414Improved, k414Fixed, "Apex Launcher 2.3.3: update without playing, and the EA app version skips the Sims 3 launcher"},
     {"4.1.3", "2026-11-26", k413Added, k413Improved, k413Fixed, "Apex Launcher 2.3.2: game caches in Saves, Sims3Packs as mods and your theme in this menu"},
     {"4.1.2", "2026-11-26", k412Added, k412Improved, k412Fixed, "Apex Launcher 2.3.1: load order, a health card on Home and new scrapbook frames"},
     {"4.1.1", "2026-11-25", k411Added, k411Improved, k411Fixed, "Apex Launcher 2.3: a new look, Game settings, backups of your saves and faster merges"},
