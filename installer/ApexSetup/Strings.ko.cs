@@ -674,6 +674,7 @@ public static partial class Strings
         ["Fix"] = "수정",
         ["Apply safe fixes without asking"] = "안전한 수정은 묻지 않고 적용",
         ["Folder"] = "폴더",
+        ["Apex Launcher folder"] = "Apex Launcher 폴더",
         ["From the store"] = "스토어에서",
         ["From your expansions"] = "확장팩에서",
         ["Gallery"] = "갤러리",

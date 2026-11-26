@@ -629,7 +629,7 @@
                 </ScrollViewer>
                 </Grid>
                 <!-- 11 what Saves did, at the foot of the window (MainWindow.Saves.cs) -->
-                <InfoBar x:Name="SavesNote" Grid.Row="1" Grid.Column="1" Tag="dyn" IsOpen="False" MinWidth="420" MaxWidth="720" Margin="24,0,24,16" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
+                <InfoBar x:Name="SavesNote" Grid.Row="1" Grid.Column="1" Tag="dyn" IsOpen="False" Visibility="{x:Bind SavesNote.IsOpen, Mode=OneWay}" MinWidth="420" MaxWidth="720" Margin="24,0,24,16" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
                 <Border x:Name="SavesBar" Grid.Row="1" Grid.Column="1" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="12,0,12,16" Padding="5,5,8,5"
                         CornerRadius="12" BorderThickness="1" BorderBrush="{ThemeResource ApexCardBorderBrush}" Background="{ThemeResource ApexRaisedBrush}" />
                 <!-- 9 Mods: its own full-height page (the side pane, the list, the chosen mods), each part scrolling on its own -->

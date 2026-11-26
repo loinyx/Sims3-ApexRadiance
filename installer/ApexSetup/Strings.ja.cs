@@ -676,6 +676,7 @@ public static partial class Strings
         ["Fix"] = "修正",
         ["Apply safe fixes without asking"] = "安全な修正を確認せずに適用する",
         ["Folder"] = "フォルダー",
+        ["Apex Launcher folder"] = "Apex Launcher のフォルダー",
         ["From the store"] = "ストアから",
         ["From your expansions"] = "拡張パックから",
         ["Gallery"] = "ギャラリー",

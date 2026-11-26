@@ -359,6 +359,7 @@ public static partial class Strings
         ["List"] = "Lista",
         ["Gallery"] = "Galeria",
         ["Folder"] = "Pasta",
+        ["Apex Launcher folder"] = "Pasta do Apex Launcher",
         ["Reading your mods…"] = "Lendo seus mods…",
         ["The launcher couldn't read your mods"] = "O launcher não conseguiu ler seus mods",
         ["Choose the game first."] = "Escolha o jogo primeiro.",

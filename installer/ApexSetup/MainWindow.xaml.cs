@@ -846,6 +846,8 @@ public sealed partial class MainWindow : Window
         if (!wizard && SmoothSection.Visibility == Visibility.Visible && FpsCard.Visibility == Visibility.Visible)
         {
             FpsCombo.MinWidth = 0; FpsCombo.Width = 200;
+            // (Custom's number box under the list, as wide: beside it, the pair ran out of the row's control slot and cut the list)
+            if (_fpsBox is StackPanel pair) { pair.Orientation = Orientation.Vertical; FpsCustom.Width = 200; }
             Row(IconBox("gauge"), T("Apex frame limit"), FpsDesc.Text, null, State(FpsPill), _fpsWant is not null, Adopt(_fpsBox, FpsCard));
         }
         if (!wizard) return;

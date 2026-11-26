@@ -652,6 +652,7 @@ public static partial class Strings
         ["Fix"] = "修正",
         ["Apply safe fixes without asking"] = "自動套用安全修正，不必詢問",
         ["Folder"] = "資料夾",
+        ["Apex Launcher folder"] = "Apex Launcher 資料夾",
         ["From the store"] = "來自商店",
         ["From your expansions"] = "來自你的資料片",
         ["Gallery"] = "圖庫",

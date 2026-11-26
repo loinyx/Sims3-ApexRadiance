@@ -674,6 +674,7 @@ public static partial class Strings
         ["Fix"] = "Korjaa",
         ["Apply safe fixes without asking"] = "Tee turvalliset korjaukset kysymättä",
         ["Folder"] = "Kansio",
+        ["Apex Launcher folder"] = "Apex Launcherin kansio",
         ["From the store"] = "Kaupasta",
         ["From your expansions"] = "Lisäosistasi",
         ["Gallery"] = "Galleria",

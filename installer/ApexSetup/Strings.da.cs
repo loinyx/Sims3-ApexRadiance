@@ -674,6 +674,7 @@ public static partial class Strings
         ["Fix"] = "Ret",
         ["Apply safe fixes without asking"] = "Anvend sikre rettelser uden at spørge",
         ["Folder"] = "Mappe",
+        ["Apex Launcher folder"] = "Apex Launchers mappe",
         ["From the store"] = "Fra butikken",
         ["From your expansions"] = "Fra dine udvidelsespakker",
         ["Gallery"] = "Galleri",

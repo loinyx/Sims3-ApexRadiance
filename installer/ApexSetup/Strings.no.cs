@@ -680,6 +680,7 @@ public static partial class Strings
         ["Fix"] = "Rett",
         ["Apply safe fixes without asking"] = "Utfør trygge rettinger uten å spørre",
         ["Folder"] = "Mappe",
+        ["Apex Launcher folder"] = "Apex Launchers mappe",
         ["From the store"] = "Fra butikken",
         ["From your expansions"] = "Fra utvidelsespakkene dine",
         ["Gallery"] = "Galleri",

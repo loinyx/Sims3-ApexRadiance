@@ -677,6 +677,7 @@ public static partial class Strings
         ["Fix"] = "Opravit",
         ["Apply safe fixes without asking"] = "Použít bezpečné opravy bez ptaní",
         ["Folder"] = "Složka",
+        ["Apex Launcher folder"] = "Složka Apex Launcheru",
         ["From the store"] = "Z obchodu",
         ["From your expansions"] = "Z vašich rozšíření",
         ["Gallery"] = "Galerie",

@@ -673,6 +673,7 @@ public static partial class Strings
         ["Fix"] = "Oplossen",
         ["Apply safe fixes without asking"] = "Veilige oplossingen toepassen zonder te vragen",
         ["Folder"] = "Map",
+        ["Apex Launcher folder"] = "Map van Apex Launcher",
         ["From the store"] = "Uit de winkel",
         ["From your expansions"] = "Uit je uitbreidingen",
         ["Gallery"] = "Galerij",

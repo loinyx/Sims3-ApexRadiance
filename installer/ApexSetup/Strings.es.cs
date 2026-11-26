@@ -682,6 +682,7 @@ public static partial class Strings
         ["Fix"] = "Corregir",
         ["Apply safe fixes without asking"] = "Aplicar correcciones seguras sin preguntar",
         ["Folder"] = "Carpeta",
+        ["Apex Launcher folder"] = "Carpeta de Apex Launcher",
         ["From the store"] = "De la tienda",
         ["From your expansions"] = "De tus expansiones",
         ["Gallery"] = "Galería",

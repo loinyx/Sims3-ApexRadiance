@@ -686,6 +686,7 @@ public static partial class Strings
         ["Fix"] = "Javítás",
         ["Apply safe fixes without asking"] = "Biztonságos javítások alkalmazása kérdés nélkül",
         ["Folder"] = "Mappa",
+        ["Apex Launcher folder"] = "Az Apex Launcher mappája",
         ["From the store"] = "Az áruházból",
         ["From your expansions"] = "A kiegészítőidből",
         ["Gallery"] = "Galéria",
