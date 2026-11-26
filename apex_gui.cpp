@@ -2778,7 +2778,7 @@ void ProfileIconPicker(IconId& selected) {
                      ImVec2(p.x + padding + size + gap, centerY - arrow * 0.5f), arrow,
                      ImGui::GetColorU32(Col(VioletTheme::kTextMuted)));
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", I18n::Tr("Choose a profile icon"));
-    if (ImGui::BeginPopup("##ProfileIcons")) {
+    if (ImGui::BeginPopup("##ProfileIcons", ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) { // (sized to its grid)
         {
             const ApexUi::ControlSizeScope sizeScope(ApexUi::ControlSize::Compact);
             static constexpr IconId choices[] = {

@@ -16,6 +16,7 @@ public sealed partial class MainWindow
 {
     MergeDraft? _draft;                 // of the merge that is open
     string _mergeQuery = "";            // the search in the open merge's list of mods (kept while the panel repaints)
+    int _mergeSearchFrom = 8;           // a merge with at least this many mods gets the search
     MergeEditPlan? _draftPlan;          // what the draft would do, when it is known
     int _draftRun;
     string? _mergeInner;                // the mod inside whose details are open (its Rel)
@@ -251,7 +252,7 @@ public sealed partial class MainWindow
             g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             void Put(FrameworkElement e, int col) { Grid.SetColumn(e, col); e.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(e); }
 
-            if (mine)
+            if (mine && _mergeQuery.Length == 0) // (no grip while the search filters: the order moves with it cleared)
             {
                 var grip = Lucide.Icon("grip-vertical", 14, Res("ApexMutedBrush"));
                 grip.Margin = new Thickness(0, 0, 8, 0);
@@ -375,7 +376,7 @@ public sealed partial class MainWindow
             list.Footer = add;
         }
         // A long merge has a search over its mods (name or file); while it filters, the order cannot be dragged
-        if (d.Items.Count >= 8)
+        if (d.Items.Count >= _mergeSearchFrom)
         {
             var search = new TextBox { PlaceholderText = T("Search mods"), Text = _mergeQuery };
             void Filter()

@@ -964,6 +964,14 @@ bool CardGroupToggle(const char* id, const char* text, bool openByDefault) {
     return open;
 }
 
+// The cards' windows (BeginCard): a note inside one is drawn as a line of the card, never a box inside the box
+std::vector<ImGuiID> g_cardWindows;
+bool InCard() {
+    for (const ImGuiWindow* w = ImGui::GetCurrentWindow(); w && (w->Flags & ImGuiWindowFlags_ChildWindow); w = w->ParentWindow)
+        if (std::find(g_cardWindows.begin(), g_cardWindows.end(), w->ID) != g_cardWindows.end()) return true;
+    return false;
+}
+
 // Every note (IconNote, NoteAction) is at least a compact button plus kSpace1 above and below high, so a note with an
 // action and one without line up when they sit side by side or one after another
 float NoteMinHeight() {
@@ -977,23 +985,27 @@ void IconNote(IconId icon, const char* text, unsigned rgb) {
     PadAfterRow();
     const float u = Unit();
     const float s = kIconSmall * u;
-    const float padX = kSpace3 * u, padY = kSpace2 * u, gap = kSpace2 * u;
+    // (inside a card: a line of the card, aligned with its rows, no box; on a page: the tinted box)
+    const bool card = InCard();
+    const float padX = card ? 0.0f : kSpace3 * u, padY = card ? kSpace1 * u : kSpace2 * u, gap = kSpace2 * u;
     const float startX = ImGui::GetCursorPosX(), startY = ImGui::GetCursorPosY();
     const float width = ImGui::GetContentRegionAvail().x;
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float lineH = ImGui::GetTextLineHeight();
     const float textW = std::fmax(width - 2.0f * padX - s - gap, 20.0f * u);
     const ImVec2 ts = ImGui::CalcTextSize(text, nullptr, false, textW);
-    const float h = std::fmax(std::fmax(ts.y, lineH) + 2.0f * padY, NoteMinHeight());
+    const float h = card ? std::fmax(ts.y, lineH) + 2.0f * padY : std::fmax(std::fmax(ts.y, lineH) + 2.0f * padY, NoteMinHeight());
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), U32(rgb, 0.10f), 10.0f * u);
+    if (!card) dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), U32(rgb, 0.10f), 10.0f * u);
     if(ts.y <= lineH + 0.5f) {
         const float cy=p.y+h*0.5f;
         DrawIcon(dl,icon,ImVec2(p.x+padX,cy-s*0.5f),s,U32(rgb));
         dl->AddText(ImVec2(p.x+padX+s+gap,CenteredTextY(text,cy)),U32(rgb),text);
     } else {
-        DrawIcon(dl, icon, ImVec2(p.x + padX, p.y + padY + (lineH - s) * 0.5f), s, U32(rgb));
+        // (the icon on the first line's letters: a line box's centre sits above them)
+        const float firstCy = p.y + padY + lineH * 0.5f, ink = firstCy - CenteredTextY(text, firstCy);
+        DrawIcon(dl, icon, ImVec2(p.x + padX, p.y + padY + ink - s * 0.5f), s, U32(rgb));
         ImGui::SetCursorPos(ImVec2(startX + padX + s + gap, startY + padY));
         ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 0.0f);
         // Multiline notes keep normal line spacing and their own text baseline.
@@ -1018,7 +1030,8 @@ bool NoteAction(IconId icon, const char* text, const char* action, IconId action
     PadAfterRow();
     const float u = Unit();
     const float s = kIconSmall * u;
-    const float padX = kSpace3 * u, padY = kSpace1 * u, gap = kSpace2 * u;
+    const bool card = InCard(); // (inside a card: a line of the card with its button, no box)
+    const float padX = card ? 0.0f : kSpace3 * u, padY = kSpace1 * u, gap = kSpace2 * u;
     const float startX = ImGui::GetCursorPosX(), startY = ImGui::GetCursorPosY();
     const float width = ImGui::GetContentRegionAvail().x;
     const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1031,12 +1044,14 @@ bool NoteAction(IconId icon, const char* text, const char* action, IconId action
     const float textW = beside ? besideW : std::fmax(width - 2.0f * padX - s - gap, 20.0f * u);
     const ImVec2 ts = ImGui::CalcTextSize(text, nullptr, false, textW);
     const float textH = std::fmax(ts.y, lineH);
-    const float h = beside ? std::fmax(textH + 2.0f * kSpace2 * u, frameH + 2.0f * padY) : textH + kSpace2 * u + frameH + 2.0f * padY + kSpace1 * u;
+    const float h = beside ? std::fmax(textH + 2.0f * (card ? kSpace1 : kSpace2) * u, frameH + 2.0f * padY)
+                           : textH + kSpace2 * u + frameH + 2.0f * padY + kSpace1 * u;
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), U32(rgb, 0.10f), 10.0f * u);
+    if (!card) dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), U32(rgb, 0.10f), 10.0f * u);
     const float textTop = beside ? p.y + (h - textH) * 0.5f : p.y + padY + kSpace1 * u;
-    DrawIcon(dl, icon, ImVec2(p.x + padX, textTop + (lineH - s) * 0.5f), s, U32(rgb));
+    const float noteCy = textTop + lineH * 0.5f, noteInk = noteCy - CenteredTextY(text, noteCy); // (on the first line's letters)
+    DrawIcon(dl, icon, ImVec2(p.x + padX, textTop + noteInk - s * 0.5f), s, U32(rgb));
     ImGui::SetCursorScreenPos(ImVec2(p.x + padX + s + gap, textTop));
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + textW);
     ImGui::PushStyleColor(ImGuiCol_Text, Col(rgb));
@@ -1262,7 +1277,7 @@ bool ColorRow(const char* label, const char* description, float* rgba, int comps
     PushSized(nullptr, kSmallScale);
     dl->AddText(ImVec2(p.x + swatchW + gap, p.y + (fh - ImGui::GetFontSize()) * 0.5f), U32(VioletTheme::kTextMuted), values);
     ImGui::PopFont();
-    if (ImGui::BeginPopup("##Picker")) {
+    if (ImGui::BeginPopup("##Picker", ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) { // (sized to its content)
         const ImGuiColorEditFlags flags = ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_InputRGB;
         ImGui::SetNextItemWidth(220.0f * u);
         const bool picked = comps > 3 ? ImGui::ColorPicker4("##Pick", rgba, flags | ImGuiColorEditFlags_AlphaBar)
@@ -1495,12 +1510,33 @@ ControlSizeScope::ControlSizeScope(ControlSize size) {
 
 ControlSizeScope::~ControlSizeScope() { ImGui::PopStyleVar(); }
 
+// The launcher's checkbox: a rounded square (6-unit corners), the accent filled with a white tick while on, a quiet
+// outline while off; the label after it, the whole line the click target
 bool Checkbox(const char* label, bool* value) {
-    const float padding = std::fmax(0.0f, (VioletTheme::kCheckboxSize * Unit() - ImGui::GetFontSize()) * 0.5f);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, padding));
-    const bool changed = ImGui::Checkbox(label, value);
-    ImGui::PopStyleVar();
-    return changed;
+    const float u = Unit(), box = VioletTheme::kCheckboxSize * u, gap = kSpace2 * u;
+    const char* end = ImGui::FindRenderedTextEnd(label);
+    const ImVec2 ts = ImGui::CalcTextSize(label, end);
+    const float h = std::fmax(box, ImGui::GetTextLineHeight());
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::PushID(label);
+    const bool clicked = ImGui::InvisibleButton("##Check", ImVec2(box + (ts.x > 0.0f ? gap + ts.x : 0.0f), h), ImGuiButtonFlags_EnableNav);
+    ImGui::PopID();
+    if (clicked) *value = !*value;
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 a(p.x, p.y + (h - box) * 0.5f), b(a.x + box, a.y + box);
+    const float r = 6.0f * u;
+    if (*value) {
+        dl->AddRectFilled(a, b, U32(hovered ? VioletTheme::kAccentLight : VioletTheme::kAccent), r);
+        const ImVec2 pts[3] = {ImVec2(a.x + box * 0.27f, a.y + box * 0.52f), ImVec2(a.x + box * 0.43f, a.y + box * 0.68f), ImVec2(a.x + box * 0.74f, a.y + box * 0.34f)};
+        dl->AddPolyline(pts, 3, U32(0xFFFFFF), ImDrawFlags_None, 2.0f * u);
+    } else {
+        dl->AddRectFilled(a, b, U32(VioletTheme::kToggleOff, hovered ? 1.0f : 0.6f), r);
+        dl->AddRect(a, b, U32(hovered ? VioletTheme::kTextMuted : VioletTheme::kTextFaint), r, 0, 1.0f * u);
+    }
+    if (ts.x > 0.0f) dl->AddText(ImVec2(b.x + gap, CenteredTextY(std::string_view(label, end - label), p.y + h * 0.5f)), ImGui::GetColorU32(ImGuiCol_Text), label, end);
+    ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
+    return clicked;
 }
 
 bool DiagnosticIntRow(const char* label, int* value, int min, int max, const char* description, ImGuiSliderFlags flags) {
@@ -1603,7 +1639,7 @@ bool DrawButton(const char* label, IconId icon, const char* tooltip, ButtonKind 
 bool BeginActionMenu(const char* id, const char* title, float minimumWidth) {
     ImGui::SetNextWindowSizeConstraints(ImVec2(minimumWidth*Unit(),0),ImVec2(FLT_MAX,FLT_MAX));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(kSpace2*Unit(),kSpace2*Unit()));
-    const bool open=ImGui::BeginPopup(id);
+    const bool open=ImGui::BeginPopup(id,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse); // (sized to its items: it never scrolls)
     ImGui::PopStyleVar();
     if(open) {
         // Keep spacing scoped to the popup body, rather than restoring the
@@ -2370,6 +2406,8 @@ bool BeginCard(const char* id, bool warning) {
     // Wheel scrolling goes on to the page (the card never scrolls itself)
     const bool visible = ImGui::BeginChild(id, ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding,
                                            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    if (const ImGuiID cardId = ImGui::GetCurrentWindow()->ID; std::find(g_cardWindows.begin(), g_cardWindows.end(), cardId) == g_cardWindows.end())
+        g_cardWindows.push_back(cardId); // (a note in it is a line of the card)
     // Read by BeginChild; popped at once so popups, tooltips and nested children opened inside keep the theme
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(2);
