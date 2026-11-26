@@ -1408,7 +1408,6 @@ public static partial class Strings
         ["The files can't be added"] = "无法添加这些文件",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "文件夹路径和文件名太长，游戏无法读取。请使用更短的名称。",
         ["The folder holds too many files. Add it in parts."] = "文件夹中的文件太多。请分批添加。",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "游戏的 Worlds 文件夹指向了其他位置，因此没有向其中添加任何内容。",
         ["The name can't be used for a file. Rename it first."] = "该名称不能用作文件名。请先重命名。",
         ["The same file as {0}"] = "与 {0} 是同一个文件",
         ["There isn't enough free space to open the archive."] = "可用空间不足，无法打开压缩包。",

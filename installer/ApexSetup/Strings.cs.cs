@@ -1414,7 +1414,6 @@ public static partial class Strings
         ["The files can't be added"] = "Soubory nelze přidat",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "Cesta ke složce a název souboru jsou příliš dlouhé, než aby je hra přečetla. Použijte kratší názvy.",
         ["The folder holds too many files. Add it in parts."] = "Složka obsahuje příliš mnoho souborů. Přidejte ji po částech.",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "Složka Worlds hry vede jinam, proto se do ní nic nepřidalo.",
         ["The name can't be used for a file. Rename it first."] = "Tento název nelze použít pro soubor. Nejdřív ho přejmenujte.",
         ["The same file as {0}"] = "Stejný soubor jako {0}",
         ["There isn't enough free space to open the archive."] = "Pro otevření archivu není dost volného místa.",

@@ -272,8 +272,12 @@ static class ModAddTests
             }
             // an archive of worlds may pass the 2 GB other archives are held to (here the test limit)
             ModAdd.MaxBytes = 100_000;
-            using (var add = Open(Zip("big-world.zip", ("Big.world", Pkg((Export, 1, Encoding.ASCII.GetString(new byte[150_000])))))))
+            var letters = new Random(1);
+            var noisy = new string(Enumerable.Range(0, 150_000).Select(_ => (char)('a' + letters.Next(26))).ToArray()); // (packs about 2:1, as a world does)
+            using (var add = Open(Zip("big-world.zip", ("Big.world", Pkg((Export, 1, noisy))))))
                 check(add.Items is [{ Name: "Big.world", Ok: true }], "add: an archive with a world is held to the free space, not the archive limit | " + string.Join(" | ", add.Items.Select(i => i.Name + "=" + i.Problem)));
+            using (var add = Open(Zip("bomb-world.zip", ("Bomb.world", Pkg((Export, 1, Encoding.ASCII.GetString(new byte[150_000])))))))
+                check(add.Items is [{ Name: "bomb-world.zip", Problem: { } p3 }] && p3.Contains("too big"), "add: an archive with a world that unpacks past 20 times its size is refused (a bomb)");
             using (var add = Open(Zip("big-mod.zip", ("Big.package", Pkg((Xml, 1, Encoding.ASCII.GetString(new byte[150_000])))))))
                 check(add.Items is [{ Name: "big-mod.zip", Problem: { } p2 }] && p2.Contains("too big"), "add: an archive of mods past the limit is still refused");
             ModAdd.MaxBytes = oldMax;

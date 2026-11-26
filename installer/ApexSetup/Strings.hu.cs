@@ -1423,7 +1423,6 @@ public static partial class Strings
         ["The files can't be added"] = "A fájlok nem adhatók hozzá",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "A mappa elérési útja és a fájlnév túl hosszú ahhoz, hogy a játék beolvassa. Használj rövidebb neveket.",
         ["The folder holds too many files. Add it in parts."] = "A mappában túl sok fájl van. Add hozzá részletekben.",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "A játék Worlds mappája máshová vezet, ezért semmi sem lett hozzáadva.",
         ["The name can't be used for a file. Rename it first."] = "Ez a név nem használható fájlhoz. Előbb nevezd át.",
         ["The same file as {0}"] = "Ugyanaz a fájl, mint a(z) {0}",
         ["There isn't enough free space to open the archive."] = "Nincs elég szabad hely az archívum megnyitásához.",

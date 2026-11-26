@@ -1410,7 +1410,6 @@ public static partial class Strings
         ["The files can't be added"] = "De bestanden kunnen niet worden toegevoegd",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "Het mappad en de bestandsnaam zijn te lang voor het spel. Gebruik kortere namen.",
         ["The folder holds too many files. Add it in parts."] = "De map bevat te veel bestanden. Voeg hem in delen toe.",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "De map Worlds van het spel leidt naar een andere plek, dus er is niets aan toegevoegd.",
         ["The name can't be used for a file. Rename it first."] = "De naam kan niet voor een bestand worden gebruikt. Hernoem het eerst.",
         ["The same file as {0}"] = "Hetzelfde bestand als {0}",
         ["There isn't enough free space to open the archive."] = "Er is niet genoeg vrije ruimte om het archief te openen.",

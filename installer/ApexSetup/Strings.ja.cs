@@ -1413,7 +1413,6 @@ public static partial class Strings
         ["The files can't be added"] = "ファイルを追加できません",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "フォルダーのパスとファイル名が長すぎて、ゲームが読み取れません。もっと短い名前にしてください。",
         ["The folder holds too many files. Add it in parts."] = "フォルダー内のファイルが多すぎます。何回かに分けて追加してください。",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "ゲームの Worlds フォルダーは別の場所を指しているため、何も追加されませんでした。",
         ["The name can't be used for a file. Rename it first."] = "この名前はファイルに使えません。先に名前を変更してください。",
         ["The same file as {0}"] = "{0} と同じファイル",
         ["There isn't enough free space to open the archive."] = "アーカイブを開くための空き容量が足りません。",

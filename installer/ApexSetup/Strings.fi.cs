@@ -1411,7 +1411,6 @@ public static partial class Strings
         ["The files can't be added"] = "Tiedostoja ei voi lisätä",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "Kansion polku ja tiedoston nimi ovat liian pitkiä, jotta peli voisi lukea ne. Käytä lyhyempiä nimiä.",
         ["The folder holds too many files. Add it in parts."] = "Kansiossa on liian monta tiedostoa. Lisää se osissa.",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "Pelin Worlds-kansio johtaa toiseen paikkaan, joten siihen ei lisätty mitään.",
         ["The name can't be used for a file. Rename it first."] = "Nimeä ei voi käyttää tiedostolle. Nimeä se ensin uudelleen.",
         ["The same file as {0}"] = "Sama tiedosto kuin {0}",
         ["There isn't enough free space to open the archive."] = "Arkiston avaamiseen ei ole tarpeeksi vapaata tilaa.",

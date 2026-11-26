@@ -1411,7 +1411,6 @@ public static partial class Strings
         ["The files can't be added"] = "파일을 추가할 수 없어요",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "폴더 경로와 파일 이름이 너무 길어서 게임이 읽을 수 없어요. 더 짧은 이름을 쓰세요.",
         ["The folder holds too many files. Add it in parts."] = "폴더에 파일이 너무 많아요. 나누어서 추가하세요.",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "게임의 Worlds 폴더가 다른 곳을 가리켜서 아무것도 추가하지 않았어요.",
         ["The name can't be used for a file. Rename it first."] = "파일 이름으로 쓸 수 없는 이름이에요. 먼저 이름을 바꾸세요.",
         ["The same file as {0}"] = "{0}과(와) 같은 파일",
         ["There isn't enough free space to open the archive."] = "압축 파일을 열 여유 공간이 부족해요.",

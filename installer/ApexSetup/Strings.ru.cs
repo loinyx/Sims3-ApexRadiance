@@ -1409,7 +1409,6 @@ public static partial class Strings
         ["The files can't be added"] = "Не удалось добавить файлы",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "Путь к папке и имя файла слишком длинные для игры. Используйте более короткие имена.",
         ["The folder holds too many files. Add it in parts."] = "В папке слишком много файлов. Добавьте её по частям.",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "Папка Worlds игры ведёт в другое место, поэтому в неё ничего не добавлено.",
         ["The name can't be used for a file. Rename it first."] = "Это имя нельзя использовать для файла. Сначала переименуйте его.",
         ["The same file as {0}"] = "Тот же файл, что и {0}",
         ["There isn't enough free space to open the archive."] = "Недостаточно свободного места, чтобы открыть архив.",

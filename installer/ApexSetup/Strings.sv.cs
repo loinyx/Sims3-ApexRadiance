@@ -1419,7 +1419,6 @@ public static partial class Strings
         ["The files can't be added"] = "Filerna kan inte läggas till",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "Mappsökvägen och filnamnet är för långa för att spelet ska kunna läsa dem. Använd kortare namn.",
         ["The folder holds too many files. Add it in parts."] = "Mappen innehåller för många filer. Lägg till den i delar.",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "Spelets Worlds-mapp leder till en annan plats, så inget lades till i den.",
         ["The name can't be used for a file. Rename it first."] = "Namnet kan inte användas för en fil. Byt namn först.",
         ["The same file as {0}"] = "Samma fil som {0}",
         ["There isn't enough free space to open the archive."] = "Det finns inte tillräckligt med ledigt utrymme för att öppna arkivet.",

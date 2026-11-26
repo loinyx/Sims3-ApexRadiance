@@ -1389,7 +1389,6 @@ public static partial class Strings
         ["The files can't be added"] = "เพิ่มไฟล์ไม่ได้",
         ["The folder path and file name are too long for the game to read. Use shorter names."] = "พาธโฟลเดอร์และชื่อไฟล์ยาวเกินกว่าที่เกมจะอ่านได้ ใช้ชื่อที่สั้นลง",
         ["The folder holds too many files. Add it in parts."] = "โฟลเดอร์มีไฟล์มากเกินไป เพิ่มเป็นส่วน ๆ",
-        ["The game's Worlds folder leads to another place, so nothing was added to it."] = "โฟลเดอร์ Worlds ของเกมชี้ไปที่อื่น จึงไม่ได้เพิ่มอะไรลงไป",
         ["The name can't be used for a file. Rename it first."] = "ใช้ชื่อนี้เป็นชื่อไฟล์ไม่ได้ เปลี่ยนชื่อก่อน",
         ["The same file as {0}"] = "ไฟล์เดียวกับ {0}",
         ["There isn't enough free space to open the archive."] = "พื้นที่ว่างไม่พอสำหรับเปิดไฟล์บีบอัด",

@@ -190,11 +190,12 @@ public sealed class ModAdd : IDisposable
         else if (depth == 0 && _set is not null) foreach (var i in Items.Skip(before).Where(i => i.Place == AddPlace.Worlds)) i.Set = _set;
     }
 
-    // A world can be larger than the 2 GB other archives are held to: an archive with one may take what the temporary
-    // folder's drive has free, less 1 GB.
-    long WorldCap()
+    // A world can be larger than the 2 GB other archives are held to: an archive with one may unpack to WorldRatio times
+    // its own size (a decompression bomb packs far tighter), and only while the temporary folder's drive keeps 1 GB free.
+    const long WorldRatio = 20;
+    long WorldCap(string archive)
     {
-        try { return Math.Max(MaxBytes, new DriveInfo(Path.GetPathRoot(_temp)!).AvailableFreeSpace - (1L << 30)); }
+        try { return Math.Max(MaxBytes, Math.Min(new FileInfo(archive).Length * WorldRatio, new DriveInfo(Path.GetPathRoot(_temp)!).AvailableFreeSpace - (1L << 30))); }
         catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { return MaxBytes; }
     }
     static bool IsWorld(string name) => name.EndsWith(".world", StringComparison.OrdinalIgnoreCase);
@@ -203,6 +204,7 @@ public sealed class ModAdd : IDisposable
     void TakeSet(Stream from, string name)
     {
         if (_set is not null) return; // (one set per archive)
+        if (!ModLibrary.SafeFileName(name)) { Engine.Log(new InvalidDataException($"world set {name}: not a plain file name, left out")); return; }
         var to = Path.Combine(_temp, Guid.NewGuid().ToString("N") + SetExtension);
         using (var f = new FileStream(to, FileMode.CreateNew, FileAccess.Write))
         {
@@ -217,7 +219,7 @@ public sealed class ModAdd : IDisposable
     {
         using var z = ZipFile.OpenRead(zip);
         if ((_filesLeft -= z.Entries.Count) < 0) throw new TooBigException();
-        if (depth == 0 && z.Entries.Any(e => IsWorld(e.FullName))) _bytesLeft = WorldCap();
+        if (depth == 0 && z.Entries.Any(e => IsWorld(e.FullName))) _bytesLeft = WorldCap(zip);
         foreach (var e in z.Entries)
         {
             _ct.ThrowIfCancellationRequested();
@@ -256,7 +258,9 @@ public sealed class ModAdd : IDisposable
     string? Unpack(string path, string archive, int depth)
     {
         if (_bytesLeft <= 0 || _filesLeft <= 0) throw new TooBigException();
-        var (dir, files, unknown) = ModConflicts.Extract(path, names => depth == 0 && names.Any(IsWorld) ? WorldCap() : ModConflicts.UnpackCap);
+        // (the cap is taken once, before extraction uses up the free space it is measured against)
+        long? worldCap = null;
+        var (dir, files, unknown) = ModConflicts.Extract(path, names => depth == 0 && names.Any(IsWorld) ? (worldCap = WorldCap(path)).Value : ModConflicts.UnpackCap);
         if (dir is null)
         {
             Engine.Log(new InvalidDataException(unknown));
@@ -269,7 +273,7 @@ public sealed class ModAdd : IDisposable
         try { Fs.Retry(() => Directory.Move(dir, here)); }
         catch { DeleteFolder(dir); throw; }
         _filesLeft -= files.Count;
-        if (depth == 0 && files.Any(IsWorld)) _bytesLeft = WorldCap();
+        if (worldCap is { } cap) _bytesLeft = cap;
         _bytesLeft -= files.Sum(f => new FileInfo(Path.Combine(here, f)).Length);
         if (_bytesLeft < 0 || _filesLeft < 0) throw new TooBigException();
         foreach (var f in files)
