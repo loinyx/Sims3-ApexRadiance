@@ -31,9 +31,11 @@ The design is adapted from Dalexlol's wrapper in sims3-modernization (PRs #360 a
    folder (the working folder read when the ASI loads, before the game runs) with the game's environment, so the host
    and the relaunch it makes inherit both.
 2. After every successful world save, Room to save's save hook records whether the largest free block (with Room to
-   save's reserve held) is under 320 MB, Room to save's own low line.
-3. When the game ends with a normal exit code and the last save was low, the host picks the `.sims3` save folder with
-   the newest file and asks the player.
+   save's reserve held) is under 320 MB, Room to save's own low line, and the save folder that save writes: the game's
+   save info names it (`<Saves>\<name>.sims3\<world>.nhd`), read in Room to save's save dispatch hook (Steam 1.67.2).
+3. When the game ends with a normal exit code and the last save was low, the host takes that save folder. Only when the
+   game named none (another game version, a path outside `Saves`) or its folder is gone does it take the `.sims3` save
+   folder with the newest file, as before. It writes the choice to `ts3wrap_LOG.txt` beside `Saves` and asks the player.
 4. On Yes, it first waits until the old game's RTX Remix bridge server has ended (at most 20 s; see below).
 5. It starts the same executable with the same command line plus `-worldFile:"<save>.sims3"`. A `-worldFile` switch
    already on the line is replaced, so a relaunched game can be relaunched again. The new game starts its own host.
@@ -44,7 +46,7 @@ The design is adapted from Dalexlol's wrapper in sims3-modernization (PRs #360 a
    - Steam: it retries once through Steam with `steam://run/<appid>//-worldFile%3A%22<save>%22` (the arguments after
      the double slash, percent-encoded as UTF-8). When no `steam:` handler is registered, the message below.
    - EA app: it does not retry. A message tells the player that the game was saved and to start The Sims 3 from the
-     EA app, naming the newest save.
+     EA app, naming the save.
    - Anything else: the message that the game could not be started again and was saved.
 
 ## Settings
@@ -107,8 +109,14 @@ The design is adapted from Dalexlol's wrapper in sims3-modernization (PRs #360 a
 - Normal exit: exit code 0 (a crash, or Task Manager's End task with code 1, brings no question).
 - Relaunch rules (`relaunch_rules.h`, pure, checked offline): reading a variable from the environment block, the
   Steam app id, the EA app start, the Steam URL, and which `NvRemixBridge.exe` belongs to the old game.
-- Save pick: the newest last-write time of a file inside each `*.sims3` folder, because a folder's own time misses
-  files rewritten in place. `.backup` folders are ignored.
+- Save pick: the folder named in the channel's `save` field (version 2), relative to `Saves`, a subfolder kept. It comes
+  from the save info that `FUN_00aae950` fills at `0x00AB10F6`, a local of `FUN_00ab1030`: its path at `info+0x430` is
+  read there at `[esp+0x464]` (`0x00AB132B`), 0xC + 0x464 above the return address of the dispatch call at `0x00AB12AF`
+  (return address checked). The path must end in `.nhd` inside a `*.sims3` folder under `Saves` (`.sims3.backup` and
+  `..` refused). Fallback: the newest last-write time of a file inside each `*.sims3` folder, because a folder's own
+  time misses files rewritten in place; `.backup` folders are ignored.
+- Host log: `ts3wrap_LOG.txt` in the game's documents folder, one appended line per offer: the save, the rule (the save
+  the game wrote, the newest save, or none) and the name the game gave.
 - Build: `native/ts3wrap/ts3wrap.vcxproj` (x64, static CRT, links `shell32` for `ShellExecuteW`) is part of `ApexRadiance.sln`; the solution's `Release|x86`
   builds it into the same output folder as the ASI.
 

@@ -90,5 +90,32 @@ int wmain(int argc, wchar_t** argv) {
     wchar_t pick[MAX_PATH];
     Check(RhNewestSave(saves.c_str(), pick, MAX_PATH) && !wcscmp(pick, L"New.sims3"), "newest save picked by its files, backups ignored");
     Check(!RhNewestSave((root + L"\\none").c_str(), pick, MAX_PATH), "no saves folder: no pick");
+
+    // the save the game wrote, from its save info path
+    const wchar_t* sd = L"C:\\U\\Saves";
+    Check(RhSaveFromInfo(L"C:\\U\\Saves\\Old.sims3\\Riverview_0x1.nhd", sd, pick, MAX_PATH) && !wcscmp(pick, L"Old.sims3"), "save info: the folder of the .nhd");
+    Check(RhSaveFromInfo(L"c:\\u\\saves\\Sub\\My Town.SIMS3\\W.nhd", sd, pick, MAX_PATH) && !wcscmp(pick, L"Sub\\My Town.SIMS3"),
+          "save info: any case, a subfolder kept");
+    Check(!RhSaveFromInfo(L"C:\\U\\Saves\\Old.sims3.backup\\W.nhd", sd, pick, MAX_PATH) && !pick[0], "save info: a .backup folder refused");
+    Check(!RhSaveFromInfo(L"C:\\U\\Saves2\\Old.sims3\\W.nhd", sd, pick, MAX_PATH) && !RhSaveFromInfo(L"C:\\U\\Saves\\..\\X.sims3\\W.nhd", sd, pick, MAX_PATH) &&
+              !RhSaveFromInfo(L"C:\\U\\Saves\\Old.sims3\\W.dat", sd, pick, MAX_PATH) && !RhSaveFromInfo(L"C:\\U\\Saves\\W.nhd", sd, pick, MAX_PATH) &&
+              !RhSaveFromInfo(L"C:\\U\\Saves\\\\Old.sims3\\W.nhd", sd, pick, MAX_PATH) && !RhSaveFromInfo(nullptr, sd, pick, MAX_PATH) &&
+              !RhSaveFromInfo(L"C:\\U\\Saves\\Old.sims3\\W.nhd", sd, pick, 9),
+          "save info: outside Saves, a parent step, no .nhd, no save folder, an empty step, null, overflow refused");
+
+    // which save the host relaunches
+    static RestartChannel p{};
+    wcscpy_s(p.savesDir, saves.c_str());
+    Check(RhPickSave(p, pick, MAX_PATH) == kRhNewest && !wcscmp(pick, L"New.sims3"), "pick: no save named, the newest (old rule)");
+    wcscpy_s(p.save, L"Old.sims3");
+    Check(RhPickSave(p, pick, MAX_PATH) == kRhSaved && !wcscmp(pick, L"Old.sims3"), "pick: the save the game wrote, not the newest");
+    CreateDirectoryW((saves + L"\\Sub").c_str(), nullptr);
+    Touch(saves + L"\\Sub\\Deep.sims3", L"d.nhd", base);
+    wcscpy_s(p.save, L"Sub\\Deep.sims3");
+    Check(RhPickSave(p, pick, MAX_PATH) == kRhSaved && !wcscmp(pick, L"Sub\\Deep.sims3"), "pick: a save in a subfolder");
+    wcscpy_s(p.save, L"Gone.sims3");
+    Check(RhPickSave(p, pick, MAX_PATH) == kRhNewest && !wcscmp(pick, L"New.sims3"), "pick: the named folder gone, the newest");
+    wcscpy_s(p.savesDir, (root + L"\\none").c_str());
+    Check(RhPickSave(p, pick, MAX_PATH) == kRhNoSave, "pick: no saves at all, none");
     return g_fail ? 1 : 0;
 }

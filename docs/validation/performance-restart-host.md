@@ -1,7 +1,7 @@
 # Restart host: validation
 
 The host must offer a restart only after a low world save followed by a normal quit, start the same executable with
-the same command line plus one `-worldFile` switch for the newest save, and leave the game unchanged while it is off.
+the same command line plus one `-worldFile` switch for the save the game wrote last (the newest save when it named none), and leave the game unchanged while it is off.
 The feature is described in [features/performance/restart-host.md](../features/performance/restart-host.md).
 
 ## Automated tests
@@ -9,7 +9,7 @@ The feature is described in [features/performance/restart-host.md](../features/p
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
 | `installer/ApexSetup.Tests` | Setup's *Restart host* component: install and removal, the `[ui] restart_host` edit (new file, missing table, existing key, other lines and line endings kept), undo through a restore point, removal with Apex, the off copy older Setups left, and the wait while Apex has older settings to copy | `dotnet run --project installer\ApexSetup.Tests` | .NET 8 SDK |
-| `tools/restart_host_test/` | The offer decision (low save, exit code, missing executable), the relaunch command line (switch added, an existing quoted or unquoted `-worldFile` replaced, bad names and overflow refused), the channel's name and checks, the save pick (newest file wins, `.backup` ignored), the relaunch rules: Steam start from an environment block (`SteamAppId`, `SteamGameId`, any case; non-digits, a 64-bit id and empty refused), EA app start (its variables or an `EA Games` folder; Steam and a look-alike folder not), the Steam URL (percent-encoded, UTF-8, quote and overflow refused), the bridge wait on a fake process list (by parent or folder; another game's bridge and other processes not) | `run.ps1` | none |
+| `tools/restart_host_test/` | The offer decision (low save, exit code, missing executable), the relaunch command line (switch added, an existing quoted or unquoted `-worldFile` replaced, bad names and overflow refused), the channel's name and checks, the save pick (newest file wins, `.backup` ignored), the save folder from the save info path (any case, subfolder kept; `.backup`, outside `Saves`, `..`, no `.nhd`, overflow refused), the host's choice (the named save over the newest, a subfolder; a gone folder or none named falls back to the newest; no saves), the relaunch rules: Steam start from an environment block (`SteamAppId`, `SteamGameId`, any case; non-digits, a 64-bit id and empty refused), EA app start (its variables or an `EA Games` folder; Steam and a look-alike folder not), the Steam URL (percent-encoded, UTF-8, quote and overflow refused), the bridge wait on a fake process list (by parent or folder; another game's bridge and other processes not) | `run.ps1` | none |
 
 ## Latest results
 
@@ -20,12 +20,15 @@ The feature is described in [features/performance/restart-host.md](../features/p
 | 2026-11-14 | branch `release/4.0.0`, uncommitted | `installer/ApexSetup.Tests` | all pass, the *Restart host* checks included | none |
 | 2026-11-14 | branch `release/4.0.0`, uncommitted | `tools/restart_host_test`; `ts3wrap.vcxproj` Release x64; `restart_host.cpp` compiled alone (x86, `/W4`) | checks pass; built | none |
 | 2026-11-14 | branch `release/4.0.0`, uncommitted (bridge wait, Steam retry, EA app message, handoff wait, crash check) | `tools/restart_host_test`; `ts3wrap.vcxproj` Release x64; `restart_host.cpp` compiled alone (x86, `/W4`) | 24 checks pass; built | none |
+| 2026-11-26 | branch `feature/restart-exact-save-1126` (the save the game wrote) | `tools/restart_host_test`; `tools/development/build.ps1 -Flavor Public`; `check.ps1 -Suite Smoke` | 33 checks pass; built (`ApexRadiance.asi`, `ts3wrap.exe`); CPU Smoke suite passed | none |
 
 ## In-game test plan
 
 1. `restart_host = true`, `ts3wrap.exe` next to the ASI, start the game. **Expected:** `[RestartHost] ts3wrap.exe started` in the log, `ts3wrap.exe` in Task Manager.
 2. Save with more than 320 MB of largest free block, quit. **Expected:** no question, the host ends.
-3. Save with less (or lower `kLowBytes` in a test build), quit normally. **Expected:** the question names that save; Yes starts the game and loads it without the main menu.
+3. Save with less (or lower `kLowBytes` in a test build), quit normally. **Expected:** the question names that save; Yes starts the game and loads it without the main menu. `ts3wrap_LOG.txt` names the rule "the save the game wrote".
+   Repeat after touching a file in another save folder between the save and the quit. **Expected:** still the save the
+   game wrote.
 4. Repeat 3 from the relaunched game. **Expected:** one `-worldFile` switch on the new command line.
 5. Start from Steam (`%command%` and the library button). **Expected:** the relaunch loads the save and Steam shows the game as running.
 6. Under the RTX Remix bridge. **Expected:** the relaunch starts only after the old `NvRemixBridge.exe` has ended (at
@@ -55,5 +58,7 @@ The feature is described in [features/performance/restart-host.md](../features/p
   and whether an EA app install of The Sims 3 can be started directly at all.
 - Whether `steam://run/47890//<args>` passes the arguments through `Sims3Launcher.exe` to `TS3W.exe`.
 - Whether the bridge server is a child of `TS3W.exe` and ends within 20 s of the game.
-- `-worldFile` loading a save with non-ASCII characters in its name.
+- `-worldFile` loading a save with non-ASCII characters in its name, or one in a subfolder of `Saves`.
+- The save info path read in the save dispatch hook on a real save, including a travel save (static reading of 1.67.2
+  only; a path that does not parse falls back to the newest save).
 - The "Mod Scripts Found" dialog or other start dialogs before the save loads.

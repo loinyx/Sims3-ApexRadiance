@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <format>
+#include <intrin.h>
 #include <mutex>
 #include <vector>
 
@@ -317,6 +318,12 @@ bool __fastcall WorldSaveHook(void* wm, void*, void* a, void* b) {
 
 int __fastcall SaveDispatchHook(void* owner,void*,void* a,void* b) {
     const DWORD entryError=GetLastError();
+    // The save info FUN_00aae950 filled at 0x00AB10F6 is a local of FUN_00ab1030, the caller: its .nhd path (info+0x430,
+    // "<Saves>\<name>.sims3\<world>.nhd") is read there at [esp+0x464] (0x00AB132B), the same esp as at this call once its
+    // two arguments are popped, so 0xC + 0x464 above our return address. Steam 1.67.2 only, as this hook; the return
+    // address is checked, and the restart host falls back to the newest save when the path does not parse.
+    const auto* ret=static_cast<const uintptr_t*>(_AddressOfReturnAddress());
+    RestartHost::NoteSave(*ret==kDispatchCall+5 ? reinterpret_cast<const wchar_t*>(reinterpret_cast<const BYTE*>(ret)+0xC+0x464) : nullptr);
     MemoryTelemetry::SaveScope saving;
     const uint64_t before=PrivateBytes();
     const auto queued=FastMemory::PrepareForSave();

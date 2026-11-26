@@ -3,14 +3,14 @@
 // ts3wrap.exe (64-bit), so fixed-width fields only (one layout for both builds, checked below). Nothing here is ever
 // written into a save. Adapted from Dalexlol's sims3-modernization wrapper, step 1 (PR #363, restartchan.h).
 //   Local\ApexRestartHost-<game pid>
-// Apex fills exe, cmd and savesDir at the start and sets `restart` after every world save; the host reads the block once
-// the game has ended.
+// Apex fills exe, cmd and savesDir at the start and sets `restart` and `save` after every world save; the host reads the
+// block once the game has ended.
 #include <windows.h>
 #include <stdint.h>
 #include <wchar.h>
 
 static const uint32_t kRhMagic = 0x48524158; // "XARH"
-static const uint32_t kRhVersion = 1;
+static const uint32_t kRhVersion = 2; // 2: `save`
 
 struct RestartChannel {
     uint32_t magic, version, size;
@@ -19,8 +19,9 @@ struct RestartChannel {
     wchar_t exe[MAX_PATH];     // the game's executable
     wchar_t savesDir[MAX_PATH]; // Documents\Electronic Arts\<game folder>\Saves
     wchar_t cmd[2048];         // the game's command line as it started
+    wchar_t save[MAX_PATH];    // the save folder the last world save wrote, relative to savesDir ("<name>.sims3"); empty: unknown
 };
-static_assert(sizeof(RestartChannel) == 5 * 4 + 2 * (MAX_PATH * 2 + 2048), "RestartChannel: one layout for the x86 game and the x64 host");
+static_assert(sizeof(RestartChannel) == 5 * 4 + 2 * (MAX_PATH * 3 + 2048), "RestartChannel: one layout for the x86 game and the x64 host");
 
 inline bool RhName(wchar_t* out, size_t cap, uint32_t pid) {
     return _snwprintf_s(out, cap, _TRUNCATE, L"Local\\ApexRestartHost-%lu", (unsigned long)pid) > 0;
@@ -57,6 +58,22 @@ inline bool RhBuildCommand(const wchar_t* cmd, const wchar_t* save, wchar_t* out
     return _snwprintf_s(out + n, cap - n, _TRUNCATE, L" -worldFile:\"%s\"", save) > 0;
 }
 
+// The save folder a save writes, from the path in the game's save info ("<savesDir>\<name>.sims3\<world>.nhd"): out is
+// "<name>.sims3", relative to savesDir, a subfolder kept ("<sub>\<name>.sims3"). False for anything else: no .nhd file, a
+// folder that does not end in ".sims3" (a ".sims3.backup" included), a path outside savesDir, or a result that does not fit.
+inline bool RhSaveFromInfo(const wchar_t* nhd, const wchar_t* savesDir, wchar_t* out, size_t cap) {
+    if (!nhd || !savesDir || !cap) return false;
+    out[0] = 0;
+    const size_t n = wcsnlen(nhd, MAX_PATH), d = wcslen(savesDir);
+    if (n >= MAX_PATH || n < 4 || _wcsicmp(nhd + n - 4, L".nhd") || !d || n <= d + 1 || _wcsnicmp(nhd, savesDir, d) || nhd[d] != L'\\') return false;
+    const wchar_t* rel = nhd + d + 1;
+    const wchar_t* file = wcsrchr(rel, L'\\');
+    const size_t len = file ? static_cast<size_t>(file - rel) : 0;
+    if (len < 7 || len >= cap || _wcsnicmp(file - 6, L".sims3", 6) || rel[0] == L'\\' || wcsstr(rel, L"..")) return false;
+    wcsncpy_s(out, cap, rel, len);
+    return true;
+}
+
 // The save folder ("<name>.sims3") holding the newest written file: the one the game saved last. False when none.
 inline bool RhNewestSave(const wchar_t* savesDir, wchar_t* out, size_t cap) {
     wchar_t pat[MAX_PATH];
@@ -83,4 +100,17 @@ inline bool RhNewestSave(const wchar_t* savesDir, wchar_t* out, size_t cap) {
     } while (FindNextFileW(h, &d));
     FindClose(h);
     return out[0] != 0;
+}
+
+enum RhRule { kRhNoSave, kRhSaved, kRhNewest };
+
+// The save to relaunch: the one the game's last world save wrote (`save`) while its folder is there, else the newest
+// (RhNewestSave), for a block without `save` (a save the game wrote outside the hooked path) or a save whose folder is gone.
+inline RhRule RhPickSave(const RestartChannel& c, wchar_t* out, size_t cap) {
+    wchar_t dir[2 * MAX_PATH];
+    if (c.save[0] && !wcschr(c.save, L'"') && _snwprintf_s(dir, _TRUNCATE, L"%s\\%s", c.savesDir, c.save) > 0) {
+        const DWORD a = GetFileAttributesW(dir);
+        if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) && !wcscpy_s(out, cap, c.save)) return kRhSaved;
+    }
+    return RhNewestSave(c.savesDir, out, cap) ? kRhNewest : kRhNoSave;
 }
