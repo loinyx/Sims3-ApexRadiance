@@ -7,7 +7,7 @@ namespace ApexPresets {
 
 namespace {
 
-// Performance: Quality without Ambient Occlusion, Depth Blur and Picture.
+// Performance: Quality without Ambient Occlusion, Depth Blur and Picture, and Classic lamp updates (easier on the GPU).
 constexpr const char* kPerformance = R"toml(
 [patches.AmbientOcclusion]
 alcance = 1.658
@@ -68,6 +68,7 @@ enabled = true
 
 [patches.NightTerrainRelight]
 atrasoSegundos = 2.0
+lampLightingMode = "classic"
 automaticoAoAnoitecer = true
 azulNosComodos = 0.0
 bordasDosMapasDeLuz = true
@@ -243,6 +244,7 @@ enabled = true
 
 [patches.NightTerrainRelight]
 atrasoSegundos = 2.0
+lampLightingMode = "instant"
 automaticoAoAnoitecer = true
 azulNosComodos = 0.0
 bordasDosMapasDeLuz = true
@@ -418,6 +420,7 @@ enabled = true
 
 [patches.NightTerrainRelight]
 atrasoSegundos = 2.0
+lampLightingMode = "instant"
 automaticoAoAnoitecer = true
 azulNosComodos = 0.0
 bordasDosMapasDeLuz = true
