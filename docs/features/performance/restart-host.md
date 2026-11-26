@@ -111,6 +111,13 @@ The design is adapted from Dalexlol's wrapper in sims3-modernization (PRs #360 a
   files rewritten in place. `.backup` folders are ignored.
 - Build: `native/ts3wrap/ts3wrap.vcxproj` (x64, static CRT, links `shell32` for `ShellExecuteW`) is part of `ApexRadiance.sln`; the solution's `Release|x86`
   builds it into the same output folder as the ASI.
+- Out-of-process services (`oop_channel.h`, `oop_host.cpp`, game side `features/oop_client.cpp`): features that keep
+  game data in this 64-bit host instead of the game's address space. The game creates `Local\ApexOopHelper-<pid>`
+  (header, 8 request slots, 256 KB payload per slot, 2 MB in all) only when such a feature is on, before it starts the
+  host; the host then runs two workers that serve requests by service id. Each call waits at most 2 s; a timeout or a
+  host that ended keeps every service in the game for the session. A feature that is on while the restart host is off
+  stays in the game and logs `[OopHelper] <feature> is on but the restart host is off`. Round trip of a small request:
+  about 6-11 us (`tools/oop_helper_test/run.ps1`, x86 client against the x64 host).
 
 ## Rejected approaches
 
