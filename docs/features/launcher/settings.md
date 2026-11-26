@@ -43,7 +43,7 @@ on its own, and the release notes of five projects live on five GitHub pages.
 | Menu label | Key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Hide while playing | `settings.json` `HideWhilePlaying` | switch | On | | The launcher goes to the notification area while the game runs |
-| Apply safe fixes without asking | `settings.json` `FixSafeAutomatically` | switch | On | | Play applies the fixable compatibility findings first ([Health](health.md)) |
+| Apply safe fixes without asking | `settings.json` `FixWithoutAsking` | switch | Off | | Play fixes the fixable compatibility findings without asking; off, it asks first ([Health](health.md)) |
 | Install updates when I press Play | `settings.json` `InstallUpdatesOnPlay` | switch | On | | The ready updates go in before the game starts; off, Play starts the game as it is |
 | Theme | `settings.json` `Theme` | choice | Amethyst | Amethyst, Orchid, Aurora, Lagoon, Emerald, Honey, Sunset, Cherry, Sakura, Graphite, Moonlight, or Windows' accent colour (`windows`) | The colour of the main button, switches, links and the selected place |
 | Light or dark | `settings.json` `Mode` | choice | Same as Windows (`system`) | Same as Windows, Dark, Light | The launcher's light or dark look |

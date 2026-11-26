@@ -201,7 +201,8 @@ public sealed partial class MainWindow
         if (_running || _session is not null || Games.IsRunning()) { await Message(T("The Sims 3 is already running"), T("Close the game, then install the updates.")); return; }
         _wizardFlow = _updatingOnly = true;
         try { await InstallAsync(ups); }
-        finally { _wizardFlow = _updatingOnly = false; }
+        // (the done screen keeps the install card's layout: leaving it ends the flow, WizardChrome)
+        finally { _updatingOnly = false; if (_step != DoneStep) _wizardFlow = false; }
     }
 
     async Task StartChecked(Game g, string? save, bool update)
@@ -270,8 +271,11 @@ public sealed partial class MainWindow
         await BackupsBeforePlay();
         PlayPendingOptions(g);
         MenuTheme(g);
-        try { p = await Task.Run(() => Launch.Start(g, save)); } // (the EA app copy waits for the EA app to start it)
-        catch (Exception e) { App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
+        // (the EA app copy waits for the EA app to start it: busy meanwhile, so no install starts under it)
+        _busy = true;
+        try { p = await Task.Run(() => Launch.Start(g, save)); }
+        catch (Exception e) { _busy = false; App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
+        _busy = false;
         var session = _session = new Session(p, Docs);
         _running = true;
         if (_settings.HideWhilePlaying) { TrayShow(T("Apex Launcher · The Sims 3 is running")); AppWindow.Hide(); }

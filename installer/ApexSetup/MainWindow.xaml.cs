@@ -2071,8 +2071,9 @@ public sealed partial class MainWindow : Window
         // (drivers: a frame generation change, or a removal that turns off the frame generation the launcher turned on)
         var drivers = !inline && SettingChanges(remove).Any(c => c.Kind is "nv" or "amd")
             || remove?.Any(Engine.TurnsFrameGenOff) == true && (SmoothMotion.SetupTurnedOn || Afmf.SetupTurnedOn);
-        // (Update and play carries only its updates to the administrator window, not what Components shows)
-        if (!await CanChangeHere(inline ? "welcome" : "components", drivers, _updatingForPlay ? comps : null))
+        // (Update and play, and Home's update button, carry only their updates to the administrator window, not what
+        // Components shows)
+        if (!await CanChangeHere(inline ? "welcome" : "components", drivers, _updatingForPlay || _updatingOnly ? comps : null))
         {
             // (installed in the administrator window, which wrote the game folder's settings: the player's own files here)
             if (firstInstall && !FirstInstall) await ApplyWizardSettings(g, bin: false, docs: true);

@@ -13,7 +13,7 @@ game still starts without it.
 | Availability | Released in 4.1.0; one page per check and ignored notices: Released in 4.1.1 |
 | Default | Checked at start and before Play; safe fixes offered before Play (*Apply safe fixes without asking*, off) |
 | Menu | Health (a badge on the sidebar entry when something needs a look); the health card on [Home](home-and-play.md) |
-| Configuration | `settings.json` `IgnoredFindings`, `IgnoredConflicts`, `FixSafeAutomatically`; `sessions.json` |
+| Configuration | `settings.json` `IgnoredFindings`, `IgnoredConflicts`, `FixWithoutAsking`; `sessions.json` |
 | Source | [`MainWindow.Health.cs`](../../../installer/ApexSetup/MainWindow.Health.cs), [`Crystal.cs`](../../../installer/ApexSetup/Crystal.cs), [`Health.cs`](../../../installer/ApexSetup.Core/Health.cs), [`Compat.cs`](../../../installer/ApexSetup.Core/Compat.cs), [`Verify.cs`](../../../installer/ApexSetup.Core/Verify.cs), [`ScriptErrors.cs`](../../../installer/ApexSetup.Core/ScriptErrors.cs), [`CrashTimeline.cs`](../../../installer/ApexSetup.Core/CrashTimeline.cs), [`CrashEvidence.cs`](../../../installer/ApexSetup.Core/CrashEvidence.cs), [`PlaceChecks.cs`](../../../installer/ApexSetup.Core/PlaceChecks.cs), [`GameCaches.cs`](../../../installer/ApexSetup.Core/GameCaches.cs) |
 
 ## The problem

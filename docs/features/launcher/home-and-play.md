@@ -12,7 +12,7 @@ and the memory the game uses. After a crash or a session that ran out of memory,
 | Availability | Released in 4.1.0; one row of saves with their own Play: Released in 4.1.1; the health card over the picture: Released in 4.1.2 |
 | Default | Shown at start when a game is found |
 | Menu | Home |
-| Configuration | `settings.json` (`HideWhilePlaying`, `InstallUpdatesOnPlay`, `FixSafeAutomatically`, `HomePicture*`), `sessions.json` ([data files](data-and-files.md)) |
+| Configuration | `settings.json` (`HideWhilePlaying`, `InstallUpdatesOnPlay`, `FixWithoutAsking`, `HomePicture*`), `sessions.json` ([data files](data-and-files.md)) |
 | Source | [`MainWindow.Home.cs`](../../../installer/ApexSetup/MainWindow.Home.cs), [`MainWindow.Launcher.cs`](../../../installer/ApexSetup/MainWindow.Launcher.cs) (`PlayAsync`, `StartChecked`, `StartGameAsync`), [`Launch.cs`](../../../installer/ApexSetup.Core/Launch.cs), [`SessionHistory.cs`](../../../installer/ApexSetup.Core/SessionHistory.cs), [`Tray.cs`](../../../installer/ApexSetup/Tray.cs) |
 
 ## The problem
