@@ -10,8 +10,8 @@ static class DesignTests
         ("an icon that is not Lucide", @"\b(FontIcon|SymbolIcon|BitmapIcon)\b|&#x[EF][0-9A-F]{3}", 0),
         ("Windows' Transparent, a clear white that flashes as it fades (use ApexClearBrush)", @"new (Microsoft\.UI\.Xaml\.Media\.)?SolidColorBrush\(Microsoft\.UI\.Colors\.Transparent\)", 0),
         ("a text size off the scale (Design.TextSize)", @"FontSize ?= ?""?(?!(11|12|13|14|16|20|24|28|32|40)\b)\d+", 6),
-        ("a corner off the scale (Design.Radius)", @"CornerRadius(\(|="")(?!(0|1|1\.5|2|4|6|8|10|12|16)\b)\d+", 25),
-        ("a colour of its own (Design/Themes.cs)", @"""#[0-9A-Fa-f]{6,8}""|Color\.FromArgb\((0x)?[0-9A-F]|\bPick\(0x|\bRgb\(0x", 192),
+        ("a corner off the scale (Design.Radius)", @"CornerRadius(\(|="")(?!(0|1|1\.5|2|4|6|8|10|12|16)\b)\d+", 20),
+        ("a colour of its own (Design/Themes.cs)", @"""#[0-9A-Fa-f]{6,8}""|Color\.FromArgb\((0x)?[0-9A-F]|\bPick\(0x|\bRgb\(0x", 155),
     ];
 
     public static void Run(Action<bool, string> check)

@@ -128,7 +128,7 @@ public sealed partial class MainWindow
         {
             var bar = new ProgressBar { IsIndeterminate = true };
             AutomationProperties.SetName(bar, T("Reading the files"));
-            var body = new StackPanel { Spacing = 14, Width = AddWidth(440) };
+            var body = new StackPanel { Spacing = Design.Space.X3, Width = AddWidth(Design.Dialogs.Small) };
             body.Children.Add(bar);
             body.Children.Add(name);
             var d = new ContentDialog { Tag = "package", Title = T("Reading the files"), Content = body, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
@@ -181,57 +181,74 @@ public sealed partial class MainWindow
         return kind + " · " + (i.Place == AddPlace.Worlds && ModAdd.WorldsNeedAdmin(_game!) ? T("Windows asks for permission") : ModRow.SizeText(i.Size)) + (i.FromPack ? " · " + T("From a Sims3Pack") : "");
     }
 
+    // a file's row: its tick, what it is, and where it goes or the choice between the version there and this one. The rows
+    // of a list are one card (Join), and the whole row ticks
     FrameworkElement AddRow(AddItem i, ModAdd add, bool narrow, Action changed)
     {
         var info = AddInfo(i);
         var quiet = i is { SameAs: null, Other: null, OtherMerge: null, Warning: null };
-        var g = new Grid { ColumnSpacing = 12, RowSpacing = 6, Padding = new Thickness(12, 8, 12, 8), MinHeight = 56 };
+        var g = new Grid { ColumnSpacing = Design.Space.IconToText, VerticalAlignment = VerticalAlignment.Center };
         foreach (var w in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
-        g.RowDefinitions.Add(new RowDefinition());
-        g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        // (a second line only when narrow: an empty one would still add its spacing and lift the row off its centre)
+        if (narrow) { g.RowSpacing = Design.Space.X2; g.RowDefinitions.Add(new RowDefinition()); g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); }
 
-        var check = new CheckBox { MinWidth = 0, IsChecked = i.Add, VerticalAlignment = VerticalAlignment.Center };
+        var check = new CheckBox { MinWidth = 0, Padding = new Thickness(0), IsChecked = i.Add, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(check, $"{i.Name}. {info}. {AddPlaceText(i.Place, add.Folder)}");
         check.Click += (_, _) => { i.Add = check.IsChecked == true; changed(); };
+        check.Tapped += (_, e) => e.Handled = true;
         g.Children.Add(check);
 
         var icon = i.Place switch { AddPlace.SavedSims => "person-standing", AddPlace.Library => i.Household ? "users" : "house", AddPlace.Worlds => "globe", _ => ModRow.IconOf(i.Kind) };
-        var tile = new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(8), Background = Res("ApexPillBrush"),
-            VerticalAlignment = VerticalAlignment.Center, Child = Lucide.Icon(icon, 18, Res("ApexSoftTextBrush")) };
+        var tile = RowIcon(icon);
+        tile.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(tile, 1);
         g.Children.Add(tile);
 
-        var text = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        var name = new TextBlock { Text = i.Name, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+        var name = new TextBlock { Text = i.Name, FontSize = Design.TextSize.Body, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
         ToolTipService.SetToolTip(name, i.Name);
-        text.Children.Add(name);
-        text.Children.Add(new TextBlock { Text = info, FontSize = 12, Foreground = Res(quiet ? "ApexMutedBrush" : "ApexWarningBrush"), TextWrapping = TextWrapping.Wrap });
-        Grid.SetColumn(text, 2);
-        g.Children.Add(text);
+        var detail = Muted(info);
+        // (two lines at most, broken between words: a long file name ends in "…" instead of breaking in two)
+        (detail.TextWrapping, detail.TextTrimming, detail.MaxLines) = (TextWrapping.WrapWholeWords, TextTrimming.CharacterEllipsis, 2);
+        ToolTipService.SetToolTip(detail, info);
+        if (!quiet) detail.Foreground = Res("ApexWarningBrush");
+        var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { name, detail } };
+        Grid.SetColumn(words, 2);
+        g.Children.Add(words);
 
-        // where it goes, or the choice between the version there and this one
         FrameworkElement to;
         if (i.CanReplace)
         {
-            var pick = new ComboBox { ItemsSource = new[] { T("Replace it"), T("Keep both") }, SelectedIndex = i.Replace ? 0 : 1, FontSize = 12, MinWidth = 130 };
+            var pick = new ComboBox { ItemsSource = new[] { T("Replace it"), T("Keep both") }, SelectedIndex = i.Replace ? 0 : 1, MinWidth = 0 };
             AutomationProperties.SetName(pick, i.Name);
             pick.SelectionChanged += (_, _) => i.Replace = pick.SelectedIndex == 0;
+            pick.Tapped += (_, e) => e.Handled = true;
             to = pick;
         }
-        else to = new TextBlock { Text = AddPlaceText(i.Place, add.Folder), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), MaxWidth = 170, TextWrapping = TextWrapping.Wrap };
+        else
+        {
+            var place = Muted(AddPlaceText(i.Place, add.Folder));
+            (place.TextTrimming, place.TextWrapping, place.MaxWidth, place.TextAlignment) = (TextTrimming.CharacterEllipsis, TextWrapping.NoWrap, Design.Size.Tile * 4, narrow ? TextAlignment.Left : TextAlignment.Right);
+            ToolTipService.SetToolTip(place, AddPlaceText(i.Place, add.Folder));
+            to = place;
+        }
         to.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(to, narrow ? 2 : 3);
         Grid.SetRow(to, narrow ? 1 : 0);
         g.Children.Add(to);
-        return new Border { Child = g, CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), BorderBrush = Res("ApexHairlineBrush"), Background = Res("ApexRaisedBrush") };
+
+        var b = new Border { Child = g, Padding = new Thickness(Design.Space.RowPad, Design.Space.X3, Design.Space.RowPad, Design.Space.X3), MinHeight = Design.Size.Row };
+        Soft(b);
+        HandCursor.On(b);
+        b.Tapped += (_, _) => { check.IsChecked = check.IsChecked != true; i.Add = check.IsChecked == true; changed(); };
+        return Join(b);
     }
 
+    // the files that can't be added: a heading, then one row each with the reason, as one card
     static StackPanel AddLeftOut(string title, List<(string Name, string Why)> out_)
     {
-        var s = new StackPanel { Spacing = 4 };
-        s.Children.Add(new TextBlock { Text = title, FontSize = 13, FontWeight = FontWeights.SemiBold });
-        foreach (var (name, why) in out_.Take(40))
-            s.Children.Add(new TextBlock { Text = $"{name}: {why}", FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        var rows = new StackPanel { Spacing = Design.Space.X1 };
+        foreach (var (name, why) in out_.Take(40)) rows.Children.Add(Row("ban", name, why, null));
+        var s = new StackPanel { Spacing = Design.Space.SectionToBody, Children = { Design.Parts.Heading(title), rows } };
         if (out_.Count > 40) s.Children.Add(Muted(T("and {0} more", out_.Count - 40)));
         return s;
     }
@@ -242,30 +259,30 @@ public sealed partial class MainWindow
         // (the ones with a choice to make first, so each has its row; one past the last row replaces nothing unseen)
         var ok = add.Items.Where(i => i.Ok).OrderByDescending(i => i.Doubt).ThenByDescending(i => i.CanReplace).ToList();
         foreach (var i in ok.Skip(200)) i.Replace = false;
-        var width = AddWidth(560);
+        var width = AddWidth(Design.Dialogs.Medium);
         var d = new ContentDialog
         {
             Tag = "package", Title = ok.Count == 0 ? T("The files can't be added") : ok.Count == 1 ? T("Add {0}", ok[0].Name) : T("Add {0} files", ok.Count),
             PrimaryButtonText = ok.Count > 0 ? T("Add") : "", CloseButtonText = ok.Count > 0 ? T("Cancel") : T("Close"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         };
         void Changed() => d.IsPrimaryButtonEnabled = ok.Any(i => i.Add);
-        var list = new StackPanel { Spacing = 8, Padding = new Thickness(0, 0, 14, 0) };
+        // (the scrollbar sits on the card's edge, over the row's own padding: nothing of the row is under it)
+        var list = new StackPanel { Spacing = Design.Space.Section };
+        var files = new StackPanel { Spacing = Design.Space.X1 };
+        if (ok.Count > 0) list.Children.Add(files);
         // shortcut: the first 200 have a row, the rest keep their default choice; a virtual list if players add that many often
-        foreach (var i in ok.Take(200)) list.Children.Add(AddRow(i, add, width < 440, Changed));
-        if (ok.Count > 200) list.Children.Add(Muted(T("and {0} more, added the same way. Files you already have are left out.", ok.Count - 200)));
+        foreach (var i in ok.Take(200)) files.Children.Add(AddRow(i, add, width < Design.Dialogs.Small, Changed));
+        if (ok.Count > 200) files.Children.Add(Muted(T("and {0} more, added the same way. Files you already have are left out.", ok.Count - 200)));
         if (add.Items.Where(i => !i.Ok).Select(i => (i.Name, AddInfo(i))).ToList() is { Count: > 0 } bad)
-        {
-            var left = AddLeftOut(T("Left out"), bad);
-            left.Margin = new Thickness(0, ok.Count > 0 ? 8 : 0, 0, 0);
-            list.Children.Add(left);
-        }
-        var body = new StackPanel { Spacing = 16, Width = width };
+            list.Children.Add(AddLeftOut(T("Left out"), bad));
+        var body = new StackPanel { Spacing = Design.Space.X4, Width = width };
         if (ok.Count > 0)
-            body.Children.Add(Muted((ok.All(i => i.Archive is not null) && paths.Count == 1 ? T("From {0}.", Path.GetFileName(paths[0])) + " " : "") + T("Each file goes to the right folder.")));
+            body.Children.Add(Design.Dialogs.Words((ok.All(i => i.Archive is not null) && paths.Count == 1 ? T("From {0}.", Path.GetFileName(paths[0])) + " " : "") + T("Each file goes to the right folder.")));
         if (ok.Any(i => i.Place == AddPlace.Mods && !i.CanReplace) && !FolderLoaded(add.Folder)) body.Children.Add(Warn(T("The game does not load this folder"), null));
         if (ok.Any(i => i.Place == AddPlace.Mods) && !File.Exists(Path.Combine(Docs, "Mods", "Resource.cfg")))
             body.Children.Add(Muted(T("The game isn't set up to load mods yet. The launcher adds the Resource.cfg file it needs.")));
-        body.Children.Add(new ScrollViewer { Content = list, Margin = new Thickness(0, 0, -14, 0), MaxHeight = 400 });
+        // (six rows, then it scrolls)
+        body.Children.Add(new ScrollViewer { Content = list, Margin = new Thickness(0, Design.Space.X2, 0, 0), MaxHeight = Design.Size.Row * 6 });
         d.Content = body;
         Changed();
         return await ShowDialog(d) == ContentDialogResult.Primary;
@@ -276,19 +293,20 @@ public sealed partial class MainWindow
     async Task AddRunDialog(ModAdd add)
     {
         var chosen = add.Items.Where(i => i.Ok && i.Add).ToList();
-        var width = AddWidth(440);
-        var crystal = new Crystal(110);
+        var width = AddWidth(Design.Dialogs.Small);
+        var crystal = new Crystal(Design.Size.Tile * 3);
         crystal.SetState(HealthState.Ready, animate: false);
         crystal.HorizontalAlignment = HorizontalAlignment.Center;
         var bar = new ProgressBar { Maximum = 1 };
         AutomationProperties.SetName(bar, T("Adding"));
-        var now = new TextBlock { FontSize = 12, Foreground = Res("ApexMutedBrush"), HorizontalAlignment = HorizontalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-        var run = new StackPanel { Spacing = 16, Width = width, Padding = new Thickness(0, 8, 0, 4) };
+        var now = Muted("");
+        (now.HorizontalAlignment, now.TextTrimming, now.TextWrapping) = (HorizontalAlignment.Center, TextTrimming.CharacterEllipsis, TextWrapping.NoWrap);
+        var run = new StackPanel { Spacing = Design.Space.X4, Width = width, Padding = new Thickness(0, Design.Space.X2, 0, Design.Space.X1) };
         run.Children.Add(crystal);
         run.Children.Add(bar);
         run.Children.Add(now);
         bool running = true, stop = false;
-        var d = new ContentDialog { Tag = "package", Title = T("Adding"), Content = new ScrollViewer { Content = run, MaxHeight = 460 }, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
+        var d = new ContentDialog { Tag = "package", Title = T("Adding"), Content = new ScrollViewer { Content = run, MaxHeight = Design.Size.Row * 7 }, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot };
         // (the file being copied is finished, the rest are not added)
         d.CloseButtonClick += (_, e) => { if (running) { e.Cancel = true; stop = true; d.CloseButtonText = T("Stopping…"); } };
         var shown = ShowDialog(d);
@@ -319,18 +337,20 @@ public sealed partial class MainWindow
         var replaced = chosen.Count(i => i.Replaced is not null);
         var title = added.Count == 1 ? T("1 file added") : T("{0} files added", added.Count);
         run.Children.Clear();
-        crystal = new Crystal(80);
+        crystal = new Crystal(Design.Size.Tile * 2);
         crystal.SetState(added.Count == chosen.Count ? HealthState.Ready : HealthState.NeedsYou, animate: false);
         crystal.HorizontalAlignment = HorizontalAlignment.Center;
         run.Children.Add(crystal);
-        var head = new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center };
+        var head = new TextBlock { Text = title, FontSize = Design.TextSize.Lead, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center };
         AutomationProperties.SetLiveSetting(head, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         run.Children.Add(head);
+        var places = new StackPanel { Spacing = Design.Space.X1 };
+        run.Children.Add(places);
         foreach (var place in added.GroupBy(i => Path.GetDirectoryName(i.Added!)!, StringComparer.OrdinalIgnoreCase))
         {
             var mods = Path.Combine(Docs, "Mods");
             var i = place.First();
-            run.Children.Add(AddedPlace(AddPlaceText(i.Place, i.Place == AddPlace.Mods && Path.GetRelativePath(mods, place.Key) is var r and not "." ? r : ""),
+            places.Children.Add(AddedPlace(AddPlaceText(i.Place, i.Place == AddPlace.Mods && Path.GetRelativePath(mods, place.Key) is var r and not "." ? r : ""),
                 place.Select(x => Path.GetFileName(x.Added!)).ToList(), place.Key));
         }
         if (replaced > 0) run.Children.Add(Muted(replaced == 1 ? T("The file it replaced is in the Recycle Bin.") : T("The {0} files replaced are in the Recycle Bin.", replaced)));
@@ -348,25 +368,13 @@ public sealed partial class MainWindow
         await ModsAgain();
     }
 
-    // one place in the result: its files, and its folder in Explorer
-    static Grid AddedPlace(string place, List<string> names, string dir)
+    // one place in the result: a row with its files, and its folder in Explorer
+    static Border AddedPlace(string place, List<string> names, string dir)
     {
-        var g = new Grid { ColumnSpacing = 10 };
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.Children.Add(Lucide.Icon("circle-check", 16, Res("ApexSuccessBrush")));
-        var text = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = place, FontSize = 13, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        text.Children.Add(new TextBlock { Text = string.Join(", ", names.Take(5)) + (names.Count > 5 ? " " + T("and {0} more", names.Count - 5) : ""), FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
-        Grid.SetColumn(text, 1);
-        g.Children.Add(text);
         var open = IconButton("folder-open", T("Open folder"));
         open.Click += (_, _) => OpenFolder(dir);
         AutomationProperties.SetHelpText(open, place);
-        Grid.SetColumn(open, 2);
-        g.Children.Add(open);
-        return g;
+        return Row("folder", place, string.Join(", ", names.Take(5)) + (names.Count > 5 ? " " + T("and {0} more", names.Count - 5) : ""), open);
     }
 
     async Task UndoAddAsync(List<AddItem> added)
