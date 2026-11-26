@@ -1,7 +1,7 @@
 namespace ApexSetup;
 
 public enum CacheGroup { CreateASim, Scripts, Worlds, Thumbnails, Online, ErrorLogs, Downloads, Leftovers, ContentBackups }
-public sealed record CacheFile(string Path, string Rel, long Size, CacheGroup Group);
+public sealed record CacheFile(string Path, string Rel, long Size, CacheGroup Group, DateTime When = default);
 
 // The cache files The Sims 3 rebuilds by itself in Documents. Clearing them is the community's first answer to CAS or
 // thumbnail glitches and slow loads after mods change. Clean moves them to the launcher's data (never deletes): the copy is
@@ -46,7 +46,7 @@ public static class GameCaches
     {
         groups ??= OneClick;
         var list = new List<CacheFile>();
-        void Add(string p, CacheGroup g) { try { list.Add(new(p, Path.GetRelativePath(docs, p), new FileInfo(p).Length, g)); } catch (IOException) { } }
+        void Add(string p, CacheGroup g) { try { var i = new FileInfo(p); list.Add(new(p, Path.GetRelativePath(docs, p), i.Length, g, i.LastWriteTime)); } catch (IOException) { } }
         foreach (var (name, g) in RootFiles.Where(x => groups.Contains(x.Group)))
             if (Path.Combine(docs, name) is var f && File.Exists(f)) Add(f, g);
         foreach (var (dir, pattern, g) in Folders.Where(x => groups.Contains(x.Group)))
@@ -72,7 +72,19 @@ public static class GameCaches
     public static long Clean(string docs, IReadOnlyCollection<CacheGroup>? groups = null)
     {
         Engine.CheckWritable();
-        var files = List(docs, groups);
+        return Move(docs, List(docs, groups));
+    }
+
+    // only the files chosen one by one; each must still be a cache List gives (never one NeverCleared, never anything else)
+    public static long Clean(string docs, IEnumerable<CacheFile> chosen)
+    {
+        Engine.CheckWritable();
+        var wanted = chosen.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return Move(docs, List(docs, Enum.GetValues<CacheGroup>()).Where(f => wanted.Contains(f.Path)).ToList());
+    }
+
+    static long Move(string docs, List<CacheFile> files)
+    {
         if (files.Count == 0) return 0;
         // (a dropped backup Windows kept hold of: marked itself, so a new backup beside it does not bring it back)
         if (File.Exists(DroppedMark))

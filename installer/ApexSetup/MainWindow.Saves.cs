@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using static ApexSetup.Strings;
 
@@ -15,14 +16,13 @@ namespace ApexSetup;
 // thread; what changes one goes through SaveClean, SaveCopies and SaveBackups, behind a dialog that says how far it is.
 public sealed partial class MainWindow
 {
-    const CleanParts AllPictures = CleanParts.Memories | CleanParts.RepeatedMemories | CleanParts.Generated;
     const long LeastGain = 50 << 10; // (less than this is not worth a clean, and would read as 0 MB)
 
     string _savesSig = "";      // what SavesHost shows (the same again is left as it is)
     bool _savesBusy;
     int _savesRun, _savesNote;
     SavesNow? _savesNow;
-    CleanParts _saveParts = CleanParts.Portraits | CleanParts.Thumbnails | CleanParts.RepeatedMemories;
+    CleanParts _saveParts = CleanParts.Portraits | CleanParts.Thumbnails | CleanParts.RepeatedMemories | CleanParts.NestedCopies;
     string? _savePick;                                    // the save on the right, by its Key
     Border? _saveDetail;                                  // the right side, and the two ways of choosing what is on it
     ListView? _saveList;
@@ -36,8 +36,9 @@ public sealed partial class MainWindow
     enum SaveKindOf { Here, Gone, Stored }
     // a line of the list. Save: the name its backups have; Look is null for one only its backups remain of
     sealed record SaveEntry(SaveKindOf Kind, string Key, string Save, string Name, SaveLook? Look, List<SavePoint> Points);
-    // FolderGone: the chosen backup folder that is not there now; Free: what is free on its drive
-    sealed record SavesNow(string Docs, List<SaveLook> Here, List<SaveEntry> Entries, string? FolderGone, long? Free)
+    // FolderGone: the chosen backup folder that is not there now; Free: what is free on its drive; Caches: the game's caches
+    // of every group, CachesKept: a copy of the last ones cleared is kept
+    sealed record SavesNow(string Docs, List<SaveLook> Here, List<SaveEntry> Entries, string? FolderGone, long? Free, List<CacheFile> Caches, bool CachesKept)
     {
         public Dictionary<string, List<SavePoint>> Points { get; } = Entries.ToDictionary(e => e.Key, e => e.Points);
     }
@@ -95,7 +96,9 @@ public sealed partial class MainWindow
         var gone = BackupChoices.Load().FolderOf(docs) is { } chosen && !Directory.Exists(chosen) ? chosen : null;
         long? free = null;
         try { free = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace; } catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { }
-        return new(docs, here, entries, gone, free);
+        List<CacheFile> caches = [];
+        try { caches = GameCaches.List(docs, Enum.GetValues<CacheGroup>()); } catch (Exception e) { App.Log(e); } // (the saves show all the same)
+        return new(docs, here, entries, gone, free, caches, GameCaches.Backup is not null);
     }
 
     // the same screen drawn again, for a choice made on it
@@ -103,7 +106,8 @@ public sealed partial class MainWindow
 
     // what the screen shows, as one text
     string SavesSig(SavesNow now) => string.Join('\n', now.Entries.Select(e => $"{e.Kind}|{e.Key}|{e.Look?.Info.LastPlayed.Ticks}|{e.Look?.Info.Bytes}|" + string.Join('|', e.Points.Select(p => p.Path + p.When.Ticks + p.Label + p.Pinned + p.Stored)))
-            .Prepend($"{SideFits}|{Lang}|{_light}|{_running}|{_busy}|{Maintenance}|{_settings.InstallUpdatesOnPlay}|{_savePick}|{_savesPage}|{now.FolderGone}|{_autoError}"));
+            .Prepend($"{SideFits}|{Lang}|{_light}|{_running}|{_busy}|{Maintenance}|{_settings.InstallUpdatesOnPlay}|{_savePick}|{_savesPage}|{now.FolderGone}|{_autoError}|{now.CachesKept}|"
+                + string.Join('|', now.Caches.Select(c => c.Path + c.Size))));
 
     void DrawSaves(SavesNow now)
     {
@@ -116,8 +120,9 @@ public sealed partial class MainWindow
         SavesHost.Children.Clear();
         SavesBar.Visibility = Visibility.Collapsed;
         SavesNote.Margin = new Thickness(24, 0, 24, 16);
-        ScreenSaves.MaxWidth = _savesPage == "auto" ? 920 : double.PositiveInfinity;
+        ScreenSaves.MaxWidth = _savesPage is "auto" or "caches" ? 920 : double.PositiveInfinity;
         if (_savesPage == "auto") { DrawAutomatic(now); return; }
+        if (_savesPage == "caches") { DrawCaches(now); return; }
         if (_savesPage == "all") { DrawAllBackups(now); return; }
 
         var several = Id(Button(T("Clean several"), () => CleanSeveral(now)), "SaveCleanSeveral");
@@ -127,8 +132,11 @@ public sealed partial class MainWindow
         import.IsEnabled = SavesBlocked() is null;
         var auto = Id(Button("", () => SavesGo("auto")), "SaveAutoPage");
         auto.Content = Labeled("calendar-clock", T("Automatic backups"));
+        var caches = Id(Button("", () => SavesGo("caches")), "SaveCachesPage");
+        caches.Content = Labeled("brush", T("Game caches"));
         var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        foreach (var b in new[] { several, import, auto }) if (b != auto ? now.Here.Count > 0 || b != several : !SideFits) acts.Children.Add(Dims(b));
+        // (the pane's own places, offered here when there is no pane)
+        foreach (var b in new[] { several, import, auto, caches }) if (b == several ? now.Here.Count > 0 : b == import || !SideFits) acts.Children.Add(Dims(b));
         SavesHost.Children.Add(PageHead(T("Saves"), now.Here.Count switch { 0 => "", 1 => T("1 save"), var n => T("{0} saves", n) } + (now.Here.Count > 0 ? ", " + SaveSize(now.Here.Sum(l => l.Info.Bytes)) : ""), acts));
         if (SavesBlocked() is { } why && now.Here.Count > 0) SavesHost.Children.Add(Warn(why, null));
         if (now.Entries.Count == 0) { SavesHost.Children.Add(EmptyPlace("users", T("No saves yet. They appear here after you save a game."))); return; }
@@ -245,7 +253,8 @@ public sealed partial class MainWindow
     {
         if (now.Entries.Count == 0) { HideSide(); return; }
         var auto = BackupChoices.Load() is { OnClose: false, BeforePlay: false, Daily: false } ? T("Off") : T("On");
-        var sig = $"{Lang}|{_light}|{auto}|{_saveQuery}|{string.Join(',', _collapsed.Order())}|" + string.Join('\n', now.Entries.Select(e => $"{e.Kind}|{e.Key}|{e.Name}|{EntrySub(now, e)}|{e.Points.Count}"));
+        var cached = now.Caches.Sum(c => c.Size) is var size and > 0 ? ModRow.SizeText(size) : "";
+        var sig = $"{Lang}|{_light}|{auto}|{cached}|{_saveQuery}|{string.Join(',', _collapsed.Order())}|" + string.Join('\n', now.Entries.Select(e => $"{e.Kind}|{e.Key}|{e.Name}|{EntrySub(now, e)}|{e.Points.Count}"));
         if (_sideOn && sig == _saveSideSig) { SaveSideAt(); return; }
         _saveSideSig = sig;
         var items = new List<FrameworkElement>();
@@ -258,10 +267,11 @@ public sealed partial class MainWindow
         }
         bool Has(string t) => t.Contains(_saveQuery, StringComparison.CurrentCultureIgnoreCase);
         if (_saveQuery.Length == 0)
-            Group("saves:backups", T("Backups"),
+            Group("saves:backups", T("Look after your saves"),
             [
                 Place("@all", "archive", T("All backups"), now.Entries.Sum(e => e.Points.Count) is var n && n > 0 ? n.ToString() : "", "SavesAll"),
                 Place("@auto", "calendar-clock", T("Automatic"), auto, "SaveAutoPage"),
+                Place("@caches", "brush", T("Game caches"), cached, "SaveCachesPage"),
             ]);
         foreach (var (kind, label) in new[] { (SaveKindOf.Here, T("In the game")), (SaveKindOf.Stored, T("Kept out of the game")), (SaveKindOf.Gone, T("Gone from the game")) })
             Group("saves:" + kind, label, now.Entries.Where(e => e.Kind == kind && (_saveQuery.Length == 0 || Has(e.Name) || Has(e.Save) || e.Look is { } l && Has(SavePlace(l.Save, l.Info)))).Select(e => SaveLine(now, e)));
@@ -467,68 +477,75 @@ public sealed partial class MainWindow
 
     // ---------- what goes ----------
 
-    static readonly (CleanParts Parts, string Name, string Info, string Icon)[] CleanOptions =
+    // one row for each part, by group; the room nothing uses comes last, always given back
+    static readonly (string Group, CleanParts Parts, string Name, string Info, string Icon)[] CleanOptions =
     [
-        (CleanParts.Portraits | CleanParts.Thumbnails, "Portraits and thumbnails", "The game makes them again as you play", "users"),
-        (CleanParts.RepeatedMemories, "Repeated memories", "One of each picture stays", "layers"),
-        (AllPictures, "All memories and photos", "Only the pictures you choose to keep stay", "image"),
+        ("Pictures", CleanParts.Portraits, "Sim portraits", "The game makes them again as you play", "users"),
+        ("Pictures", CleanParts.Thumbnails, "Lot and household thumbnails", "Your household's picture stays", "house"),
+        ("Pictures", CleanParts.RepeatedMemories, "Repeated memories", "One of each picture stays", "layers"),
+        ("Pictures", CleanParts.Memories, "All memories", "Only the pictures you choose to keep stay", "image"),
+        ("Pictures", CleanParts.Generated, "Selfies, cards and photo booth", "Pictures your Sims took; the ones you choose stay", "camera"),
+        ("Worlds and leftovers", CleanParts.NestedCopies, "Copies of the save inside it", "Repeated folders the game doesn't read", "copy"),
     ];
 
     void CleanPart(StackPanel host, SavesNow now, SaveLook l)
     {
         var clean = Id(Button("", () => CleanSaves([l])), "SaveClean");
-        var keep = Id2(Link(T("Choose the pictures that stay"), () => Safe(KeepAsync([l]))), "SaveKeep");
-        keep.VerticalAlignment = VerticalAlignment.Center;
-        host.Children.Add(Section(T("Clean"), new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children = { keep, Dims(clean) } }));
+        host.Children.Add(Section(T("Clean"), Dims(clean)));
         var note = PageSub("");
-        (note.Margin, note.Visibility) = (new Thickness(0, 8, 0, 0), Visibility.Collapsed);
-        var rows = new StackPanel { Spacing = 4 };
+        (note.Margin, note.Visibility) = (new Thickness(0, Design.Space.X2, 0, 0), Visibility.Collapsed);
+        var rows = new StackPanel { Spacing = Design.Space.X1 };
         AutomationProperties.SetName(rows, T("Clean"));
         var says = new List<Action<SaveRead?, bool>>();
-        var bar = new Grid { Height = 8, CornerRadius = new CornerRadius(4), Background = Res("ApexTileBrush") };
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0, GridUnitType.Star) });
-        bar.ColumnDefinitions.Add(new ColumnDefinition());
-        var part = new Border { Background = Design.DesignSystem.MainBrush, CornerRadius = new CornerRadius(4) };
-        bar.Children.Add(part);
-        var barLeft = SaveText("", 13, "ApexSoftTextBrush");
-        var barRight = SaveText(SaveSize(l.Info.Bytes), 13, "ApexMutedBrush");
-        barRight.HorizontalAlignment = HorizontalAlignment.Right;
-        var meter = new Border { Padding = new Thickness(Design.Space.CardPad), Child = new StackPanel { Spacing = Design.Space.X3, Children = { new Grid { Children = { barLeft, barRight } }, bar } } };
-        Soft(meter);
-        rows.Children.Add(Join(meter));
+        var (meter, setMeter) = FreeMeter();
+        rows.Children.Add(meter);
         says.Add((read, done) =>
         {
             var gain = read is null ? 0 : Gain(read, _saveParts);
-            barLeft.Text = !done ? T("Reading the save\u2026") : gain > 0 ? T("{0} can be freed", SaveSize(gain)) : T("Nothing to free with these choices");
-            bar.ColumnDefinitions[0].Width = new GridLength(gain, GridUnitType.Star);
-            bar.ColumnDefinitions[1].Width = new GridLength(Math.Max(1, l.Info.Bytes - gain), GridUnitType.Star);
-            part.MinWidth = gain > 0 ? 8 : 0;
+            var total = read?.Plan.Before ?? l.Info.Bytes;
+            setMeter(!done ? T("Reading the save…") : gain > 0 ? T("{0} can be freed", SaveSize(gain)) : T("Nothing to free with these choices"), SaveSize(total), gain, total);
         });
-        foreach (var (parts, title, info, icon) in CleanOptions)
+        var group = "";
+        foreach (var (of, parts, title, info, icon) in CleanOptions)
         {
-            var size = SaveText("", 13, "ApexMutedBrush");
-            size.VerticalAlignment = VerticalAlignment.Center;
-            var sw = new ToggleSwitch { IsOn = (_saveParts & parts) == parts, OnContent = "", OffContent = "", MinWidth = 0, Width = 40, VerticalAlignment = VerticalAlignment.Center };
+            if (of != group) rows.Children.Add(RowGroup(T(group = of)));
+            var size = RowSize();
+            var sw = RowSwitch((_saveParts & parts) != 0);
             AutomationProperties.SetName(sw, T(title) + ". " + T(info));
+            var drawing = false;
             sw.Toggled += (_, _) =>
             {
+                if (drawing) return;
                 var was = _saveParts;
-                if (sw.IsOn) _saveParts |= parts;
+                if (sw.IsOn) _saveParts |= parts == CleanParts.Memories ? CleanParts.Memories | CleanParts.RepeatedMemories : parts;
                 // (the last picture of each can't go while its copies stay)
-                else if ((_saveParts & parts) == parts) _saveParts &= parts == CleanParts.RepeatedMemories ? ~AllPictures : parts == AllPictures ? ~(CleanParts.Memories | CleanParts.Generated) : ~parts;
+                else _saveParts &= parts == CleanParts.RepeatedMemories ? ~(CleanParts.RepeatedMemories | CleanParts.Memories) : ~parts;
                 if (was != _saveParts) Say();
             };
-            rows.Children.Add(Row(icon, T(title), T(info), new StackPanel { Orientation = Orientation.Horizontal, Spacing = 20, Children = { size, sw } }));
-            var only = parts == AllPictures ? CleanParts.Memories | CleanParts.Generated : parts;
+            // (the pictures that stay are chosen where all of them would go)
+            var keep = parts == CleanParts.Memories ? Id2(Link(T("Choose the pictures that stay"), () => Safe(KeepAsync([l]))), "SaveKeep") : null;
+            rows.Children.Add(Row(icon, T(title), T(info), RowEnd(size, sw), keep));
             says.Add((read, done) =>
             {
-                var on = (_saveParts & parts) == parts;
-                sw.IsOn = on;
-                var bytes = read?.Plan.Gains.Where(x => (only & x.Key) != 0).Sum(x => x.Value.Bytes) ?? 0;
-                size.Text = read is null ? "" : SaveSize(bytes);
-                size.Foreground = Res(on && bytes > 0 ? "ApexSuccessBrush" : "ApexMutedBrush");
+                var gain = read?.Plan.Gains.GetValueOrDefault(parts);
+                var none = gain is not { Count: > 0 } && (parts != CleanParts.Memories || read?.Plan.Gains.GetValueOrDefault(CleanParts.RepeatedMemories) is not { Count: > 0 });
+                drawing = true;
+                (sw.IsEnabled, sw.IsOn) = (!none, !none && (_saveParts & parts) != 0);
+                drawing = false;
+                size.Text = gain is null && !done ? "" : none ? T("Empty") : SaveSize(gain!.Bytes);
+                size.Foreground = Res(sw.IsOn && gain?.Bytes > 0 ? "ApexSuccessBrush" : "ApexMutedBrush");
             });
         }
+        // the room nothing uses: given back by every clean
+        var dead = RowSize();
+        // (a tick in the switches' column, exactly as wide as one in every language, so the sizes stay in line)
+        var always = new Border { Width = Design.Size.ControlLarge, VerticalAlignment = VerticalAlignment.Center, Background = Res("ApexClearBrush"), Child = Lucide.Icon("check", Design.Size.IconSmall, Res("ApexMutedBrush")) };
+        always.Child.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        ToolTipService.SetToolTip(always, T("Always"));
+        AutomationProperties.SetName(always, T("Always"));
+        rows.Children.Add(Row("maximize", T("Unused space"), T("Leftovers inside the save's files"), RowEnd(dead, always)));
+        // (under 0.05 MB reads as nothing, like the other rows)
+        says.Add((read, _) => (dead.Text, dead.Foreground) = (read is null ? "" : read.Plan.DeadBytes < 52_429 ? T("Empty") : SaveSize(read.Plan.DeadBytes), Res(read?.Plan.DeadBytes >= 52_429 ? "ApexSuccessBrush" : "ApexMutedBrush")));
         host.Children.Add(rows);
         host.Children.Add(note);
         // (this one first; the rest is read for the window that cleans several)
@@ -551,6 +568,55 @@ public sealed partial class MainWindow
             if (read?.Plan is { Refusal: { } no, Gains.Count: 0 }) (note.Text, note.Visibility) = (T(no.Key, TArgs(no.Args)), Visibility.Visible);
         }
     }
+
+    // the head of a card of rows: what can be freed, out of how much, and the bar of it (say, of: its left and right words)
+    (Border Card, Action<string, string, long, long> Set) FreeMeter()
+    {
+        var bar = new Grid { Height = Design.Space.X2, CornerRadius = new CornerRadius(Design.Space.X1), Background = Res("ApexTileBrush") };
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0, GridUnitType.Star) });
+        bar.ColumnDefinitions.Add(new ColumnDefinition());
+        var part = new Border { Background = Design.DesignSystem.MainBrush, CornerRadius = new CornerRadius(Design.Space.X1) };
+        bar.Children.Add(part);
+        var left = SaveText("", Design.TextSize.Small, "ApexSoftTextBrush");
+        var right = SaveText("", Design.TextSize.Small, "ApexMutedBrush");
+        Typography.SetNumeralAlignment(left, FontNumeralAlignment.Tabular);
+        Typography.SetNumeralAlignment(right, FontNumeralAlignment.Tabular);
+        right.HorizontalAlignment = HorizontalAlignment.Right;
+        AutomationProperties.SetLiveSetting(left, AutomationLiveSetting.Polite);
+        var meter = new Border { Padding = new Thickness(Design.Space.CardPad), Child = new StackPanel { Spacing = Design.Space.X3, Children = { new Grid { Children = { left, right } }, bar } } };
+        Soft(meter);
+        return (Join(meter), (say, of, gain, total) =>
+        {
+            (left.Text, right.Text) = (say, of);
+            bar.ColumnDefinitions[0].Width = new GridLength(gain, GridUnitType.Star);
+            bar.ColumnDefinitions[1].Width = new GridLength(Math.Max(1, total - gain), GridUnitType.Star);
+            part.MinWidth = gain > 0 ? Design.Space.X2 : 0;
+        });
+    }
+
+    // a row's end: its size, then its switch (or what stands in the switch's place)
+    static StackPanel RowEnd(UIElement size, UIElement control) =>
+        new() { Orientation = Orientation.Horizontal, Spacing = Design.Space.X5, Children = { size, control } };
+
+    // a size at a row's end: right-aligned, every digit one width, so the sizes of a card line up
+    static TextBlock RowSize(string text = "")
+    {
+        var t = SaveText(text, Design.TextSize.Small, "ApexMutedBrush");
+        (t.VerticalAlignment, t.TextAlignment) = (VerticalAlignment.Center, TextAlignment.Right);
+        Typography.SetNumeralAlignment(t, FontNumeralAlignment.Tabular);
+        return t;
+    }
+
+    // a switch at a row's end, as Toggle draws its own
+    static ToggleSwitch RowSwitch(bool on) =>
+        new() { IsOn = on, OnContent = "", OffContent = "", MinWidth = 0, Width = Design.Size.ControlLarge, VerticalAlignment = VerticalAlignment.Center };
+
+    // a group's name between the rows of one card
+    static Border RowGroup(string name) => Join(new Border
+    {
+        Child = Eyebrow(name), Padding = new Thickness(Design.Space.RowPad, Design.Space.X4, Design.Space.RowPad, Design.Space.X1), Tag = "group",
+        Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1),
+    });
 
     static HyperlinkButton Id2(HyperlinkButton b, string id) { AutomationProperties.SetAutomationId(b, id); return b; }
 

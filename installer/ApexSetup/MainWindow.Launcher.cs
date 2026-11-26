@@ -579,6 +579,8 @@ public sealed partial class MainWindow
     Button? FindingAction(Health.Item it)
     {
         var f = it.Finding;
+        // (the caches are chosen group by group, file by file, on their own page in Saves)
+        if (f.Suggest == "Clear the game caches") return Button(T(f.Suggest), () => { Show(SavesScreen); SavesGo("caches"); });
         // a suggestion (clear the caches, back up a save): offered under its own name, never run by Fix or Repair
         if (f.CanApply && it.Area == HealthArea.Mods) return Button(T(f.Suggest!), async () =>
         {
@@ -1180,13 +1182,15 @@ public sealed partial class MainWindow
     }
 
     // a row of Settings, as Components and Game settings draw theirs: icon, name and what it does, the control on the right
-    static Border Row(string? icon, string title, string detail, UIElement? action)
+    // (more: a link under the line, such as what opens the row's own list)
+    static Border Row(string? icon, string title, string detail, UIElement? action, UIElement? more = null)
     {
         var g = new Grid { ColumnSpacing = 16, VerticalAlignment = VerticalAlignment.Center };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         if (icon is not null) g.Children.Add(RowIcon(icon));
         var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap } } };
         if (detail.Length > 0) words.Children.Add(Muted(detail));
+        if (more is not null) words.Children.Add(more);
         Grid.SetColumn(words, 1);
         g.Children.Add(words);
         if (action is FrameworkElement a) { Grid.SetColumn(a, 2); a.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(a); }

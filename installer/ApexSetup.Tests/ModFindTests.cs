@@ -301,6 +301,29 @@ static class ModFindTests
         check(GameCaches.Restore() && File.Exists(old) && File.ReadAllText(Path.Combine(docs, "scriptCache.package")) == "newer" && File.Exists(Path.Combine(docs, @"WorldCaches\Riverview_objects.package")) && GameCaches.Backup is null,
             "caches: a second clear loses nothing of the first, and the newest copy goes back");
 
+        // file by file: only the files chosen go, and a file that is not a cache (or never cleared) is never moved
+        var world = GameCaches.List(docs, all).Single(c => c.Group == CacheGroup.Worlds);
+        var thumbs = GameCaches.List(docs, all).Single(c => c.Group == CacheGroup.Thumbnails);
+        var store = new CacheFile(Path.Combine(docs, @"DCCache\dcdb0.dbc"), @"DCCache\dcdb0.dbc", 1, CacheGroup.Leftovers);
+        var merged = new CacheFile(Path.Combine(docs, @"DCBackup\ccmerged.package"), @"DCBackup\ccmerged.package", 1, CacheGroup.ContentBackups);
+        Games.IsRunning = () => true;
+        refused = false;
+        try { GameCaches.Clean(docs, [world]); } catch (SetupException) { refused = true; }
+        Games.IsRunning = () => false;
+        check(refused && File.Exists(world.Path), "caches: clearing chosen files is refused while the game runs");
+        var one = GameCaches.Clean(docs, [world, store, merged]);
+        check(one == world.Size && !File.Exists(world.Path) && File.Exists(thumbs.Path) && File.Exists(store.Path) && File.Exists(merged.Path) && GameCaches.Backup is not null,
+            "caches: file by file, only the chosen caches go; the store content and the merged content stay even when asked");
+        check(GameCaches.Restore() && File.Exists(world.Path) && GameCaches.Backup is null && GameCaches.Clean(docs, Array.Empty<CacheFile>()) == 0 && GameCaches.Backup is null,
+            "caches: a file cleared alone goes back; nothing chosen moves nothing");
+        var wait = Fs.RetryDelay;
+        Fs.RetryDelay = TimeSpan.Zero;
+        var held = false;
+        using (new FileStream(thumbs.Path, FileMode.Open, FileAccess.Read, FileShare.None))
+            try { GameCaches.Clean(docs, [world, thumbs]); } catch (IOException) { held = true; }
+        Fs.RetryDelay = wait;
+        check(held && File.Exists(world.Path) && File.Exists(thumbs.Path) && GameCaches.Backup is null, "caches: file by file, one in use leaves every chosen file where it was");
+
         // a move that fails undoes the ones before it
         var delay = Fs.RetryDelay;
         Fs.RetryDelay = TimeSpan.Zero;

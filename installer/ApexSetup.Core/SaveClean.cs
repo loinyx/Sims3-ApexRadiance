@@ -5,10 +5,11 @@ namespace ApexSetup;
 // What a clean can take out of a save. Each is a set of pictures the game works without:
 // Portraits: the Sims' faces, made again as you play. Thumbnails: lot pictures and other households' pictures, made
 // again too (the save's own household picture always stays). RepeatedMemories: every copy of a memory's picture but
-// one. Memories: that last one of each. Generated: selfies, cards and photo booth pictures.
+// one. Memories: that last one of each. Generated: selfies, cards and photo booth pictures. NestedCopies: not pictures,
+// the save's own folder again inside it (X.sims3\X.sims3\...), which the game never reads: it reads only the top level.
 // Never taken: a picture the player chose to keep, the textures of placed lots, anything that is the game's own data.
 [Flags]
-public enum CleanParts { None = 0, Portraits = 1, Thumbnails = 2, RepeatedMemories = 4, Memories = 8, Generated = 16 }
+public enum CleanParts { None = 0, Portraits = 1, Thumbnails = 2, RepeatedMemories = 4, Memories = 8, Generated = 16, NestedCopies = 32 }
 
 public sealed record CleanGain(int Count, long Bytes);
 public enum CleanStep { Copy, Write, Verify, Swap }
@@ -32,6 +33,7 @@ public sealed class CleanPlan
     public MergeReason? Refusal { get; internal set; }
     public bool CanRun => Refusal is null && After < Before;
     internal List<(SavePackage File, bool[] Keep, long Size)> Files { get; } = new();
+    internal List<string> Nested { get; } = new(); // the copies that go (NestedCopies chosen)
 }
 
 // Makes a save smaller by taking out pictures and unused room. The plan says, to the byte, what each choice frees. Run
@@ -111,6 +113,13 @@ public static class SaveClean
                 plan.Removed += keep.Count(k => !k);
                 plan.After -= p.Length - size;
             }
+            // (counted in the save's size, so Before is what the zip made first holds; real folders only, never a link)
+            var nested = NestedCopies(s.Dir);
+            var bytes = nested.Sum(d => new DirectoryInfo(d).EnumerateFiles("*", Deep).Sum(f => f.Length));
+            plan.Gains[CleanParts.NestedCopies] = new(nested.Count, bytes);
+            plan.Before += bytes;
+            plan.After += bytes;
+            if ((parts & CleanParts.NestedCopies) != 0) { plan.Nested.AddRange(nested); plan.After -= bytes; }
         }
         catch (SetupException e) { plan.Refusal = new(e.Key, e.Args); return plan; }
         // (the numbers are told also while the game runs or in a test run; only Run is refused)
@@ -119,6 +128,13 @@ public static class SaveClean
         catch (InvalidOperationException e) { plan.Refusal = new(e.Message, []); }
         return plan;
     }
+
+    static readonly EnumerationOptions Deep = new() { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
+
+    // every folder in the save whose name ends in .sims3: a copy of a save inside it, which the game does not read
+    static List<string> NestedCopies(string dir) => Directory.Exists(dir)
+        ? new DirectoryInfo(dir).EnumerateDirectories("*.sims3").Where(d => d.Name.EndsWith(".sims3", StringComparison.OrdinalIgnoreCase) && !d.Attributes.HasFlag(FileAttributes.ReparsePoint)).Select(d => d.FullName).ToList()
+        : [];
 
     public static CleanResult Run(CleanPlan plan, IProgress<CleanProgress>? progress = null, CancellationToken ct = default)
     {
@@ -134,6 +150,7 @@ public static class SaveClean
         foreach (var (p, _, _) in plan.Files)
             if (new FileInfo(p.Path) is not { Exists: true } now || now.Length != p.Length || now.LastWriteTimeUtc != p.Written || File.Exists(p.Path + NewSuffix) || File.Exists(p.Path + OldSuffix))
                 throw new SetupException("{0} changed since the launcher read it. Try again.", plan.Save.Name);
+        if (plan.Nested.Any(d => !Directory.Exists(d) || Directory.Exists(d + OldSuffix))) throw new SetupException("{0} changed since the launcher read it. Try again.", plan.Save.Name);
     }
 
     static CleanResult RunNow(CleanPlan plan, IProgress<CleanProgress>? progress, CancellationToken ct)
@@ -143,6 +160,7 @@ public static class SaveClean
         progress?.Report(new(CleanStep.Copy, 0, 1));
         var copy = Saves.Backup(plan.Save, plan.Docs, SaveCopies.BeforeClean);
         var swapped = new List<SavePackage>();
+        var aside = new List<string>(); // (the nested copies moved out of the way, deleted only once all is in)
         try
         {
             FailPoint("copy");
@@ -172,6 +190,12 @@ public static class SaveClean
                 progress?.Report(new(CleanStep.Swap, swapped.Count, plan.Files.Count));
                 FailPoint("swap");
             }
+            foreach (var d in plan.Nested)
+            {
+                Fs.Retry(() => Directory.Move(d, d + OldSuffix));
+                aside.Add(d);
+                FailPoint("swap");
+            }
             FailPoint("finish");
             foreach (var (p, _, size) in plan.Files)
                 if (new FileInfo(p.Path).Length != size) throw new InvalidDataException(Path.GetFileName(p.Path) + " is not the size that was written");
@@ -187,6 +211,9 @@ public static class SaveClean
                     Fs.Retry(() => File.Move(path + OldSuffix, path, overwrite: true));
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { back = false; Engine.Log(e); }
+            foreach (var d in Enumerable.Reverse(aside))
+                try { Fs.Retry(() => Directory.Move(d + OldSuffix, d)); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { back = false; Engine.Log(e); }
             foreach (var (p, _, _) in plan.Files)
                 try { File.Delete(p.Path + NewSuffix); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
             // (nothing changed: the zip is not a point anyone asked for. When an original is stuck aside, it stays: it is the save.)
@@ -197,6 +224,8 @@ public static class SaveClean
         // 4. the originals go: the zip holds them (one that stays is cleared at the next start)
         foreach (var p in swapped)
             try { Fs.Retry(() => File.Delete(p.Path + OldSuffix)); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
+        foreach (var d in aside)
+            try { Fs.DeleteClear(d + OldSuffix); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
         SaveCopies.Thin(plan.Docs, plan.Save);
         return new(plan.Save, plan.Before, plan.After, plan.Removed, copy, SaveInfo.Read(plan.Save.Dir)?.LastPlayed ?? default);
     }

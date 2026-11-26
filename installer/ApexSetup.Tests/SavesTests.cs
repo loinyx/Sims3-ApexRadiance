@@ -155,6 +155,7 @@ static class SavesTests
             Info(check, docs, s);
             Contents(check, docs, s);
             Clean(check, docs, s);
+            Nested(check, Path.Combine(root, "Docs4"));
             Copies(check, docs, s);
             Whole(check, docs, recycled);
             Namesakes(check, Path.Combine(root, "Docs2"), recycled);
@@ -382,6 +383,51 @@ static class SavesTests
         File.SetLastWriteTime(town, File.GetLastWriteTime(town).AddSeconds(2));
         check(Throws<SetupException>(() => SaveClean.Run(stale)) && Directory.GetFiles(Saves.BackupDir(docs)).Length == 0, "clean: a save that changed since the plan is not cleaned");
         File.SetLastWriteTime(town, new DateTime(2024, 3, 9, 10, 0, 0));
+    }
+
+    // a save with copies of itself inside it (the game reads only the top level): only the .sims3 folders go, measured to
+    // the byte, in the zip made first, and back with Undo
+    static void Nested(Action<bool, string> check, string docs)
+    {
+        var s = Make(docs, "Nest");
+        var copy = Path.Combine(s.Dir, "Nest.sims3");
+        Pkg(Path.Combine(copy, "Nest_0x00000000.nhd"), 4, Raw(Game, 0, 1, Encoding.ASCII.GetBytes("an old copy of the town")));
+        Pkg(Path.Combine(copy, "Nest.sims3", "TravelDB.package"), 0, Raw(Game, 0, 2, Encoding.ASCII.GetBytes("and one more inside it")));
+        Directory.CreateDirectory(Path.Combine(s.Dir, "Other"));
+        File.WriteAllText(Path.Combine(s.Dir, "Other", "notes.txt"), "not a save");
+        var bytes = Directory.EnumerateFiles(copy, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length);
+        var before = Snap(s.Dir);
+
+        var none = SaveClean.Plan(docs, s, CleanParts.None);
+        var plan = SaveClean.Plan(docs, s, CleanParts.NestedCopies);
+        check(none.Gains[CleanParts.NestedCopies] == new CleanGain(1, bytes) && none.Before == SaveContents.Read(s.Dir).Bytes + bytes && none.After == none.Before - none.DeadBytes
+              && plan.After == none.After - bytes, "clean: the copies of a save inside it are measured to the byte, and only a .sims3 folder counts");
+
+        // (at the finish, every swap step was taken: the last one is the copy moved aside, where the second run stops)
+        var (asWas, swaps) = (true, 0);
+        foreach (var at in new[] { "finish", "swap" })
+        {
+            var hits = 0;
+            SaveClean.FailPoint = p => { if (at == "finish" && p == "swap") swaps++; if (p == at && ++hits == (at == "swap" ? swaps : 1)) throw new IOException("stop at " + at); };
+            asWas &= Throws<IOException>(() => SaveClean.Run(plan)) && Same(before, Snap(s.Dir));
+        }
+        asWas &= swaps == 3;
+        SaveClean.FailPoint = _ => { };
+        check(asWas, "clean: a failure once the copy inside is moved aside puts it back as it was");
+
+        var r = SaveClean.Run(plan);
+        using (var z = ZipFile.OpenRead(r.Copy))
+            check(!Directory.Exists(copy) && File.ReadAllText(Path.Combine(s.Dir, "Other", "notes.txt")) == "not a save" && r.Before - r.After == bytes + none.DeadBytes
+                  && !Directory.EnumerateFileSystemEntries(s.Dir).Any(f => f.Contains(".apex-")) && z.GetEntry("Nest.sims3/Nest.sims3/Nest.sims3/TravelDB.package") is not null,
+                "clean: the copy inside the save goes, the rest of the folder stays, and the zip made first holds it");
+        var undone = SaveClean.Undo(docs, r);
+        check(Snap(Path.Combine(undone.Dir, "Nest.sims3")).Count == 2 && before.Where(x => x.Key.StartsWith("Nest.sims3", StringComparison.OrdinalIgnoreCase))
+              .All(x => Snap(undone.Dir).TryGetValue(x.Key, out var v) && v[..64] == x.Value[..64]), "clean: undo brings the copy inside the save back");
+
+        // a clean cut short with the copy aside: the next start puts it back
+        Directory.Move(Path.Combine(undone.Dir, "Nest.sims3"), Path.Combine(undone.Dir, "Nest.sims3.apex-old"));
+        SaveCopies.Recover(docs);
+        check(Directory.Exists(Path.Combine(undone.Dir, "Nest.sims3")) && !Directory.Exists(Path.Combine(undone.Dir, "Nest.sims3.apex-old")), "clean: a copy left aside goes back at the next start");
     }
 
     sealed class Sync(Action<CleanProgress> a) : IProgress<CleanProgress> { public void Report(CleanProgress v) => a(v); }

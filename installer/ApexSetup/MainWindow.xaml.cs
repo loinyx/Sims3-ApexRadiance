@@ -963,7 +963,9 @@ public sealed partial class MainWindow : Window
             bool above = Row(i - 1), below = Row(i + 1);
             const double r = Design.Radius.Card;
             b.CornerRadius = new CornerRadius(above ? 0 : r, above ? 0 : r, below ? 0 : r, below ? 0 : r);
-            b.BorderThickness = new Thickness(1, 1, 1, below ? 0 : 1);
+            // (a group's heading and its first row read as one: no line between them)
+            var head = above && rows[i - 1] is Border { Tag: "group" };
+            b.BorderThickness = new Thickness(1, head ? 0 : 1, 1, below ? 0 : 1);
             b.Margin = new Thickness(0, above ? -gap : 0, 0, 0);
         }
     }
