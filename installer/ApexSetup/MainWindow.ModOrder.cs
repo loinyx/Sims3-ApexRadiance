@@ -627,7 +627,7 @@ public sealed partial class MainWindow
         }
         var outer = new Grid();
         if (r.Moved) outer.Children.Add(new Border { Width = 3, Margin = new Thickness(0, Design.Space.X3, 0, Design.Space.X3), HorizontalAlignment = HorizontalAlignment.Left, CornerRadius = new CornerRadius(0, 2, 2, 0), Background = Res("ApexAccentBrush") });
-        var row = new Grid { ColumnSpacing = Design.Space.IconToText, Padding = new Thickness(Design.Space.RowPad, Design.Space.X3, Design.Space.RowPad, Design.Space.X3) };
+        var row = new Grid { ColumnSpacing = Design.Space.IconToText, Padding = new Thickness(Design.Space.X3, Design.Space.X3, Design.Space.RowPad, Design.Space.X3) };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         outer.Children.Add(row);
         card.Child = outer;
@@ -636,23 +636,21 @@ public sealed partial class MainWindow
 
         // the grip (a lock for what the launcher installed, an eye for what is not read), the place in the order, the mod
         var grip = Lucide.Icon(unread ? "eye-off" : m.Locked ? "lock" : "grip-vertical", Design.Size.IconSmall, Res("ApexMutedBrush"));
-        if (unread || m.Locked) (grip.Tag, grip.Opacity) = ("fixed", 1); else grip.Opacity = c.FocusState != FocusState.Unfocused ? 1 : 0;
+        grip.Tag = "fixed"; // (always shown: the row says it can be dragged before the pointer is on it)
         if (m.Locked) ToolTipService.SetToolTip(grip, T("Installed by Apex Launcher, so it stays where it is"));
         card.Tag = grip;
-        // (in the row's left margin: it shows under the pointer and moves nothing)
-        (grip.HorizontalAlignment, grip.VerticalAlignment, grip.Margin, grip.IsHitTestVisible) = (HorizontalAlignment.Left, VerticalAlignment.Center, new Thickness(2, 0, 0, 0), false);
-        outer.Children.Add(grip);
+        grip.VerticalAlignment = VerticalAlignment.Center;
         var number = new TextBlock
         {
             Text = r.At > 0 ? r.At.ToString(LangCulture()) : "–", FontSize = Design.TextSize.Small, FontWeight = FontWeights.SemiBold,
             Foreground = Res(r.Moved ? "ApexOnAccentBrush" : unread ? "ApexMutedBrush" : "ApexSoftTextBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         };
         Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
-        Put(new Border
+        Put(new StackPanel { Orientation = Orientation.Horizontal, Spacing = Design.Space.X2, Children = { grip, new Border
         {
             Width = Design.Size.Tile, Height = Design.Size.Tile, CornerRadius = new CornerRadius(Design.Radius.Tile), Child = number,
             Background = Res(r.Moved ? "ApexAccentBrush" : unread ? "ApexClearBrush" : "ApexTileBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(unread ? 1 : 0),
-        }, 0);
+        } } }, 0);
         var name = Path.GetFileNameWithoutExtension(m.Name);
         var words = new StackPanel { Spacing = 2 };
         words.Children.Add(new TextBlock { Text = name, FontSize = Design.TextSize.Body, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
