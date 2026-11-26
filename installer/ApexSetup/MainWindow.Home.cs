@@ -288,11 +288,14 @@ public sealed partial class MainWindow
         var g = new Grid { Padding = new Thickness(Design.Space.CardPad), ColumnSpacing = Design.Space.IconToText };
         foreach (var w in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto }) g.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
         // the crystal in its light, floating (a slow bob, still when Windows' animations are off)
-        const double size = 56, light = 96;
+        // (the light stays still and breathes, wider than the crystal; the card's corners clip it, as glass holds a light)
+        const double size = 56, light = 150;
+        var pulse = new ScaleTransform();
+        var glow = new SoftGlow(StateTint(255), calm ? 0.55 : 0.75, 0.5) { Width = light, Height = light, Margin = new Thickness(-(light - size) / 2),
+            VerticalAlignment = VerticalAlignment.Center, RenderTransform = pulse, RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5) };
+        g.Children.Add(glow);
         var bob = new CompositeTransform();
         var holder = new Grid { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center, RenderTransform = bob };
-        holder.Children.Add(new SoftGlow(StateTint(255), calm ? 0.4 : 0.6, 0.5) { Width = light, Height = light, Margin = new Thickness(-(light - size) / 2),
-            IsHitTestVisible = false });
         var crystal = new Crystal(size) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         crystal.SetLevel(HealthLevel, animate: false);
         holder.Children.Add(crystal);
@@ -305,8 +308,18 @@ public sealed partial class MainWindow
             Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(up, bob);
             Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(up, "TranslateY");
             float_.Children.Add(up);
-            holder.Loaded += (_, _) => float_.Begin();
-            holder.Unloaded += (_, _) => float_.Stop();
+            // the light grows and settles slowly, out of step with the bob
+            var grow = new Microsoft.UI.Xaml.Media.Animation.Storyboard { RepeatBehavior = Microsoft.UI.Xaml.Media.Animation.RepeatBehavior.Forever, AutoReverse = true };
+            foreach (var axis in new[] { "ScaleX", "ScaleY" })
+            {
+                var s = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation { From = 0.88, To = 1.1, Duration = TimeSpan.FromMilliseconds(3400),
+                    EasingFunction = new Microsoft.UI.Xaml.Media.Animation.SineEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut } };
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(s, pulse);
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(s, axis);
+                grow.Children.Add(s);
+            }
+            holder.Loaded += (_, _) => { float_.Begin(); grow.Begin(); };
+            holder.Unloaded += (_, _) => { float_.Stop(); grow.Stop(); };
         }
         var words = new StackPanel { Spacing = Design.Space.TitleToSub, VerticalAlignment = VerticalAlignment.Center };
         words.Children.Add(new TextBlock { Text = title, FontSize = Design.TextSize.Lead, FontWeight = FontWeights.SemiBold, Foreground = ink, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -318,6 +331,7 @@ public sealed partial class MainWindow
         Grid.SetColumn(go, 2);
         g.Children.Add(go);
 
+        g.CornerRadius = new CornerRadius(Design.Radius.Card);
         var b = new Button
         {
             Content = g, Width = 320, Padding = new Thickness(0), CornerRadius = new CornerRadius(Design.Radius.Card), BorderThickness = new Thickness(0),
