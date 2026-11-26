@@ -9,6 +9,7 @@
 // Steam (steam://run) for a Steam start, or the player is told to start the game from the EA app for an EA app start.
 #include "restart_channel.h"
 #include "relaunch_rules.h"
+#include "oop_host.h"
 #include <shellapi.h>
 #include <tlhelp32.h>
 
@@ -43,6 +44,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR args, int) {
     const DWORD pid = wcstoul(args, nullptr, 10);
     HANDLE game = pid ? OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr;
     if (!game) return 2;
+    OopHost::Start(pid);  // the game's out-of-process services, when it switched any on (oop_channel.h); serve until this host ends
     wchar_t name[64];
     HANDLE map = RhName(name, 64, pid) ? OpenFileMappingW(FILE_MAP_READ, FALSE, name) : nullptr;  // kept open past the game's end
     const auto* chan = map ? static_cast<const RestartChannel*>(MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0)) : nullptr;
