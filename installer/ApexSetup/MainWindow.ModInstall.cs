@@ -356,7 +356,8 @@ public sealed partial class MainWindow
         if (replaced > 0) run.Children.Add(Muted(replaced == 1 ? T("The file it replaced is in the Recycle Bin.") : T("The {0} files replaced are in the Recycle Bin.", replaced)));
         var left = add.Items.Where(i => i.Added is null)
             .Select(i => (i.Name, !i.Ok || !i.Add && i.SameAs is not null ? AddInfo(i) : failed.TryGetValue(i, out var why) ? why : i.Add ? T("Cancelled") : T("Not selected"))).ToList();
-        if (left.Count > 0) run.Children.Add(AddLeftOut(T("Left out"), left));
+        // (a section apart from the places above it, as in the list before adding)
+        if (left.Count > 0) { var outCard = AddLeftOut(T("Left out"), left); outCard.Margin = new Thickness(0, Design.Space.Section - run.Spacing, 0, 0); run.Children.Add(outCard); }
         d.Title = T("Done");
         d.CloseButtonText = T("Close");
         await shown;
