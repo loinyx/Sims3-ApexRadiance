@@ -50,6 +50,8 @@
 #include "shader_cache.h"
 #include "platform.h"
 #include "gpu_trace.h"
+#include "edit_in_game_arg.h"
+#include <tlhelp32.h>
 #include <format>
 #include <string>
 
@@ -66,6 +68,77 @@ constexpr ULONGLONG kSettleAfterPresentMs = 1000; // official S3SS loads its pat
 constexpr ULONGLONG kSettleTimeoutMs = 20000;     // no Present by then (no device, headless): install anyway
 
 bool Stopping(DWORD waitMs = 0) { return g_stop && WaitForSingleObject(g_stop, waitMs) == WAIT_OBJECT_0; }
+
+EditInGameArg::Scan g_editArgW, g_editArgA; // DllMain's command-line scan, logged once the log is open
+
+std::string ParentProcessName() {
+    const DWORD self = GetCurrentProcessId();
+    DWORD parent = 0;
+    std::wstring name = L"?";
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return "?";
+    PROCESSENTRY32W e{sizeof e};
+    for (BOOL ok = Process32FirstW(snap, &e); ok; ok = Process32NextW(snap, &e))
+        if (e.th32ProcessID == self) { parent = e.th32ParentProcessID; break; }
+    e.dwSize = sizeof e;
+    for (BOOL ok = parent && Process32FirstW(snap, &e); ok; ok = Process32NextW(snap, &e))
+        if (e.th32ProcessID == parent) { name = e.szExeFile; break; }
+    CloseHandle(snap);
+    return ApexUtil::ToUtf8(name);
+}
+
+// One line on how the game was started (a save opened directly or the main menu, Apex Launcher's marker, the game's
+// -editInGameMode and what was renamed) and, when the switch was renamed, the pack selection the game reads instead
+// (LoadOption.ini selectedflags). Names only: the save's name and paths are left out.
+void LogLaunch() {
+    const std::wstring line = GetCommandLineW();
+    std::wstring lower = line;
+    for (auto& c : lower) c = static_cast<wchar_t>(towlower(c));
+    const bool save = lower.find(L"-worldfile") != std::wstring::npos;
+    const auto& w = g_editArgW;
+    LOG_INFO(std::format("[LaunchDiag] Start: {}; parent {}; -apexDirect {}; editInGameMode {} (value \"{}\"), renamed {} (ANSI copy {}, {} for the old launcher's value)",
+                         save ? "save on the command line (direct to the save)" : "no save on the command line (main menu)",
+                         ParentProcessName(), w.marked ? "yes" : "no", w.found, w.value, w.renamed, g_editArgA.renamed, w.legacy));
+    if (w.found > w.renamed)
+        LOG_WARNING("[LaunchDiag] -editInGameMode stays on the command line: the game opens the save in its edit-in-game mode with time stopped (Create a World's start, or a launcher that did not mark its start)");
+    if (w.renamed) {
+        wchar_t flags[32] = {};
+        const std::wstring ini = ApexPaths::GameDocumentsDirectory() + L"LoadOption.ini";
+        GetPrivateProfileStringW(L"productoption", L"selectedflags", L"(none)", flags, 32, ini.c_str());
+        LOG_INFO("[LaunchDiag] Without -editInGameMode the game mounts the packs of LoadOption.ini selectedflags " + ApexUtil::ToUtf8(flags));
+    }
+}
+
+// The world's mode (WorldManager +0x1B4: 0 tool mode / loading, 2 edit-in-game with time stopped) and active byte (+0x41),
+// one line per change, from the pump. Read-only, as WorldSession. At most kModeLines lines, then a count.
+bool ReadWorldMode(uintptr_t global, int& mode, int& active) {
+    __try {
+        if (const uintptr_t world = *reinterpret_cast<const uintptr_t*>(global)) {
+            mode = *reinterpret_cast<const int*>(world + 0x1B4);
+            active = *reinterpret_cast<const unsigned char*>(world + 0x41);
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+void WatchWorldMode() {
+    constexpr int kModeLines = 24;
+    static int lastMode = -2, lastActive = -2, lines = 0, changes = 0;
+    const uintptr_t global = GameAddr::Get(GameAddr::Id::WorldManagerPtr);
+    int mode = -1, active = -1;
+    if (!global || !ReadWorldMode(global, mode, active)) return;
+    if (mode == lastMode && active == lastActive) return;
+    ++changes;
+    if (lines < kModeLines) {
+        ++lines;
+        LOG_INFO(std::format("[LaunchDiag] World mode {} -> {}, active {}{}", lastMode, mode, active,
+                             mode == 2 ? ": edit-in-game mode, time cannot run" : ""));
+    } else if (lines == kModeLines) {
+        ++lines;
+        LOG_INFO(std::format("[LaunchDiag] World mode: {} changes, further ones are not logged", changes));
+    }
+    lastMode = mode;
+    lastActive = active;
+}
 
 std::wstring ModuleName(HMODULE m) {
     wchar_t path[MAX_PATH] = {};
@@ -173,6 +246,7 @@ DWORD InitBody() {
     else LOG_WARNING(std::format("[Main] Unknown game build [0x{:08X}]: game-code features start only where their code is found by signature", g_exeTimestamp));
     LOG_INFO("[Main] Platform: " + Platform::Summary());
     LogEnvironment();
+    LogLaunch();
     // Apex's HLSL shaders (every quality and mode) compile now on a background thread, so the render thread never runs
     // D3DCompile: the features only create the shader objects from the bytecode (shader_cache.h).
     ShaderCache::Start();
@@ -237,6 +311,7 @@ DWORD InitBody() {
         HookGuard::Try("Pump: settings autosave", [] { ApexConfig::PumpAutosave(); });
         HookGuard::Try("Pump: load timing", [] { LoadTiming::Pump(); }); // log lines only ([LoadTiming])
         HookGuard::Try("Pump: transition watch", [] { TransitionWatch::Pump(); });
+        HookGuard::Try("Pump: world mode", [] { WatchWorldMode(); }); // [LaunchDiag] lines only
         HookGuard::Try("Pump: transition calls", [] { TransitionCalls::Pump(); });
         HookGuard::Try("Pump: allocator trim", [] { AllocatorTuning::Pump(); }); // allocator_trim
         if constexpr (kDevToolsBuild) if(!kPublicBuild) HookGuard::Try("Pump: lot loading analysis", [] { LotLoadAnalysis::Pump(); });
@@ -268,26 +343,6 @@ DWORD WINAPI InitThread(LPVOID) {
     return 1;
 }
 
-// Apex Launcher's direct start of the EA app copy goes through the Sims 3 launcher's -editInGameMode, which the game reads
-// too (any value starting with t or 1 is on) and which then loads the save in Edit Town with time stopped. The launcher
-// marks that start with -apexDirect; with it, every "editInGameMode" of the process's command line (the wide one and
-// Windows' ANSI copy) is renamed in place, before the game reads it, to a key of the same length the game does not know.
-// Without the marker nothing changes (Create a World's own edit-in-game start keeps it).
-template <typename Char> void RenameEditInGame(Char* line) {
-    if (!line) return;
-    constexpr char kFrom[] = "editInGameMode", kTo[] = "apexNoEditMode", kMark[] = "-apexDirect";
-    const auto lower = [](Char c) { return c >= 'A' && c <= 'Z' ? Char(c - 'A' + 'a') : c; };
-    const auto at = [&](const Char* p, const char* word) {
-        for (; *word; ++p, ++word) if (lower(*p) != lower(Char(*word))) return false;
-        return true;
-    };
-    bool marked = false;
-    for (const Char* p = line; *p && !marked; ++p) marked = at(p, kMark);
-    if (!marked) return;
-    for (Char* p = line; *p; ++p)
-        if (at(p, kFrom)) for (int i = 0; kTo[i]; ++i) p[i] = Char(kTo[i]);
-}
-
 bool IsGameProcess() {
     const std::wstring exe = ModuleName(nullptr);
     return _wcsicmp(exe.c_str(), L"TS3W.exe") == 0 || _wcsicmp(exe.c_str(), L"TS3.exe") == 0;
@@ -303,8 +358,9 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {
         // the launcher and other tools (the ASI loader loads us into Sims3Launcher.exe too): stay loaded and idle. FALSE would
         // unload the DLL at once, and its CRT teardown then crashes freeing thread_local maps (WER dumps on every EA launch)
         if (!IsGameProcess()) return TRUE;
-        RenameEditInGame(GetCommandLineW()); // (first: before the game reads its arguments; only with Apex Launcher's marker)
-        RenameEditInGame(GetCommandLineA());
+        // (first: before the game reads its arguments; only for Apex Launcher's start, edit_in_game_arg.h)
+        g_editArgW = EditInGameArg::Rename(GetCommandLineW());
+        g_editArgA = EditInGameArg::Rename(GetCommandLineA());
         if (!ModuleLifetime::Pin(module)) {
             OutputDebugStringA("[" APEX_PRODUCT_NAME "] Could not retain the module for process lifetime; no hooks or workers started\n");
             return FALSE;
