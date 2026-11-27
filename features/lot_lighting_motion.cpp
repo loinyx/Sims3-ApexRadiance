@@ -66,6 +66,7 @@
 
 #include "lot_lighting_motion.h"
 #include "lot_build_share.h"
+#include "lot_wait.h"
 #include "level_light_share.h"
 #include "room_light_queue.h"
 #include "room_solve_share.h"
@@ -170,7 +171,7 @@ void __cdecl LotBuildAdjust(uint32_t* budget) {
     if (*budget <= kBuildMovingMs) return;
     const uint64_t now = GetTickCount64();
     SampleCamera(now);
-    if (!MovingAt(now)) return;
+    if (!MovingAt(now) || LotWait::KeepFullBudget()) return; // a lot wait open: the game's slice
     *budget = kBuildMovingMs;
     c_buildLowered.fetch_add(1, std::memory_order_relaxed);
 }
@@ -435,7 +436,7 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     // time pacing (PaceSettle): the game's budget while the frames hold, down to the moving budget when they do not (a
     // recording: 61 of 197 hitches while moving came from these two). Off: the game's budget, as before
     const bool paced = (boosted || settling) && PerfToggles::MotionPacedRaise.load(std::memory_order_relaxed);
-    if ((paced || (!boosted && !settling)) && moving && game > 0.0f && game < kLeaveAloneMs) {
+    if ((paced || (!boosted && !settling)) && moving && game > 0.0f && game < kLeaveAloneMs && !LotWait::KeepFullBudget()) {
         const float scaled = game * (static_cast<float>(g_budgetMs.load(std::memory_order_relaxed)) / kPriorityMs);
         out = std::max(FloorMs(game), std::min(game, scaled));
         if (paced) {
@@ -577,7 +578,7 @@ int __fastcall Hook_WallAoStep(void* solver, void* edx, void* stopwatch, uint32_
             waitSince.store(now, std::memory_order_relaxed);
             since = now;
         }
-        if (now - since < static_cast<uint64_t>(std::max(0, g_firstPassWaitMs.load(std::memory_order_relaxed)))) {
+        if (now - since < static_cast<uint64_t>(std::max(0, g_firstPassWaitMs.load(std::memory_order_relaxed))) && !LotWait::KeepFullBudget()) {
             (state == 0 ? c_aoMove0 : c_aoMove1).fetch_add(1, std::memory_order_relaxed);
             if (state == 0) g_firstHeldTick.store(now, std::memory_order_relaxed);
             return state;
