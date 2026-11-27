@@ -221,15 +221,19 @@ public sealed partial class MainWindow
         var blocked = _healthState == HealthState.Blocked;
         row.Children.Add(PlayButton(null));
         // the ready updates, installed now without starting the game: the same square as More, beside Play
-        if (WelcomeUpdates() is { Count: > 0 } ready)
+        // (the launcher's own update joins the list, last: it restarts the launcher)
+        if (WelcomeUpdates() is var ready && (ready.Count > 0 || _launcherUpdate is not null))
         {
+            var count = ready.Count + (_launcherUpdate is null ? 0 : 1);
             var install = new Button
             {
                 Width = 56, Height = 56, Padding = new Thickness(0), CornerRadius = new CornerRadius(Design.Radius.Control), Background = glass, BorderThickness = new Thickness(0),
                 IsEnabled = !_busy && !Maintenance, Content = new LucideIcon { Kind = "download", Size = Design.Size.IconSmall, Stroke = ink, StrokeWidth = 1.75 },
             };
-            var what = ready.Count == 1 ? T("Install 1 update") : T("Install {0} updates", ready.Count);
-            ToolTipService.SetToolTip(install, what + "\n" + string.Join("\n", ready.Select(c => Name(c) + " " + (ReleaseOf(c)?.Version ?? ""))));
+            var what = count == 1 ? T("Install 1 update") : T("Install {0} updates", count);
+            var lines = ready.Select(c => Name(c) + " " + (ReleaseOf(c)?.Version ?? "")).ToList();
+            if (_launcherUpdate is { } lu) lines.Add("Apex Launcher " + lu.Version);
+            ToolTipService.SetToolTip(install, what + "\n" + string.Join("\n", lines));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(install, what);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(install, "HomeUpdateButton");
             install.Click += async (_, _) => await UpdateOnlyAsync();

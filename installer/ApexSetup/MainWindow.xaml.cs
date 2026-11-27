@@ -149,6 +149,7 @@ public sealed partial class MainWindow : Window
     }
 
     Action? _setupOffer, _saySetupUpdate; // (the launcher update's card while it waits for a free moment; its notice, said again in a new language)
+    (string Version, Action Install)? _launcherUpdate; // a newer launcher downloaded and checked: on Home's update button
 
     // the card, once nothing else is open or running (a dialog it replaced would read as cancelled)
     void OfferSetupUpdate() => DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
@@ -196,22 +197,9 @@ public sealed partial class MainWindow : Window
             }
             (_saySetupUpdate = () => SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new version of Apex Launcher is available"),
                 T("Apex Launcher {0} is ready to install. The launcher opens again after the update.", v), T("Update the launcher"), UpdateNow))();
-            // (the notice above sits on the old start page: anywhere else, and when no game runs, the offer is a card of its own,
-            // shown when nothing else is open; while something is, it waits for the next screen)
-            _setupOffer = async () =>
-            {
-                try
-                {
-                    var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
-                    body.Children.Add(Design.Dialogs.Words(T("Downloaded and checked. The launcher restarts in a moment and reopens where you were. Nothing in the game changes.")));
-                    body.Children.Add(new TextBlock { Text = App.Version + " \u2192 " + v, FontSize = 13, Foreground = App.Brush("ApexMutedBrush") });
-                    if (await ShowDialog(new ContentDialog { Tag = "download", Title = T("Apex Launcher {0} is ready", v), Content = body, PrimaryButtonText = T("Restart now"), CloseButtonText = T("Later"),
-                            DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Primary)
-                        UpdateNow();
-                }
-                catch (Exception e) { App.Log(e); }
-            };
-            OfferSetupUpdate();
+            // (no card of its own: it joins the other updates, on Home's update button, and goes in last since it restarts)
+            _launcherUpdate = (v, UpdateNow);
+            RefreshAll();
         }
         catch (Exception e) { App.Log(e); }
     }

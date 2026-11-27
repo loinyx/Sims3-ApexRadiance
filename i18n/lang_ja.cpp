@@ -180,6 +180,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "各効果のスイッチはページのタイトル横にあり、オフでもページを読めます"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Apex の外で確認が必要なものは、出たり消えたりするページではなく概要に表示されます"},
     {"Shaders is out of beta", "シェーダーはベータ版を卒業しました"},
+    {"Apex Launcher: its own update joins the update button beside Play, with no window of its own", "Apex Launcher: 自身のアップデートはプレイの横のアップデートボタンに含まれ、専用ウィンドウは出ない"},
+    {"Apex Launcher 2.3.6: its own update sits with the others beside Play", "Apex Launcher 2.3.6: 自身のアップデートもプレイの横に他と一緒に"},
     {"Apex Launcher: a save opened on the EA app version no longer starts paused", "Apex Launcher: EA アプリ版で開いたセーブが一時停止で始まらなくなった"},
     {"Apex Launcher 2.3.5: saves opened on the EA app version run normally", "Apex Launcher 2.3.5: EA アプリ版で開いたセーブが通常どおり動く"},
     {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher: ゲームが自動で終了したお知らせを閉じられるように"},

@@ -3,7 +3,7 @@
 A downloaded `ApexLauncher.exe` asks once whether to install itself or run without installing. Installed, it lives in
 `%LOCALAPPDATA%\Programs\Apex Launcher` (or a folder the player picks), with a Start menu entry, an optional desktop
 shortcut, an *Installed apps* entry, *Open with* for `.package` files and an optional start with Windows. When a newer
-launcher is published with Apex Radiance, it offers *Restart now* or *Later* and replaces itself. An Apex Radiance Setup
+launcher is published with Apex Radiance, it joins the other updates on Home's update button and replaces itself. An Apex Radiance Setup
 1.x updates itself into the launcher and keeps its language, games and settings.
 
 ## Status
@@ -39,7 +39,8 @@ anything.
 4. **Self-update** (`SelfUpdate.CheckSetupUpdateAsync`). The latest `loinyx/Sims3-ApexRadiance` release is read for
    `ApexLauncher.exe` (or `ApexRadianceSetup.exe`). The download must match GitHub's SHA-256 digest, have a higher file
    version and the product name *Apex Launcher* or *Apex Radiance Setup*. An info bar says *A new version of Apex
-   Launcher is available*; when it is ready, *Apex Launcher X is ready* offers *Restart now* or *Later*. The running exe
+   Launcher is available*; when it is ready, it is one more line on Home's update button (*Install N updates*, beside
+   Play), installed last since it restarts the launcher; there is no dialog of its own. The running exe
    is renamed `.old` (deleted at the next start) and the new one takes its place. No update runs in a dry run, in the
    administrator copy or during `--uninstall`.
 5. **From Apex Radiance Setup.** Setup 1.1.0 and later update to the release asset `ApexRadianceSetup.exe`, which is the
