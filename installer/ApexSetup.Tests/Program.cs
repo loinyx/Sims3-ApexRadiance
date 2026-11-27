@@ -1399,7 +1399,8 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Check(quoted, "a save name with a quote is refused");
         Check(Session.IsTestRun(@"C:\Games\The Sims 3\Game\Bin\TS3W.exe -NoInactiveIdle -ApexTestAgent:1") && !Session.IsTestRun(@"TS3W.exe -worldFile:""Sunset.sims3""") && !Session.IsTestRun(null),
             "a session does not follow Apex Radiance's test runner as a restart of the game");
-        Check(Launch.EaParams(null) == "-editInGameMode:true0" && Launch.EaParams("West Arbor") == "-worldFile:West Arbor.sims3\" -editInGameMode:true0",
+        Check(Launch.EaParams(null) == "-editInGameMode:true -apexDirect" && Launch.EaParams("West Arbor") == "-worldFile:West Arbor.sims3\" -editInGameMode:true -apexDirect"
+            && Launch.CanStartDirect("4.1.6") && Launch.CanStartDirect("4.2.0") && !Launch.CanStartDirect("4.1.5") && !Launch.CanStartDirect(null),
             "the EA app copy skips the Sims 3 launcher, the save first and closed by a quote for the EA app's own");
         var eaRoot = Path.Combine(Path.GetTempPath(), "apex-ea-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(eaRoot, "__Installer"));

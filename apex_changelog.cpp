@@ -19,6 +19,10 @@ constexpr const char* k407Improved[] = {
     "RTX Remix bridge: the game keeps its graphics settings on every start",
     nullptr};
 
+constexpr const char* k416Fixed[] = {
+    "Apex Launcher: a save opened on the EA app version no longer starts paused",
+    nullptr};
+
 constexpr const char* k415Improved[] = {
     "Apex Launcher: the note that the game closed on its own can be closed",
     nullptr};
@@ -888,6 +892,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.1.6", "2026-11-26", nullptr, nullptr, k416Fixed, "Apex Launcher 2.3.5: saves opened on the EA app version run normally"},
     {"4.1.5", "2026-11-26", nullptr, k415Improved, nullptr, "Apex Launcher 2.3.4: the note that the game closed on its own can be closed"},
     {"4.1.4", "2026-11-26", k414Added, k414Improved, k414Fixed, "Apex Launcher 2.3.3: update without playing, and the EA app version skips the Sims 3 launcher"},
     {"4.1.3", "2026-11-26", k413Added, k413Improved, k413Fixed, "Apex Launcher 2.3.2: game caches in Saves, Sims3Packs as mods and your theme in this menu"},

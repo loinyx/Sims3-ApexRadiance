@@ -180,6 +180,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Minden effekt kapcsolója az oldala címe mellett van, és az oldal kikapcsolva is olvasható marad"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Ami az Apexen kívül figyelmet igényel, az Áttekintésben látszik egy megjelenő és eltűnő oldal helyett"},
     {"Shaders is out of beta", "A Shaderek már nem béták"},
+    {"Apex Launcher: a save opened on the EA app version no longer starts paused", "Apex Launcher: az EA alkalmazásos verzióban megnyitott mentés már nem szünetelve indul"},
+    {"Apex Launcher 2.3.5: saves opened on the EA app version run normally", "Apex Launcher 2.3.5: az EA alkalmazásos verzióban megnyitott mentések rendesen futnak"},
     {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher: a játék magától bezárult értesítés bezárható"},
     {"Apex Launcher 2.3.4: the note that the game closed on its own can be closed", "Apex Launcher 2.3.4: a játék magától bezárult értesítés bezárható"},
     {"Apex Launcher: an update button beside Play installs updates without starting the game", "Apex Launcher: a Játék melletti frissítés gomb a játék elindítása nélkül telepíti a frissítéseket"},

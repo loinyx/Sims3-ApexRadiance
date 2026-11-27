@@ -19,15 +19,19 @@ public static class Launch
 
     // The EA app copy: its TS3.exe started by anyone but the EA app asks the EA app to start the game, and the EA app starts
     // its own target, Sims3Launcher.exe -test (installerdata.xml), so the Sims 3 launcher opens. Asked through the EA app's
-    // own link instead, with the launcher's -editInGameMode (it then starts TS3.exe at once, passing every argument on, with
-    // no window of its own). Its value is "true0": the launcher only checks that it starts with "true", while the game turns
-    // its Edit Town mode on for "true" alone (a save opened with "true" had no Sims and no lots to pick). The EA app rewrites "-worldFile:" as "-worldfile:"" with a quote of its own, so the save
+    // own link instead, with the launcher's -editInGameMode:true (it then starts TS3.exe at once, passing every argument on,
+    // with no window of its own). The game reads that switch too (any value starting with t or 1 is on) and would load the
+    // save in Edit Town with time stopped, so -apexDirect asks Apex Radiance (4.1.6 and later, apex_main.cpp) to rename it
+    // before the game reads it. The EA app rewrites "-worldFile:" as "-worldfile:"" with a quote of its own, so the save
     // goes unquoted and closes with a quote, and comes first so the EA app's -test does not join its name.
     public static string EaParams(string? save)
     {
         var name = save is null ? null : Args(save)["-worldFile:\"".Length..^1];
-        return name is null ? "-editInGameMode:true0" : $"-worldFile:{name}\" -editInGameMode:true0";
+        return name is null ? "-editInGameMode:true -apexDirect" : $"-worldFile:{name}\" -editInGameMode:true -apexDirect";
     }
+
+    // the Apex Radiance that renames the switch for -apexDirect: an older one would leave the game in Edit Town
+    public static bool CanStartDirect(string? apexVersion) => Version.TryParse(apexVersion, out var v) && v >= new Version(4, 1, 6);
 
     // the game's id for the EA app: the first content id in its installer data (sims3_dd for The Sims 3)
     public static string? EaContentId(Game g)
@@ -40,12 +44,14 @@ public static class Launch
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Xml.XmlException) { return null; }
     }
 
-    public static Process Start(Game g, string? save = null)
+    // apexVersion: the installed ApexRadiance.asi's; the EA app copy goes through the EA app only with one that can (CanStartDirect),
+    // else as before (the EA app then opens the Sims 3 launcher)
+    public static Process Start(Game g, string? save = null, string? apexVersion = null)
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Dry run: the game is not started.");
         if (Elevation.IsUacElevated) throw new SetupException("This window can't start the game. Close it and press Play in Apex Launcher.");
         if (Games.IsRunning()) throw new SetupException("The Sims 3 is already running.");
-        if (g.Edition == Edition.EA && EaContentId(g) is { } id) return StartThroughEaApp(id, save);
+        if (g.Edition == Edition.EA && CanStartDirect(apexVersion) && EaContentId(g) is { } id) return StartThroughEaApp(id, save);
         var psi = new ProcessStartInfo(g.ExePath, Args(save)) { WorkingDirectory = g.Bin, UseShellExecute = false };
         // (a Steam copy started by its exe asks Steam to start it otherwise; the app id lets it run in place)
         if (g.Edition == Edition.Steam) psi.Environment["SteamAppId"] = SteamAppId.ToString();
