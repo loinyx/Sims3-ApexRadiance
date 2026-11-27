@@ -181,6 +181,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Bryteren for hver effekt står ved sidetittelen, og siden er lesbar når den er av"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Det som trenger en titt utenfor Apex vises i Oversikt i stedet for på en side som kommer og går"},
     {"Shaders is out of beta", "Shadere er ikke lenger i beta"},
+    {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher: meldingen om at spillet lukket seg selv kan lukkes"},
+    {"Apex Launcher 2.3.4: the note that the game closed on its own can be closed", "Apex Launcher 2.3.4: meldingen om at spillet lukket seg selv kan lukkes"},
     {"Apex Launcher: an update button beside Play installs updates without starting the game", "Apex Launcher: en oppdateringsknapp ved siden av Spill installerer oppdateringer uten å starte spillet"},
     {"Apex Launcher: the EA app version starts the game without the Sims 3 launcher", "Apex Launcher: EA-app-versjonen starter spillet uten The Sims 3-launcheren"},
     {"Apex Launcher: Play asks before it fixes the game's files", "Apex Launcher: Spill spør før det retter spillets filer"},

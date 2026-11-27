@@ -181,6 +181,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "每個效果的開關都在頁面標題旁，關閉時頁面仍可閱讀"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Apex 之外需要留意的事項顯示在概覽中，不再是時有時無的頁面"},
     {"Shaders is out of beta", "著色器已結束測試版"},
+    {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher：可以關閉「遊戲自行關閉」的提示"},
+    {"Apex Launcher 2.3.4: the note that the game closed on its own can be closed", "Apex Launcher 2.3.4：可以關閉「遊戲自行關閉」的提示"},
     {"Apex Launcher: an update button beside Play installs updates without starting the game", "Apex Launcher：「開始遊戲」旁的更新按鈕無需啟動遊戲即可安裝更新"},
     {"Apex Launcher: the EA app version starts the game without the Sims 3 launcher", "Apex Launcher：EA app 版本無需《模擬市民 3》啟動器即可開始遊戲"},
     {"Apex Launcher: Play asks before it fixes the game's files", "Apex Launcher：「開始遊戲」會在修復遊戲檔案前先詢問"},

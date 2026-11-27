@@ -181,6 +181,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Ο διακόπτης κάθε εφέ βρίσκεται δίπλα στον τίτλο της σελίδας του, και η σελίδα διαβάζεται και όταν είναι ανενεργό"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Ό,τι χρειάζεται προσοχή εκτός Apex εμφανίζεται στην Επισκόπηση, αντί για μια σελίδα που εμφανίζεται και χάνεται"},
     {"Shaders is out of beta", "Τα Shaders δεν είναι πια σε beta"},
+    {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher: η ειδοποίηση ότι το παιχνίδι έκλεισε μόνο του κλείνει"},
+    {"Apex Launcher 2.3.4: the note that the game closed on its own can be closed", "Apex Launcher 2.3.4: η ειδοποίηση ότι το παιχνίδι έκλεισε μόνο του κλείνει"},
     {"Apex Launcher: an update button beside Play installs updates without starting the game", "Apex Launcher: ένα κουμπί ενημέρωσης δίπλα στο Παίξε εγκαθιστά ενημερώσεις χωρίς να ξεκινά το παιχνίδι"},
     {"Apex Launcher: the EA app version starts the game without the Sims 3 launcher", "Apex Launcher: η έκδοση της εφαρμογής EA ξεκινά το παιχνίδι χωρίς τον launcher του The Sims 3"},
     {"Apex Launcher: Play asks before it fixes the game's files", "Apex Launcher: το Παίξε ρωτά πριν διορθώσει τα αρχεία του παιχνιδιού"},
