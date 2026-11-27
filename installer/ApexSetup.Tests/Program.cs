@@ -1397,6 +1397,8 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         var quoted = false;
         try { Launch.Args("a\"b"); } catch (ArgumentException) { quoted = true; }
         Check(quoted, "a save name with a quote is refused");
+        Check(Session.IsTestRun(@"C:\Games\The Sims 3\Game\Bin\TS3W.exe -NoInactiveIdle -ApexTestAgent:1") && !Session.IsTestRun(@"TS3W.exe -worldFile:""Sunset.sims3""") && !Session.IsTestRun(null),
+            "a session does not follow Apex Radiance's test runner as a restart of the game");
         Check(Launch.EaParams(null) == "-editInGameMode:true0" && Launch.EaParams("West Arbor") == "-worldFile:West Arbor.sims3\" -editInGameMode:true0",
             "the EA app copy skips the Sims 3 launcher, the save first and closed by a quote for the EA app's own");
         var eaRoot = Path.Combine(Path.GetTempPath(), "apex-ea-" + Guid.NewGuid().ToString("N"));
@@ -1513,9 +1515,10 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Paths.MigrateOldData();
         Check(File.ReadAllText(Path.Combine(Paths.Data, "games.txt")) == lbin && !Directory.Exists(Path.Combine(Paths.LocalAppData, "Apex Radiance Setup")),
             "Setup's remembered games move to the launcher's folder, once");
-        var st = new LauncherSettings { FixWithoutAsking = true, WelcomedBack = true };
+        var st = new LauncherSettings { FixWithoutAsking = true, WelcomedBack = true, SessionDismissed = new DateTime(2026, 11, 26, 13, 2, 0) };
         st.Save();
-        Check(LauncherSettings.Load() is { FixWithoutAsking: true, WelcomedBack: true, InstallUpdatesOnPlay: true }, "the launcher's settings read back");
+        Check(LauncherSettings.Load() is { FixWithoutAsking: true, WelcomedBack: true, InstallUpdatesOnPlay: true } ls && ls.SessionDismissed == new DateTime(2026, 11, 26, 13, 2, 0),
+            "the launcher's settings read back, with the session whose note was closed");
 
         // its own install: shortcuts, the Installed apps entry and the Run value, all removed again
         LauncherInstall.RegistryBase = @"Software\ApexLauncherTest";

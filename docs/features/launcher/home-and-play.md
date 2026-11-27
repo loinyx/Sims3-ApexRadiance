@@ -32,7 +32,8 @@ menus after the main menu has loaded.
    *Apex Radiance can't start*), the first thing to look at, and a way into [Health](health.md).
 2. **Banners.** *Apex Radiance can't start* when Health is Blocked (Play becomes *Play anyway*, "The game starts without
    Apex Radiance"); *No internet* with *Try again*; *The game closed on its own* or *Ran out of memory* when the last
-   session ended so, with the time played, the memory peak and *Open this save again*.
+   session ended so, with the time played, the memory peak and *Open this save again*; its close button hides that
+   session's note for good (`SessionDismissed` in `settings.json`).
 3. **Your saves.** The 4 newest saves, each with its household picture, when it was saved and a round Play button; a
    line counts the shown saves without a backup and offers *Back up now* / *Back up all*
    ([Saves and backups](saves-and-backups.md)).
@@ -60,8 +61,9 @@ menus after the main menu has loaded.
    turns its Edit Town mode on for `true` alone (a save opened that way had no Sims and no lots to pick), not for `true0`. A save goes first as `-worldFile:<name>.sims3"` (the EA app adds the
    opening quote itself and lowercases the switch). The launcher then waits up to 2 minutes for `TS3.exe`.
 7. **The session** (`Session` in `Launch.cs`). Every 5 s the launcher reads the game's private memory and keeps the
-   peak; it follows a restart of the game (by the restart host or within about 20 s). The end is classed as a crash
-   (an exit code of `0xC0000000` or more, or a crash file written since the start: the game's `xcpt *.txt`,
+   peak; it follows a restart of the game (by the restart host or within about 20 s), never a game started by Apex
+   Radiance's test runner (`-ApexTestAgent` in its command line, read with `NtQueryInformationProcess`). The end is
+   classed as a crash (an exit code of `0xC0000000` or more, or a crash file written since the start: the game's `xcpt *.txt`,
    `ApexRadiance_Crash.txt` or `.dmp`) or as low memory (a peak of 3,400 MB or more, `Session.LowMemoryBytes`). A crash
    always offers *Open this save again*; low memory offers it only while the restart host is off. Sessions are kept in
    `sessions.json` (the newest 20) and feed Health's Stability tile.
