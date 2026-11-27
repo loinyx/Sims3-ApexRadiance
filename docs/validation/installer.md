@@ -33,6 +33,9 @@ controls past the window's edge at several window sizes. Build commands are in [
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-26 | `f61f227e` | `installer/ApexSetup.Tests` | All passed | none |
+| 2026-11-26 | `f61f227e` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run, portable, a data folder of its own) | 237 steps, 0 failures | Windows 11, RTX 4070 Ti SUPER |
+| 2026-11-26 | `6b9a4c4d` | Play on the EA app copy (1.69.47) through the EA app link, by hand | Game opens without the Sims 3 launcher; a save opens from its card with Sims and lots as usual | Windows 11, EA app |
 | 2026-11-26 | `df5c0894` | `installer/ApexSetup.Tests` | All passed | none |
 | 2026-11-26 | `df5c0894` | `installer/ui-smoke/Run-UiSmoke.ps1 -Quick` (dry run, portable, a data folder of its own) | 237 steps: 1 and 3 failures in two runs, each an element not found in time (Mods grid, Health pages), none logged; 0 failures on `a56065c5` | Windows 11, RTX 4070 Ti SUPER |
 | 2026-11-26 | `0eb74a39` | `installer/ApexSetup.Tests` | All passed | none |

@@ -556,7 +556,7 @@ public sealed partial class MainWindow : Window
 
     // A first install (and the updates Play puts in) runs its steps in one card in the middle of the window, without the
     // sidebar: none of it works before Apex Radiance is in. Any other screen leaves the card.
-    bool _wizardFlow, _updatingForPlay, _playAnyway;
+    bool _wizardFlow, _updatingForPlay, _updatingOnly, _playAnyway; // (_updatingOnly: Home's update button, an update without Play)
     readonly Dictionary<FrameworkElement, Panel> _moved = new();
     StackPanel? _fpsBox;
     (string? Bin, bool Writable) _writableFor = (null, true);
@@ -2071,8 +2071,9 @@ public sealed partial class MainWindow : Window
         // (drivers: a frame generation change, or a removal that turns off the frame generation the launcher turned on)
         var drivers = !inline && SettingChanges(remove).Any(c => c.Kind is "nv" or "amd")
             || remove?.Any(Engine.TurnsFrameGenOff) == true && (SmoothMotion.SetupTurnedOn || Afmf.SetupTurnedOn);
-        // (Update and play carries only its updates to the administrator window, not what Components shows)
-        if (!await CanChangeHere(inline ? "welcome" : "components", drivers, _updatingForPlay ? comps : null))
+        // (Update and play, and Home's update button, carry only their updates to the administrator window, not what
+        // Components shows)
+        if (!await CanChangeHere(inline ? "welcome" : "components", drivers, _updatingForPlay || _updatingOnly ? comps : null))
         {
             // (installed in the administrator window, which wrote the game folder's settings: the player's own files here)
             if (firstInstall && !FirstInstall) await ApplyWizardSettings(g, bin: false, docs: true);
@@ -2235,14 +2236,14 @@ public sealed partial class MainWindow : Window
                 _defaultsFor = left is null ? _game : null;
                 _busy = false;
                 // (Cancel and undo: everything is back as it was, and the install returns to its choices)
-                if (ex is OperationCanceledException && left is null) { Show(_updatingForPlay ? Home : ComponentsStep); return; }
+                if (ex is OperationCanceledException && left is null) { Show(_updatingForPlay || _updatingOnly ? Home : ComponentsStep); return; }
                 for (int i = 0; i < rows.Count; i++) rows[i](i < at ? 4 : i == at ? 3 : 0);
                 var again = await WizardFailed(net, text, left, offerDxvk: order.Contains(Components.Bridge) && !VulkanBlocked);
                 if (again == "try") { await InstallAsync(comps, remove, inline, settingsOnly); return; }
                 // (the bridge would not install: the same install with DXVK in its place)
                 if (again == "dxvk") { _defaultsFor = _game; _renderer = RDxvk; RefreshComponents(); var (da, dd) = Plan(); await InstallAsync(da, dd); return; }
                 if (again == "play") { _playAnyway = true; return; }
-                Show(_updatingForPlay ? Home : ComponentsStep);
+                Show(_updatingForPlay || _updatingOnly ? Home : ComponentsStep);
                 return;
             }
             // the files it changed before the error are put back: half an install is the worse state. Keeping them is the
@@ -2284,7 +2285,7 @@ public sealed partial class MainWindow : Window
     async Task<string?> WizardFailed(bool net, string text, string? left, bool offerDxvk = false)
     {
         // a first install: said in its own card, where the steps are (the install's prototype); an update keeps the dialog
-        if (!_updatingForPlay && _step == InstallStep && left is null)
+        if (!_updatingForPlay && !_updatingOnly && _step == InstallStep && left is null)
         {
             InstallRing.Visibility = Visibility.Collapsed;
             InstallFailBadge.Visibility = InstallCopy.Visibility = Visibility.Visible;
@@ -2312,7 +2313,7 @@ public sealed partial class MainWindow : Window
         var body = new StackPanel { Spacing = 16, Width = Design.Dialogs.Small };
         var what = left is not null ? T("Some files couldn't be restored: {0}. Use Repair or remove to fix the game.", left)
             : net ? T("The launcher can't reach GitHub. Check your internet connection and try again.")
-            : update ? T("The game is as it was before the update.") : T("Everything added so far was removed again.");
+            : update || _updatingOnly ? T("The game is as it was before the update.") : T("Everything added so far was removed again.");
         body.Children.Add(Design.Dialogs.Words(text));
         body.Children.Add(Design.Dialogs.Words(what));
         var copy = new HyperlinkButton { Content = T("Copy details"), Padding = new Thickness(0) };
@@ -2320,7 +2321,7 @@ public sealed partial class MainWindow : Window
         body.Children.Add(copy);
         var r = await ShowDialog(new ContentDialog
         {
-            Tag = "!triangle-alert", Title = left is not null ? T("The launcher could not finish") : update ? T("The update wasn't installed") : T("Nothing was changed"),
+            Tag = "!triangle-alert", Title = left is not null ? T("The launcher could not finish") : update || _updatingOnly ? T("The update wasn't installed") : T("Nothing was changed"),
             Content = body, PrimaryButtonText = T("Try again"), SecondaryButtonText = update ? T("Play anyway") : "", CloseButtonText = update ? T("Cancel") : T("Back"),
             DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
         });

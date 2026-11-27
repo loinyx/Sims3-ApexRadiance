@@ -11,9 +11,9 @@ game still starts without it.
 | | |
 |---|---|
 | Availability | Released in 4.1.0; one page per check and ignored notices: Released in 4.1.1 |
-| Default | Checked at start and before Play; safe fixes applied automatically (*Apply safe fixes without asking*, on) |
+| Default | Checked at start and before Play; safe fixes offered before Play (*Apply safe fixes without asking*, off) |
 | Menu | Health (a badge on the sidebar entry when something needs a look); the health card on [Home](home-and-play.md) |
-| Configuration | `settings.json` `IgnoredFindings`, `IgnoredConflicts`, `FixSafeAutomatically`; `sessions.json` |
+| Configuration | `settings.json` `IgnoredFindings`, `IgnoredConflicts`, `FixWithoutAsking`; `sessions.json` |
 | Source | [`MainWindow.Health.cs`](../../../installer/ApexSetup/MainWindow.Health.cs), [`Crystal.cs`](../../../installer/ApexSetup/Crystal.cs), [`Health.cs`](../../../installer/ApexSetup.Core/Health.cs), [`Compat.cs`](../../../installer/ApexSetup.Core/Compat.cs), [`Verify.cs`](../../../installer/ApexSetup.Core/Verify.cs), [`ScriptErrors.cs`](../../../installer/ApexSetup.Core/ScriptErrors.cs), [`CrashTimeline.cs`](../../../installer/ApexSetup.Core/CrashTimeline.cs), [`CrashEvidence.cs`](../../../installer/ApexSetup.Core/CrashEvidence.cs), [`PlaceChecks.cs`](../../../installer/ApexSetup.Core/PlaceChecks.cs), [`GameCaches.cs`](../../../installer/ApexSetup.Core/GameCaches.cs) |
 
 ## The problem
@@ -40,8 +40,9 @@ driver reset. The game reports none of it; its crash logs name addresses, not mo
    `client.targetProcess` and `dxvk.conf` keys corrected. Others are reported with a link. Each fix has its own restore
    point ([Components](../installer.md)). Suggestions (the game's Edge Smoothing, the renderer, Apex's recommended
    settings) have their own *Apply*.
-5. **Automatic fixes.** With *Apply safe fixes without asking* on, Play first applies every compatibility fix that has
-   a fix and is not a suggestion, when the game folder can be written without a prompt.
+5. **Fixes before Play.** When the game folder can be written without a prompt, Play lists every compatibility finding
+   that has a fix and is not a suggestion in *Fix the game's files first?* (*Fix and play*, *Play without fixing*,
+   *Cancel*). With *Apply safe fixes without asking* on, it fixes them without the question.
 6. **Ignore and show again.** An ignored notice moves to an *Ignored* section (the *Ignored* tab for Mods), with Undo;
    ids mask numbers and dates so a notice stays ignored when only a count changes.
 7. **Stability.** A timeline of the last sessions (up to 8 entries): normal end, crash, freeze, or no report. Each crash
@@ -58,7 +59,7 @@ driver reset. The game reports none of it; its crash logs name addresses, not mo
 
 | Menu label | Key (`settings.json`) | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Apply safe fixes without asking | `FixSafeAutomatically` | switch | On | | Play applies the fixable compatibility findings first; *Repair or remove* can undo them |
+| Apply safe fixes without asking | `FixWithoutAsking` | switch | Off | | Play fixes the fixable compatibility findings without asking; off, it asks; *Repair or remove* can undo them. The earlier `FixSafeAutomatically` (on) is not carried over |
 
 ## Compatibility and interactions
 

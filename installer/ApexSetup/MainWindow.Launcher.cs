@@ -194,6 +194,17 @@ public sealed partial class MainWindow
         finally { _starting = false; }
     }
 
+    // Home's update button: the ready updates in the install card, then the done screen; the game is not started
+    async Task UpdateOnlyAsync()
+    {
+        if (_game is null || _busy || _starting || WelcomeUpdates() is not { Count: > 0 } ups) return;
+        if (_running || _session is not null || Games.IsRunning()) { await Message(T("The Sims 3 is already running"), T("Close the game, then install the updates.")); return; }
+        _wizardFlow = _updatingOnly = true;
+        try { await InstallAsync(ups); }
+        // (the done screen keeps the install card's layout: leaving it ends the flow, WizardChrome)
+        finally { _updatingOnly = false; if (_step != DoneStep) _wizardFlow = false; }
+    }
+
     async Task StartChecked(Game g, string? save, bool update)
     {
         if (update && WelcomeUpdates() is { Count: > 0 } pending && await UpdatesFirst(pending) is var go && go != true)
@@ -217,10 +228,17 @@ public sealed partial class MainWindow
         var (docs, apex) = (Docs, _latest.GetValueOrDefault(Releases.Apex));
         Task<List<Health.Item>> BeforePlay() => _state is { } s ? Task.Run(() => Health.Gather(g, s, docs, apex, beforePlay: true).Where(i => !IsIgnored(i)).ToList()) : Task.FromResult(new List<Health.Item>());
         var found = await BeforePlay();
-        // the fixes that are safe to make without asking (each keeps a copy of the file it changes). Never an administrator
-        // prompt from Play: where the game's folder needs one, they wait on Health. A fix that fails does not stop the start.
-        if (_settings.FixSafeAutomatically && found.Any(i => i.Finding.CanFix) && (Elevation.IsElevated || DryRun || Elevation.CanWrite(g.Bin))
-            && await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); },
+        // the safe fixes (each keeps a copy of the file it changes): offered before the start, made without asking only when
+        // the player chose that in Settings. Never an administrator prompt from Play: where the game's folder needs one, they
+        // wait on Health. A fix that fails does not stop the start.
+        var fix = false;
+        if (found.Where(i => i.Finding.CanFix).ToList() is { Count: > 0 } fixable && (Elevation.IsElevated || DryRun || Elevation.CanWrite(g.Bin)))
+        {
+            if (_settings.FixWithoutAsking) fix = true;
+            else if (await FixesFirst(fixable) is { } yes) fix = yes;
+            else return; // (Cancel)
+        }
+        if (fix && await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); },
                 T("Fixed"), null, "Fix incompatible settings"))
         {
             RefreshGame(); // (starts the full check too)
@@ -253,8 +271,11 @@ public sealed partial class MainWindow
         await BackupsBeforePlay();
         PlayPendingOptions(g);
         MenuTheme(g);
-        try { p = Launch.Start(g, save); }
-        catch (Exception e) { App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
+        // (the EA app copy waits for the EA app to start it: busy meanwhile, so no install starts under it)
+        _busy = true;
+        try { p = await Task.Run(() => Launch.Start(g, save)); }
+        catch (Exception e) { _busy = false; App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
+        _busy = false;
         var session = _session = new Session(p, Docs);
         _running = true;
         if (_settings.HideWhilePlaying) { TrayShow(T("Apex Launcher · The Sims 3 is running")); AppWindow.Hide(); }
@@ -340,7 +361,8 @@ public sealed partial class MainWindow
         _defaultsFor = null;
         _modsLoaded = false;
         RefreshGame(); // (starts the full check too)
-        if (_step is Welcome or GameStep or WizardSettings && !FirstInstall) Show(Home); // (a first install finished in the administrator window)
+        // (the administrator window's Finish closes it; this window then opens on Home, as Finish does here)
+        if (!FirstInstall) Show(Home);
         else RefreshAll();
         return false;
     }
@@ -746,8 +768,8 @@ public sealed partial class MainWindow
         var installed = Environment.ProcessPath is { } exe && LauncherInstall.IsInstalledCopy(exe);
         host.Children.Add(Toggle("eye-off", T("Hide while playing"), T("The launcher comes back when the game closes"), _settings.HideWhilePlaying,
             on => { _settings.HideWhilePlaying = on; _settings.Save(); }));
-        host.Children.Add(Toggle("shield-check", T("Apply safe fixes without asking"), T("You can undo them in Repair or remove"), _settings.FixSafeAutomatically,
-            on => { _settings.FixSafeAutomatically = on; _settings.Save(); }));
+        host.Children.Add(Toggle("shield-check", T("Apply safe fixes without asking"), T("You can undo them in Repair or remove"), _settings.FixWithoutAsking,
+            on => { _settings.FixWithoutAsking = on; _settings.Save(); }));
         host.Children.Add(Section(T("Updates")));
         host.Children.Add(Toggle("wand-sparkles", T("Install updates when I press Play"), T("The game starts once they are installed"), _settings.InstallUpdatesOnPlay,
             on => { _settings.InstallUpdatesOnPlay = on; _settings.Save(); }));
@@ -948,6 +970,23 @@ public sealed partial class MainWindow
     // nothing (true, false, null)
     // Play with updates waiting: each one in a row (its icon, what it is, the version it goes from and to), and the choice of
     // updating first, playing as it is or staying
+    // Play's question when the game's files have safe fixes: true fixes them first, false plays as is, null is Cancel
+    async Task<bool?> FixesFirst(List<Health.Item> fixable)
+    {
+        var body = new StackPanel { Spacing = Design.Space.X4, Width = Design.Dialogs.Medium };
+        body.Children.Add(Design.Dialogs.Words(T("Apex Launcher can fix these before the game starts. Each file keeps a copy you can put back in Repair or remove.")));
+        var list = new StackPanel { Spacing = Design.Space.X2 };
+        foreach (var i in fixable) list.Children.Add(Design.Dialogs.Words("• " + T(i.Finding.Text, i.Finding.Args)));
+        body.Children.Add(list);
+        var r = await ShowDialog(new ContentDialog
+        {
+            Tag = "wrench", Title = T("Fix the game's files first?"), Content = body,
+            PrimaryButtonText = T("Fix and play"), SecondaryButtonText = T("Play without fixing"), CloseButtonText = T("Cancel"),
+            DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
+        });
+        return r == ContentDialogResult.Primary ? true : r == ContentDialogResult.Secondary ? false : null;
+    }
+
     async Task<bool?> UpdatesFirst(List<string> ups)
     {
         var body = new StackPanel { Spacing = Design.Space.X4, Width = Design.Dialogs.Medium };

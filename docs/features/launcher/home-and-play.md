@@ -12,7 +12,7 @@ and the memory the game uses. After a crash or a session that ran out of memory,
 | Availability | Released in 4.1.0; one row of saves with their own Play: Released in 4.1.1; the health card over the picture: Released in 4.1.2 |
 | Default | Shown at start when a game is found |
 | Menu | Home |
-| Configuration | `settings.json` (`HideWhilePlaying`, `InstallUpdatesOnPlay`, `FixSafeAutomatically`, `HomePicture*`), `sessions.json` ([data files](data-and-files.md)) |
+| Configuration | `settings.json` (`HideWhilePlaying`, `InstallUpdatesOnPlay`, `FixWithoutAsking`, `HomePicture*`), `sessions.json` ([data files](data-and-files.md)) |
 | Source | [`MainWindow.Home.cs`](../../../installer/ApexSetup/MainWindow.Home.cs), [`MainWindow.Launcher.cs`](../../../installer/ApexSetup/MainWindow.Launcher.cs) (`PlayAsync`, `StartChecked`, `StartGameAsync`), [`Launch.cs`](../../../installer/ApexSetup.Core/Launch.cs), [`SessionHistory.cs`](../../../installer/ApexSetup.Core/SessionHistory.cs), [`Tray.cs`](../../../installer/ApexSetup/Tray.cs) |
 
 ## The problem
@@ -24,8 +24,10 @@ menus after the main menu has loaded.
 ## How Apex Radiance solves it
 
 1. **The top.** The picture chosen in [Settings](settings.md#settings) (a gallery picture, the household's photo of the
-   newest save, or none) at its own width-to-height, so nothing of it is cut, the game's name, Play and a *More options*
-   menu (*Play without updating*, *All saves*). Over the
+   newest save, or none) at its own width-to-height, so nothing of it is cut, the game's name, Play, an *Install N
+   updates* button while updates are ready (`UpdateOnlyAsync`: the install card, then the done screen, without starting
+   the game; a failure says "The update wasn't installed" and Back returns Home) and a *More options* menu (*Play without
+   updating*, *All saves*). Over the
    picture, a card of dark glass holds the health crystal, the state (*Ready to play*, *Needs your attention*,
    *Apex Radiance can't start*), the first thing to look at, and a way into [Health](health.md).
 2. **Banners.** *Apex Radiance can't start* when Health is Blocked (Play becomes *Play anyway*, "The game starts without
@@ -40,8 +42,9 @@ menus after the main menu has loaded.
    - Updates waiting and *Install updates when I press Play* on: a dialog *N updates install first* with *Update and
      play*, *Play without updating* and *Cancel*. The updates run in the install card, then the game starts.
    - Health runs its before-play checks only (installed files and compatibility, `Health.Gather(beforePlay: true)`).
-     With *Apply safe fixes without asking* on and a game folder the player can write to, the fixable compatibility
-     findings are fixed first. Play never shows an administrator prompt.
+     With a game folder the player can write to, the fixable compatibility findings are offered first (*Fix the game's
+     files first?*: *Fix and play*, *Play without fixing*, *Cancel*), or fixed without the question when *Apply safe
+     fixes without asking* is on. Play never shows an administrator prompt.
    - Still Blocked: *One thing before you play* with *Open Health*, *Play anyway* and *Cancel*.
    - Automatic backups set to *Before playing* run ([Saves and backups](saves-and-backups.md#automatic-backups)), Game
      settings choices waiting for the game's `Options.ini` are applied, and the game starts.
@@ -49,6 +52,13 @@ menus after the main menu has loaded.
    the player, with `Game\Bin` as the working folder. A save's Play adds `-worldFile:"<name>.sims3"`. For the Steam
    edition it sets `SteamAppId=47890`. When the exe asks for administrator rights (Win32 error 740), it starts through
    the shell instead.
+   The EA app edition goes through the EA app instead: its `TS3.exe` started by anyone else asks the EA app to start the
+   game, and the EA app starts its own target, `Sims3Launcher.exe -test` (`__Installer\installerdata.xml`), so the Sims 3
+   launcher would open. Play opens `origin2://game/launch?offerIds=<id>&cmdParams=<params>` with the first content id
+   of `installerdata.xml` (`sims3_dd`) and `-editInGameMode:true0`: with it the Sims 3 launcher starts `TS3.exe` at once,
+   passing every argument on, without its window. The launcher only checks that the value starts with `true`; the game
+   turns its Edit Town mode on for `true` alone (a save opened that way had no Sims and no lots to pick), not for `true0`. A save goes first as `-worldFile:<name>.sims3"` (the EA app adds the
+   opening quote itself and lowercases the switch). The launcher then waits up to 2 minutes for `TS3.exe`.
 7. **The session** (`Session` in `Launch.cs`). Every 5 s the launcher reads the game's private memory and keeps the
    peak; it follows a restart of the game (by the restart host or within about 20 s). The end is classed as a crash
    (an exit code of `0xC0000000` or more, or a crash file written since the start: the game's `xcpt *.txt`,
@@ -85,8 +95,8 @@ safe fixes without asking*, *Install updates when I press Play*, *Picture at the
   by hand counts as a crash only when the exit code says so.
 - The memory meter shows the game's private memory against 3.3 GB, a rule of thumb for the 32-bit game, not the exact
   point where it fails.
-- Unverified on a real install: Play and the session with the EA app edition, and the notification-area icon. A save
-  opened from Home and the crash state on Home are listed as open checks on the
+- Unverified on a real install: the session with the EA app edition, a save opened through the EA app, and the
+  notification-area icon. A save opened from Home and the crash state on Home are listed as open checks on the
   [validation page](../../validation/installer.md#open-checks).
 
 ## Technical reference

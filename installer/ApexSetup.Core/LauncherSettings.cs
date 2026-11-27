@@ -6,7 +6,8 @@ namespace ApexSetup;
 // with Windows is the Run key itself, LauncherInstall.RunsAtStartup).
 public sealed class LauncherSettings
 {
-    public bool FixSafeAutomatically { get; set; } = true;
+    // (off by default: Play asks first. A new name, so the old FixSafeAutomatically, on for everyone, is not carried over)
+    public bool FixWithoutAsking { get; set; }
     public bool InstallUpdatesOnPlay { get; set; } = true;
     public bool HideWhilePlaying { get; set; } = true;
     public bool WelcomedBack { get; set; }
