@@ -111,6 +111,7 @@
     <ClCompile Include="features\fast_memory.cpp" />
     <ClCompile Include="features\memory_guard.cpp" />
     <ClCompile Include="features\restart_host.cpp" />
+    <ClCompile Include="features\oop_client.cpp" />
     <ClCompile Include="features\delegate_sig_fix.cpp" />
     <ClCompile Include="features\save_name_fix.cpp" />
     <ClCompile Include="features\bone_index_guard.cpp" />
@@ -314,6 +315,7 @@
     <ClInclude Include="features\fast_memory.h" />
     <ClInclude Include="features\memory_guard.h" />
     <ClInclude Include="features\restart_host.h" />
+    <ClInclude Include="features\oop_client.h" />
     <ClInclude Include="features\delegate_sig_fix.h" />
     <ClInclude Include="features\save_name_fix.h" />
     <ClInclude Include="features\save_name_patch.h" />

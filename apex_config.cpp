@@ -459,6 +459,9 @@ void LoadSettings() {
         g_ui = u;
     }
     { std::lock_guard<std::mutex> lock(g_uiLock);
+        g_ui.oopPlugins.clear(); // [oop] plugins: read only; a save keeps the table as it is (ReadRoot)
+        if (const toml::array* plugins = root["oop"]["plugins"].as_array())
+            for (const auto& name : *plugins) g_ui.oopPlugins.push_back(name.value_or(std::string()));
         if (const auto* d = root["developer"].as_table()) g_importedDeveloper = *d;
     }
     if (const toml::table* qol = root["qol"].as_table()) {

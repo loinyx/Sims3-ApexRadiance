@@ -52,6 +52,7 @@ The design is adapted from Dalexlol's wrapper in sims3-modernization (PRs #360 a
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | None (Apex Launcher: *TS3Wrap*) | `[ui] restart_host` | bool | `false` | | Starts `ts3wrap.exe` with the game; needs the exe next to `ApexRadiance.asi` |
+| None | `[oop] plugins` | list of file names | `[]` | at most 8 names of at most 31 characters, no path | 64-bit service DLLs the host loads from its own folder; needs `restart_host` |
 
 ## Compatibility and interactions
 
@@ -111,6 +112,23 @@ The design is adapted from Dalexlol's wrapper in sims3-modernization (PRs #360 a
   files rewritten in place. `.backup` folders are ignored.
 - Build: `native/ts3wrap/ts3wrap.vcxproj` (x64, static CRT, links `shell32` for `ShellExecuteW`) is part of `ApexRadiance.sln`; the solution's `Release|x86`
   builds it into the same output folder as the ASI.
+- Out-of-process services (`oop_channel.h`, `oop_host.cpp`, game side `features/oop_client.cpp`): features that keep
+  game data in this 64-bit host instead of the game's address space. The game creates `Local\ApexOopHelper-<pid>`
+  (header, 8 request slots, 256 KB payload per slot, 2 MB in all) only when such a feature is on, before it starts the
+  host; the host then runs two workers that serve requests by service id. Each call waits at most 2 s; a timeout or a
+  host that ended keeps every service in the game for the session. A feature that is on while the restart host is off
+  stays in the game and logs `[OopHelper] <feature> is on but the restart host is off`. Round trip of a small request:
+  about 6-11 us (`tools/oop_helper_test/run.ps1`, x86 client against the x64 host).
+- Plugins (`oop_plugin.h`, the one header a plugin and its caller need): another mod keeps its data in the host through
+  a 64-bit DLL named in `[oop] plugins`. The game writes the names into the section's plugin table; the host loads
+  each from its own folder only (`LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32`, a name with a
+  path is refused), calls its `ApexOopPluginInit`, checks the ABI's major version and records loaded, missing, wrong
+  ABI, start failed or refused per entry before it reports ready. Plugins get the service ids 16-31 in list order;
+  built-in services keep 0-15. The ASI in the game reaches its plugin through four exports of `ApexRadiance.asi`:
+  `ApexOop_Abi`, `ApexOop_HostState`, `ApexOop_Service` (service id by tag) and `ApexOop_Call` (plugin services and
+  echo only). They share the one client and its lost-host state, so a call that times out ends the services of every
+  caller for the session; the call's timeout is kept between 100 ms and 2 s for that reason. A plugin's handler runs
+  on the host's two workers and must return fast. With an empty list nothing is created or loaded.
 
 ## Rejected approaches
 
