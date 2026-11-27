@@ -181,6 +181,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Jokaisen tehosteen kytkin on sivun otsikon vieressä, ja sivu pysyy luettavana, kun se on pois päältä"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Apexin ulkopuoliset huomiota vaativat asiat näkyvät Yleiskatsauksessa eikä välillä katoavalla sivulla"},
     {"Shaders is out of beta", "Shaderit eivät ole enää beta"},
+    {"Apex Launcher: a save opened on the EA app version no longer starts paused", "Apex Launcher: EA-sovelluksen versiossa avattu tallennus ei enää ala tauotettuna"},
+    {"Apex Launcher 2.3.5: saves opened on the EA app version run normally", "Apex Launcher 2.3.5: EA-sovelluksen versiossa avatut tallennukset toimivat normaalisti"},
     {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher: ilmoituksen pelin sulkeutumisesta itsestään voi sulkea"},
     {"Apex Launcher 2.3.4: the note that the game closed on its own can be closed", "Apex Launcher 2.3.4: ilmoituksen pelin sulkeutumisesta itsestään voi sulkea"},
     {"Apex Launcher: an update button beside Play installs updates without starting the game", "Apex Launcher: Pelaa-painikkeen vieressä oleva päivityspainike asentaa päivitykset käynnistämättä peliä"},

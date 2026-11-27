@@ -273,7 +273,8 @@ public sealed partial class MainWindow
         MenuTheme(g);
         // (the EA app copy waits for the EA app to start it: busy meanwhile, so no install starts under it)
         _busy = true;
-        try { p = await Task.Run(() => Launch.Start(g, save)); }
+        var apexVersion = _state?.ApexVersion;
+        try { p = await Task.Run(() => Launch.Start(g, save, apexVersion)); }
         catch (Exception e) { _busy = false; App.Log(e); await Message(T("The game did not start"), ErrorText(e)); return; }
         _busy = false;
         var session = _session = new Session(p, Docs);

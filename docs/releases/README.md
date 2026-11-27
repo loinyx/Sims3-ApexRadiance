@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [4.1.6](4.1.6.md): Apex Launcher 2.3.5 and Apex Radiance 4.1.6: a save opened on the EA app version no longer starts paused.
 - [4.1.5](4.1.5.md): Apex Launcher 2.3.4: Home's note that the game closed on its own can be closed, and a game started by the test runner is no longer counted as the player's.
 - [4.1.4](4.1.4.md): Apex Launcher 2.3.3 with an update button beside Play, the EA app version started without the Sims 3 launcher and Play asking before it fixes the game's files; the Shaders look list fixed in a narrow menu.
 - [4.1.3](4.1.3.md): Apex Launcher 2.3.2 with Game caches in Saves, Sims3Packs added as mods and its colour theme in the menu, which had a design pass over every page; a crash with the RTX Remix bridge fixed.

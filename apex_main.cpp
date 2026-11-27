@@ -268,6 +268,26 @@ DWORD WINAPI InitThread(LPVOID) {
     return 1;
 }
 
+// Apex Launcher's direct start of the EA app copy goes through the Sims 3 launcher's -editInGameMode, which the game reads
+// too (any value starting with t or 1 is on) and which then loads the save in Edit Town with time stopped. The launcher
+// marks that start with -apexDirect; with it, every "editInGameMode" of the process's command line (the wide one and
+// Windows' ANSI copy) is renamed in place, before the game reads it, to a key of the same length the game does not know.
+// Without the marker nothing changes (Create a World's own edit-in-game start keeps it).
+template <typename Char> void RenameEditInGame(Char* line) {
+    if (!line) return;
+    constexpr char kFrom[] = "editInGameMode", kTo[] = "apexNoEditMode", kMark[] = "-apexDirect";
+    const auto lower = [](Char c) { return c >= 'A' && c <= 'Z' ? Char(c - 'A' + 'a') : c; };
+    const auto at = [&](const Char* p, const char* word) {
+        for (; *word; ++p, ++word) if (lower(*p) != lower(Char(*word))) return false;
+        return true;
+    };
+    bool marked = false;
+    for (const Char* p = line; *p && !marked; ++p) marked = at(p, kMark);
+    if (!marked) return;
+    for (Char* p = line; *p; ++p)
+        if (at(p, kFrom)) for (int i = 0; kTo[i]; ++i) p[i] = Char(kTo[i]);
+}
+
 bool IsGameProcess() {
     const std::wstring exe = ModuleName(nullptr);
     return _wcsicmp(exe.c_str(), L"TS3W.exe") == 0 || _wcsicmp(exe.c_str(), L"TS3.exe") == 0;
@@ -283,6 +303,8 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {
         // the launcher and other tools (the ASI loader loads us into Sims3Launcher.exe too): stay loaded and idle. FALSE would
         // unload the DLL at once, and its CRT teardown then crashes freeing thread_local maps (WER dumps on every EA launch)
         if (!IsGameProcess()) return TRUE;
+        RenameEditInGame(GetCommandLineW()); // (first: before the game reads its arguments; only with Apex Launcher's marker)
+        RenameEditInGame(GetCommandLineA());
         if (!ModuleLifetime::Pin(module)) {
             OutputDebugStringA("[" APEX_PRODUCT_NAME "] Could not retain the module for process lifetime; no hooks or workers started\n");
             return FALSE;
