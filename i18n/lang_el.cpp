@@ -181,6 +181,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Ο διακόπτης κάθε εφέ βρίσκεται δίπλα στον τίτλο της σελίδας του, και η σελίδα διαβάζεται και όταν είναι ανενεργό"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Ό,τι χρειάζεται προσοχή εκτός Apex εμφανίζεται στην Επισκόπηση, αντί για μια σελίδα που εμφανίζεται και χάνεται"},
     {"Shaders is out of beta", "Τα Shaders δεν είναι πια σε beta"},
+    {"Apex Launcher: its own update joins the update button beside Play, with no window of its own", "Apex Launcher: η δική του ενημέρωση μπαίνει στο κουμπί ενημέρωσης δίπλα στο Παίξε, χωρίς δικό της παράθυρο"},
+    {"Apex Launcher 2.3.6: its own update sits with the others beside Play", "Apex Launcher 2.3.6: η δική του ενημέρωση είναι μαζί με τις άλλες δίπλα στο Παίξε"},
     {"Apex Launcher: a save opened on the EA app version no longer starts paused", "Apex Launcher: μια αποθήκευση που ανοίγει στην έκδοση της εφαρμογής EA δεν ξεκινά πια σε παύση"},
     {"Apex Launcher 2.3.5: saves opened on the EA app version run normally", "Apex Launcher 2.3.5: οι αποθηκεύσεις που ανοίγουν στην έκδοση της εφαρμογής EA τρέχουν κανονικά"},
     {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher: η ειδοποίηση ότι το παιχνίδι έκλεισε μόνο του κλείνει"},

@@ -181,6 +181,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "각 효과의 스위치가 페이지 제목 옆에 있고, 꺼져 있어도 페이지를 읽을 수 있습니다"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Apex 밖에서 확인이 필요한 항목은 나타났다 사라지는 페이지 대신 개요에 표시됩니다"},
     {"Shaders is out of beta", "셰이더가 베타를 벗어났습니다"},
+    {"Apex Launcher: its own update joins the update button beside Play, with no window of its own", "Apex Launcher: 자체 업데이트가 별도 창 없이 플레이 옆 업데이트 버튼에 포함됨"},
+    {"Apex Launcher 2.3.6: its own update sits with the others beside Play", "Apex Launcher 2.3.6: 자체 업데이트가 다른 업데이트와 함께 플레이 옆에"},
     {"Apex Launcher: a save opened on the EA app version no longer starts paused", "Apex Launcher: EA 앱 버전에서 연 저장 파일이 더 이상 일시 정지된 채 시작하지 않음"},
     {"Apex Launcher 2.3.5: saves opened on the EA app version run normally", "Apex Launcher 2.3.5: EA 앱 버전에서 연 저장 파일이 정상적으로 진행됨"},
     {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher: 게임이 저절로 종료되었다는 알림을 닫을 수 있음"},

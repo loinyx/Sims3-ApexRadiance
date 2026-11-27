@@ -181,6 +181,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "Vypínač každého efektu je u názvu jeho stránky a stránka zůstává čitelná, i když je vypnutý"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Co potřebuje pozornost mimo Apex, se zobrazuje v Přehledu místo stránky, která se objevuje a mizí"},
     {"Shaders is out of beta", "Shadery už nejsou v betě"},
+    {"Apex Launcher: its own update joins the update button beside Play, with no window of its own", "Apex Launcher: vlastní aktualizace je u tlačítka aktualizace vedle Hrát, bez vlastního okna"},
+    {"Apex Launcher 2.3.6: its own update sits with the others beside Play", "Apex Launcher 2.3.6: vlastní aktualizace je s ostatními vedle Hrát"},
     {"Apex Launcher: a save opened on the EA app version no longer starts paused", "Apex Launcher: uložená hra otevřená ve verzi z aplikace EA už nezačíná pozastavená"},
     {"Apex Launcher 2.3.5: saves opened on the EA app version run normally", "Apex Launcher 2.3.5: uložené hry otevřené ve verzi z aplikace EA běží normálně"},
     {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher: upozornění, že se hra zavřela sama, jde zavřít"},

@@ -181,6 +181,8 @@ const I18n::Pair kPairs[] = {
     {"Each effect's switch sits beside its page title, and the page stays readable while it is off", "每個效果的開關都在頁面標題旁，關閉時頁面仍可閱讀"},
     {"What needs a look outside Apex shows on Overview, instead of a page that comes and goes", "Apex 之外需要留意的事項顯示在概覽中，不再是時有時無的頁面"},
     {"Shaders is out of beta", "著色器已結束測試版"},
+    {"Apex Launcher: its own update joins the update button beside Play, with no window of its own", "Apex Launcher：自身更新併入「開始遊戲」旁的更新按鈕，不再單獨跳出視窗"},
+    {"Apex Launcher 2.3.6: its own update sits with the others beside Play", "Apex Launcher 2.3.6：自身更新與其他更新一起放在「開始遊戲」旁"},
     {"Apex Launcher: a save opened on the EA app version no longer starts paused", "Apex Launcher：在 EA app 版本中開啟的存檔不再以暫停狀態開始"},
     {"Apex Launcher 2.3.5: saves opened on the EA app version run normally", "Apex Launcher 2.3.5：在 EA app 版本中開啟的存檔運作正常"},
     {"Apex Launcher: the note that the game closed on its own can be closed", "Apex Launcher：可以關閉「遊戲自行關閉」的提示"},
