@@ -113,13 +113,44 @@ public sealed class Session
             _p = null;
             for (int i = 0; _p is null && (i < 10 || HostRunning()); i++)
             {
-                _p = GameNames.SelectMany(Process.GetProcessesByName).FirstOrDefault();
+                _p = GameNames.SelectMany(Process.GetProcessesByName).FirstOrDefault(x => !IsTestRun(x));
                 if (_p is null) await Task.Delay(TimeSpan.FromSeconds(2), ct);
             }
             if (_p is null) break;
         }
         return new SessionInfo(Started, Played, PeakBytes, Classify(exit, PeakBytes, _docs is not null && CrashFileSince(_docs, Started)), exit);
     }
+
+    // Apex Radiance's own test runner (tools/ingame_runner, -ApexTestAgent:1) is no restart of the player's game: a session
+    // that followed it took the runner's minutes, and its crash files, for the player's
+    public static bool IsTestRun(string? commandLine) => commandLine?.Contains("-ApexTestAgent", StringComparison.OrdinalIgnoreCase) == true;
+    static bool IsTestRun(Process p) => IsTestRun(CommandLineOf(p));
+
+    // a process's command line, read with NtQueryInformationProcess (ProcessCommandLineInformation, Windows 8.1 and later);
+    // null when it cannot be read
+    static string? CommandLineOf(Process p)
+    {
+        try
+        {
+            var size = 0;
+            NtQueryInformationProcess(p.Handle, 60, IntPtr.Zero, 0, ref size);
+            if (size <= 0 || size > 1 << 20) return null;
+            var buffer = System.Runtime.InteropServices.Marshal.AllocHGlobal(size);
+            try
+            {
+                if (NtQueryInformationProcess(p.Handle, 60, buffer, size, ref size) != 0) return null;
+                // a UNICODE_STRING: its length in bytes (ushort), then (aligned) the pointer to its text
+                var length = (ushort)System.Runtime.InteropServices.Marshal.ReadInt16(buffer);
+                var text = System.Runtime.InteropServices.Marshal.ReadIntPtr(buffer, IntPtr.Size);
+                return System.Runtime.InteropServices.Marshal.PtrToStringUni(text, length / 2);
+            }
+            finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer); }
+        }
+        catch (Exception e) when (e is Win32Exception or InvalidOperationException or NotSupportedException) { return null; }
+    }
+
+    [System.Runtime.InteropServices.DllImport("ntdll.dll")]
+    static extern int NtQueryInformationProcess(IntPtr process, int infoClass, IntPtr info, int length, ref int returned);
 
     static bool HostRunning()
     {

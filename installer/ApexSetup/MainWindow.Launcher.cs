@@ -1220,9 +1220,11 @@ public sealed partial class MainWindow
         Child = new TextBlock { Text = text, FontSize = 11, Foreground = Res(brush) },
     };
 
-    InfoBar Banner(InfoBarSeverity sev, string title, string text, string? action = null, Action? run = null)
+    // closed: what a closable banner runs when its own close button is pressed
+    InfoBar Banner(InfoBarSeverity sev, string title, string text, string? action = null, Action? run = null, Action? closed = null)
     {
-        var bar = new InfoBar { IsClosable = false };
+        var bar = new InfoBar { IsClosable = closed is not null };
+        if (closed is not null) bar.CloseButtonClick += (_, _) => closed();
         SetInfo(bar, sev, title, text, action, run);
         return bar;
     }

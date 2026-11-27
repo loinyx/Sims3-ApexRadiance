@@ -39,9 +39,12 @@ public sealed partial class MainWindow
             below.Children.Add(Banner(InfoBarSeverity.Error, T("Apex Radiance can't start"), T("The game still starts, but without Apex Radiance until this is fixed."), T("Open Health"), () => Show(HealthScreen)));
         if (_offline) below.Children.Add(Banner(InfoBarSeverity.Warning, T("No internet"), T("You can still play. Updates wait until you're back online."), T("Try again"), async () => await LoadReleasesAsync()));
         // the last session shows only when it went wrong: straight back into the newest save
-        if (!_running && SessionHistory.List().FirstOrDefault() is { End: SessionEnd.Crash or SessionEnd.LowMemory } last && Saves.Newest(Docs) is { } newest)
+        // (its close button hides that session's note for good)
+        if (!_running && SessionHistory.List().FirstOrDefault() is { End: SessionEnd.Crash or SessionEnd.LowMemory } last && last.Started != _settings.SessionDismissed
+            && Saves.Newest(Docs) is { } newest)
             below.Children.Add(Banner(InfoBarSeverity.Warning, last.End == SessionEnd.Crash ? T("The game closed on its own") : T("Ran out of memory"),
-                Played(last.Played) + " · " + T("memory peaked at {0}", ModRow.SizeText(last.PeakBytes)), T("Open this save again"), async () => await PlayAsync(newest.Name)));
+                Played(last.Played) + " · " + T("memory peaked at {0}", ModRow.SizeText(last.PeakBytes)), T("Open this save again"), async () => await PlayAsync(newest.Name),
+                () => { _settings.SessionDismissed = last.Started; _settings.Save(); }));
         if (saves.Count > 0) below.Children.Add(HomeSaves(saves.Take(4).ToList()));
         below.Children.Add(HomePictures());
         host.Children.Add(below);
