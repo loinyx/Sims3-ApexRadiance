@@ -242,6 +242,7 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/delegate_sig_fix_test/` | Delegate signature fix: the stub inside the game's check sequence (crash memory, `Object[]`, other parameter), the pattern and call target in TS3W.exe (`run.ps1 [-Exe <TS3W.exe>]`) |
 | `tools/save_name_fix_test/` | Save name fix: the patch's offsets and branches, both patterns in the game's script assembly (`run.ps1 [-Dll <Sims3GameplaySystems.dll>]`) |
 | `tools/bone_index_guard_test/` | Bone index guard: Apex's getter called as the game calls it (valid index, past the list, empty list, stack balance), the pattern in TS3W.exe (`run.ps1 [-Exe <TS3W.exe>]`) |
+| `tools/lot_wait_test/` | Full lot budget during lot waits: the start and done hooks with stand-in originals (arguments, edx:eax result, stack balance), open and close by key, full table, switch off, the 120 s ceiling, both signatures in TS3W.exe (`run.ps1 [-Exe <TS3W.exe>]`) |
 | `tools/dxt_test/` | Fast DXT1 / DXT5 encoder against the translation of `0x006152F0` / `0x006154B0` |
 | `tools/second_device_probe/` | In game, never shipped: an ASI that makes and releases a throwaway Direct3D 9 device the way Turbo Simulation Engine does, before or after the game's first frame (Display, the RTX Remix bridge's second-device answer) |
 | `tools/i18n_check/` | Translation tables: conflicts, missing languages, placeholder and `##id` mismatches; coverage and stale keys of the other languages; `i18n/keys.tsv` up to date (`tools/i18n_keys.pl` writes it) |

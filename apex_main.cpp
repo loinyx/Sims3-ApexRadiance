@@ -33,6 +33,7 @@
 #include "save_name_fix.h"
 #include "bone_index_guard.h"
 #include "pick_readback.h"
+#include "lot_wait.h"
 #include "readback_bench.h"
 #include "d3d9_bootstrap.h"
 #include "frame_profiler.h"
@@ -221,6 +222,7 @@ DWORD InitBody() {
         RestartHost::Start();       // [ui] restart_host: ts3wrap.exe, off by default
         BoneIndexGuard::Install(); // game fix, always on: bone indices past a Sim part's bone list (bone_index_guard.h)
         PickReadback::Install();   // always on: the mouse pick read back without the GPU wait (pick_readback.h)
+        LotWait::Install();        // PerfToggles::LotWaitFullBudget: open lot waits keep the game's lot budget (lot_wait.h)
         ReadbackBench::Install();  // developer mode, [readback_bench] run = true only (readback_bench.h)
         LOG_INFO("[Main] Features started");
         LoadTiming::NoteFeaturesStarted();

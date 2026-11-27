@@ -70,6 +70,11 @@ the lot being played):
   (`RoomLightQueue::CurrentRoomUrgent`), the lot being played gets the game's budget up to 6 ms (`kEditMovingMs`)
   instead of the scaled one, so an edit made while panning does not wait for 3 ms slices. Which lot a budget call serves
   is not read, so a neighbouring lot's pass is not raised.
+- **A lot wait open:** while a script waits for a lot to load in detail (`World.WaitForDetailedLots`, which holds live
+  mode after a load until the lot's Sims and objects are in), the lot budgets, the lot build slice and the wall shading
+  pass keep the game's own values while the camera moves, so the camera-motion cuts cannot stretch that wait
+  (`features/lot_wait.h`: two hooks count the waits open between their start and done; one wait counts for at most
+  120 s). Tester switch `perf_lot_wait_full_budget` (on); off, the cuts run during lot waits too.
 - **After a drag stops:** while the rooms that waited for a dragged lamp to stop are solved (at most 15 s), the frame's
   room solves stay under the spread cap of 3.5 ms (`DragLite::SolveCapMs`): the lot being played gets what *Faster room
   lighting*'s drain left of it, the other lots 0.25 ms, with no edit boost. While the lamp's own rooms still wait there

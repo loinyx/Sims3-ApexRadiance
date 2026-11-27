@@ -49,6 +49,7 @@ const Item kItems[] = {
     {"perf_steady_room_pacing", &PerfToggles::SteadyRoomPacing, Effect::None},
     {"perf_key_list_counted_packages", &PerfToggles::KeyListCountedPackages, Effect::None},
     {"perf_motion_room0_hold", &PerfToggles::MotionRoom0Hold, Effect::None},
+    {"perf_lot_wait_full_budget", &PerfToggles::LotWaitFullBudget, Effect::None},
 };
 } // namespace
 

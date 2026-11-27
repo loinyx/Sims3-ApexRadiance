@@ -51,4 +51,8 @@ inline std::atomic<bool> KeyListCountedPackages{true};
 // for the camera to stop, at most 2 s per motion (room_light_queue.cpp MoveHold). Off: picked at once, as before. Only when
 // those rooms relight changes, not their light
 inline std::atomic<bool> MotionRoom0Hold{true};
+// Lot lighting and wall shading while the camera moves: while a World.WaitForDetailedLots wait is open (features/lot_wait.h),
+// the camera-motion cuts keep the game's budget, so the waited lot loads at the game's pace. Off: the cuts run during
+// lot waits too, as before. Only how fast the waited lot's lighting and build finish changes
+inline std::atomic<bool> LotWaitFullBudget{true};
 } // namespace PerfToggles
